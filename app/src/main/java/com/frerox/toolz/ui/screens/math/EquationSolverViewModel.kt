@@ -17,11 +17,13 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.data.math.MathHistoryDao
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +66,7 @@ data class SolverState(
 
 @HiltViewModel
 class EquationSolverViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val mathHistoryDao: MathHistoryDao
 ) : ViewModel() {
 

@@ -19,6 +19,7 @@
 
 package com.frerox.toolz.ui.screens.todo
 
+import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedContent
@@ -186,7 +187,7 @@ import kotlin.math.roundToInt
 // SECTION 1 ─ Constants & Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-private enum class TaskFilter(val label: String) { ALL("All"), TODAY("Today"), UPCOMING("Next") }
+private enum class TaskFilter(@StringRes val label: Int) { ALL(R.string.st_TodoScreen_filter_all), TODAY(R.string.st_TodoScreen_filter_today), UPCOMING(R.string.st_TodoScreen_filter_next) }
 
 private val PriorityColors = listOf(
     Color(0xFF9E9E9E), // 1 · None
@@ -196,8 +197,10 @@ private val PriorityColors = listOf(
     Color(0xFFF44336), // 5 · Critical
 )
 
-private val PriorityLabels = listOf("None", "Low", "Medium", "High", "Critical")
+@StringRes
+private val PriorityLabels: List<Int> = listOf(R.string.st_TodoScreen_priority_none, R.string.st_TodoScreen_priority_low, R.string.st_TodoScreen_priority_medium, R.string.st_TodoScreen_priority_high, R.string.st_TodoScreen_priority_critical)
 
+@Composable
 private fun formatDueDate(ts: Long): String {
     val diff = ts - System.currentTimeMillis()
     val days = TimeUnit.MILLISECONDS.toDays(diff)
@@ -366,7 +369,7 @@ fun TodoScreen(
             // ── Filter bar ────────────────────────────────────────────────────
             ToolzConnectedButtonGroup(
                 selectedIndex = selectedFilter.ordinal,
-                options = TaskFilter.entries.map { it.label },
+                options = TaskFilter.entries.map { stringResource(it.label) },
                 onOptionSelected = { selectedFilter = TaskFilter.entries[it] },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1749,7 +1752,7 @@ private fun TaskDetailSheet(
                             )
                             Spacer(Modifier.height(3.dp))
                             Text(
-                                text = PriorityLabels[p - 1],
+                                text = stringResource(PriorityLabels[p - 1]),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (isSelected) pColor else pColor.copy(0.7f),
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal

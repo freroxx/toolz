@@ -23,8 +23,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.device.DeviceSpecMapper
 import com.frerox.toolz.data.device.DeviceSpecUiModel
 import com.frerox.toolz.data.device.DeviceSpecsRepository
@@ -41,14 +43,14 @@ import javax.inject.Inject
 
 data class BatteryState(
     val level: Int = 0,
-    val status: String = "Unknown",
-    val health: String = "Good",
+    @StringRes val statusRes: Int = R.string.st_BatteryInfoScreen_status_unknown,
+    @StringRes val healthRes: Int = R.string.st_BatteryInfoScreen_health_good,
     val temperature: Float = 0f,
     val voltage: Int = 0,
     val technology: String = "",
     val isCharging: Boolean = false,
     val isFull: Boolean = false,
-    val powerSource: String = "None",
+    @StringRes val powerSourceRes: Int = R.string.st_BatteryInfoScreen_power_none,
     val currentNowMa: Int = 0, // Current in mA
     val capacityMah: Int = 0, // Capacity in mAh
     val chargeCounterUah: Int = 0, // Charge counter in uAh
@@ -85,29 +87,29 @@ class BatteryInfoViewModel @Inject constructor(
                 val isFull = statusInt == BatteryManager.BATTERY_STATUS_FULL || (isCharging && batteryPct >= 100f)
 
                 val status = when {
-                    isFull -> "Full"
-                    isCharging -> "Charging"
-                    statusInt == BatteryManager.BATTERY_STATUS_DISCHARGING -> "Discharging"
-                    statusInt == BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "Not Charging"
-                    else -> "Unknown"
+                    isFull -> R.string.st_BatteryInfoScreen_status_full
+                    isCharging -> R.string.st_BatteryInfoScreen_status_charging
+                    statusInt == BatteryManager.BATTERY_STATUS_DISCHARGING -> R.string.st_BatteryInfoScreen_status_discharging
+                    statusInt == BatteryManager.BATTERY_STATUS_NOT_CHARGING -> R.string.st_BatteryInfoScreen_status_not_charging
+                    else -> R.string.st_BatteryInfoScreen_status_unknown
                 }
 
                 val chargePlug = it.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
                 val powerSource = when (chargePlug) {
-                    BatteryManager.BATTERY_PLUGGED_USB -> "USB"
-                    BatteryManager.BATTERY_PLUGGED_AC -> "AC Adapter"
-                    BatteryManager.BATTERY_PLUGGED_WIRELESS -> "Wireless"
-                    else -> "Battery"
+                    BatteryManager.BATTERY_PLUGGED_USB -> R.string.st_BatteryInfoScreen_power_usb
+                    BatteryManager.BATTERY_PLUGGED_AC -> R.string.st_BatteryInfoScreen_power_ac
+                    BatteryManager.BATTERY_PLUGGED_WIRELESS -> R.string.st_BatteryInfoScreen_power_wireless
+                    else -> R.string.st_BatteryInfoScreen_power_battery
                 }
 
                 val healthInt = it.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)
                 val health = when (healthInt) {
-                    BatteryManager.BATTERY_HEALTH_GOOD -> "Good"
-                    BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Overheat"
-                    BatteryManager.BATTERY_HEALTH_DEAD -> "Dead"
-                    BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "Over Voltage"
-                    BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "Failure"
-                    else -> "Unknown"
+                    BatteryManager.BATTERY_HEALTH_GOOD -> R.string.st_BatteryInfoScreen_health_good
+                    BatteryManager.BATTERY_HEALTH_OVERHEAT -> R.string.st_BatteryInfoScreen_health_overheat
+                    BatteryManager.BATTERY_HEALTH_DEAD -> R.string.st_BatteryInfoScreen_health_dead
+                    BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> R.string.st_BatteryInfoScreen_health_over_voltage
+                    BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> R.string.st_BatteryInfoScreen_health_failure
+                    else -> R.string.st_BatteryInfoScreen_health_unknown
                 }
 
                 val temp = it.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
@@ -125,11 +127,11 @@ class BatteryInfoViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         level = batteryPct.toInt(),
-                        status = status,
+                        statusRes = status,
                         isCharging = isCharging || isFull,
                         isFull = isFull,
-                        powerSource = powerSource,
-                        health = health,
+                        powerSourceRes = powerSource,
+                        healthRes = health,
                         temperature = temp,
                         voltage = volt,
                         technology = tech,

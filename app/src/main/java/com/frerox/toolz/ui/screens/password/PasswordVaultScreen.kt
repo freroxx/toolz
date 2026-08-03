@@ -21,6 +21,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -1201,7 +1202,7 @@ private fun CompactStrengthBadge(strength: Int) {
         color = color.copy(alpha = 0.12f),
     ) {
         Text(
-            text = strengthLabel(strength),
+            text = stringResource(strengthLabel(strength)),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             color = color,
@@ -2049,12 +2050,13 @@ private fun rememberStrengthColor(strength: Int): Color = when (strength) {
     else -> MaterialTheme.colorScheme.primary
 }
 
-private fun strengthLabel(strength: Int): String = when (strength) {
-    0    -> "CRITICAL"
-    1    -> "WEAK"
-    2    -> "MEDIUM"
-    3    -> "STRONG"
-    else -> "ELITE"
+@StringRes
+private fun strengthLabel(strength: Int): Int = when (strength) {
+    0    -> R.string.st_PasswordVaultScreen_strength_critical
+    1    -> R.string.st_PasswordVaultScreen_strength_weak
+    2    -> R.string.st_PasswordVaultScreen_strength_medium
+    3    -> R.string.st_PasswordVaultScreen_strength_strong
+    else -> R.string.st_PasswordVaultScreen_strength_elite
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

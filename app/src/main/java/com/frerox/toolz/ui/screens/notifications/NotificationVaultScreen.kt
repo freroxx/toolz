@@ -105,6 +105,7 @@ private val kAppAccentPalette = listOf(
 private fun String.toAppAccentColor(): Color =
     kAppAccentPalette[abs(hashCode()) % kAppAccentPalette.size]
 
+@Composable
 private fun Long.toRelativeTime(): String {
     val diff = System.currentTimeMillis() - this
     return when {

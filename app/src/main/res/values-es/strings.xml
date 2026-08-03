@@ -1819,7 +1819,7 @@
     <string name="st_StepCounterScreen_hardware_missing">FALTA HARDWARE</string>
     <string name="st_StepCounterScreen_hardware_missing_desc">Este dispositivo no parece tener el hardware físico necesario para contar pasos.</string>
     <string name="st_StepCounterScreen_engine_state">Estado: %s</string>
-    <string name="st_StepCounterScreen_goal_met">%d%% del objetivo  •  %d kcal</string>
+    <string name="st_StepCounterScreen_goal_met">%1$d%% del objetivo  •  %2$d kcal</string>
 
 
     <!-- StepTrendsScreen -->
@@ -2479,4 +2479,99 @@
     <string name="st_PeriodicTableScreen_Element_Co_Name">Cobalto</string>
     <string name="st_PeriodicTableScreen_Element_Co_Desc">Metal duro, lustroso, gris azulado.</string>
     <string name="st_PeriodicTableScreen_Element_Co_Fact">Utilizado en aleaciones de alta resistencia y cátodos de baterías de iones de litio.</string>
+
+    <!-- Missing translations (obfuscated keys) -->
+    <string name="st_SearchScreen_onboarding_desc">Todas las búsquedas pasan por un proxy anónimo con bloqueo de anuncios integrado y DNS sobre HTTPS. Sin rastreo, sin perfiles.</string>
+    <string name="st_SpeedometerScreen_a7l8">ALTITUD</string>
+    <string name="st_SpeedometerScreen_b7a8">Atrás</string>
+    <string name="st_SpeedometerScreen_e5p6">ACTIVAR PERMISOS</string>
+    <string name="st_SpeedometerScreen_g1d2">GPS DESCONECTADO</string>
+    <string name="st_SpeedometerScreen_g1r2">GPS REQUERIDO</string>
+    <string name="st_SpeedometerScreen_h3u4">MODO HUD ACTIVO</string>
+    <string name="st_SpeedometerScreen_h9m0">Modo HUD</string>
+    <string name="st_SpeedometerScreen_l3a4">Se requiere acceso a la ubicación para calcular la velocidad y rastrear tu viaje con precisión.</string>
+    <string name="st_SpeedometerScreen_l9o0">UBICACIÓN</string>
+    <string name="st_SpeedometerScreen_l9t0">TENDENCIA EN VIVO</string>
+    <string name="st_SpeedometerScreen_p1a2">Pausa</string>
+    <string name="st_SpeedometerScreen_p3v4">VELOCIDAD MÁXIMA</string>
+    <string name="st_SpeedometerScreen_p5s6">Velocímetro de precisión</string>
+    <string name="st_SpeedometerScreen_p7a8">EN PAUSA</string>
+    <string name="st_SpeedometerScreen_r5e6">REINICIAR</string>
+    <string name="st_SpeedometerScreen_s1p2">VELOCÍMETRO</string>
+    <string name="st_SpeedometerScreen_s3t4">Iniciar</string>
+    <string name="st_SpeedometerScreen_t5t6">VIAJE TOTAL</string>
+    <string name="st_StepCounterScreen_a1c2">ACTIVO</string>
+    <string name="st_StepCounterScreen_a1r2">ACCESO REQUERIDO</string>
+    <string name="st_StepCounterScreen_a5v6">PROMEDIO</string>
+    <string name="st_StepCounterScreen_a7t8">TOTAL HISTÓRICO</string>
+    <string name="st_StepCounterScreen_a9t0">TENDENCIAS DE ACTIVIDAD</string>
+    <string name="st_StepCounterScreen_b3a4">BARRAS</string>
+    <string name="st_StepCounterScreen_b3d4">MEJOR DÍA</string>
+    <string name="st_StepCounterScreen_b5a6">Atrás</string>
+    <string name="st_StepCounterScreen_b5u6">BUFFER</string>
+    <string name="st_StepCounterScreen_b7o8">AMBOS</string>
+    <string name="st_StepCounterScreen_c1a2">CADENCIA</string>
+    <string name="st_StepCounterScreen_c1a3">CALORÍAS</string>
+    <string name="st_StepCounterScreen_c1l2">Cerrar</string>
+    <string name="st_StepCounterScreen_c1o2">COACH</string>
+    <string name="st_StepCounterScreen_c5l6">Copiar registros</string>
+    <string name="st_StepCounterScreen_c9w0">Chatea con tu entrenador físico de IA</string>
+    <string name="st_StepCounterScreen_d3i4">DISTANCIA</string>
+    <string name="st_StepCounterScreen_e7t8">Telemetría del motor</string>
+    <string name="st_StepCounterScreen_f1i2">FITNESS</string>
+    <string name="st_StepCounterScreen_f9r0">CONGELADO</string>
+    <string name="st_StepCounterScreen_g5a6">OTORGAR ACCESO</string>
+    <string name="st_StepCounterScreen_g5o6">META</string>
+    <string name="st_StepCounterScreen_g7a8">GYRO GATE</string>
+    <string name="st_StepCounterScreen_h7m8">HARDWARE FALTANTE</string>
+    <string name="st_StepCounterScreen_l3o4">REGISTROS EN VIVO</string>
+    <string name="st_StepCounterScreen_l5i6">LÍNEA</string>
+    <string name="st_StepCounterScreen_m1i2">LOGROS</string>
+    <string name="st_StepCounterScreen_m3o5">Se requieren sensores de movimiento para cuantificar tu actividad. Estos datos se guardan localmente.</string>
+    <string name="st_StepCounterScreen_n7t8">Aún no hay telemetría registrada. Da unos pasos…</string>
+    <string name="st_StepCounterScreen_p3a4">PAUSA</string>
+    <string name="st_StepCounterScreen_p3e5">PENDIENTE</string>
+    <string name="st_StepCounterScreen_p5a6">EN PAUSA</string>
+    <string name="st_StepCounterScreen_r5e6">REANUDAR</string>
+    <string name="st_StepCounterScreen_r7e8">RESTANTE</string>
+    <string name="st_StepCounterScreen_r9e0">Reiniciar motor</string>
+    <string name="st_StepCounterScreen_r9t0">REANUDAR SEGUIMIENTO</string>
+    <string name="st_StepCounterScreen_s1d2">Detección de pasos simple</string>
+    <string name="st_StepCounterScreen_s3t4">Contador de pasos</string>
+    <string name="st_StepCounterScreen_s3t5">Estricto</string>
+    <string name="st_StepCounterScreen_s3t6">PASOS DE HOY</string>
+    <string name="st_StepCounterScreen_s5i6">Simple</string>
+    <string name="st_StepCounterScreen_s7d8">DSP Estricto</string>
+    <string name="st_StepCounterScreen_s7e8">Ajustes</string>
+    <string name="st_StepCounterScreen_s9a0">Acel Simple</string>
+    <string name="st_StepCounterScreen_s9d0">Filtro de detección estricto</string>
+    <string name="st_StepCounterScreen_t9d0">Este dispositivo no parece tener el hardware físico de contador de pasos necesario.</string>
+    <string name="st_StepCounterScreen_t9o0">Toca para ver las tendencias completas</string>
+    <string name="st_StepCounterScreen_t9r0">Tendencias</string>
+    <string name="st_StepCounterScreen_y1p2">Tu progreso a lo largo del tiempo</string>
+    <string name="st_StepCounterScreen_y7a8">Tu seguimiento de actividad está actualmente en pausa. Reanúdalo para registrar pasos.</string>
+
+
+    <!-- QRGeneratorScreen -->
+    <string name="st_QRGeneratorScreen_back">Atrás</string>
+    <string name="st_QRGeneratorScreen_qr_code">Código QR</string>
+    <string name="st_QRGeneratorScreen_fill_clipboard">Rellenar desde el portapapeles</string>
+    <string name="st_QRGeneratorScreen_low_contrast">¡Alerta de bajo contraste! El QR podría ser ilegible.</string>
+    <string name="st_QRGeneratorScreen_input_placeholder">https://toolz.app o información de Wi-Fi...</string>
+    <string name="st_QRGeneratorScreen_use_app_theme">Usar tema de la app</string>
+    <string name="st_QRGeneratorScreen_fg_color">Color de primer plano</string>
+    <string name="st_QRGeneratorScreen_bg_color">Color de fondo</string>
+    <string name="st_QRGeneratorScreen_note_placeholder">Etiqueta de texto opcional...</string>
+    <string name="st_QRGeneratorScreen_note_top">Superior</string>
+    <string name="st_QRGeneratorScreen_note_bottom">Inferior</string>
+    <string name="st_QRGeneratorScreen_font_size">Tamaño de fuente</string>
+    <string name="st_QRGeneratorScreen_dot_shape">Forma del punto</string>
+    <string name="st_QRGeneratorScreen_eye_shape">Forma del ojo</string>
+    <string name="st_QRGeneratorScreen_quiet_zone">Zona de silencio (margen)</string>
+    <string name="st_QRGeneratorScreen_logo_buffer">Espacio libre del logo</string>
+    <string name="st_QRGeneratorScreen_pick_logo">ELEGIR LOGO CENTRAL</string>
+    <string name="st_QRGeneratorScreen_remove_logo">Quitar logo</string>
+    <string name="st_QRGeneratorScreen_save_png">GUARDAR PNG</string>
+    <string name="st_QRGeneratorScreen_encrypted_found">¡Texto cifrado encontrado!</string>
+    <string name="st_QRGeneratorScreen_detected_prefix">Detectado: </string>
 </resources>

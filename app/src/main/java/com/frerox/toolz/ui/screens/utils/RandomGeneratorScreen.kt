@@ -674,3 +674,16 @@ fun HistoryItem(result: RandomResult) {
         }
     }
 }
+
+@Composable
+private fun randomTypeLabel(type: String): String = when (type) {
+    "Number" -> stringResource(R.string.st_RandomGeneratorScreen_type_number)
+    "Password" -> stringResource(R.string.st_RandomGeneratorScreen_type_password)
+    "Color" -> stringResource(R.string.st_RandomGeneratorScreen_type_color)
+    "Date" -> stringResource(R.string.st_RandomGeneratorScreen_type_date)
+    "Coin" -> stringResource(R.string.st_RandomGeneratorScreen_type_coin)
+    "Decision" -> stringResource(R.string.st_RandomGeneratorScreen_type_decision)
+    "UUID" -> stringResource(R.string.st_RandomGeneratorScreen_type_uuid)
+    "Letter" -> stringResource(R.string.st_RandomGeneratorScreen_type_letter)
+    else -> type
+}

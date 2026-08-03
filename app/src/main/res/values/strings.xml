@@ -1884,7 +1884,7 @@
     <string name="st_StepCounterScreen_hardware_missing">HARDWARE MISSING</string>
     <string name="st_StepCounterScreen_hardware_missing_desc">This device does not appear to have the physical step counter hardware needed.</string>
     <string name="st_StepCounterScreen_engine_state">State: %s</string>
-    <string name="st_StepCounterScreen_goal_met">%d%% of goal  •  %d kcal</string>
+    <string name="st_StepCounterScreen_goal_met">%1$d%% of goal  •  %2$d kcal</string>
 
     <string name="st_StepCounterScreen_f1i2">FITNESS</string>
     <string name="st_StepCounterScreen_s3t4">Step Counter</string>
@@ -2508,4 +2508,119 @@
     <string name="st_PeriodicTableScreen_Element_Co_Name">Cobalt</string>
     <string name="st_PeriodicTableScreen_Element_Co_Desc">Hard, lustrous, bluish-grey metal.</string>
     <string name="st_PeriodicTableScreen_Element_Co_Fact">Used in high-strength alloys and lithium-ion battery cathodes.</string>
+
+    <!-- QRGeneratorScreen -->
+    <string name="st_QRGeneratorScreen_back">Back</string>
+    <string name="st_QRGeneratorScreen_qr_code">QR Code</string>
+    <string name="st_QRGeneratorScreen_fill_clipboard">Fill from Clipboard</string>
+    <string name="st_QRGeneratorScreen_low_contrast">Low contrast alert! QR may be unreadable.</string>
+    <string name="st_QRGeneratorScreen_input_placeholder">https://toolz.app or Wi-Fi info...</string>
+    <string name="st_QRGeneratorScreen_use_app_theme">Use App Theme</string>
+    <string name="st_QRGeneratorScreen_fg_color">Foreground Color</string>
+    <string name="st_QRGeneratorScreen_bg_color">Background Color</string>
+    <string name="st_QRGeneratorScreen_note_placeholder">Optional text label...</string>
+    <string name="st_QRGeneratorScreen_note_top">Top</string>
+    <string name="st_QRGeneratorScreen_note_bottom">Bottom</string>
+    <string name="st_QRGeneratorScreen_font_size">Font Size</string>
+    <string name="st_QRGeneratorScreen_dot_shape">Dot Shape</string>
+    <string name="st_QRGeneratorScreen_eye_shape">Eye Shape</string>
+    <string name="st_QRGeneratorScreen_quiet_zone">Quiet Zone (Padding)</string>
+    <string name="st_QRGeneratorScreen_logo_buffer">Logo Clearance Buffer</string>
+    <string name="st_QRGeneratorScreen_pick_logo">PICK CENTER LOGO</string>
+    <string name="st_QRGeneratorScreen_remove_logo">Remove Logo</string>
+    <string name="st_QRGeneratorScreen_save_png">SAVE PNG</string>
+    <string name="st_QRGeneratorScreen_encrypted_found">Encrypted text found!</string>
+    <string name="st_QRGeneratorScreen_detected_prefix">Detected: </string>
+
+    <!-- BMI Calculator Activity Levels -->
+    <string name="st_BmiScreen_activity_sedentary">Sedentary</string>
+    <string name="st_BmiScreen_activity_sedentary_desc">Little or no exercise, desk job</string>
+    <string name="st_BmiScreen_activity_light">Lightly Active</string>
+    <string name="st_BmiScreen_activity_light_desc">Light exercise 1-3 days/week</string>
+    <string name="st_BmiScreen_activity_moderate">Moderately Active</string>
+    <string name="st_BmiScreen_activity_moderate_desc">Moderate exercise 3-5 days/week</string>
+    <string name="st_BmiScreen_activity_active">Very Active</string>
+    <string name="st_BmiScreen_activity_active_desc">Hard exercise 6-7 days/week</string>
+    <string name="st_BmiScreen_activity_extreme">Extra Active</string>
+    <string name="st_BmiScreen_activity_extreme_desc">Very hard exercise, physical job or 2x training</string>
+
+    <!-- Lyrics Architecture Sheet -->
+    <string name="st_LyricsArchitectureSheet_ldc_title">Local Database Cache</string>
+    <string name="st_LyricsArchitectureSheet_ldc_badge">OFFLINE</string>
+    <string name="st_LyricsArchitectureSheet_ldc_summary">Instant retrieval from your device.</string>
+    <string name="st_LyricsArchitectureSheet_ldc_details">Highly optimized Room database storing LRC and plain text metadata for immediate display.</string>
+    <string name="st_LyricsArchitectureSheet_eam_title">Embedded Audio Metadata</string>
+    <string name="st_LyricsArchitectureSheet_eam_badge">LOCAL</string>
+    <string name="st_LyricsArchitectureSheet_eam_summary">Parsed directly from your music files.</string>
+    <string name="st_LyricsArchitectureSheet_eam_details">Native extraction of ID3v2/MP4 tags to find lyrics synced within the file headers.</string>
+    <string name="st_LyricsArchitectureSheet_sss_title">Sidecar Sync Service</string>
+    <string name="st_LyricsArchitectureSheet_sss_badge">LOCAL</string>
+    <string name="st_LyricsArchitectureSheet_sss_summary">External .lrc file matching.</string>
+    <string name="st_LyricsArchitectureSheet_sss_details">Scans for matching filename.lrc files in the same directory as your audio tracks.</string>
+    <string name="st_LyricsArchitectureSheet_lse_title">Lyrics Search Engine</string>
+    <string name="st_LyricsArchitectureSheet_lse_badge">ONLINE</string>
+    <string name="st_LyricsArchitectureSheet_lse_summary">Global metadata search.</string>
+    <string name="st_LyricsArchitectureSheet_lse_details">Real-time API search across multiple public lyrics providers when local data is missing.</string>
+    <string name="st_LyricsArchitectureSheet_cce_title">Cloud Catalog Exchange</string>
+    <string name="st_LyricsArchitectureSheet_cce_badge">ONLINE</string>
+    <string name="st_LyricsArchitectureSheet_cce_summary">Verified community lyrics.</string>
+    <string name="st_LyricsArchitectureSheet_cce_details">Proprietary exchange format for high-fidelity synced lyrics from the Toolz community catalog.</string>
+    <string name="st_LyricsArchitectureSheet_spaf_title">Smart Proxy AI Filter</string>
+    <string name="st_LyricsArchitectureSheet_spaf_badge">PRIVACY</string>
+    <string name="st_LyricsArchitectureSheet_spaf_summary">Encrypted request routing.</string>
+    <string name="st_LyricsArchitectureSheet_spaf_details">Protects your identity by routing all online requests through an anonymous proxy layer.</string>
+    <string name="st_LyricsArchitectureSheet_engine_title">Lyrics Engine Architecture</string>
+    <string name="st_LyricsArchitectureSheet_pipeline_subtitle">Data retrieval pipeline</string>
+    <string name="st_LyricsArchitectureSheet_close">Close</string>
+    <string name="st_LyricsArchitectureSheet_all_count">ALL SOURCES (%d)</string>
+    <string name="st_LyricsArchitectureSheet_local_count">LOCAL ONLY (%d)</string>
+    <string name="st_LyricsArchitectureSheet_online_count">ONLINE ONLY (%d)</string>
+    <string name="st_LyricsArchitectureSheet_got_it">GOT IT</string>
+
+    <!-- Compass Directions -->
+    <string name="st_CompassScreen_dir_north">North</string>
+    <string name="st_CompassScreen_dir_north_east">North East</string>
+    <string name="st_CompassScreen_dir_east">East</string>
+    <string name="st_CompassScreen_dir_south_east">South East</string>
+    <string name="st_CompassScreen_dir_south">South</string>
+    <string name="st_CompassScreen_dir_south_west">South West</string>
+    <string name="st_CompassScreen_dir_west">West</string>
+    <string name="st_CompassScreen_dir_north_west">North West</string>
+
+    <!-- Battery Info Status & Health -->
+    <string name="st_BatteryInfoScreen_status_unknown">Unknown</string>
+    <string name="st_BatteryInfoScreen_health_good">Good</string>
+    <string name="st_BatteryInfoScreen_power_none">None</string>
+    <string name="st_BatteryInfoScreen_status_full">Full</string>
+    <string name="st_BatteryInfoScreen_status_charging">Charging</string>
+    <string name="st_BatteryInfoScreen_status_discharging">Discharging</string>
+    <string name="st_BatteryInfoScreen_status_not_charging">Not Charging</string>
+    <string name="st_BatteryInfoScreen_power_usb">USB</string>
+    <string name="st_BatteryInfoScreen_power_ac">AC Charger</string>
+    <string name="st_BatteryInfoScreen_power_wireless">Wireless</string>
+    <string name="st_BatteryInfoScreen_power_battery">Battery</string>
+    <string name="st_BatteryInfoScreen_health_overheat">Overheat</string>
+    <string name="st_BatteryInfoScreen_health_dead">Dead</string>
+    <string name="st_BatteryInfoScreen_health_over_voltage">Over Voltage</string>
+    <string name="st_BatteryInfoScreen_health_failure">Failure</string>
+    <string name="st_BatteryInfoScreen_health_unknown">Unknown</string>
+
+    <!-- Device Info Battery Health -->
+    <string name="st_DeviceInfoScreen_health_good">Good</string>
+    <string name="st_DeviceInfoScreen_health_overheating">Overheating</string>
+    <string name="st_DeviceInfoScreen_health_dead">Dead</string>
+    <string name="st_DeviceInfoScreen_health_over_voltage">Over Voltage</string>
+    <string name="st_DeviceInfoScreen_health_failure">Failure</string>
+    <string name="st_DeviceInfoScreen_health_cold">Cold</string>
+    <string name="st_DeviceInfoScreen_health_unknown">Unknown</string>
+
+    <!-- Random Generator Types -->
+    <string name="st_RandomGeneratorScreen_type_number">Number</string>
+    <string name="st_RandomGeneratorScreen_type_password">Password</string>
+    <string name="st_RandomGeneratorScreen_type_color">Color</string>
+    <string name="st_RandomGeneratorScreen_type_date">Date</string>
+    <string name="st_RandomGeneratorScreen_type_coin">Coin</string>
+    <string name="st_RandomGeneratorScreen_type_decision">Decision</string>
+    <string name="st_RandomGeneratorScreen_type_uuid">UUID</string>
+    <string name="st_RandomGeneratorScreen_type_letter">Letter</string>
 </resources>

@@ -60,6 +60,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -187,7 +189,7 @@ fun QRGeneratorScreen(
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_QRGeneratorScreen_back), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     actions = {
@@ -257,7 +259,7 @@ fun QRGeneratorScreen(
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "QR Code",
+                                    contentDescription = stringResource(R.string.st_QRGeneratorScreen_qr_code),
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit
                                 )
@@ -304,8 +306,8 @@ fun QRGeneratorScreen(
                                     Icon(Icons.Rounded.ContentPaste, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(12.dp))
                                     Column {
-                                        Text("Fill from Clipboard", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text(if (type == QRInputType.ENCRYPTED) "Encrypted text found!" else "Detected: ${type.displayName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.7f))
+                                        Text(stringResource(R.string.st_QRGeneratorScreen_fill_clipboard), fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text(if (type == QRInputType.ENCRYPTED) stringResource(R.string.st_QRGeneratorScreen_encrypted_found) else stringResource(R.string.st_QRGeneratorScreen_detected_prefix) + type.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.7f))
                                     }
                                 }
                             }
@@ -325,7 +327,7 @@ fun QRGeneratorScreen(
                             ) {
                                 Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(12.dp))
-                                Text("Low contrast alert! QR may be unreadable.", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_low_contrast), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     }
@@ -337,7 +339,7 @@ fun QRGeneratorScreen(
                             value = inputText,
                             onValueChange = { viewModel.updateInputText(it) },
                             modifier = Modifier.fillMaxWidth().animateContentSize(),
-                            placeholder = { Text("https://toolz.app or Wi-Fi info...") },
+                            placeholder = { Text(stringResource(R.string.st_QRGeneratorScreen_input_placeholder)) },
                             shape = RoundedCornerShape(24.dp),
                             maxLines = 5,
                             trailingIcon = {
@@ -376,7 +378,7 @@ fun QRGeneratorScreen(
                             
                             // App Theme Toggle
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("Use App Theme", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_use_app_theme), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 ExpressiveSwitch(
                                     checked = isInheritingTheme,
                                     onCheckedChange = { viewModel.toggleInheritTheme(it) }
@@ -391,7 +393,7 @@ fun QRGeneratorScreen(
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 // Foreground
-                                Text("Foreground Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_fg_color), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                                 ColorSelector(
                                     selectedColor = foregroundColor,
                                     onColorSelected = { viewModel.updateForegroundColor(it) },
@@ -413,7 +415,7 @@ fun QRGeneratorScreen(
                                 Spacer(Modifier.height(8.dp))
                                 
                                 // Background
-                                Text("Background Color", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_bg_color), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                                 ColorSelector(
                                     selectedColor = backgroundColor,
                                     onColorSelected = { viewModel.updateBackgroundColor(it) },
@@ -448,7 +450,7 @@ fun QRGeneratorScreen(
                                     value = noteText,
                                     onValueChange = { viewModel.updateNoteText(it) },
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Optional text label...") },
+                                    placeholder = { Text(stringResource(R.string.st_QRGeneratorScreen_note_placeholder)) },
                                     shape = RoundedCornerShape(20.dp),
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -461,14 +463,14 @@ fun QRGeneratorScreen(
                                     FilterChip(
                                         selected = notePosition == "TOP",
                                         onClick = { viewModel.updateNotePosition("TOP") },
-                                        label = { Text("Top") },
+                                        label = { Text(stringResource(R.string.st_QRGeneratorScreen_note_top)) },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(12.dp)
                                     )
                                     FilterChip(
                                         selected = notePosition == "BOTTOM",
                                         onClick = { viewModel.updateNotePosition("BOTTOM") },
-                                        label = { Text("Bottom") },
+                                        label = { Text(stringResource(R.string.st_QRGeneratorScreen_note_bottom)) },
                                         modifier = Modifier.weight(1f),
                                         shape = RoundedCornerShape(12.dp)
                                     )
@@ -476,7 +478,7 @@ fun QRGeneratorScreen(
                                 
                                 Column {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("Font Size", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(stringResource(R.string.st_QRGeneratorScreen_font_size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text("${noteSize.toInt()}px", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                     }
                                     ExpressiveSlider(
@@ -493,7 +495,7 @@ fun QRGeneratorScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         SectionHeader("GEOMETRIC STYLING", Icons.Rounded.BlurOn)
                         
-                        Text("Dot Shape", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                        Text(stringResource(R.string.st_QRGeneratorScreen_dot_shape), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             val dots = listOf(
                                 Triple(QREngine.DotShape.SQUARE, "Classic", Icons.Rounded.Square),
@@ -514,7 +516,7 @@ fun QRGeneratorScreen(
                         
                         Spacer(Modifier.height(8.dp))
                         
-                        Text("Eye Shape", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                        Text(stringResource(R.string.st_QRGeneratorScreen_eye_shape), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             val eyes = listOf(
                                 Triple(QREngine.EyeShape.SQUARE, "Classic", Icons.Rounded.CropSquare),
@@ -539,7 +541,7 @@ fun QRGeneratorScreen(
                         
                         Column {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Quiet Zone (Padding)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_quiet_zone), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("$quietZone", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                             ExpressiveSlider(
@@ -551,7 +553,7 @@ fun QRGeneratorScreen(
                         
                         Column {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Logo Clearance Buffer", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.st_QRGeneratorScreen_logo_buffer), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("${(logoClearance * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                             ExpressiveSlider(
@@ -573,7 +575,7 @@ fun QRGeneratorScreen(
                         ) {
                             Icon(Icons.Rounded.AddPhotoAlternate, null)
                             Spacer(Modifier.width(10.dp))
-                            Text("PICK CENTER LOGO", fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_QRGeneratorScreen_pick_logo), fontWeight = FontWeight.Black)
                         }
                         
                         AnimatedVisibility(visible = logoBitmap != null) {
@@ -585,7 +587,7 @@ fun QRGeneratorScreen(
                             ) {
                                 Icon(Icons.Rounded.Delete, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Remove Logo")
+                                Text(stringResource(R.string.st_QRGeneratorScreen_remove_logo))
                             }
                         }
                     }
@@ -606,7 +608,7 @@ fun QRGeneratorScreen(
                         ) {
                             Icon(Icons.Rounded.Download, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("SAVE PNG", fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_QRGeneratorScreen_save_png), fontWeight = FontWeight.Black)
                         }
                         
                         IconButton(

@@ -738,13 +738,13 @@ fun ActivityLevelCard(
             
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = level.label.uppercase(),
+                    text = stringResource(level.labelRes).uppercase(),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Black,
                     color = if (isSelected) accentColor else MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = level.description,
+                    text = stringResource(level.descRes),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

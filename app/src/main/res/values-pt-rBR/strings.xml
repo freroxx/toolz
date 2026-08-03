@@ -1904,7 +1904,7 @@
     <string name="st_StepCounterScreen_h7m8">HARDWARE AUSENTE</string>
     <string name="st_StepCounterScreen_t9d0">Este dispositivo não parece ter o hardware físico de contagem de passos necessário para este recurso.</string>
     <string name="st_StepCounterScreen_engine_state">Estado: %s</string>
-    <string name="st_StepCounterScreen_goal_met">%d%% da meta  •  %d kcal</string>
+    <string name="st_StepCounterScreen_goal_met">%1$d%% da meta  •  %2$d kcal</string>
 
 
     <!-- StepTrendsScreen -->
@@ -2525,4 +2525,29 @@
     <string name="st_PeriodicTableScreen_Element_Co_Name">Cobalto</string>
     <string name="st_PeriodicTableScreen_Element_Co_Desc">Metal duro, lustroso, cinza-azulado.</string>
     <string name="st_PeriodicTableScreen_Element_Co_Fact">Usado em ligas de alta resistência e cátodos de baterias de íons de lítio.</string>
+
+    <string name="st_Version_Text">v%s</string>
+
+    <!-- QRGeneratorScreen -->
+    <string name="st_QRGeneratorScreen_back">Voltar</string>
+    <string name="st_QRGeneratorScreen_qr_code">Código QR</string>
+    <string name="st_QRGeneratorScreen_fill_clipboard">Preencher da área de transferência</string>
+    <string name="st_QRGeneratorScreen_low_contrast">Alerta de baixo contraste! O QR pode ficar ilegível.</string>
+    <string name="st_QRGeneratorScreen_input_placeholder">https://toolz.app ou informações de Wi-Fi...</string>
+    <string name="st_QRGeneratorScreen_use_app_theme">Usar tema do app</string>
+    <string name="st_QRGeneratorScreen_fg_color">Cor de primeiro plano</string>
+    <string name="st_QRGeneratorScreen_bg_color">Cor de fundo</string>
+    <string name="st_QRGeneratorScreen_note_placeholder">Rótulo de texto opcional...</string>
+    <string name="st_QRGeneratorScreen_note_top">Superior</string>
+    <string name="st_QRGeneratorScreen_note_bottom">Inferior</string>
+    <string name="st_QRGeneratorScreen_font_size">Tamanho da fonte</string>
+    <string name="st_QRGeneratorScreen_dot_shape">Formato do ponto</string>
+    <string name="st_QRGeneratorScreen_eye_shape">Formato do olho</string>
+    <string name="st_QRGeneratorScreen_quiet_zone">Zona de silêncio (espaçamento)</string>
+    <string name="st_QRGeneratorScreen_logo_buffer">Espaço livre do logo</string>
+    <string name="st_QRGeneratorScreen_pick_logo">ESCOLHER LOGO CENTRAL</string>
+    <string name="st_QRGeneratorScreen_remove_logo">Remover logo</string>
+    <string name="st_QRGeneratorScreen_save_png">SALVAR PNG</string>
+    <string name="st_QRGeneratorScreen_encrypted_found">Texto criptografado encontrado!</string>
+    <string name="st_QRGeneratorScreen_detected_prefix">Detectado: </string>
 </resources>

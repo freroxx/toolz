@@ -1889,6 +1889,7 @@ private fun iconForExtension(ext: String): ImageVector = when (ext.lowercase()) 
     else                               -> Icons.AutoMirrored.Rounded.InsertDriveFile
 }
 
+@Composable
 private fun formatLastUsed(time: Long): String {
     if (time == 0L) return "a long time ago"
     val days = (System.currentTimeMillis() - time) / 86_400_000L

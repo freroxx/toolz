@@ -17,8 +17,10 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -35,15 +37,15 @@ enum class Gender { MALE, FEMALE }
 
 enum class ActivityLevel(
     val multiplier: Float,
-    val label: String,
+    @StringRes val labelRes: Int,
     val shortLabel: String,
-    val description: String,
+    @StringRes val descRes: Int,
 ) {
-    SEDENTARY (1.20f, "Sedentary",   "SED", "Desk job, little to no exercise"),
-    LIGHT     (1.375f,"Lightly Active", "LGT", "Light exercise 1-3 days/week"),
-    MODERATE  (1.55f, "Moderately Active", "MOD", "Moderate exercise 3-5 days/week"),
-    ACTIVE    (1.725f,"Very Active",  "ACT", "Hard exercise 6-7 days/week"),
-    EXTREME   (1.90f, "Extra Active",     "EXT", "Physical job or training 2x/day"),
+    SEDENTARY(1.20f, R.string.st_BmiScreen_activity_sedentary, "SED", R.string.st_BmiScreen_activity_sedentary_desc),
+    LIGHT(1.375f, R.string.st_BmiScreen_activity_light, "LGT", R.string.st_BmiScreen_activity_light_desc),
+    MODERATE(1.55f, R.string.st_BmiScreen_activity_moderate, "MOD", R.string.st_BmiScreen_activity_moderate_desc),
+    ACTIVE(1.725f, R.string.st_BmiScreen_activity_active, "ACT", R.string.st_BmiScreen_activity_active_desc),
+    EXTREME(1.90f, R.string.st_BmiScreen_activity_extreme, "EXT", R.string.st_BmiScreen_activity_extreme_desc),
 }
 
 // ─────────────────────────────────────────────────────────────

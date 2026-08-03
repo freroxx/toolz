@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +48,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -395,18 +397,19 @@ private fun DiagnosticItem(label: String, value: String, color: Color) {
     }
 }
 
+@Composable
 private fun getDirectionLabel(azimuth: Float): String {
     val norm = (azimuth % 360 + 360) % 360
     return when (norm) {
-        in 337.5..360.0, in 0.0..22.5 -> "North"
-        in 22.5..67.5 -> "North East"
-        in 67.5..112.5 -> "East"
-        in 112.5..157.5 -> "South East"
-        in 157.5..202.5 -> "South"
-        in 202.5..247.5 -> "South West"
-        in 247.5..292.5 -> "West"
-        in 292.5..337.5 -> "North West"
-        else -> "North"
+        in 337.5..360.0, in 0.0..22.5 -> stringResource(R.string.st_CompassScreen_dir_north)
+        in 22.5..67.5 -> stringResource(R.string.st_CompassScreen_dir_north_east)
+        in 67.5..112.5 -> stringResource(R.string.st_CompassScreen_dir_east)
+        in 112.5..157.5 -> stringResource(R.string.st_CompassScreen_dir_south_east)
+        in 157.5..202.5 -> stringResource(R.string.st_CompassScreen_dir_south)
+        in 202.5..247.5 -> stringResource(R.string.st_CompassScreen_dir_south_west)
+        in 247.5..292.5 -> stringResource(R.string.st_CompassScreen_dir_west)
+        in 292.5..337.5 -> stringResource(R.string.st_CompassScreen_dir_north_west)
+        else -> stringResource(R.string.st_CompassScreen_dir_north)
     }
 }
 

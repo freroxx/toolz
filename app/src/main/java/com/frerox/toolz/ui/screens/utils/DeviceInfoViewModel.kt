@@ -33,8 +33,10 @@ import android.os.StatFs
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.WindowManager
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.device.DeviceSpecMapper
 import com.frerox.toolz.data.device.DeviceSpecResponse
 import com.frerox.toolz.data.device.DeviceSpecUiModel
@@ -296,16 +298,17 @@ class DeviceInfoViewModel @Inject constructor(
         return Math.sqrt(x + y)
     }
 
-    private fun getBatteryHealth(context: Context): String {
+    @StringRes
+    private fun getBatteryHealth(context: Context): Int {
         val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
         return when (intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)) {
-            BatteryManager.BATTERY_HEALTH_GOOD -> "Good"
-            BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Overheating"
-            BatteryManager.BATTERY_HEALTH_DEAD -> "Dead"
-            BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "Over Voltage"
-            BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "Unspecified Failure"
-            BatteryManager.BATTERY_HEALTH_COLD -> "Cold"
-            else -> "Unknown"
+            BatteryManager.BATTERY_HEALTH_GOOD -> R.string.st_DeviceInfoScreen_health_good
+            BatteryManager.BATTERY_HEALTH_OVERHEAT -> R.string.st_DeviceInfoScreen_health_overheating
+            BatteryManager.BATTERY_HEALTH_DEAD -> R.string.st_DeviceInfoScreen_health_dead
+            BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> R.string.st_DeviceInfoScreen_health_over_voltage
+            BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> R.string.st_DeviceInfoScreen_health_failure
+            BatteryManager.BATTERY_HEALTH_COLD -> R.string.st_DeviceInfoScreen_health_cold
+            else -> R.string.st_DeviceInfoScreen_health_unknown
         }
     }
 
@@ -408,7 +411,7 @@ data class DetailedDeviceData(
     val refreshRate: Int,
     
     val batteryLevel: Int,
-    val batteryHealth: String,
+    val batteryHealth: Int,
     val batteryTech: String,
     val batteryVoltage: String,
     val batteryTemp: String,

@@ -37,21 +37,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 
 data class ArchitectureLayerInfo(
     val stepIndex: String,
-    val title: String,
-    val badge: String,
-    val summary: String,
-    val technicalDetails: String,
+    @StringRes val titleRes: Int,
+    @StringRes val badgeRes: Int,
+    @StringRes val summaryRes: Int,
+    @StringRes val technicalDetailsRes: Int,
     val icon: ImageVector,
     val isLocal: Boolean
 )
@@ -103,55 +106,55 @@ fun LyricsArchitectureSheet(
         listOf(
             ArchitectureLayerInfo(
                 stepIndex = "01",
-                title = "Local Database Cache",
-                badge = "FASTEST",
-                summary = "Instant retrieval from Room DB cache without disk/network delays.",
-                technicalDetails = "Stores retrieved LRC strings indexed by track URI. Bypasses disk scanning and network calls for previously fetched tracks.",
+                titleRes = R.string.st_LyricsArchitectureSheet_ldc_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_ldc_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_ldc_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_ldc_details,
                 icon = Icons.Rounded.Storage,
                 isLocal = true
             ),
             ArchitectureLayerInfo(
                 stepIndex = "02",
-                title = "Embedded Audio Metadata",
-                badge = "ID3 / FLAC",
-                summary = "Extracts embedded USLT/SYLT frames directly from file headers.",
-                technicalDetails = "Uses MediaMetadataRetriever (METADATA_KEY_LYRICS on API 31+) to parse embedded unsynchronized and synchronized lyrics frames in under 10ms.",
+                titleRes = R.string.st_LyricsArchitectureSheet_eam_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_eam_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_eam_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_eam_details,
                 icon = Icons.Rounded.AudioFile,
                 isLocal = true
             ),
             ArchitectureLayerInfo(
                 stepIndex = "03",
-                title = "Storage Sidecar Scanner",
-                badge = "SIDECAR .LRC",
-                summary = "Scans track folder for matching .lrc or .txt sidecar files.",
-                technicalDetails = "Looks for candidate files (track_name.lrc, track_name.txt) in the same directory. Parses timecodes and verifies formatting before loading.",
+                titleRes = R.string.st_LyricsArchitectureSheet_sss_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_sss_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_sss_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_sss_details,
                 icon = Icons.Rounded.FolderZip,
                 isLocal = true
             ),
             ArchitectureLayerInfo(
                 stepIndex = "04",
-                title = "LRCLIB Synced Engine",
-                badge = "LRCLIB SYNC",
-                summary = "Multi-stage fuzzy query against open LRCLIB database.",
-                technicalDetails = "Queries https://lrclib.net/api with sanitized title/artist parameters. Handles time-synchronized LRC files with sub-second accuracy.",
+                titleRes = R.string.st_LyricsArchitectureSheet_lse_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_lse_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_lse_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_lse_details,
                 icon = Icons.Rounded.CloudDownload,
                 isLocal = false
             ),
             ArchitectureLayerInfo(
                 stepIndex = "05",
-                title = "Catalog Captions Engine",
-                badge = "STREAMING",
-                summary = "Converts WebVTT/SRT subtitle streams into LRC sync lines.",
-                technicalDetails = "Converts stream caption tracks into standardized LRC format compatible with karaoke word sync and smooth scrolling UI.",
+                titleRes = R.string.st_LyricsArchitectureSheet_cce_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_cce_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_cce_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_cce_details,
                 icon = Icons.Rounded.ClosedCaption,
                 isLocal = false
             ),
             ArchitectureLayerInfo(
                 stepIndex = "06",
-                title = "Secondary Public API Fallback",
-                badge = "FAILSAFE API",
-                summary = "Failsafe resolver querying secondary public lyrics web endpoints.",
-                technicalDetails = "Queries public REST endpoints using sanitized query parameters. Ensures high coverage even for obscure or indies tracks.",
+                titleRes = R.string.st_LyricsArchitectureSheet_spaf_title,
+                badgeRes = R.string.st_LyricsArchitectureSheet_spaf_badge,
+                summaryRes = R.string.st_LyricsArchitectureSheet_spaf_summary,
+                technicalDetailsRes = R.string.st_LyricsArchitectureSheet_spaf_details,
                 icon = Icons.Rounded.AutoAwesome,
                 isLocal = false
             )
@@ -251,7 +254,7 @@ fun LyricsArchitectureSheet(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = "Lyrics Engine",
+                                        text = stringResource(R.string.st_LyricsArchitectureSheet_engine_title),
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -268,7 +271,7 @@ fun LyricsArchitectureSheet(
                                 }
 
                                 Text(
-                                    text = "6-stage resolution & fallback pipeline",
+                                    text = stringResource(R.string.st_LyricsArchitectureSheet_pipeline_subtitle),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp
@@ -285,7 +288,7 @@ fun LyricsArchitectureSheet(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Rounded.Close,
-                                    contentDescription = "Close",
+                                    contentDescription = stringResource(R.string.st_LyricsArchitectureSheet_close),
                                     modifier = Modifier.size(18.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -306,7 +309,7 @@ fun LyricsArchitectureSheet(
                     onClick = { selectedFilter = ArchitectureFilterTab.ALL },
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                 ) {
-                    Text("All (6)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(stringResource(R.string.st_LyricsArchitectureSheet_all_count, 6), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 SegmentedButton(
@@ -314,7 +317,7 @@ fun LyricsArchitectureSheet(
                     onClick = { selectedFilter = ArchitectureFilterTab.LOCAL },
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                 ) {
-                    Text("Local (3)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(stringResource(R.string.st_LyricsArchitectureSheet_local_count, 3), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 SegmentedButton(
@@ -322,7 +325,7 @@ fun LyricsArchitectureSheet(
                     onClick = { selectedFilter = ArchitectureFilterTab.ONLINE },
                     shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
                 ) {
-                    Text("Online (3)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(stringResource(R.string.st_LyricsArchitectureSheet_online_count, 3), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
 
@@ -428,7 +431,7 @@ fun LyricsArchitectureSheet(
                                         )
 
                                         Text(
-                                            text = layer.title,
+                                            text = stringResource(layer.titleRes),
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSurface,
@@ -442,7 +445,7 @@ fun LyricsArchitectureSheet(
                                                 else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
                                     ) {
                                         Text(
-                                            text = layer.badge,
+                                            text = stringResource(layer.badgeRes),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Black,
                                             fontSize = 9.sp,
@@ -456,7 +459,7 @@ fun LyricsArchitectureSheet(
                                 Spacer(Modifier.height(4.dp))
 
                                 Text(
-                                    text = layer.summary,
+                                    text = stringResource(layer.summaryRes),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.5.sp,
@@ -492,7 +495,7 @@ fun LyricsArchitectureSheet(
                                                 )
 
                                                 Text(
-                                                    text = layer.technicalDetails,
+                                                    text = stringResource(layer.technicalDetailsRes),
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurface,
                                                     fontSize = 11.sp,
@@ -514,7 +517,7 @@ fun LyricsArchitectureSheet(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Got it",
+                            stringResource(R.string.st_LyricsArchitectureSheet_got_it),
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleSmall
                         )

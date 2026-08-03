@@ -138,9 +138,9 @@ fun BatteryInfoScreen(
                                 .fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_i9j0), state.status.uppercase(), if (state.isCharging) Icons.Rounded.Bolt else Icons.Rounded.Power)
+                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_i9j0), stringResource(state.statusRes).uppercase(), if (state.isCharging) Icons.Rounded.Bolt else Icons.Rounded.Power)
                             VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_k1l2), state.health.uppercase(), Icons.Rounded.HealthAndSafety)
+                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_k1l2), stringResource(state.healthRes).uppercase(), Icons.Rounded.HealthAndSafety)
                             VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_m3n4), "${state.temperature}°C", Icons.Rounded.Thermostat)
                         }
@@ -207,7 +207,7 @@ fun BatteryInfoScreen(
                             MetricCard(stringResource(R.string.st_BatteryInfoScreen_e1f2), state.technology, Icons.Rounded.Memory)
                         }
                         StaggeredEntrance(index = 6, modifier = Modifier.weight(1f)) {
-                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_g3h4), state.powerSource, Icons.Rounded.Usb)
+                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_g3h4), stringResource(state.powerSourceRes), Icons.Rounded.Usb)
                         }
                     }
                 }

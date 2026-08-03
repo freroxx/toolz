@@ -18,6 +18,7 @@
 package com.frerox.toolz.util.security
 
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.fragment.app.FragmentActivity
@@ -26,8 +27,8 @@ import androidx.core.content.ContextCompat
 object BiometricPromptUtils {
     fun showBiometricPrompt(
         activity: FragmentActivity,
-        title: String = "Biometric Authentication",
-        subtitle: String = "Log in using your biometric credential",
+        @StringRes title: Int = R.string.st_BiometricPromptUtils_title,
+        @StringRes subtitle: Int = R.string.st_BiometricPromptUtils_subtitle,
         onSuccess: (BiometricPrompt.AuthenticationResult) -> Unit,
         onError: (Int, CharSequence) -> Unit = { _, _ -> },
         onFailed: () -> Unit = {}
@@ -52,8 +53,8 @@ object BiometricPromptUtils {
             })
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
+            .setTitle(activity.getString(title))
+            .setSubtitle(activity.getString(subtitle))
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
             .build()
 
