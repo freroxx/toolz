@@ -1025,7 +1025,7 @@ private fun ErrorDialog(message: String, onDismiss: () -> Unit) {
                 onClick = {
                     vibrationManager?.vibrateTick()
                     clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(message))
-                    android.widget.Toast.makeText(context, stringResource(R.string.st_FileConverterScreen_ctc41), android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, context.getString(R.string.st_FileConverterScreen_ctc41), android.widget.Toast.LENGTH_SHORT).show()
                 }
             ) {
                 Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
@@ -1163,7 +1163,7 @@ private fun OutputFileCard(
                     setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                context.startActivity(Intent.createChooser(intent, stringResource(R.string.st_FileConverterScreen_oa38)))
+                context.startActivity(Intent.createChooser(intent, context.getString(R.string.st_FileConverterScreen_oa38)))
             } catch (_: Exception) {}
         },
         modifier = Modifier.fillMaxWidth(),
@@ -1217,7 +1217,7 @@ private fun RecentConversionItem(
                         setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    context.startActivity(Intent.createChooser(intent, stringResource(R.string.st_FileConverterScreen_of56)))
+                    context.startActivity(Intent.createChooser(intent, context.getString(R.string.st_FileConverterScreen_of56)))
                 }
             } catch (_: Exception) {}
         },

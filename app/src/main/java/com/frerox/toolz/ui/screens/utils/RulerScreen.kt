@@ -255,6 +255,7 @@ fun RulerScreen(
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
+            val resetLabel = stringResource(R.string.st_RulerScreen_q7r8)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -319,7 +320,6 @@ fun RulerScreen(
                         }
                     },
                     trailingContent = {
-                        val resetLabel = stringResource(R.string.st_RulerScreen_q7r8)
                         clickableItem(
                             onClick = {
                                 haptic.click()

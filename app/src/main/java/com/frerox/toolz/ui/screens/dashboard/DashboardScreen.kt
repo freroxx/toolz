@@ -48,8 +48,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -1167,11 +1170,14 @@ fun DashboardHeader(
 
     val greeting = remember {
         val calendar = java.util.Calendar.getInstance()
-        when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
-            in 0..5   -> context.getString(R.string.st_DashboardScreen_m3n4)
-            in 6..11  -> context.getString(R.string.st_DashboardScreen_o5p6)
-            in 12..16 -> context.getString(R.string.st_DashboardScreen_q7r8)
-            else      -> context.getString(R.string.st_DashboardScreen_s9t0)
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        hour
+    }.let { hour ->
+        when (hour) {
+            in 0..5   -> stringResource(R.string.st_DashboardScreen_m3n4)
+            in 6..11  -> stringResource(R.string.st_DashboardScreen_o5p6)
+            in 12..16 -> stringResource(R.string.st_DashboardScreen_q7r8)
+            else      -> stringResource(R.string.st_DashboardScreen_s9t0)
         }
     }
 

@@ -216,6 +216,8 @@ fun FlipCoinScreen(
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
+            val flipLabel = stringResource(R.string.st_FlipCoinScreen_k1l2)
+            val statsLabel = stringResource(R.string.st_FlipCoinScreen_m3n4)
             ToolzHorizontalFloatingToolbar(
                 expanded = true,
                 content = {
@@ -229,8 +231,6 @@ fun FlipCoinScreen(
                     }
                 },
                 trailingContent = {
-                    val flipLabel = stringResource(R.string.st_FlipCoinScreen_k1l2)
-                    val statsLabel = stringResource(R.string.st_FlipCoinScreen_m3n4)
                     clickableItem(
                         onClick = {
                             vibrationManager?.vibrateClick()

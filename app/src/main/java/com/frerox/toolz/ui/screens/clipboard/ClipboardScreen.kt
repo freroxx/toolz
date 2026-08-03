@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -927,6 +928,7 @@ private fun ClipboardCard(
     onSummarize  : () -> Unit,
     onAction     : (String) -> Unit,
 ) {
+    val context = LocalContext.current
     val meta = typeMeta(entry.type)
     val borderColor by animateColorAsState(
         targetValue   = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -1003,7 +1005,7 @@ private fun ClipboardCard(
                         }
                     }
                     Text(
-                        entry.timestamp.toRelativeTime(),
+                        entry.timestamp.toRelativeTime(context),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
