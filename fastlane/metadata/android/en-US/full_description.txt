@@ -1,0 +1,1 @@
+Toolz is a modern Android toolkit that brings 45+ tools into one polished app. It is built for people who want one fast home for the tools they actually use, not a folder full of closed-source single-purpose apps.
