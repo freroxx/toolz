@@ -224,20 +224,18 @@ class CatalogViewModel @Inject constructor(
         currentContextTrack = currentTrack
         currentSearchJob?.cancel()
         currentSearchJob = viewModelScope.launch {
+            val isInitialLoad = _uiState.value.quickPicks.isEmpty()
             lastRefreshTime = System.currentTimeMillis()
             storefrontRefreshCount++
+            
             _uiState.update {
                 it.copy(
-                    isLoading = true,
+                    isLoading = isInitialLoad,
                     isLoadingRecommendations = true,
                     error = null,
                     mode = CatalogMode.TRENDING,
                     query = "",
-                    selectedGenre = null,
-                    quickPicks = emptyList(),
-                    trending = emptyList(),
-                    justForYou = emptyList(),
-                    tracks = emptyList()
+                    selectedGenre = null
                 )
             }
 
@@ -253,7 +251,8 @@ class CatalogViewModel @Inject constructor(
                         it.copy(
                             quickPicks = quickPicks,
                             trending = trending,
-                            isLoading = false
+                            isLoading = false,
+                            tracks = emptyList() // Clear search results when returning to trending
                         )
                     }
 
@@ -625,7 +624,8 @@ class CatalogViewModel @Inject constructor(
     }
 
     private suspend fun collectDistinctTracks(queries: List<String>, limit: Int): List<CatalogTrack> = coroutineScope {
-        val jobs = queries.distinct().take(12).map { query ->
+        // Reduced parallelism to avoid network bottleneck and UI lag
+        val jobs = queries.distinct().take(6).map { query ->
             async {
                 try {
                     repository.search(query).first
