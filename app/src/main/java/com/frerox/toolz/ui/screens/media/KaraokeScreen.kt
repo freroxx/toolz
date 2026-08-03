@@ -278,14 +278,16 @@ fun KaraokeView(
     }
 
     // ── Effects ───────────────────────────────────────────────────────────────
-    LaunchedEffect(state.currentTrack?.uri) {
-        if (!micPermission.status.isGranted) {
-            // Only request once per track change; system suppresses repeated permanent denials
-            micPermission.launchPermissionRequest()
+    LaunchedEffect(state.currentTrack?.uri, phase) {
+        if (phase == KaraokePhase.SPLASH) {
+            if (!micPermission.status.isGranted) {
+                // Only request once per track change; system suppresses repeated permanent denials
+                micPermission.launchPermissionRequest()
+            }
+            minSplashTimeElapsed = false
+            delay(1400)
+            minSplashTimeElapsed = true
         }
-        minSplashTimeElapsed = false
-        delay(1400)
-        minSplashTimeElapsed = true
     }
 
     LaunchedEffect(
@@ -389,6 +391,9 @@ fun KaraokeView(
     // We strictly enforce exclusive mic ownership.
     LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlaying) {
         if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && isLogicalPlaying) {
+            // Add a stability delay to prevent mic flickering at the very start of the session
+            // while the media player is still buffering or transitioning.
+            delay(400)
             if (aiState.karaokeSpeechCorrectionEnabled) {
                 aiViewModel.startKaraokeRecording()
             } else if (isAudioSavingEnabled && mediaRecorder == null && !isRecorderStarting) {
@@ -756,6 +761,7 @@ fun KaraokeView(
                     onSeek(0)
                     phase = KaraokePhase.SPLASH
                     hasStartedOnce = false
+                    wasSingConfidentlyHandled = false
                     countdownTick = 3
                     minSplashTimeElapsed = false
                     showSettings = false
@@ -1820,12 +1826,13 @@ private fun KaraokeEvaluation(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        MaterialTheme.colorScheme.surface,
-                        gradeColor.copy(alpha = 0.05f),
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
+                        Color.Transparent,
+                        gradeColor.copy(alpha = 0.08f),
+                        MaterialTheme.colorScheme.surface
                     )
                 )
             )
@@ -1834,13 +1841,13 @@ private fun KaraokeEvaluation(
         if (score >= 85) {
             ConfettiEffect(
                 color = gradeColor,
-                particleCount = if (score >= 95) 40 else 20
+                particleCount = if (score >= 95) 45 else 25
             )
         }
 
         AnimatedVisibility(
             visible = showContent.value,
-            enter = fadeIn(tween(400)) + slideInVertically(tween(400)) { it / 4 },
+            enter = fadeIn(tween(600)) + slideInVertically(tween(600)) { it / 4 },
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
@@ -1854,30 +1861,37 @@ private fun KaraokeEvaluation(
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 4.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                     )
                     Text(
                         track.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
 
                 Box(contentAlignment = Alignment.Center) {
                     Box(
-                        modifier = Modifier.size(260.dp).background(
-                            Brush.radialGradient(listOf(gradeColor.copy(alpha = 0.25f), Color.Transparent)), CircleShape
+                        modifier = Modifier.size(280.dp).background(
+                            Brush.radialGradient(listOf(gradeColor.copy(alpha = 0.35f), Color.Transparent)), CircleShape
                         )
                     )
+                    Surface(
+                        modifier = Modifier.size(220.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, gradeColor.copy(alpha = 0.2f)),
+                        tonalElevation = 4.dp
+                    ) {}
                     CircularProgressIndicator(
                         progress = { animatedScore / 100f },
                         modifier = Modifier.size(220.dp),
-                        strokeWidth = 12.dp,
+                        strokeWidth = 14.dp,
                         color = gradeColor,
                         trackColor = gradeColor.copy(alpha = 0.1f),
                         strokeCap = StrokeCap.Round
@@ -1890,20 +1904,20 @@ private fun KaraokeEvaluation(
                             fontSize = 110.sp,
                             color = gradeColor,
                             modifier = Modifier.graphicsLayer {
-                                val s = 0.9f + (animatedScore / 100f) * 0.1f
+                                val s = 0.9f + (animatedScore / 100f) * 0.15f
                                 scaleX = s; scaleY = s
                             }
                         )
                         Text(
                             "$animatedScore%",
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(28.dp))
 
                 Text(
                     message,
@@ -1913,13 +1927,14 @@ private fun KaraokeEvaluation(
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
 
-                Surface(
+                ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    )
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
