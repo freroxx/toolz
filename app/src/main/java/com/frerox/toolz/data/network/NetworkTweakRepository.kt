@@ -239,8 +239,17 @@ class NetworkTweakRepository @Inject constructor(
                 icon = Icons.Rounded.SportsEsports,
                 type = TweakType.SHIZUKU_ONLY,
                 category = TweakCategory.PERFORMANCE,
-                applyCommands = listOf("cmd wifi set-power-save-mode disabled"),
-                revertCommands = listOf("cmd wifi set-power-save-mode enabled"),
+                applyCommands = listOf(
+                    "cmd wifi set-power-save-mode disabled",
+                    "svc wifi set-power-save-mode disabled",
+                    "settings put global wifi_sleep_policy 2"
+                ),
+                revertCommands = listOf(
+                    "cmd wifi set-power-save-mode enabled",
+                    "svc wifi set-power-save-mode enabled",
+                    "settings delete global wifi_sleep_policy"
+                ),
+                verificationCommand = "cmd wifi get-power-save-mode | grep -q 'disabled' || [ \"$(settings get global wifi_sleep_policy)\" = \"2\" ]",
                 riskNote = "Higher battery consumption while active."
             ),
             WifiTweak(
