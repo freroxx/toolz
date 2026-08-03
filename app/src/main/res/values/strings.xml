@@ -963,7 +963,7 @@
     <string name="st_NetworkPowerSuiteScreen_y5z6">Neighbor Table</string>
 
     <!-- WifiTweaksScreen -->
-    <string name="st_WifiTweaksScreen_f1a2">Network tweaks</string>
+    <string name="st_WifiTweaksScreen_f1a2">Network Tweaks</string>
     <string name="st_WifiTweaksScreen_3d5b">Beta</string>
     <string name="st_WifiTweaksScreen_9e2c">Back</string>
     <string name="st_WifiTweaksScreen_1a2b">Refresh</string>
@@ -972,29 +972,46 @@
     <string name="st_WifiTweaksScreen_2b8a">Fix My Connection</string>
     <string name="st_WifiTweaksScreen_4d9c">Reset All</string>
     <string name="st_WifiTweaksScreen_6a1b">Signal Soundscape</string>
-    <string name="st_WifiTweaksScreen_1b2c">Frequency shifts with signal strength. Walk around to find the peak.</string>
+    <string name="st_WifiTweaksScreen_1b2c">Frequency changes with signal strength. Walk around to find the peak.</string>
     <string name="st_WifiTweaksScreen_3c4d">Stability Monitor</string>
     <string name="st_WifiTweaksScreen_5d6e">Advisor</string>
     <string name="st_WifiTweaksScreen_7e8f">Spectrum Visualizer</string>
-    <string name="st_WifiTweaksScreen_9f0a">Nearby networks</string>
-    <string name="st_WifiTweaksScreen_a1b2">Channel advisor</string>
-    <string name="st_WifiTweaksScreen_c3d4">Scan room</string>
+    <string name="st_WifiTweaksScreen_9f0a">Nearby Networks</string>
+    <string name="st_WifiTweaksScreen_a1b2">Channel Advisor</string>
+    <string name="st_WifiTweaksScreen_c3d4">Scan Room</string>
     <string name="st_WifiTweaksScreen_e5f6">Settings</string>
     <string name="st_WifiTweaksScreen_g7h8">Start Test</string>
     <string name="st_WifiTweaksScreen_i9j0">Trace Route</string>
     <string name="st_WifiTweaksScreen_k1l2">Target Host</string>
-    <string name="st_WifiTweaksScreen_m3n4">Low-level Config</string>
+    <string name="st_WifiTweaksScreen_m3n4">Low Level Config</string>
     <string name="st_WifiTweaksScreen_o5p6">Copy Report</string>
     <string name="st_WifiTweaksScreen_q7r8">OS Settings</string>
     <string name="st_WifiTweaksScreen_s9t0">Developer Options</string>
-    <string name="st_WifiTweaksScreen_u1v2">Real-time Throughput</string>
+    <string name="st_WifiTweaksScreen_u1v2">Realtime Throughput</string>
     <string name="st_WifiTweaksScreen_w3x4">PRIVILEGED ENGINE</string>
     <string name="st_WifiTweaksScreen_y5z6">Ready-to-use Profiles</string>
     <string name="st_WifiTweaksScreen_a7b8">DNS Benchmark</string>
     <string name="st_WifiTweaksScreen_c9d0">Custom Private DNS</string>
     <string name="st_WifiTweaksScreen_e1f2">Presets</string>
     <string name="st_WifiTweaksScreen_g3h4">Health Audit</string>
-    <string name="st_WifiTweaksScreen_i5j6">Real-world Speed</string>
+    <string name="st_WifiTweaksScreen_i5j6">Actual Speed</string>
+    <string name="st_WifiTweaksScreen_tab_overview">Overview</string>
+    <string name="st_WifiTweaksScreen_tab_analyzer">Analyzer</string>
+    <string name="st_WifiTweaksScreen_tab_profiles">Profiles</string>
+    <string name="st_WifiTweaksScreen_tab_dns">DNS</string>
+    <string name="st_WifiTweaksScreen_tab_diag">Diag</string>
+    <string name="st_WifiTweaksScreen_tab_traffic">Traffic</string>
+    <string name="st_WifiTweaksScreen_tab_console">Console</string>
+    <string name="st_WifiTweaksScreen_toggle_nav">Toggle navigation</string>
+    <string name="st_WifiTweaksScreen_diag_terminal">Diagnostic Terminal</string>
+    <string name="st_WifiTweaksScreen_experimental_tool">Experimental Tool</string>
+    <string name="st_WifiTweaksScreen_experimental_desc">This suite contains advanced network tweaks that are currently in Beta. Some functions may be experimental and stability may vary depending on your device and Android version.\n\nMost optimizations require Shizuku for privileged shell access. Use with caution.</string>
+    <string name="st_WifiTweaksScreen_got_it">Got it</string>
+    <string name="st_WifiTweaksScreen_select_benchmark">Select Benchmark Servers</string>
+    <string name="st_WifiTweaksScreen_diag_summary_copied">Diagnostic summary copied.</string>
+    <string name="st_WifiTweaksScreen_ping_result">Ping to %1$s: %2$s ms</string>
+
+
 
     <!-- FileConverterScreen -->
     <string name="st_FileConverterScreen_fc1">FILE CONVERTER</string>
@@ -1706,7 +1723,7 @@
     <string name="st_SearchScreen_c7b8">Customize blocklists</string>
     <string name="st_SearchScreen_n9h0">No history saved</string>
     <string name="st_SearchScreen_b1v2">Biometric verification</string>
-    <string name="st_SearchScreen_c3e4">Choose your preferred search engine</string>
+    <string name="st_SearchScreen_choose_engine">Choose your preferred search engine</string>
     <string name="st_SearchScreen_d5u6">DuckDuckGo</string>
     <string name="st_SearchScreen_p7f8">Privacy-focused, no tracking</string>
     <string name="st_SearchScreen_b9r0">Brave</string>
@@ -1723,7 +1740,7 @@
     <string name="st_SearchScreen_p1t2">Plants trees while you search</string>
     <string name="st_SearchScreen_a3e4">All Engines</string>
     <string name="st_SearchScreen_c5r6">Combined results from multiple sources</string>
-    <string name="st_SearchScreen_d7o8">DNS over HTTPS</string>
+    <string name="st_SearchScreen_doh">DNS over HTTPS</string>
     <string name="st_SearchScreen_e9t0">Encrypt DNS lookups to prevent tracking</string>
     <string name="st_SearchScreen_a1f2">Auto (Fastest)</string>
     <string name="st_SearchScreen_a3s4">Automatically switch to the lowest latency provider</string>
@@ -1753,66 +1770,49 @@
     <string name="st_SearchScreen_y3o5">Your own DoH resolver</string>
     <string name="st_SearchScreen_d5h6">DoH URL or Hostname</string>
     <string name="st_SearchScreen_e7u8">e.g. dns.example.com</string>
-    <string name="st_SearchScreen_s9b0">Save to bookmarks</string>
-    <string name="st_SearchScreen_s1l2">Share link</string>
-    <string name="st_SearchScreen_c3u4">Copy URL</string>
+    <string name="st_SearchScreen_save_bookmarks">Save to bookmarks</string>
+    <string name="st_SearchScreen_share_link">Share link</string>
+    <string name="st_SearchScreen_copy_url">Copy URL</string>
     <string name="st_SearchScreen_a5b6">All bookmarks</string>
-    <string name="st_SearchScreen_p7d8">Private by default</string>
-    <string name="st_SearchScreen_a9s0">All searches are routed through an anonymous proxy with built-in ad blocking and DNS-over-HTTPS. No tracking, no profiling.</string>
-    <string name="st_SearchScreen_g1s2">Get started</string>
-    <string name="st_SearchScreen_t3i4">Title</string>
-    <string name="st_SearchScreen_u5r6">URL</string>
-    <string name="st_SearchScreen_h7u8">https://…</string>
-    <string name="st_SearchScreen_s9a0">Save</string>
-    <string name="st_SearchScreen_w1g2">Where would you like to go?</string>
-    <string name="st_SearchScreen_q3a4">Quick access</string>
-    <string name="st_SearchScreen_b5o6">Bookmarks</string>
-
-    <!-- AltimeterScreen -->
-    <string name="st_AltimeterScreen_a1l2">ALTIMETER</string>
-    <string name="st_AltimeterScreen_p3e4">Precision Elevation Tracking</string>
-    <string name="st_AltimeterScreen_b5a6">Back</string>
-    <string name="st_AltimeterScreen_r7p8">Reset Peak</string>
-    <string name="st_AltimeterScreen_t9r0">Toggle Reference</string>
-    <string name="st_AltimeterScreen_r1e2">RESET</string>
-    <string name="st_AltimeterScreen_c3l4">CLIMB RATE</string>
-    <string name="st_AltimeterScreen_p5r6">PRESSURE</string>
-    <string name="st_AltimeterScreen_m7a8">MAX ALT</string>
-    <string name="st_AltimeterScreen_m9a0">MIN ALT</string>
-    <string name="st_AltimeterScreen_a1s2">ALTITUDE SENSORS LOCKED</string>
-    <string name="st_AltimeterScreen_t3r4">Toolz requires precision location access to calibrate vertical displacement relative to sea level. Your data is never shared.</string>
-    <string name="st_AltimeterScreen_a5l6">ACTIVATE ALTIMETER</string>
-
-    <!-- BubbleLevelScreen -->
-    <string name="st_BubbleLevelScreen_b1l2">BUBBLE LEVEL</string>
-    <string name="st_BubbleLevelScreen_p3e4">Precision Equilibrium</string>
-    <string name="st_BubbleLevelScreen_b5a6">Back</string>
-    <string name="st_BubbleLevelScreen_h7o8">Hold</string>
-    <string name="st_BubbleLevelScreen_c9a0">Calibrate</string>
-    <string name="st_BubbleLevelScreen_r1e2">Reset</string>
-    <string name="st_BubbleLevelScreen_m3o4">Mode</string>
-    <string name="st_BubbleLevelScreen_l5e6">LEVEL</string>
-    <string name="st_BubbleLevelScreen_a7d8">ADJUST</string>
-
-    <!-- CompassScreen -->
-    <string name="st_CompassScreen_c1o2">COMPASS</string>
-    <string name="st_CompassScreen_m3o4">Magnetic Orientation</string>
-    <string name="st_CompassScreen_b5a6">Back</string>
-    <string name="st_CompassScreen_t7h8">Target Heading</string>
-    <string name="st_CompassScreen_e9f0">Exit Full</string>
-    <string name="st_CompassScreen_f1s2">Full Screen</string>
-    <string name="st_CompassScreen_a3c4">ACCURACY</string>
-    <string name="st_CompassScreen_t5i6">TILT</string>
-    <string name="st_CompassScreen_n7o8">North</string>
-    <string name="st_CompassScreen_n9e0">North East</string>
-    <string name="st_CompassScreen_e1a2">East</string>
-    <string name="st_CompassScreen_s3e4">South East</string>
-    <string name="st_CompassScreen_s5o6">South</string>
-    <string name="st_CompassScreen_s7w8">South West</string>
-    <string name="st_CompassScreen_w9e0">West</string>
-    <string name="st_CompassScreen_n1w2">North West</string>
+    <string name="st_SearchScreen_onboarding_title">Private by default</string>
+    <string name="st_SearchScreen_onboarding_desc">All searches are routed through an anonymous proxy with built-in ad blocking and DNS-over-HTTPS. No tracking, no profiling.</string>
+    <string name="st_SearchScreen_get_started">Get started</string>
+    <string name="st_SearchScreen_title">Title</string>
+    <string name="st_SearchScreen_url">URL</string>
+    <string name="st_SearchScreen_url_hint">https://…</string>
+    <string name="st_SearchScreen_save">Save</string>
+    <string name="st_SearchScreen_where_to">Where would you like to go?</string>
+    <string name="st_SearchScreen_quick_access">Quick access</string>
+    <string name="st_SearchScreen_bookmarks">Bookmarks</string>
+    <string name="st_SearchScreen_results_count">%d results</string>
+    <string name="st_SearchScreen_all_bookmarks">All bookmarks</string>
+    <string name="st_SearchScreen_greeting_night">Good night</string>
+    <string name="st_SearchScreen_greeting_morning">Good morning</string>
+    <string name="st_SearchScreen_greeting_afternoon">Good afternoon</string>
+    <string name="st_SearchScreen_greeting_evening">Good evening</string>
+    <string name="st_SearchScreen_see_all">See all</string>
 
     <!-- SpeedometerScreen -->
+    <string name="st_SpeedometerScreen_title">SPEEDOMETER</string>
+    <string name="st_SpeedometerScreen_hud_active">HUD MODE ACTIVE</string>
+    <string name="st_SpeedometerScreen_desc">Precision speedometer</string>
+    <string name="st_SpeedometerScreen_back">Back</string>
+    <string name="st_SpeedometerScreen_hud_mode">HUD Mode</string>
+    <string name="st_SpeedometerScreen_pause">Pause</string>
+    <string name="st_SpeedometerScreen_start">Start</string>
+    <string name="st_SpeedometerScreen_reset">RESET</string>
+    <string name="st_SpeedometerScreen_paused">PAUSED</string>
+    <string name="st_SpeedometerScreen_live_trend">LIVE TREND</string>
+    <string name="st_SpeedometerScreen_gps_disconnected">GPS DISCONNECTED</string>
+    <string name="st_SpeedometerScreen_max_speed">MAX SPEED</string>
+    <string name="st_SpeedometerScreen_total_trip">TOTAL TRIP</string>
+    <string name="st_SpeedometerScreen_altitude">ALTITUDE</string>
+    <string name="st_SpeedometerScreen_location">LOCATION</string>
+    <string name="st_SpeedometerScreen_gps_required">GPS REQUIRED</string>
+    <string name="st_SpeedometerScreen_gps_desc">Location access is required to calculate speed and track your journey accurately.</string>
+    <string name="st_SpeedometerScreen_grant_permissions">ENABLE PERMISSIONS</string>
+    <string name="st_SpeedometerScreen_gps_precision">GPS PRECISION: ±%dm</string>
+
     <string name="st_SpeedometerScreen_s1p2">SPEEDOMETER</string>
     <string name="st_SpeedometerScreen_h3u4">HUD MODE ACTIVE</string>
     <string name="st_SpeedometerScreen_p5s6">Precision Speedometer</string>
@@ -1824,17 +1824,70 @@
     <string name="st_SpeedometerScreen_p7a8">PAUSED</string>
     <string name="st_SpeedometerScreen_l9t0">LIVE TREND</string>
     <string name="st_SpeedometerScreen_g1d2">GPS DISCONNECTED</string>
-    <string name="st_SpeedometerScreen_p3v4">PEAK VELOCITY</string>
+    <string name="st_SpeedometerScreen_p3v4">MAX SPEED</string>
     <string name="st_SpeedometerScreen_t5t6">TOTAL TRIP</string>
     <string name="st_SpeedometerScreen_a7l8">ALTITUDE</string>
     <string name="st_SpeedometerScreen_l9o0">LOCATION</string>
     <string name="st_SpeedometerScreen_g1r2">GPS REQUIRED</string>
-    <string name="st_SpeedometerScreen_l3a4">Location access is needed to calculate velocity and track your trip progress accurately.</string>
+    <string name="st_SpeedometerScreen_l3a4">Location access is required to calculate speed and track your journey accurately.</string>
     <string name="st_SpeedometerScreen_e5p6">ENABLE PERMISSIONS</string>
 
     <!-- StepCounterScreen -->
+    <string name="st_StepCounterScreen_fitness">FITNESS</string>
+    <string name="st_StepCounterScreen_title">Step Counter</string>
+    <string name="st_StepCounterScreen_back">Back</string>
+    <string name="st_StepCounterScreen_settings">Settings</string>
+    <string name="st_StepCounterScreen_trends">Trends</string>
+    <string name="st_StepCounterScreen_coach">COACH</string>
+    <string name="st_StepCounterScreen_pause">PAUSE</string>
+    <string name="st_StepCounterScreen_resume">RESUME</string>
+    <string name="st_StepCounterScreen_telemetry">Engine Telemetry</string>
+    <string name="st_StepCounterScreen_strict_filter">Strict Detection Filter</string>
+    <string name="st_StepCounterScreen_simple_detection">Simple Step Detection</string>
+    <string name="st_StepCounterScreen_strict">Strict</string>
+    <string name="st_StepCounterScreen_simple">Simple</string>
+    <string name="st_StepCounterScreen_dsp_strict">DSP Strict</string>
+    <string name="st_StepCounterScreen_accel_simple">Accel Simple</string>
+    <string name="st_StepCounterScreen_cadence">CADENCE</string>
+    <string name="st_StepCounterScreen_pending">PENDING</string>
+    <string name="st_StepCounterScreen_buffer">BUFFER</string>
+    <string name="st_StepCounterScreen_gyro_gate">GYRO GATE</string>
+    <string name="st_StepCounterScreen_frozen">FROZEN</string>
+    <string name="st_StepCounterScreen_active">ACTIVE</string>
+    <string name="st_StepCounterScreen_live_logs">LIVE LOGS</string>
+    <string name="st_StepCounterScreen_copy_logs">Copy logs</string>
+    <string name="st_StepCounterScreen_no_telemetry">No telemetry. Take a few steps…</string>
+    <string name="st_StepCounterScreen_reset_engine">Reset engine</string>
+    <string name="st_StepCounterScreen_close">Close</string>
+    <string name="st_StepCounterScreen_steps_today">STEPS TODAY</string>
+    <string name="st_StepCounterScreen_goal">GOAL</string>
+    <string name="st_StepCounterScreen_remaining">REMAINING</string>
+    <string name="st_StepCounterScreen_activity_trends">ACTIVITY TRENDS</string>
+    <string name="st_StepCounterScreen_trends_desc">Your progress over time</string>
+    <string name="st_StepCounterScreen_bars">BARS</string>
+    <string name="st_StepCounterScreen_line">LINE</string>
+    <string name="st_StepCounterScreen_both">BOTH</string>
+    <string name="st_StepCounterScreen_tap_trends">Tap to open full trends</string>
+    <string name="st_StepCounterScreen_achievements">ACHIEVEMENTS</string>
+    <string name="st_StepCounterScreen_best_day">BEST DAY</string>
+    <string name="st_StepCounterScreen_average">AVERAGE</string>
+    <string name="st_StepCounterScreen_all_time_total">ALL-TIME TOTAL</string>
+    <string name="st_StepCounterScreen_chat_coach">Chat with your AI Fitness Coach</string>
+    <string name="st_StepCounterScreen_calories">CALORIES</string>
+    <string name="st_StepCounterScreen_distance">DISTANCE</string>
+    <string name="st_StepCounterScreen_paused">PAUSED</string>
+    <string name="st_StepCounterScreen_paused_desc">Activity tracking is paused. Resume to record steps.</string>
+    <string name="st_StepCounterScreen_resume_tracking">RESUME TRACKING</string>
+    <string name="st_StepCounterScreen_access_required">ACCESS REQUIRED</string>
+    <string name="st_StepCounterScreen_access_desc">Motion sensors are required to measure your daily activity. This data is saved locally.</string>
+    <string name="st_StepCounterScreen_grant_access">GRANT ACCESS</string>
+    <string name="st_StepCounterScreen_hardware_missing">HARDWARE MISSING</string>
+    <string name="st_StepCounterScreen_hardware_missing_desc">This device does not appear to have the physical step counter hardware needed.</string>
+    <string name="st_StepCounterScreen_engine_state">State: %s</string>
+    <string name="st_StepCounterScreen_goal_met">%d%% of goal  •  %d kcal</string>
+
     <string name="st_StepCounterScreen_f1i2">FITNESS</string>
-    <string name="st_StepCounterScreen_s3t4">Step Tracker</string>
+    <string name="st_StepCounterScreen_s3t4">Step Counter</string>
     <string name="st_StepCounterScreen_b5a6">Back</string>
     <string name="st_StepCounterScreen_s7e8">Settings</string>
     <string name="st_StepCounterScreen_t9r0">Trends</string>
@@ -1846,8 +1899,8 @@
     <string name="st_StepCounterScreen_s1d2">Simple Step Detection</string>
     <string name="st_StepCounterScreen_s3t5">Strict</string>
     <string name="st_StepCounterScreen_s5i6">Simple</string>
-    <string name="st_StepCounterScreen_s7d8">Strict DSP</string>
-    <string name="st_StepCounterScreen_s9a0">Simple Accel</string>
+    <string name="st_StepCounterScreen_s7d8">DSP Strict</string>
+    <string name="st_StepCounterScreen_s9a0">Accel Simple</string>
     <string name="st_StepCounterScreen_c1a2">CADENCE</string>
     <string name="st_StepCounterScreen_p3e5">PENDING</string>
     <string name="st_StepCounterScreen_b5u6">BUFFER</string>
@@ -1856,9 +1909,11 @@
     <string name="st_StepCounterScreen_a1c2">ACTIVE</string>
     <string name="st_StepCounterScreen_l3o4">LIVE LOGS</string>
     <string name="st_StepCounterScreen_c5l6">Copy logs</string>
-    <string name="st_StepCounterScreen_n7t8">No telemetry logged yet. Take a few steps...</string>
+    <string name="st_StepCounterScreen_n7t8">No telemetry recorded yet. Take a few steps…</string>
     <string name="st_StepCounterScreen_r9e0">Reset Engine</string>
     <string name="st_StepCounterScreen_c1l2">Close</string>
+    <string name="st_StepCounterScreen_c1a3">CALORIES</string>
+    <string name="st_StepCounterScreen_d3i4">DISTANCE</string>
     <string name="st_StepCounterScreen_s3t6">STEPS TODAY</string>
     <string name="st_StepCounterScreen_g5o6">GOAL</string>
     <string name="st_StepCounterScreen_r7e8">REMAINING</string>
@@ -1868,29 +1923,20 @@
     <string name="st_StepCounterScreen_l5i6">LINE</string>
     <string name="st_StepCounterScreen_b7o8">BOTH</string>
     <string name="st_StepCounterScreen_t9o0">Tap to open full trends</string>
-    <string name="st_StepCounterScreen_m1i2">MILESTONES</string>
+    <string name="st_StepCounterScreen_m1i2">ACHIEVEMENTS</string>
     <string name="st_StepCounterScreen_b3d4">BEST DAY</string>
     <string name="st_StepCounterScreen_a5v6">AVERAGE</string>
-    <string name="st_StepCounterScreen_a7t8">ALL-TIME TOTAL</string>
+    <string name="st_StepCounterScreen_a7t8">TOTAL OF ALL TIME</string>
     <string name="st_StepCounterScreen_c9w0">Chat with your AI Fitness Coach</string>
-    <string name="st_StepCounterScreen_c1a3">CALORIES</string>
-    <string name="st_StepCounterScreen_d3i4">DISTANCE</string>
     <string name="st_StepCounterScreen_p5a6">PAUSED</string>
-    <string name="st_StepCounterScreen_y7a8">Your activity tracking is currently paused. Resume to continue recording steps.</string>
+    <string name="st_StepCounterScreen_y7a8">Your activity tracking is currently paused. Resume to record steps.</string>
     <string name="st_StepCounterScreen_r9t0">RESUME TRACKING</string>
     <string name="st_StepCounterScreen_a1r2">ACCESS REQUIRED</string>
-    <string name="st_StepCounterScreen_m3o5">Motion sensors are required to quantify your daily movement. This data is stored locally and securely.</string>
+    <string name="st_StepCounterScreen_m3o5">Motion sensors are required to quantify your activity. This data is saved locally.</string>
     <string name="st_StepCounterScreen_g5a6">GRANT ACCESS</string>
     <string name="st_StepCounterScreen_h7m8">HARDWARE MISSING</string>
-    <string name="st_StepCounterScreen_t9d0">This device does not appear to have the physical step counting hardware required for this feature.</string>
+    <string name="st_StepCounterScreen_t9d0">This device does not appear to have the physical step counter hardware needed.</string>
 
-    <!-- StepTrendsScreen -->
-    <string name="st_StepTrendsScreen_a1c2">ACTIVITY</string>
-    <string name="st_StepTrendsScreen_t3i4">Trends &amp; Insights</string>
-    <string name="st_StepTrendsScreen_b5a6">Back</string>
-    <string name="st_StepTrendsScreen_w7e8">WEEK</string>
-    <string name="st_StepTrendsScreen_m9o0">MONTH</string>
-    <string name="st_StepTrendsScreen_y1e2">YEAR</string>
     <string name="st_StepTrendsScreen_s3t4">Steps</string>
     <string name="st_StepTrendsScreen_d5i6">Distance</string>
     <string name="st_StepTrendsScreen_c7a8">Calories</string>
@@ -1901,6 +1947,15 @@
     <string name="st_StepTrendsScreen_d7a8">DAYS</string>
     <string name="st_StepTrendsScreen_h9b0">HISTORY BREAKDOWN</string>
     <string name="st_StepTrendsScreen_t1o2">Tap to open full trends</string>
+    <string name="st_StepTrendsScreen_avg_steps">Avg %s steps/d</string>
+    <string name="st_StepTrendsScreen_goal_steps">Goal: %s steps</string>
+
+    <string name="st_StepTrendsScreen_w7e8">WEEK</string>
+    <string name="st_StepTrendsScreen_m9o0">MONTH</string>
+    <string name="st_StepTrendsScreen_y1e2">YEAR</string>
+    <string name="st_StepTrendsScreen_a1c2">ACTIVITY</string>
+    <string name="st_StepTrendsScreen_t3i4">Trends and Insights</string>
+    <string name="st_StepTrendsScreen_b5a6">Back</string>
 
     <!-- VoiceRecorderScreen -->
     <string name="st_VoiceRecorderScreen_v1r2">Voice Recorder</string>
@@ -1923,10 +1978,13 @@
     <string name="st_VoiceRecorderScreen_r5n6">Recording name</string>
     <string name="st_VoiceRecorderScreen_s7a8">Save</string>
     <string name="st_VoiceRecorderScreen_n9o0">No recordings yet</string>
-    <string name="st_VoiceRecorderScreen_t1m2">Tap the mic button to start</string>
+    <string name="st_VoiceRecorderScreen_t1m2">Tap the mic to start</string>
     <string name="st_VoiceRecorderScreen_i3g4">Input Gain</string>
-    <string name="st_VoiceRecorderScreen_b5r6">Background recording</string>
-    <string name="st_VoiceRecorderScreen_k7b8">Keep recording when app is in background</string>
+    <string name="st_VoiceRecorderScreen_b5r6">Background Recording</string>
+    <string name="st_VoiceRecorderScreen_k7b8">Keep recording when the app is in the background</string>
+    <string name="st_VoiceRecorderScreen_confirm_delete">\"%s\" will be deleted permanently.</string>
+    <string name="st_VoiceRecorderScreen_recording_suffix">Recording…</string>
+
 
     <!-- LoadingScreen -->
     <string name="st_LoadingScreen_5c50">TOOLZ</string>
@@ -2126,11 +2184,11 @@
     <string name="st_DeviceInfoScreen_a1b2">DEVICE INFO</string>
     <string name="st_DeviceInfoScreen_c3d4">Hardware Snapshot</string>
     <string name="st_DeviceInfoScreen_e5f6">Back</string>
-    <string name="st_DeviceInfoScreen_g7h8">Refresh specs</string>
-    <string name="st_DeviceInfoScreen_i9j0">Matching Device Profile...</string>
+    <string name="st_DeviceInfoScreen_g7h8">Refresh Specs</string>
+    <string name="st_DeviceInfoScreen_i9j0">Matching Device Profile…</string>
     <string name="st_DeviceInfoScreen_k1l2">CACHED</string>
     <string name="st_DeviceInfoScreen_m3n4">View Source</string>
-    <string name="st_DeviceInfoScreen_o5p6">Try Again</string>
+    <string name="st_DeviceInfoScreen_o5p6">Retry</string>
     <string name="st_DeviceInfoScreen_q7r8">Hardware Highlights</string>
     <string name="st_DeviceInfoScreen_s9t0">Key features from matched profile</string>
     <string name="st_DeviceInfoScreen_u1v2">Market Specifications</string>
@@ -2138,19 +2196,24 @@
     <string name="st_DeviceInfoScreen_y5z6">Technical Details</string>
     <string name="st_DeviceInfoScreen_a7b8">Processor</string>
     <string name="st_DeviceInfoScreen_c9d0">Memory</string>
-    <string name="st_DeviceInfoScreen_e1f2">Screen</string>
+    <string name="st_DeviceInfoScreen_e1f2">Display</string>
     <string name="st_DeviceInfoScreen_g3h4">Battery</string>
     <string name="st_DeviceInfoScreen_i5j6">Software</string>
     <string name="st_DeviceInfoScreen_k7l8">Sensors</string>
     <string name="st_DeviceInfoScreen_m9n0">Optics</string>
     <string name="st_DeviceInfoScreen_o1p2">Connectivity</string>
     <string name="st_DeviceInfoScreen_q3r4">Syncing with Catalog</string>
-    <string name="st_DeviceInfoScreen_s5t6">Fetching official hardware specifications...</string>
+    <string name="st_DeviceInfoScreen_s5t6">Fetching official hardware specs…</string>
     <string name="st_DeviceInfoScreen_u7v8">Manual Search Query</string>
-    <string name="st_DeviceInfoScreen_w9x0">Manually enter a model name (e.g., \'Pixel 9 Pro\' or \'Galaxy S25 Ultra\') if matching failed.</string>
+    <string name="st_DeviceInfoScreen_w9x0">Manually enter a model name (e.g. \'Pixel 9 Pro\' or \'Galaxy S25 Ultra\') if auto-match failed.</string>
     <string name="st_DeviceInfoScreen_a1b3">Device Model</string>
     <string name="st_DeviceInfoScreen_c3d5">Search</string>
     <string name="st_DeviceInfoScreen_e5f7">Cancel</string>
+    <string name="st_DeviceInfoScreen_verified">Verified %s</string>
+    <string name="st_DeviceInfoScreen_local_hardware">Direct read from system services</string>
+    <string name="st_DeviceInfoScreen_detected_sensors">%d sensors detected</string>
+    <string name="st_DeviceInfoScreen_no_camera_info">No camera info</string>
+
 
     <!-- FlipCoinScreen -->
     <string name="st_FlipCoinScreen_a1b2">COIN FLIP</string>
@@ -2173,12 +2236,12 @@
 
     <!-- PeriodicTableScreen -->
     <string name="st_PeriodicTableScreen_a1b2">PERIODIC TABLE</string>
-    <string name="st_PeriodicTableScreen_c3d4">Compare Mode</string>
-    <string name="st_PeriodicTableScreen_e5f6">Search by name, symbol or number...</string>
+    <string name="st_PeriodicTableScreen_c3d4">Comparison Mode</string>
+    <string name="st_PeriodicTableScreen_e5f6">Search by name, symbol, or number…</string>
     <string name="st_PeriodicTableScreen_g7h8">ALL</string>
     <string name="st_PeriodicTableScreen_i9j0">OPTIMIZING ATOMIC DATABASE</string>
     <string name="st_PeriodicTableScreen_k1l2">ATOMIC NUMBER</string>
-    <string name="st_PeriodicTableScreen_m3n4">ATOMIC WEIGHT</string>
+    <string name="st_PeriodicTableScreen_m3n4">ATOMIC MASS</string>
     <string name="st_PeriodicTableScreen_o5p6">ELECTRON CONFIG</string>
     <string name="st_PeriodicTableScreen_q7r8">DISCOVERY</string>
     <string name="st_PeriodicTableScreen_s9t0">DENSITY</string>
@@ -2188,9 +2251,21 @@
     <string name="st_PeriodicTableScreen_a7b8">BOILING POINT</string>
     <string name="st_PeriodicTableScreen_c9d0">ATOMIC INSIGHT</string>
     <string name="st_PeriodicTableScreen_e1f2">ELEMENT COMPARISON</string>
-    <string name="st_PeriodicTableScreen_g3h4">MELT</string>
+    <string name="st_PeriodicTableScreen_g3h4">MERGE</string>
     <string name="st_PeriodicTableScreen_i5j6">BOIL</string>
     <string name="st_PeriodicTableScreen_k7l8">CLOSE COMPARISON</string>
+    <string name="st_PeriodicTableScreen_initializing">Initializing...</string>
+    <string name="st_PeriodicTableScreen_fetching">Fetching atomic data...</string>
+    <string name="st_PeriodicTableScreen_indexing">Indexing electron shells...</string>
+    <string name="st_PeriodicTableScreen_mapping">Mapping isotopes...</string>
+    <string name="st_PeriodicTableScreen_optimizing">Optimizing search index...</string>
+    <string name="st_PeriodicTableScreen_readying">Readying periodic grid...</string>
+    <string name="st_PeriodicTableScreen_synthesizing">Synthesizing atomic database...</string>
+    <string name="st_PeriodicTableScreen_indexed">%d elements indexed</string>
+    <string name="st_PeriodicTableScreen_unknown">Unknown</string>
+    <string name="st_PeriodicTableScreen_generic_element">Element %d</string>
+    <string name="st_PeriodicTableScreen_generic_desc">This element is a member of the %s group, characterized by unique atomic properties and clinical applications in theoretical physics.</string>
+
 
     <!-- RandomGeneratorScreen -->
     <string name="st_RandomGeneratorScreen_a1b2">ENTROPY ENGINE</string>
@@ -2351,4 +2426,86 @@
     <string name="st_SoundMeterScreen_u1v2">AUDIO ACCESS REQUIRED</string>
     <string name="st_SoundMeterScreen_w3x4">Sound Meter needs microphone access to measure real-time decibel levels. Your audio is never recorded or stored.</string>
     <string name="st_SoundMeterScreen_y5z6">GRANT PERMISSION</string>
+    <!-- Periodic Table Elements -->
+    <string name="st_PeriodicTableScreen_Element_H_Name">Hydrogen</string>
+    <string name="st_PeriodicTableScreen_Element_H_Desc">Lightest element in the universe.</string>
+    <string name="st_PeriodicTableScreen_Element_H_Fact">Constitutes about 75% of all baryonic mass.</string>
+    <string name="st_PeriodicTableScreen_Element_He_Name">Helium</string>
+    <string name="st_PeriodicTableScreen_Element_He_Desc">Second most abundant element.</string>
+    <string name="st_PeriodicTableScreen_Element_He_Fact">Discovered in the sun\'s spectrum before it was found on Earth.</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Name">Lithium</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Desc">Lightest metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Fact">Used extensively in rechargeable batteries.</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Name">Beryllium</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Desc">Strong, lightweight metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Fact">Used in structural materials for high-speed aircraft and missiles.</string>
+    <string name="st_PeriodicTableScreen_Element_B_Name">Boron</string>
+    <string name="st_PeriodicTableScreen_Element_B_Desc">Versatile metalloid.</string>
+    <string name="st_PeriodicTableScreen_Element_B_Fact">Key component of fiberglass and heat-resistant glass.</string>
+    <string name="st_PeriodicTableScreen_Element_C_Name">Carbon</string>
+    <string name="st_PeriodicTableScreen_Element_C_Desc">Basis of all known life.</string>
+    <string name="st_PeriodicTableScreen_Element_C_Fact">Can exist as both soft graphite and hard diamond.</string>
+    <string name="st_PeriodicTableScreen_Element_N_Name">Nitrogen</string>
+    <string name="st_PeriodicTableScreen_Element_N_Desc">Major part of Earth\'s atmosphere.</string>
+    <string name="st_PeriodicTableScreen_Element_N_Fact">Essential for the production of fertilizers and explosives.</string>
+    <string name="st_PeriodicTableScreen_Element_O_Name">Oxygen</string>
+    <string name="st_PeriodicTableScreen_Element_O_Desc">Essential for respiration.</string>
+    <string name="st_PeriodicTableScreen_Element_O_Fact">Makes up about 21% of Earth\'s atmosphere by volume.</string>
+    <string name="st_PeriodicTableScreen_Element_F_Name">Fluorine</string>
+    <string name="st_PeriodicTableScreen_Element_F_Desc">Most electronegative element.</string>
+    <string name="st_PeriodicTableScreen_Element_F_Fact">Used in toothpaste to prevent dental cavities.</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Name">Neon</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Desc">Noble gas known for its glow.</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Fact">Used in advertising signs and high-voltage indicators.</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Name">Sodium</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Desc">Highly reactive alkali metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Fact">Common component of table salt (sodium chloride).</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Name">Magnesium</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Desc">Light, strong metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Fact">Abundant in the Earth\'s crust and essential for biological functions.</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Name">Aluminum</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Desc">Low density and corrosion resistant.</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Fact">The most widely used non-ferrous metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Name">Silicon</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Desc">Key component of semiconductors.</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Fact">The second most abundant element in Earth\'s crust.</string>
+    <string name="st_PeriodicTableScreen_Element_P_Name">Phosphorus</string>
+    <string name="st_PeriodicTableScreen_Element_P_Desc">Essential for life (DNA/RNA).</string>
+    <string name="st_PeriodicTableScreen_Element_P_Fact">Exists in several forms, including white and red phosphorus.</string>
+    <string name="st_PeriodicTableScreen_Element_S_Name">Sulfur</string>
+    <string name="st_PeriodicTableScreen_Element_S_Desc">Brittle non-metal.</string>
+    <string name="st_PeriodicTableScreen_Element_S_Fact">Known for its distinct "rotten egg" smell when in compound form.</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Name">Chlorine</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Desc">Powerful oxidizing agent.</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Fact">Widely used for water purification and as a disinfectant.</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Name">Argon</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Desc">Third most abundant gas in the atmosphere.</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Fact">Used in incandescent lighting and as a shielding gas.</string>
+    <string name="st_PeriodicTableScreen_Element_K_Name">Potassium</string>
+    <string name="st_PeriodicTableScreen_Element_K_Desc">Essential mineral for nerve function.</string>
+    <string name="st_PeriodicTableScreen_Element_K_Fact">Highly reactive metal that must be stored in oil.</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Name">Calcium</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Desc">Essential for bone health.</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Fact">The most abundant mineral in the human body.</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Name">Scandium</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Desc">Rare-earth metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Fact">Used in aerospace industry and high-intensity lamps.</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Name">Titanium</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Desc">High strength-to-weight ratio.</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Fact">Highly resistant to corrosion in sea water and chlorine.</string>
+    <string name="st_PeriodicTableScreen_Element_V_Name">Vanadium</string>
+    <string name="st_PeriodicTableScreen_Element_V_Desc">Hard, silvery-grey metal.</string>
+    <string name="st_PeriodicTableScreen_Element_V_Fact">Primarily used as a steel additive for strength.</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Name">Chromium</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Desc">Steely-grey, lustrous metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Fact">Key ingredient in stainless steel and chrome plating.</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Name">Manganese</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Desc">Important industrial metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Fact">Essential for photosynthesis in plants and bone formation in humans.</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Name">Iron</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Desc">Most common element on Earth by mass.</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Fact">Central to the production of steel and transport of oxygen in blood.</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Name">Cobalt</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Desc">Hard, lustrous, bluish-grey metal.</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Fact">Used in high-strength alloys and lithium-ion battery cathodes.</string>
 </resources>

@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,10 +78,14 @@ fun VoiceRecorderScreen(
     val context = LocalContext.current
     var showSettingsSheet by remember { mutableStateOf(false) }
 
+    val title = stringResource(R.string.st_VoiceRecorderScreen_v1r2)
+    val backDesc = stringResource(R.string.st_VoiceRecorderScreen_b3a4)
+    val settingsDesc = stringResource(R.string.st_VoiceRecorderScreen_s5e6)
+
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Voice Recorder",
+                title = title,
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -88,7 +94,7 @@ fun VoiceRecorderScreen(
                         },
                         modifier = Modifier.padding(start = 4.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = backDesc)
                     }
                 },
                 actions = {
@@ -99,7 +105,7 @@ fun VoiceRecorderScreen(
                         },
                         modifier = Modifier.padding(end = 4.dp)
                     ) {
-                        Icon(Icons.Rounded.Tune, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Tune, contentDescription = settingsDesc)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -219,6 +225,13 @@ private fun RecorderFloatingToolbar(
     onMark: () -> Unit,
     onOpenFolder: () -> Unit
 ) {
+    val stopDesc = stringResource(R.string.st_VoiceRecorderScreen_s7t8)
+    val recordDesc = stringResource(R.string.st_VoiceRecorderScreen_r9e0)
+    val resumeLabel = stringResource(R.string.st_VoiceRecorderScreen_r1e2)
+    val pauseLabel = stringResource(R.string.st_VoiceRecorderScreen_p3a4)
+    val markLabel = stringResource(R.string.st_VoiceRecorderScreen_m5a6)
+    val folderLabel = stringResource(R.string.st_VoiceRecorderScreen_f7o8)
+
     ToolzHorizontalFloatingToolbar(
         expanded = true,
         modifier = Modifier.padding(bottom = 16.dp),
@@ -237,7 +250,7 @@ private fun RecorderFloatingToolbar(
             ) {
                 Icon(
                     imageVector = if (uiState.isRecording) Icons.Rounded.Stop else Icons.Rounded.Mic,
-                    contentDescription = if (uiState.isRecording) "Stop" else "Record",
+                    contentDescription = if (uiState.isRecording) stopDesc else recordDesc,
                     modifier = Modifier.size(26.dp)
                 )
             }
@@ -252,18 +265,18 @@ private fun RecorderFloatingToolbar(
                             contentDescription = null
                         )
                     },
-                    label = if (uiState.isPaused) "Resume" else "Pause"
+                    label = if (uiState.isPaused) resumeLabel else pauseLabel
                 )
                 clickableItem(
                     onClick = onMark,
                     icon = { Icon(Icons.Rounded.BookmarkAdd, contentDescription = null) },
-                    label = "Mark"
+                    label = markLabel
                 )
             }
             clickableItem(
                 onClick = onOpenFolder,
                 icon = { Icon(Icons.Rounded.FolderOpen, contentDescription = null) },
-                label = "Folder"
+                label = folderLabel
             )
         }
     )
@@ -354,7 +367,7 @@ private fun RecordingStatusCard(
                     onClick = {},
                     label = {
                         Text(
-                            text = if (uiState.isPaused) "Paused" else "Recording",
+                            text = if (uiState.isPaused) stringResource(R.string.st_VoiceRecorderScreen_p9a0) else stringResource(R.string.st_VoiceRecorderScreen_r1e3),
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
@@ -553,7 +566,7 @@ private fun RecordingsSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Recordings",
+                text = stringResource(R.string.st_VoiceRecorderScreen_r3e4),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -657,9 +670,9 @@ private fun RecordingCard(
                         label = "PlayIcon"
                     ) { playing ->
                         if (playing) {
-                            Icon(Icons.Rounded.Pause, contentDescription = "Pause", modifier = Modifier.size(22.dp))
+                            Icon(Icons.Rounded.Pause, contentDescription = stringResource(R.string.st_VoiceRecorderScreen_p3a4), modifier = Modifier.size(22.dp))
                         } else {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", modifier = Modifier.size(22.dp))
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = stringResource(R.string.st_VoiceRecorderScreen_p5l6), modifier = Modifier.size(22.dp))
                         }
                     }
                 }
@@ -688,7 +701,7 @@ private fun RecordingCard(
                 ) {
                     Icon(
                         Icons.Rounded.DeleteOutline,
-                        contentDescription = "Delete",
+                        contentDescription = stringResource(R.string.st_VoiceRecorderScreen_d7e8),
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
                         modifier = Modifier.size(20.dp)
                     )
@@ -731,8 +744,8 @@ private fun RecordingCard(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete recording?") },
-            text = { Text("\"${file.nameWithoutExtension}\" will be permanently deleted.") },
+            title = { Text(stringResource(R.string.st_VoiceRecorderScreen_d9r0)) },
+            text = { Text(stringResource(R.string.st_VoiceRecorderScreen_confirm_delete, file.nameWithoutExtension)) },
             confirmButton = {
                 ToolzExpressiveButton(
                     onClick = { onDelete(); showDeleteDialog = false },
@@ -740,11 +753,11 @@ private fun RecordingCard(
                         containerColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("Delete")
+                    Text(stringResource(R.string.st_VoiceRecorderScreen_d7e8))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.st_VoiceRecorderScreen_c1a2)) }
             },
             shape = SquircleShape
         )
@@ -753,24 +766,24 @@ private fun RecordingCard(
     if (showRenameDialog) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename") },
+            title = { Text(stringResource(R.string.st_VoiceRecorderScreen_r3e5)) },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Recording name") },
+                    label = { Text(stringResource(R.string.st_VoiceRecorderScreen_r5n6)) },
                     shape = SmallExpressiveShape,
                     singleLine = true
                 )
             },
             confirmButton = {
                 ToolzExpressiveButton(onClick = { onRename(newName); showRenameDialog = false }) {
-                    Text("Save")
+                    Text(stringResource(R.string.st_VoiceRecorderScreen_s7a8))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showRenameDialog = false }) { Text(stringResource(R.string.st_VoiceRecorderScreen_c1a2)) }
             },
             shape = SquircleShape
         )
@@ -855,12 +868,12 @@ private fun EmptyRecordingsView() {
                 }
             }
             Text(
-                text = "No recordings yet",
+                text = stringResource(R.string.st_VoiceRecorderScreen_n9o0),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Tap the mic button to start",
+                text = stringResource(R.string.st_VoiceRecorderScreen_t1m2),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
@@ -894,7 +907,7 @@ fun VoiceRecorderSettingsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Settings",
+                stringResource(R.string.st_VoiceRecorderScreen_s5e6),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(vertical = 8.dp)
@@ -907,7 +920,7 @@ fun VoiceRecorderSettingsSheet(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Input Gain", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.st_VoiceRecorderScreen_i3g4), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                         Text(
                             "${String.format("%.1f", state.gainLevel)}×",
                             style = MaterialTheme.typography.bodyMedium,
@@ -935,12 +948,12 @@ fun VoiceRecorderSettingsSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Background recording",
+                            stringResource(R.string.st_VoiceRecorderScreen_b5r6),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            "Keep recording when app is in background",
+                            stringResource(R.string.st_VoiceRecorderScreen_k7b8),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

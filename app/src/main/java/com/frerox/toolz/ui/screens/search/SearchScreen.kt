@@ -41,6 +41,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchCategory
@@ -164,7 +166,7 @@ fun SearchScreen(
         QuickLinkDialog(
             titleInitial = ql.title,
             urlInitial   = ql.url,
-            dialogTitle  = "Edit quick link",
+            dialogTitle  = stringResource(R.string.st_SearchScreen_e1q2),
             onDismiss    = { editingQuickLink = null },
             onConfirm    = { t, u -> viewModel.updateQuickLink(ql.id, t, u); editingQuickLink = null },
         )
@@ -174,7 +176,7 @@ fun SearchScreen(
         QuickLinkDialog(
             titleInitial = bm.title,
             urlInitial   = bm.url,
-            dialogTitle  = "Edit bookmark",
+            dialogTitle  = stringResource(R.string.st_SearchScreen_e3b4),
             onDismiss    = { editingBookmark = null },
             onConfirm    = { t, u -> viewModel.updateBookmark(bm.id, t, u); editingBookmark = null },
         )
@@ -184,8 +186,8 @@ fun SearchScreen(
         AlertDialog(
             onDismissRequest = { showClearHistoryDialog = false },
             icon   = { Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
-            title  = { Text("Clear history?") },
-            text   = { Text("All saved searches will be removed.", style = MaterialTheme.typography.bodyMedium) },
+            title  = { Text(stringResource(R.string.st_SearchScreen_c5h6)) },
+            text   = { Text(stringResource(R.string.st_SearchScreen_a7s8), style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
                 Button(
                     onClick = { viewModel.clearHistory(); showClearHistoryDialog = false },
@@ -194,10 +196,10 @@ fun SearchScreen(
                         contentColor   = MaterialTheme.colorScheme.onError,
                     ),
                     shape = RoundedCornerShape(12.dp),
-                ) { Text("Clear all") }
+                ) { Text(stringResource(R.string.st_SearchScreen_c9a0)) }
             },
             dismissButton = {
-                TextButton(onClick = { showClearHistoryDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearHistoryDialog = false }) { Text(stringResource(R.string.st_SearchScreen_c1a2)) }
             },
             shape = RoundedCornerShape(24.dp),
         )
@@ -242,8 +244,8 @@ fun SearchScreen(
         AlertDialog(
             onDismissRequest = { showNextDnsWarning = false },
             icon = { Icon(Icons.Rounded.NotificationImportant, null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("NextDNS Not Configured") },
-            text = { Text("To use NextDNS, you must first provide your Configuration ID in the Ad Block settings.") },
+            title = { Text(stringResource(R.string.st_SearchScreen_n5d6)) },
+            text = { Text(stringResource(R.string.st_SearchScreen_t7p8)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -253,10 +255,10 @@ fun SearchScreen(
                         onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
                     },
                     shape = RoundedCornerShape(12.dp)
-                ) { Text("Go to Setup") }
+                ) { Text(stringResource(R.string.st_SearchScreen_g9s0)) }
             },
             dismissButton = {
-                TextButton(onClick = { showNextDnsWarning = false }) { Text("Cancel") }
+                TextButton(onClick = { showNextDnsWarning = false }) { Text(stringResource(R.string.st_SearchScreen_c1a2)) }
             },
             shape = RoundedCornerShape(28.dp)
         )
@@ -489,7 +491,7 @@ fun SearchScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Recent",
+                                stringResource(R.string.st_SearchScreen_r1e2),
                                 style      = MaterialTheme.typography.labelMedium,
                                 color      = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.SemiBold,
@@ -500,7 +502,7 @@ fun SearchScreen(
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                             ) {
                                 Text(
-                                    "Clear all",
+                                    stringResource(R.string.st_SearchScreen_c9a0),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -591,12 +593,12 @@ private fun PageContent(
                     else                       -> ErrorType.GENERIC
                 }
                 val errorTitle = when (uiState.error) {
-                    is SearchError.Offline      -> "You're Offline"
-                    is SearchError.DnsError     -> "DNS Resolution Failed"
-                    is SearchError.RateLimited  -> "Rate Limited"
-                    is SearchError.NoResults    -> "No Results Found"
-                    is SearchError.NetworkError -> "Connection Error"
-                    else                        -> "Search Error"
+                    is SearchError.Offline      -> stringResource(R.string.st_SearchScreen_y3o4)
+                    is SearchError.DnsError     -> stringResource(R.string.st_SearchScreen_d5r6)
+                    is SearchError.RateLimited  -> stringResource(R.string.st_SearchScreen_r7l8)
+                    is SearchError.NoResults    -> stringResource(R.string.st_SearchScreen_n9r0)
+                    is SearchError.NetworkError -> stringResource(R.string.st_SearchScreen_c1e2)
+                    else                        -> stringResource(R.string.st_SearchScreen_s3e4)
                 }
                 Box(Modifier.fillMaxSize()) {
                     ErrorState(
@@ -694,8 +696,8 @@ private fun HomePage(
             item(key = "bookmarks") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SectionHeader(
-                        title       = "Bookmarks",
-                        actionLabel = if (bookmarks.size > 3) "See all" else null,
+                        title       = stringResource(R.string.st_SearchScreen_bookmarks),
+                        actionLabel = if (bookmarks.size > 3) stringResource(R.string.st_SearchScreen_see_all) else null,
                         onAction    = onSeeAllBookmarks,
                     )
                     LazyRow(
@@ -735,10 +737,10 @@ private fun HomePage(
 private fun GreetingHeader(userName: String) {
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val greeting = when {
-        hour < 5  -> "Good night"
-        hour < 12 -> "Good morning"
-        hour < 18 -> "Good afternoon"
-        else      -> "Good evening"
+        hour < 5  -> stringResource(R.string.st_SearchScreen_greeting_night)
+        hour < 12 -> stringResource(R.string.st_SearchScreen_greeting_morning)
+        hour < 18 -> stringResource(R.string.st_SearchScreen_greeting_afternoon)
+        else      -> stringResource(R.string.st_SearchScreen_greeting_evening)
     }
     val name = if (userName.isNotBlank()) ", $userName" else ""
 
@@ -760,7 +762,7 @@ private fun GreetingHeader(userName: String) {
                 color      = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                "Where would you like to go?",
+                stringResource(R.string.st_SearchScreen_where_to),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -780,7 +782,7 @@ private fun QuickLinksSection(
     onEditClick: (QuickLinkEntry) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeader(title = "Quick access")
+        SectionHeader(title = stringResource(R.string.st_SearchScreen_quick_access))
         LazyRow(
             contentPadding        = PaddingValues(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -868,7 +870,7 @@ private fun ResultsPage(
 
         item(key = "resultsCount") {
             Text(
-                "${uiState.results.size} results",
+                stringResource(R.string.st_SearchScreen_results_count, uiState.results.size),
                 style    = MaterialTheme.typography.labelSmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.padding(start = 4.dp, bottom = 2.dp).animateItem(),
@@ -936,10 +938,10 @@ private fun ResultsPage(
                         ) {
                             Icon(Icons.Rounded.ExpandMore, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Load more results")
+                            Text(stringResource(R.string.st_SearchScreen_l5m6))
                         }
                         Text(
-                            "Results may be less relevant the further you go",
+                            stringResource(R.string.st_SearchScreen_r7m8),
                             style  = MaterialTheme.typography.labelSmall,
                             color  = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
@@ -954,7 +956,7 @@ private fun ResultsPage(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            "You've reached the end",
+                            stringResource(R.string.st_SearchScreen_y9e0),
                             style  = MaterialTheme.typography.bodyMedium,
                             color  = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium,
@@ -968,7 +970,7 @@ private fun ResultsPage(
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("Back to home")
+                            Text(stringResource(R.string.st_SearchScreen_b1h2))
                         }
                     }
                 }
@@ -1017,7 +1019,7 @@ private fun SearchSettingsSheet(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "Search settings",
+                stringResource(R.string.st_SearchScreen_s3s4),
                 style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
@@ -1050,7 +1052,7 @@ private fun SearchSettingsSheet(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Search Engine",
+                            stringResource(R.string.st_SearchScreen_s5e6),
                             style      = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1072,8 +1074,8 @@ private fun SearchSettingsSheet(
             Spacer(Modifier.height(4.dp))
 
             SettingsToggleRow(
-                title    = "Safe search",
-                subtitle = "Filter explicit content",
+                title    = stringResource(R.string.st_SearchScreen_s7s8),
+                subtitle = stringResource(R.string.st_SearchScreen_f9e0),
                 checked  = safeSearch,
                 onCheckedChange = onSafeSearchToggle,
                 leadingIcon = {
@@ -1086,8 +1088,8 @@ private fun SearchSettingsSheet(
                 },
             )
             SettingsToggleRow(
-                title    = "Ad & tracker blocking",
-                subtitle = "Block 200+ ad domains",
+                title    = stringResource(R.string.st_SearchScreen_a1b2),
+                subtitle = stringResource(R.string.st_SearchScreen_b3d4),
                 checked  = adBlockEnabled,
                 onCheckedChange = onAdBlockToggle,
                 leadingIcon = {
@@ -1100,8 +1102,8 @@ private fun SearchSettingsSheet(
                 },
             )
             SettingsToggleRow(
-                title    = "Incognito mode",
-                subtitle = "Don't save search history",
+                title    = stringResource(R.string.st_SearchScreen_i5m6),
+                subtitle = stringResource(R.string.st_SearchScreen_d7s8),
                 checked  = isIncognito,
                 onCheckedChange = { onIncognitoToggle() },
                 leadingIcon = {
@@ -1114,8 +1116,8 @@ private fun SearchSettingsSheet(
                 },
             )
             SettingsToggleRow(
-                title    = "Password autofill",
-                subtitle = "Fill credentials with biometrics",
+                title    = stringResource(R.string.st_SearchScreen_p9a0),
+                subtitle = stringResource(R.string.st_SearchScreen_f1c2),
                 checked  = autofillEnabled,
                 onCheckedChange = onAutofillToggle,
                 leadingIcon = {
@@ -1159,7 +1161,7 @@ private fun SearchSettingsSheet(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "DNS Provider",
+                            stringResource(R.string.st_SearchScreen_d3p4),
                             style      = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium,
                         )
@@ -1207,14 +1209,14 @@ private fun SecuritySheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("Privacy & Security", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SearchScreen_p5s6), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
 
             // Presets
-            Text("Presets", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.st_SearchScreen_p7r8), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("LOW" to "Standard", "BASIC" to "Enhanced", "MAX" to "Maximum").forEach { (k, l) ->
+                listOf("LOW" to stringResource(R.string.st_SearchScreen_s9t0), "BASIC" to stringResource(R.string.st_SearchScreen_e1n2), "MAX" to stringResource(R.string.st_SearchScreen_m3a4)).forEach { (k, l) ->
                     FilledTonalButton(
                         onClick   = { onPresetSelect(k) },
                         shape     = RoundedCornerShape(14.dp),
@@ -1227,7 +1229,7 @@ private fun SecuritySheet(
             Spacer(Modifier.height(4.dp))
 
             Column {
-                SettingsToggleRow("Ad & tracker blocking", "200+ blocked domains", adBlockEnabled, onAdBlockToggle,
+                SettingsToggleRow(stringResource(R.string.st_SearchScreen_a1b2), stringResource(R.string.st_SearchScreen_z5b6), adBlockEnabled, onAdBlockToggle,
                     leadingIcon = { Icon(Icons.Rounded.Shield, null, Modifier.size(20.dp), tint = if (adBlockEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
                 
                 AnimatedVisibility(visible = adBlockEnabled) {
@@ -1238,14 +1240,14 @@ private fun SecuritySheet(
                     ) {
                         Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Customize blocklists", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.st_SearchScreen_c7b8), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
 
-            SettingsToggleRow("Incognito mode", "No history saved", isIncognito, onIncognitoToggle,
+            SettingsToggleRow(stringResource(R.string.st_SearchScreen_i5m6), stringResource(R.string.st_SearchScreen_n9h0), isIncognito, onIncognitoToggle,
                 leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(20.dp), tint = if (isIncognito) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
-            SettingsToggleRow("Password autofill", "Biometric verification", autofillEnabled, onAutofillToggle,
+            SettingsToggleRow(stringResource(R.string.st_SearchScreen_p9a0), stringResource(R.string.st_SearchScreen_b1v2), autofillEnabled, onAutofillToggle,
                 leadingIcon = { Icon(Icons.Rounded.Key, null, Modifier.size(20.dp), tint = if (autofillEnabled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant) })
 
             Spacer(Modifier.height(12.dp))
@@ -1279,7 +1281,7 @@ private fun SecuritySheet(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "DNS Provider",
+                            stringResource(R.string.st_SearchScreen_d3p4),
                             style      = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1319,19 +1321,19 @@ private fun SearchEngineSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Search Engine", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Choose your preferred search engine", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.st_SearchScreen_s5e6), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SearchScreen_choose_engine), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "DUCKDUCKGO" to ("DuckDuckGo" to "Privacy-focused, no tracking"),
-                "BRAVE"      to ("Brave" to "Fast, private results"),
-                "GOOGLE"     to ("Google" to "World's most popular search"),
-                "BING"       to ("Bing" to "Microsoft's search engine"),
-                "STARTPAGE"  to ("Startpage" to "Google results with total privacy"),
-                "SWISSCOWS"  to ("Swisscows" to "Family-friendly, private search"),
-                "ECOSIA"     to ("Ecosia" to "Plants trees while you search"),
-                "META"       to ("All Engines" to "Combined results from multiple sources"),
+                "DUCKDUCKGO" to (stringResource(R.string.st_SearchScreen_d5u6) to stringResource(R.string.st_SearchScreen_p7f8)),
+                "BRAVE"      to (stringResource(R.string.st_SearchScreen_b9r0) to stringResource(R.string.st_SearchScreen_f1p2)),
+                "GOOGLE"     to (stringResource(R.string.st_SearchScreen_g3o4) to stringResource(R.string.st_SearchScreen_w5m6)),
+                "BING"       to (stringResource(R.string.st_SearchScreen_b7i8) to stringResource(R.string.st_SearchScreen_m9s0)),
+                "STARTPAGE"  to (stringResource(R.string.st_SearchScreen_s1t2) to stringResource(R.string.st_SearchScreen_g3r4)),
+                "SWISSCOWS"  to (stringResource(R.string.st_SearchScreen_s5w6) to stringResource(R.string.st_SearchScreen_f7p8)),
+                "ECOSIA"     to (stringResource(R.string.st_SearchScreen_e9c0) to stringResource(R.string.st_SearchScreen_p1t2)),
+                "META"       to (stringResource(R.string.st_SearchScreen_a3e4) to stringResource(R.string.st_SearchScreen_c5r6)),
             )
 
             engines.forEach { entry ->
@@ -1437,8 +1439,8 @@ private fun DnsSheet(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("DNS over HTTPS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Encrypt DNS lookups to prevent tracking", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_SearchScreen_doh), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_SearchScreen_e9t0), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 
                 IconButton(
@@ -1477,13 +1479,13 @@ private fun DnsSheet(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Auto (Fastest)",
+                            stringResource(R.string.st_SearchScreen_a1f2),
                             style      = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
                             color      = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Text(
-                            "Automatically switch to the lowest latency provider",
+                            stringResource(R.string.st_SearchScreen_a3s4),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )
@@ -1497,18 +1499,18 @@ private fun DnsSheet(
             Spacer(Modifier.height(8.dp))
 
             val providers = listOf(
-                "SYSTEM"            to ("System default" to "No encryption"),
-                "ADGUARD"           to ("AdGuard" to "Ad + tracking protection"),
-                "ADGUARD_FAMILY"    to ("AdGuard Family" to "Adult content filter"),
-                "CLOUDFLARE"        to ("Cloudflare" to "Fast, privacy-focused"),
-                "CLOUDFLARE_FAMILY" to ("Cloudflare Family" to "Malware + adult filter"),
-                "GOOGLE"            to ("Google Public" to "Reliable global anycast"),
-                "QUAD9"             to ("Quad9" to "Security-focused"),
-                "NEXTDNS"           to ("NextDNS" to "Customisable filtering"),
-                "MULLVAD_EXTENDED"  to ("Mullvad Extended" to "Aggressive ad blocking"),
-                "CONTROLD"          to ("Control D" to "Flexible filtering"),
-                "CLEANBROWSING_SECURITY" to ("CleanBrowsing" to "Hardened security filter"),
-                "CUSTOM"            to ("Custom URL" to "Your own DoH resolver"),
+                "SYSTEM"            to (stringResource(R.string.st_SearchScreen_s5d6) to stringResource(R.string.st_SearchScreen_n7e8)),
+                "ADGUARD"           to (stringResource(R.string.st_SearchScreen_a9g0) to stringResource(R.string.st_SearchScreen_a1t2)),
+                "ADGUARD_FAMILY"    to (stringResource(R.string.st_SearchScreen_a3f4) to stringResource(R.string.st_SearchScreen_a5c6)),
+                "CLOUDFLARE"        to (stringResource(R.string.st_SearchScreen_c7l8) to stringResource(R.string.st_SearchScreen_f9p0)),
+                "CLOUDFLARE_FAMILY" to (stringResource(R.string.st_SearchScreen_c1f2) to stringResource(R.string.st_SearchScreen_m3a5)),
+                "GOOGLE"            to (stringResource(R.string.st_SearchScreen_g5p6) to stringResource(R.string.st_SearchScreen_r7g8)),
+                "QUAD9"             to (stringResource(R.string.st_SearchScreen_q9a0) to stringResource(R.string.st_SearchScreen_s1f2)),
+                "NEXTDNS"           to (stringResource(R.string.st_SearchScreen_n3d5) to stringResource(R.string.st_SearchScreen_c5f6)),
+                "MULLVAD_EXTENDED"  to (stringResource(R.string.st_SearchScreen_m7e8) to stringResource(R.string.st_SearchScreen_a9b3)),
+                "CONTROLD"          to (stringResource(R.string.st_SearchScreen_c1d3) to stringResource(R.string.st_SearchScreen_f5f6)),
+                "CLEANBROWSING_SECURITY" to (stringResource(R.string.st_SearchScreen_c7b9) to stringResource(R.string.st_SearchScreen_h9s0)),
+                "CUSTOM"            to (stringResource(R.string.st_SearchScreen_c1u2) to stringResource(R.string.st_SearchScreen_y3o5)),
             )
             
             providers.forEach { entry ->
@@ -1579,8 +1581,8 @@ private fun DnsSheet(
                 OutlinedTextField(
                     value         = customDns,
                     onValueChange = onCustomDnsChange,
-                    label         = { Text("DoH URL or Hostname") },
-                    placeholder   = { Text("e.g. dns.example.com") },
+                    label         = { Text(stringResource(R.string.st_SearchScreen_d5h6)) },
+                    placeholder   = { Text(stringResource(R.string.st_SearchScreen_e7u8)) },
                     singleLine    = true,
                     shape         = RoundedCornerShape(16.dp),
                     modifier      = Modifier.fillMaxWidth(),
@@ -1624,9 +1626,9 @@ private fun ResultActionsSheet(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             Spacer(Modifier.height(8.dp))
-            ActionRow(Icons.Rounded.BookmarkAdd, "Save to bookmarks", onBookmarkToggle)
-            ActionRow(Icons.Rounded.Share, "Share link", onShare)
-            ActionRow(Icons.Rounded.ContentCopy, "Copy URL", onCopy)
+            ActionRow(Icons.Rounded.BookmarkAdd, stringResource(R.string.st_SearchScreen_save_bookmarks), onBookmarkToggle)
+            ActionRow(Icons.Rounded.Share, stringResource(R.string.st_SearchScreen_share_link), onShare)
+            ActionRow(Icons.Rounded.ContentCopy, stringResource(R.string.st_SearchScreen_copy_url), onCopy)
         }
     }
 }
@@ -1666,7 +1668,7 @@ private fun AllBookmarksSheet(
                 .navigationBarsPadding(),
         ) {
             Text(
-                "All bookmarks",
+                stringResource(R.string.st_SearchScreen_all_bookmarks),
                 style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 modifier   = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
@@ -1727,17 +1729,17 @@ private fun OnboardingDialog(onDismiss: () -> Unit) {
                 }
             }
         },
-        title = { Text("Private by default", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.st_SearchScreen_onboarding_title), fontWeight = FontWeight.Bold) },
         text  = {
             Text(
-                "All searches are routed through an anonymous proxy with built-in ad blocking and DNS-over-HTTPS. No tracking, no profiling.",
+                stringResource(R.string.st_SearchScreen_onboarding_desc),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 22.sp,
             )
         },
         confirmButton = {
-            Button(onClick = onDismiss, shape = RoundedCornerShape(14.dp)) { Text("Get started") }
+            Button(onClick = onDismiss, shape = RoundedCornerShape(14.dp)) { Text(stringResource(R.string.st_SearchScreen_get_started)) }
         },
         shape = RoundedCornerShape(28.dp),
     )
@@ -1751,7 +1753,7 @@ private fun OnboardingDialog(onDismiss: () -> Unit) {
 fun QuickLinkDialog(
     titleInitial: String = "",
     urlInitial:   String = "",
-    dialogTitle:  String = "Add quick link",
+    dialogTitle:  String = stringResource(R.string.st_SearchScreen_quick_access),
     onDismiss:    () -> Unit,
     onConfirm:    (title: String, url: String) -> Unit,
 ) {
@@ -1766,7 +1768,7 @@ fun QuickLinkDialog(
                 OutlinedTextField(
                     value         = title,
                     onValueChange = { title = it },
-                    label         = { Text("Title") },
+                    label         = { Text(stringResource(R.string.st_SearchScreen_title)) },
                     singleLine    = true,
                     shape         = RoundedCornerShape(14.dp),
                     modifier      = Modifier.fillMaxWidth(),
@@ -1774,8 +1776,8 @@ fun QuickLinkDialog(
                 OutlinedTextField(
                     value         = url,
                     onValueChange = { url = it },
-                    label         = { Text("URL") },
-                    placeholder   = { Text("https://…") },
+                    label         = { Text(stringResource(R.string.st_SearchScreen_url)) },
+                    placeholder   = { Text(stringResource(R.string.st_SearchScreen_url_hint)) },
                     singleLine    = true,
                     shape         = RoundedCornerShape(14.dp),
                     modifier      = Modifier.fillMaxWidth(),
@@ -1787,10 +1789,10 @@ fun QuickLinkDialog(
                 onClick  = { onConfirm(title.trim(), url.trim()) },
                 enabled  = title.isNotBlank() && url.isNotBlank(),
                 shape    = RoundedCornerShape(14.dp),
-            ) { Text("Save") }
+            ) { Text(stringResource(R.string.st_SearchScreen_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_SearchScreen_c1a2)) }
         },
         shape = RoundedCornerShape(24.dp),
     )

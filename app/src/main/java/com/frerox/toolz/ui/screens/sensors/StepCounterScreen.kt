@@ -50,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import kotlinx.coroutines.delay
 import androidx.compose.material.icons.automirrored.rounded.ShowChart
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -167,7 +169,7 @@ fun StepCounterScreen(
             ExpressiveTopAppBar(
                 title = {
                     Text(
-                        text = "FITNESS",
+                        text = stringResource(R.string.st_StepCounterScreen_f1i2),
                         modifier = Modifier.pointerInput(state.isEnabledInSettings) {
                             detectTapGestures(
                                 onLongPress = {
@@ -180,7 +182,7 @@ fun StepCounterScreen(
                         }
                     )
                 },
-                subtitle = { Text("Step Tracker") },
+                subtitle = { Text(stringResource(R.string.st_StepCounterScreen_s3t4)) },
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -192,7 +194,7 @@ fun StepCounterScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_StepCounterScreen_b5a6))
                     }
                 },
                 actions = {
@@ -206,7 +208,7 @@ fun StepCounterScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.st_StepCounterScreen_s7e8))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -215,6 +217,11 @@ fun StepCounterScreen(
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
+            val trendsDesc = stringResource(R.string.st_StepCounterScreen_t9r0)
+            val coachLabel = stringResource(R.string.st_StepCounterScreen_c1o2)
+            val pauseLabel = stringResource(R.string.st_StepCounterScreen_p3a4)
+            val resumeLabel = stringResource(R.string.st_StepCounterScreen_r5e6)
+
             ToolzHorizontalFloatingToolbar(
                 expanded = true,
                 modifier = Modifier.padding(bottom = 16.dp),
@@ -227,7 +234,7 @@ fun StepCounterScreen(
                         modifier = Modifier.size(48.dp),
                         shape = SmallExpressiveShape
                     ) {
-                        Icon(Icons.Rounded.BarChart, contentDescription = "Trends")
+                        Icon(Icons.Rounded.BarChart, contentDescription = trendsDesc)
                     }
                 },
                 trailingContent = {
@@ -248,7 +255,7 @@ fun StepCounterScreen(
                                     Icon(Icons.Rounded.AutoAwesome, null)
                                 }
                             },
-                            label = "COACH"
+                            label = coachLabel
                         )
                     }
                     clickableItem(
@@ -257,7 +264,7 @@ fun StepCounterScreen(
                             viewModel.toggleStepCounter(!state.isEnabledInSettings)
                         },
                         icon = { Icon(if (state.isEnabledInSettings) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null) },
-                        label = if (state.isEnabledInSettings) "PAUSE" else "RESUME"
+                        label = if (state.isEnabledInSettings) pauseLabel else resumeLabel
                     )
                 }
             )
@@ -369,12 +376,12 @@ private fun StepEngineDebugDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Engine Telemetry",
+                            text = stringResource(R.string.st_StepCounterScreen_e7t8),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isStrict) "Strict Detection Filter" else "Simple Step Detection",
+                            text = if (isStrict) stringResource(R.string.st_StepCounterScreen_s9d0) else stringResource(R.string.st_StepCounterScreen_s1d2),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -385,13 +392,13 @@ private fun StepEngineDebugDialog(
                         FilterChip(
                             selected = isStrict,
                             onClick = { if (!isStrict) onToggleEngine(engineMode) },
-                            label = { Text("Strict", style = MaterialTheme.typography.labelSmall) },
+                            label = { Text(stringResource(R.string.st_StepCounterScreen_s3t5), style = MaterialTheme.typography.labelSmall) },
                             shape = CircleShape
                         )
                         FilterChip(
                             selected = !isStrict,
                             onClick = { if (isStrict) onToggleEngine(engineMode) },
-                            label = { Text("Simple", style = MaterialTheme.typography.labelSmall) },
+                            label = { Text(stringResource(R.string.st_StepCounterScreen_s5i6), style = MaterialTheme.typography.labelSmall) },
                             shape = CircleShape
                         )
                     }
@@ -424,7 +431,7 @@ private fun StepEngineDebugDialog(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "State: $motionStatus",
+                                text = stringResource(R.string.st_StepCounterScreen_engine_state, motionStatus),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = statusContentColor
@@ -432,7 +439,7 @@ private fun StepEngineDebugDialog(
                         }
 
                         Text(
-                            text = if (isStrict) "Strict DSP" else "Simple Accel",
+                            text = if (isStrict) stringResource(R.string.st_StepCounterScreen_s7d8) else stringResource(R.string.st_StepCounterScreen_s9a0),
                             style = MaterialTheme.typography.labelSmall,
                             color = statusContentColor.copy(alpha = 0.8f)
                         )
@@ -444,14 +451,14 @@ private fun StepEngineDebugDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    StatChip(label = "CADENCE", value = cadenceBpm, modifier = Modifier.weight(1f))
+                    StatChip(label = stringResource(R.string.st_StepCounterScreen_c1a2), value = cadenceBpm, modifier = Modifier.weight(1f))
                     if (isStrict) {
-                        StatChip(label = "PENDING", value = pendingSteps, modifier = Modifier.weight(1f))
-                        StatChip(label = "BUFFER", value = candidateCount, modifier = Modifier.weight(1f))
+                        StatChip(label = stringResource(R.string.st_StepCounterScreen_p3e5), value = pendingSteps, modifier = Modifier.weight(1f))
+                        StatChip(label = stringResource(R.string.st_StepCounterScreen_b5u6), value = candidateCount, modifier = Modifier.weight(1f))
                     } else {
                         StatChip(
-                            label = "GYRO GATE",
-                            value = if (isGyroFrozen) "FROZEN" else "ACTIVE",
+                            label = stringResource(R.string.st_StepCounterScreen_g7a8),
+                            value = if (isGyroFrozen) stringResource(R.string.st_StepCounterScreen_f9r0) else stringResource(R.string.st_StepCounterScreen_a1c2),
                             valueColor = if (isGyroFrozen) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
                         )
@@ -471,7 +478,7 @@ private fun StepEngineDebugDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "LIVE LOGS",
+                            stringResource(R.string.st_StepCounterScreen_l3o4),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -486,7 +493,7 @@ private fun StepEngineDebugDialog(
                         ) {
                             Icon(
                                 Icons.Rounded.ContentCopy,
-                                contentDescription = "Copy logs",
+                                contentDescription = stringResource(R.string.st_StepCounterScreen_c5l6),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -517,7 +524,7 @@ private fun StepEngineDebugDialog(
                             Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                                 if (logs.isEmpty()) {
                                     Text(
-                                        "No telemetry logged yet. Take a few steps...",
+                                        stringResource(R.string.st_StepCounterScreen_n7t8),
                                         style = MaterialTheme.typography.bodySmall.copy(
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 11.sp
@@ -575,14 +582,14 @@ private fun StepEngineDebugDialog(
                     ) {
                         Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Reset Engine")
+                        Text(stringResource(R.string.st_StepCounterScreen_r9e0))
                     }
                     Button(
                         onClick = onDismissRequest,
                         modifier = Modifier.weight(1f),
                         shape = CircleShape
                     ) {
-                        Text("Close")
+                        Text(stringResource(R.string.st_StepCounterScreen_c1l2))
                     }
                 }
             }
@@ -664,7 +671,7 @@ private fun StepContentLayout(state: StepState, onShowChat: () -> Unit, viewMode
             ) {
                 StaggeredEntrance(index = 2, modifier = Modifier.weight(1f)) {
                     ActivityStatCard(
-                        title = "CALORIES",
+                        title = stringResource(R.string.st_StepCounterScreen_c1a3),
                         value = "${state.calories}",
                         unit = "KCAL",
                         icon = Icons.Rounded.Whatshot,
@@ -673,7 +680,7 @@ private fun StepContentLayout(state: StepState, onShowChat: () -> Unit, viewMode
                 }
                 StaggeredEntrance(index = 3, modifier = Modifier.weight(1f)) {
                     ActivityStatCard(
-                        title = "DISTANCE",
+                        title = stringResource(R.string.st_StepCounterScreen_d3i4),
                         value = String.format(Locale.US, "%.2f", state.distanceDisplay),
                         unit = state.distanceUnit.uppercase(),
                         icon = Icons.Rounded.Route,
@@ -827,7 +834,7 @@ private fun StepProgressRingSection(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "STEPS TODAY",
+                        text = stringResource(R.string.st_StepCounterScreen_s3t6),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
@@ -844,13 +851,13 @@ private fun StepProgressRingSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("GOAL", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.st_StepCounterScreen_g5o6), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Text("%,d".format(goal), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 }
                 
                 val remaining = (goal - steps).coerceAtLeast(0)
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("REMAINING", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.st_StepCounterScreen_r7e8), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Text("%,d".format(remaining), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -898,14 +905,14 @@ private fun TrendsSection(
                 ) {
                     Column {
                         Text(
-                            "ACTIVITY TRENDS",
+                            stringResource(R.string.st_StepCounterScreen_a9t0),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
                             letterSpacing = 2.sp
                         )
                         Text(
-                            "Your progress over time",
+                            stringResource(R.string.st_StepCounterScreen_y1p2),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -926,9 +933,9 @@ private fun TrendsSection(
                                 else -> Icons.AutoMirrored.Rounded.ShowChart
                             }
                             val text = when (chartMode) {
-                                0 -> "BARS"
-                                1 -> "LINE"
-                                else -> "BOTH"
+                                0 -> stringResource(R.string.st_StepCounterScreen_b3a4)
+                                1 -> stringResource(R.string.st_StepCounterScreen_l5i6)
+                                else -> stringResource(R.string.st_StepCounterScreen_b7o8)
                             }
                             Icon(icon, null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -985,7 +992,7 @@ private fun TrendsSection(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                "$pct% of goal  •  $cal kcal",
+                                stringResource(R.string.st_StepCounterScreen_goal_met, pct, cal),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -1011,7 +1018,7 @@ private fun TrendsSection(
                 Icon(Icons.Rounded.OpenInFull, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    "Tap to open full trends",
+                    stringResource(R.string.st_StepCounterScreen_t9o0),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                 )
@@ -1025,7 +1032,7 @@ private fun TrendsSection(
 private fun MilestonesSection(state: StepState) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
-            "MILESTONES",
+            stringResource(R.string.st_StepCounterScreen_m1i2),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
@@ -1036,14 +1043,14 @@ private fun MilestonesSection(state: StepState) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             MilestoneCard(
                 modifier = Modifier.weight(1f),
-                title = "BEST DAY",
+                title = stringResource(R.string.st_StepCounterScreen_b3d4),
                 value = "${state.bestDaySteps}",
                 icon = Icons.Rounded.EmojiEvents,
                 color = Color(0xFFFFD700)
             )
             MilestoneCard(
                 modifier = Modifier.weight(1f),
-                title = "AVERAGE",
+                title = stringResource(R.string.st_StepCounterScreen_a5v6),
                 value = "${state.averageSteps}",
                 icon = Icons.Rounded.Timeline,
                 color = Color(0xFF4CAF50)
@@ -1052,7 +1059,7 @@ private fun MilestonesSection(state: StepState) {
         
         MilestoneCard(
             modifier = Modifier.fillMaxWidth(),
-            title = "ALL-TIME TOTAL",
+            title = stringResource(R.string.st_StepCounterScreen_a7t8),
             value = "${state.allTimeTotal}",
             icon = Icons.Rounded.Functions,
             color = MaterialTheme.colorScheme.primary
@@ -1145,7 +1152,7 @@ private fun AiFitnessAgentPill(state: StepState, onChat: () -> Unit) {
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Chat with your AI Fitness Coach",
+                        text = stringResource(R.string.st_StepCounterScreen_c9w0),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                     )
@@ -1224,10 +1231,10 @@ private fun DisabledInSettingsView(onEnable: () -> Unit) {
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("PAUSED", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.st_StepCounterScreen_p5a6), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "Your activity tracking is currently paused. Resume to continue recording steps.",
+                    stringResource(R.string.st_StepCounterScreen_y7a8),
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1237,7 +1244,7 @@ private fun DisabledInSettingsView(onEnable: () -> Unit) {
                     onClick = onEnable,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
-                    Text("RESUME TRACKING", fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_StepCounterScreen_r9t0), fontWeight = FontWeight.Black)
                 }
             }
         }
@@ -1249,16 +1256,16 @@ private fun PermissionDeniedView(onGrant: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Rounded.Lock, null, modifier = Modifier.size(100.dp).alpha(0.15f), tint = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(40.dp))
-        Text("ACCESS REQUIRED", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+        Text(stringResource(R.string.st_StepCounterScreen_a1r2), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         Text(
-            "Motion sensors are required to quantify your daily movement. This data is stored locally and securely.",
+            stringResource(R.string.st_StepCounterScreen_m3o5),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 16.dp, bottom = 48.dp),
             style = MaterialTheme.typography.bodyLarge
         )
         ToolzExpressiveButton(onClick = onGrant, modifier = Modifier.fillMaxWidth().height(72.dp), shape = BouncyShape) {
-            Text("GRANT ACCESS", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_StepCounterScreen_g5a6), fontWeight = FontWeight.Black)
         }
     }
 }
@@ -1268,9 +1275,9 @@ private fun NoSensorView() {
     Column(modifier = Modifier.fillMaxSize().padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Rounded.SentimentVeryDissatisfied, null, modifier = Modifier.size(100.dp).alpha(0.15f), tint = MaterialTheme.colorScheme.error)
         Spacer(modifier = Modifier.height(40.dp))
-        Text("HARDWARE MISSING", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+        Text(stringResource(R.string.st_StepCounterScreen_h7m8), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
         Text(
-            "This device does not appear to have the physical step counting hardware required for this feature.",
+            stringResource(R.string.st_StepCounterScreen_t9d0),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 16.dp),

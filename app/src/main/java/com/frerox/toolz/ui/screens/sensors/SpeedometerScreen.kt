@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -83,8 +85,8 @@ fun SpeedometerScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "SPEEDOMETER",
-                subtitle = if (state.isHudMode) "HUD MODE ACTIVE" else "Precision Speedometer",
+                title = stringResource(R.string.st_SpeedometerScreen_s1p2),
+                subtitle = if (state.isHudMode) stringResource(R.string.st_SpeedometerScreen_h3u4) else stringResource(R.string.st_SpeedometerScreen_p5s6),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -96,7 +98,7 @@ fun SpeedometerScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SpeedometerScreen_b7a8))
                     }
                 },
                 actions = {
@@ -109,7 +111,7 @@ fun SpeedometerScreen(
                     ) {
                         Icon(
                             if (state.isHudMode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                            contentDescription = "HUD Mode"
+                            contentDescription = stringResource(R.string.st_SpeedometerScreen_h9m0)
                         )
                     }
                 },
@@ -120,6 +122,10 @@ fun SpeedometerScreen(
         containerColor = Color.Transparent,
         floatingActionButton = {
             if (!state.isHudMode) {
+                val pauseLabel = stringResource(R.string.st_SpeedometerScreen_p1a2)
+                val startLabel = stringResource(R.string.st_SpeedometerScreen_s3t4)
+                val resetLabel = stringResource(R.string.st_SpeedometerScreen_r5e6)
+
                 ToolzHorizontalFloatingToolbar(
                     expanded = true,
                     modifier = Modifier.padding(bottom = 16.dp),
@@ -137,7 +143,7 @@ fun SpeedometerScreen(
                         ) {
                             Icon(
                                 if (state.isTracking) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (state.isTracking) "Pause" else "Start"
+                                contentDescription = if (state.isTracking) pauseLabel else startLabel
                             )
                         }
                     },
@@ -156,7 +162,7 @@ fun SpeedometerScreen(
                                 viewModel.resetStats()
                             },
                             icon = { Icon(Icons.Rounded.History, null) },
-                            label = "RESET"
+                            label = resetLabel
                         )
                     }
                 )
@@ -208,7 +214,7 @@ fun SpeedometerScreen(
                                     Icon(Icons.Rounded.PauseCircleFilled, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        "PAUSED",
+                                        stringResource(R.string.st_SpeedometerScreen_p7a8),
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Black,
                                         letterSpacing = 2.sp
@@ -237,7 +243,7 @@ fun SpeedometerScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 Text(
-                                    text = "LIVE TREND",
+                                    text = stringResource(R.string.st_SpeedometerScreen_l9t0),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     modifier = Modifier.align(Alignment.TopStart),
@@ -282,7 +288,7 @@ fun SpeedometerScreen(
                             Box(modifier = Modifier.size(10.dp).graphicsLayer { alpha = pulseAlpha }.clip(CircleShape).background(signalColor))
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                text = if (!state.isGpsEnabled) "GPS DISCONNECTED" else "GPS PRECISION: ±${state.accuracy.toInt()}m",
+                                text = if (!state.isGpsEnabled) stringResource(R.string.st_SpeedometerScreen_g1d2) else stringResource(R.string.st_SpeedometerScreen_gps_precision, state.accuracy.toInt()),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -301,7 +307,7 @@ fun SpeedometerScreen(
                         StaggeredEntrance(index = 1) {
                             SpeedStatCard(
                                 modifier = Modifier.weight(1f),
-                                label = "PEAK VELOCITY",
+                                label = stringResource(R.string.st_SpeedometerScreen_p3v4),
                                 value = String.format(Locale.getDefault(), "%.${state.unit.precision}f", state.maxSpeedDisplay),
                                 unit = state.unit.label,
                                 icon = Icons.Rounded.Speed,
@@ -312,7 +318,7 @@ fun SpeedometerScreen(
                             val distance = if (state.unit == SpeedUnit.KMH) state.totalDistanceMeters / 1000 else (state.totalDistanceMeters / 1000) * 0.621371
                             SpeedStatCard(
                                 modifier = Modifier.weight(1f),
-                                label = "TOTAL TRIP",
+                                label = stringResource(R.string.st_SpeedometerScreen_t5t6),
                                 value = String.format(Locale.getDefault(), "%.1f", distance),
                                 unit = if (state.unit == SpeedUnit.KMH) "KM" else "MI",
                                 icon = Icons.Rounded.Route,
@@ -338,9 +344,9 @@ fun SpeedometerScreen(
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                InfoItemInternal("ALTITUDE", "${state.altitude.toInt()}m", Icons.Rounded.Terrain)
+                                InfoItemInternal(stringResource(R.string.st_SpeedometerScreen_a7l8), "${state.altitude.toInt()}m", Icons.Rounded.Terrain)
                                 VerticalDivider(modifier = Modifier.height(40.dp).width(1.5.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                InfoItemInternal("LOCATION", "${String.format("%.4f", state.latitude)}, ${String.format("%.4f", state.longitude)}", Icons.Rounded.Map)
+                                InfoItemInternal(stringResource(R.string.st_SpeedometerScreen_l9o0), "${String.format("%.4f", state.latitude)}, ${String.format("%.4f", state.longitude)}", Icons.Rounded.Map)
                             }
                         }
                     }
@@ -446,13 +452,13 @@ fun SpeedometerPermissionView(onGrant: () -> Unit) {
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "GPS REQUIRED",
+            text = stringResource(R.string.st_SpeedometerScreen_g1r2),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Location access is needed to calculate velocity and track your trip progress accurately.",
+            text = stringResource(R.string.st_SpeedometerScreen_l3a4),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -463,7 +469,7 @@ fun SpeedometerPermissionView(onGrant: () -> Unit) {
             shape = MediumExpressiveShape,
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) {
-            Text("ENABLE PERMISSIONS", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SpeedometerScreen_e5p6), fontWeight = FontWeight.Bold)
         }
     }
 }

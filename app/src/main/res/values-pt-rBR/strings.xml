@@ -983,12 +983,28 @@
     <string name="st_WifiTweaksScreen_s9t0">Opções do Desenvolvedor</string>
     <string name="st_WifiTweaksScreen_u1v2">Taxa de Transferência em Tempo Real</string>
     <string name="st_WifiTweaksScreen_w3x4">MOTOR PRIVILEGIADO</string>
-    <string name="st_WifiTweaksScreen_y5z6">Perfis Prontos para Uso</string>
+    <string name="st_WifiTweaksScreen_y5z6">Perfiles Prontos para Uso</string>
     <string name="st_WifiTweaksScreen_a7b8">Benchmark de DNS</string>
     <string name="st_WifiTweaksScreen_c9d0">DNS Privado Personalizado</string>
     <string name="st_WifiTweaksScreen_e1f2">Predefinições</string>
     <string name="st_WifiTweaksScreen_g3h4">Auditoria de Saúde</string>
     <string name="st_WifiTweaksScreen_i5j6">Velocidade Real</string>
+    <string name="st_WifiTweaksScreen_tab_overview">Visão geral</string>
+    <string name="st_WifiTweaksScreen_tab_analyzer">Analisador</string>
+    <string name="st_WifiTweaksScreen_tab_profiles">Perfis</string>
+    <string name="st_WifiTweaksScreen_tab_dns">DNS</string>
+    <string name="st_WifiTweaksScreen_tab_diag">Diagnóstico</string>
+    <string name="st_WifiTweaksScreen_tab_traffic">Tráfego</string>
+    <string name="st_WifiTweaksScreen_tab_console">Console</string>
+    <string name="st_WifiTweaksScreen_toggle_nav">Alternar Navegação</string>
+    <string name="st_WifiTweaksScreen_diag_terminal">Terminal de Diagnóstico</string>
+    <string name="st_WifiTweaksScreen_experimental_tool">Ferramenta Experimental</string>
+    <string name="st_WifiTweaksScreen_experimental_desc">Esta suíte contém ajustes de rede avançados que estão atualmente em Beta. Algumas funções podem ser experimentais e a estabilidade pode variar dependendo do seu dispositivo e da versão do Android.\n\nA maioria das otimizações requer Shizuku para acesso privilegiado ao shell. Use com cautela.</string>
+    <string name="st_WifiTweaksScreen_got_it">Entendi</string>
+    <string name="st_WifiTweaksScreen_select_benchmark">Selecionar Servidores de Benchmark</string>
+    <string name="st_WifiTweaksScreen_diag_summary_copied">Resumo de diagnóstico copiado.</string>
+    <string name="st_WifiTweaksScreen_ping_result">Ping para %1$s: %2$s ms</string>
+
 
     <!-- FileConverterScreen -->
     <string name="st_FileConverterScreen_fc1">CONVERSOR DE ARQUIVOS</string>
@@ -1700,7 +1716,7 @@
     <string name="st_SearchScreen_c7b8">Personalizar listas de bloqueio</string>
     <string name="st_SearchScreen_n9h0">Nenhum histórico salvo</string>
     <string name="st_SearchScreen_b1v2">Verificação biométrica</string>
-    <string name="st_SearchScreen_c3e4">Escolha seu mecanismo de busca preferido</string>
+    <string name="st_SearchScreen_choose_engine">Escolha seu mecanismo de busca preferido</string>
     <string name="st_SearchScreen_d5u6">DuckDuckGo</string>
     <string name="st_SearchScreen_p7f8">Focado em privacidade, sem rastreamento</string>
     <string name="st_SearchScreen_b9r0">Brave</string>
@@ -1717,7 +1733,7 @@
     <string name="st_SearchScreen_p1t2">Planta árvores enquanto você busca</string>
     <string name="st_SearchScreen_a3e4">Todos os Mecanismos</string>
     <string name="st_SearchScreen_c5r6">Resultados combinados de múltiplas fontes</string>
-    <string name="st_SearchScreen_d7o8">DNS over HTTPS</string>
+    <string name="st_SearchScreen_doh">DNS sobre HTTPS</string>
     <string name="st_SearchScreen_e9t0">Criptografar consultas DNS para evitar rastreamento</string>
     <string name="st_SearchScreen_a1f2">Auto (Mais Rápido)</string>
     <string name="st_SearchScreen_a3s4">Alternar automaticamente para o provedor de menor latência</string>
@@ -1747,20 +1763,28 @@
     <string name="st_SearchScreen_y3o5">Seu próprio resolvedor DoH</string>
     <string name="st_SearchScreen_d5h6">URL DoH ou Hostname</string>
     <string name="st_SearchScreen_e7u8">ex: dns.exemplo.com</string>
-    <string name="st_SearchScreen_s9b0">Salvar nos favoritos</string>
-    <string name="st_SearchScreen_s1l2">Compartilhar link</string>
-    <string name="st_SearchScreen_c3u4">Copiar URL</string>
+    <string name="st_SearchScreen_save_bookmarks">Salvar nos favoritos</string>
+    <string name="st_SearchScreen_share_link">Compartilhar link</string>
+    <string name="st_SearchScreen_copy_url">Copiar URL</string>
     <string name="st_SearchScreen_a5b6">Todos os favoritos</string>
-    <string name="st_SearchScreen_p7d8">Privado por padrão</string>
+    <string name="st_SearchScreen_onboarding_title">Privado por padrão</string>
     <string name="st_SearchScreen_a9s0">Todas as buscas são roteadas por um proxy anônimo com bloqueio de anúncios integrado e DNS-over-HTTPS. Sem rastreamento, sem perfilamento.</string>
-    <string name="st_SearchScreen_g1s2">Começar</string>
-    <string name="st_SearchScreen_t3i4">Título</string>
-    <string name="st_SearchScreen_u5r6">URL</string>
-    <string name="st_SearchScreen_h7u8">https://…</string>
-    <string name="st_SearchScreen_s9a0">Salvar</string>
-    <string name="st_SearchScreen_w1g2">Para onde você gostaria de ir?</string>
-    <string name="st_SearchScreen_q3a4">Acesso rápido</string>
-    <string name="st_SearchScreen_b5o6">Favoritos</string>
+    <string name="st_SearchScreen_get_started">Começar</string>
+    <string name="st_SearchScreen_title">Título</string>
+    <string name="st_SearchScreen_url">URL</string>
+    <string name="st_SearchScreen_url_hint">https://…</string>
+    <string name="st_SearchScreen_save">Salvar</string>
+    <string name="st_SearchScreen_where_to">Para onde você gostaria de ir?</string>
+    <string name="st_SearchScreen_quick_access">Acesso rápido</string>
+    <string name="st_SearchScreen_bookmarks">Favoritos</string>
+    <string name="st_SearchScreen_results_count">%d resultados</string>
+    <string name="st_SearchScreen_all_bookmarks">Todos os favoritos</string>
+    <string name="st_SearchScreen_greeting_night">Boa noite</string>
+    <string name="st_SearchScreen_greeting_morning">Bom dia</string>
+    <string name="st_SearchScreen_greeting_afternoon">Boa tarde</string>
+    <string name="st_SearchScreen_greeting_evening">Boa noite</string>
+    <string name="st_SearchScreen_see_all">Ver todos</string>
+
 
     <!-- AltimeterScreen -->
     <string name="st_AltimeterScreen_a1l2">ALTIMETRO</string>
@@ -1825,6 +1849,8 @@
     <string name="st_SpeedometerScreen_g1r2">GPS NECESSÁRIO</string>
     <string name="st_SpeedometerScreen_l3a4">O acesso à localização é necessário para calcular a velocidade e rastrear o progresso da sua viagem com precisão.</string>
     <string name="st_SpeedometerScreen_e5p6">ATIVAR PERMISSÕES</string>
+    <string name="st_SpeedometerScreen_gps_precision">PRECISÃO DO GPS: ±%dm</string>
+
 
     <!-- StepCounterScreen -->
     <string name="st_StepCounterScreen_f1i2">FITNESS</string>
@@ -1877,6 +1903,9 @@
     <string name="st_StepCounterScreen_g5a6">CONCEDER ACESSO</string>
     <string name="st_StepCounterScreen_h7m8">HARDWARE AUSENTE</string>
     <string name="st_StepCounterScreen_t9d0">Este dispositivo não parece ter o hardware físico de contagem de passos necessário para este recurso.</string>
+    <string name="st_StepCounterScreen_engine_state">Estado: %s</string>
+    <string name="st_StepCounterScreen_goal_met">%d%% da meta  •  %d kcal</string>
+
 
     <!-- StepTrendsScreen -->
     <string name="st_StepTrendsScreen_a1c2">ATIVIDADE</string>
@@ -1895,6 +1924,8 @@
     <string name="st_StepTrendsScreen_d7a8">DIAS</string>
     <string name="st_StepTrendsScreen_h9b0">DETALHAMENTO DO HISTÓRICO</string>
     <string name="st_StepTrendsScreen_t1o2">Toque para abrir tendências completas</string>
+    <string name="st_StepTrendsScreen_avg_steps">Média %s passos/dia</string>
+    <string name="st_StepTrendsScreen_goal_steps">Meta: %s passos</string>
     <!-- VoiceRecorderScreen -->
     <string name="st_VoiceRecorderScreen_v1r2">Gravador de Voz</string>
     <string name="st_VoiceRecorderScreen_b3a4">Voltar</string>
@@ -1920,6 +1951,9 @@
     <string name="st_VoiceRecorderScreen_i3g4">Ganho de Entrada</string>
     <string name="st_VoiceRecorderScreen_b5r6">Gravação em segundo plano</string>
     <string name="st_VoiceRecorderScreen_k7b8">Manter gravação quando o app estiver em segundo plano</string>
+    <string name="st_VoiceRecorderScreen_confirm_delete">\"%s\" será excluído permanentemente.</string>
+    <string name="st_VoiceRecorderScreen_recording_suffix">Gravando…</string>
+
 
     <!-- LoadingScreen -->
     <string name="st_LoadingScreen_5c50">TOOLZ</string>
@@ -2143,6 +2177,11 @@
     <string name="st_DeviceInfoScreen_a1b3">Modelo do Dispositivo</string>
     <string name="st_DeviceInfoScreen_c3d5">Buscar</string>
     <string name="st_DeviceInfoScreen_e5f7">Cancelar</string>
+    <string name="st_DeviceInfoScreen_verified">Verificado %s</string>
+    <string name="st_DeviceInfoScreen_local_hardware">Leitura direta dos serviços do sistema</string>
+    <string name="st_DeviceInfoScreen_detected_sensors">%d sensores detectados</string>
+    <string name="st_DeviceInfoScreen_no_camera_info">Sem informações da câmera</string>
+
 
     <!-- FlipCoinScreen -->
     <string name="st_FlipCoinScreen_a1b2">CARA OU COROA</string>
@@ -2163,7 +2202,6 @@
     <string name="st_FlipCoinScreen_e1f2">LADOS PERSONALIZADOS</string>
     <string name="st_FlipCoinScreen_g3h4">REDEFINIR PARA PADRÕES</string>
 
-    <!-- PeriodicTableScreen -->
     <string name="st_PeriodicTableScreen_a1b2">TABELA PERIÓDICA</string>
     <string name="st_PeriodicTableScreen_c3d4">Modo Comparação</string>
     <string name="st_PeriodicTableScreen_e5f6">Pesquisar por nome, símbolo ou número…</string>
@@ -2183,6 +2221,18 @@
     <string name="st_PeriodicTableScreen_g3h4">FUNDIR</string>
     <string name="st_PeriodicTableScreen_i5j6">FERVER</string>
     <string name="st_PeriodicTableScreen_k7l8">FECHAR COMPARAÇÃO</string>
+    <string name="st_PeriodicTableScreen_initializing">Inicializando...</string>
+    <string name="st_PeriodicTableScreen_fetching">Buscando dados atômicos...</string>
+    <string name="st_PeriodicTableScreen_indexing">Indexando camadas de elétrons...</string>
+    <string name="st_PeriodicTableScreen_mapping">Mapeando isótopos...</string>
+    <string name="st_PeriodicTableScreen_optimizing">Otimizando índice de busca...</string>
+    <string name="st_PeriodicTableScreen_readying">Preparando grade periódica...</string>
+    <string name="st_PeriodicTableScreen_synthesizing">Sintetizando banco de dados atômico...</string>
+    <string name="st_PeriodicTableScreen_indexed">%d elementos indexados</string>
+    <string name="st_PeriodicTableScreen_unknown">Desconhecido</string>
+    <string name="st_PeriodicTableScreen_generic_element">Elemento %d</string>
+    <string name="st_PeriodicTableScreen_generic_desc">Este elemento é membro do grupo %s, caracterizado por propriedades atômicas únicas e aplicações clínicas na física teórica.</string>
+
 
     <!-- RandomGeneratorScreen -->
     <string name="st_RandomGeneratorScreen_a1b2">MOTOR DE ENTROPIA</string>
@@ -2343,4 +2393,136 @@
     <string name="st_SoundMeterScreen_u1v2">ACESSO A ÁUDIO NECESSÁRIO</string>
     <string name="st_SoundMeterScreen_w3x4">O sonômetro precisa de acesso ao microfone para medir níveis de decibel em tempo real. Seu áudio nunca é gravado ou armazenado.</string>
     <string name="st_SoundMeterScreen_y5z6">CONCEDER PERMISSÃO</string>
+    <string name="st_SearchScreen_edit_quick_link">Editar link rápido</string>
+    <string name="st_SearchScreen_edit_bookmark">Editar favorito</string>
+    <string name="st_SearchScreen_clear_history_title">Limpar histórico?</string>
+    <string name="st_SearchScreen_clear_history_desc">Todas as buscas salvas serão removidas.</string>
+    <string name="st_SearchScreen_clear_all">Limpar tudo</string>
+    <string name="st_SearchScreen_cancel">Cancelar</string>
+    <string name="st_SearchScreen_share">Compartilhar</string>
+    <string name="st_SearchScreen_no_nextdns_title">NextDNS não configurado</string>
+    <string name="st_SearchScreen_no_nextdns_desc">Para usar o NextDNS, primeiro você deve fornecer seu ID de configuração nas configurações de bloqueio de anúncios.</string>
+    <string name="st_SearchScreen_go_to_setup">Ir para configuração</string>
+    <string name="st_SearchScreen_recent">Recente</string>
+    <string name="st_SearchScreen_offline_title">Você está offline</string>
+    <string name="st_SearchScreen_dns_failed">Falha na resolução DNS</string>
+    <string name="st_SearchScreen_rate_limited">Limite de taxa atingido</string>
+    <string name="st_SearchScreen_no_results">Nenhum resultado encontrado</string>
+    <string name="st_SearchScreen_connection_error">Erro de conexão</string>
+    <string name="st_SearchScreen_search_error">Erro de busca</string>
+    <string name="st_SearchScreen_load_more">Carregar mais resultados</string>
+    <string name="st_SearchScreen_load_more_desc">Os resultados podem ser menos relevantes quanto mais você avançar</string>
+    <string name="st_SearchScreen_reached_end">Você chegou ao fim</string>
+    <string name="st_SearchScreen_back_to_home">Voltar para o início</string>
+    <string name="st_SearchScreen_search_settings">Configurações de busca</string>
+    <string name="st_SearchScreen_engine">Mecanismo de busca</string>
+    <string name="st_SearchScreen_safe_search">Busca segura</string>
+    <string name="st_SearchScreen_safe_search_desc">Filtrar conteúdo explícito</string>
+    <string name="st_SearchScreen_ad_blocking">Bloqueio de anúncios e rastreadores</string>
+    <string name="st_SearchScreen_ad_blocking_desc">Bloquear mais de 200 domínios de anúncios</string>
+    <string name="st_SearchScreen_incognito">Modo anônimo</string>
+    <string name="st_SearchScreen_incognito_desc">Não salvar histórico de busca</string>
+    <string name="st_SearchScreen_autofill">Preenchimento automático de senhas</string>
+    <string name="st_SearchScreen_autofill_desc">Preencher credenciais com biometria</string>
+    <string name="st_SearchScreen_dns_provider">Provedor DNS</string>
+    <string name="st_SearchScreen_privacy_security">Privacidade e Segurança</string>
+    <string name="st_SearchScreen_presets">Predefinições</string>
+    <string name="st_SearchScreen_standard">Padrão</string>
+    <string name="st_SearchScreen_enhanced">Aprimorado</string>
+    <string name="st_SearchScreen_maximum">Máximo</string>
+    <string name="st_SearchScreen_customize_blocklists">Personalizar listas de bloqueio</string>
+    <string name="st_SearchScreen_no_history">Nenhum histórico salvo</string>
+    <string name="st_SearchScreen_biometric_verify">Verificação biométrica</string>
+    <string name="st_SearchScreen_doh_desc">Criptografar consultas DNS para evitar rastreamento</string>
+    <string name="st_SearchScreen_auto_fastest">Auto (Mais rápido)</string>
+    <string name="st_SearchScreen_auto_desc">Mudar automaticamente para o provedor com menor latência</string>
+    <string name="st_SearchScreen_system_default">Padrão do sistema</string>
+    <string name="st_SearchScreen_no_encryption">Sem criptografia</string>
+    <string name="st_SearchScreen_custom_url">URL personalizada</string>
+    <string name="st_SearchScreen_own_resolver">Seu próprio resolvedor DoH</string>
+    <string name="st_SearchScreen_doh_url_label">URL ou Hostname de DoH</string>
+    <string name="st_SearchScreen_doh_hint">ex. dns.exemplo.com</string>
+    <string name="st_SearchScreen_onboarding_desc">Todas as buscas são roteadas por um proxy anônimo com bloqueio de anúncios integrado e DNS-over-HTTPS. Sem rastreamento, sem perfilamento.</string>
+    <!-- Periodic Table Elements -->
+    <string name="st_PeriodicTableScreen_Element_H_Name">Hidrogênio</string>
+    <string name="st_PeriodicTableScreen_Element_H_Desc">O elemento mais leve do universo.</string>
+    <string name="st_PeriodicTableScreen_Element_H_Fact">Constitui cerca de 75% de toda a massa bariônica.</string>
+    <string name="st_PeriodicTableScreen_Element_He_Name">Hélio</string>
+    <string name="st_PeriodicTableScreen_Element_He_Desc">Segundo elemento mais abundante.</string>
+    <string name="st_PeriodicTableScreen_Element_He_Fact">Descoberto no espectro do sol antes de ser encontrado na Terra.</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Name">Lítio</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Desc">O metal mais leve.</string>
+    <string name="st_PeriodicTableScreen_Element_Li_Fact">Usado extensivamente em baterias recarregáveis.</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Name">Berílio</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Desc">Metal forte e leve.</string>
+    <string name="st_PeriodicTableScreen_Element_Be_Fact">Usado em materiais estruturais para aeronaves de alta velocidade e mísseis.</string>
+    <string name="st_PeriodicTableScreen_Element_B_Name">Boro</string>
+    <string name="st_PeriodicTableScreen_Element_B_Desc">Metaloide versátil.</string>
+    <string name="st_PeriodicTableScreen_Element_B_Fact">Componente chave da fibra de vidro e do vidro resistente ao calor.</string>
+    <string name="st_PeriodicTableScreen_Element_C_Name">Carbono</string>
+    <string name="st_PeriodicTableScreen_Element_C_Desc">Base de toda a vida conhecida.</string>
+    <string name="st_PeriodicTableScreen_Element_C_Fact">Pode existir tanto como grafite macio quanto diamante duro.</string>
+    <string name="st_PeriodicTableScreen_Element_N_Name">Nitrogênio</string>
+    <string name="st_PeriodicTableScreen_Element_N_Desc">Parte principal da atmosfera terrestre.</string>
+    <string name="st_PeriodicTableScreen_Element_N_Fact">Essencial para a produção de fertilizantes e explosivos.</string>
+    <string name="st_PeriodicTableScreen_Element_O_Name">Oxigênio</string>
+    <string name="st_PeriodicTableScreen_Element_O_Desc">Essencial para la respiração.</string>
+    <string name="st_PeriodicTableScreen_Element_O_Fact">Representa cerca de 21% da atmosfera terrestre por volume.</string>
+    <string name="st_PeriodicTableScreen_Element_F_Name">Flúor</string>
+    <string name="st_PeriodicTableScreen_Element_F_Desc">O elemento mais eletronegativo.</string>
+    <string name="st_PeriodicTableScreen_Element_F_Fact">Usado em cremes dentais para prevenir cáries.</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Name">Neônio</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Desc">Gás nobre conhecido por seu brilho.</string>
+    <string name="st_PeriodicTableScreen_Element_Ne_Fact">Usado em letreiros publicitários e indicadores de alta tensão.</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Name">Sódio</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Desc">Metal alcalino altamente reativo.</string>
+    <string name="st_PeriodicTableScreen_Element_Na_Fact">Componente comum do sal de cozinha (cloreto de sódio).</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Name">Magnésio</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Desc">Metal leve e forte.</string>
+    <string name="st_PeriodicTableScreen_Element_Mg_Fact">Abundante na crosta terrestre e essencial para funções biológicas.</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Name">Alumínio</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Desc">Baixa densidade e resistente à corrosão.</string>
+    <string name="st_PeriodicTableScreen_Element_Al_Fact">O metal não ferroso mais amplamente utilizado.</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Name">Silício</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Desc">Componente chave de semicondutores.</string>
+    <string name="st_PeriodicTableScreen_Element_Si_Fact">O segundo elemento mais abundante na crosta terrestre.</string>
+    <string name="st_PeriodicTableScreen_Element_P_Name">Fósforo</string>
+    <string name="st_PeriodicTableScreen_Element_P_Desc">Essencial para a vida (DNA/RNA).</string>
+    <string name="st_PeriodicTableScreen_Element_P_Fact">Existe em várias formas, incluindo fósforo branco e vermelho.</string>
+    <string name="st_PeriodicTableScreen_Element_S_Name">Enxofre</string>
+    <string name="st_PeriodicTableScreen_Element_S_Desc">Não metal quebradiço.</string>
+    <string name="st_PeriodicTableScreen_Element_S_Fact">Conhecido por seu cheiro distinto de "ovo podre" quando em forma de composto.</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Name">Cloro</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Desc">Poderoso agente oxidante.</string>
+    <string name="st_PeriodicTableScreen_Element_Cl_Fact">Amplamente utilizado para purificação de água e como desinfetante.</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Name">Argônio</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Desc">Terceiro gás mais abundante na atmosfera.</string>
+    <string name="st_PeriodicTableScreen_Element_Ar_Fact">Usado em iluminação incandescente e como gás de proteção.</string>
+    <string name="st_PeriodicTableScreen_Element_K_Name">Potássio</string>
+    <string name="st_PeriodicTableScreen_Element_K_Desc">Mineral essencial para a função nervosa.</string>
+    <string name="st_PeriodicTableScreen_Element_K_Fact">Metal altamente reativo que deve ser armazenado em óleo.</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Name">Cálcio</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Desc">Essencial para a saúde óssea.</string>
+    <string name="st_PeriodicTableScreen_Element_Ca_Fact">O mineral mais abundante no corpo humano.</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Name">Escândio</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Desc">Metal de terras raras.</string>
+    <string name="st_PeriodicTableScreen_Element_Sc_Fact">Usado na indústria aeroespacial e lâmpadas de alta intensidade.</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Name">Titânio</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Desc">Alta relação resistência/peso.</string>
+    <string name="st_PeriodicTableScreen_Element_Ti_Fact">Altamente resistente à corrosão em água do mar e cloro.</string>
+    <string name="st_PeriodicTableScreen_Element_V_Name">Vanádio</string>
+    <string name="st_PeriodicTableScreen_Element_V_Desc">Metal duro, cinza-prateado.</string>
+    <string name="st_PeriodicTableScreen_Element_V_Fact">Usado principalmente como aditivo de aço para resistência.</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Name">Cromo</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Desc">Metal cinza-aço, lustroso.</string>
+    <string name="st_PeriodicTableScreen_Element_Cr_Fact">Ingrediente chave no aço inoxidável e cromagem.</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Name">Manganês</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Desc">Importante metal industrial.</string>
+    <string name="st_PeriodicTableScreen_Element_Mn_Fact">Essencial para a fotossíntese em plantas e formação óssea em humanos.</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Name">Ferro</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Desc">Elemento mais comum na Terra por massa.</string>
+    <string name="st_PeriodicTableScreen_Element_Fe_Fact">Central para a produção de aço e transporte de oxigênio no sangue.</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Name">Cobalto</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Desc">Metal duro, lustroso, cinza-azulado.</string>
+    <string name="st_PeriodicTableScreen_Element_Co_Fact">Usado em ligas de alta resistência e cátodos de baterias de íons de lítio.</string>
 </resources>

@@ -41,6 +41,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.ui.components.*
@@ -60,6 +62,13 @@ fun StepTrendsScreen(
     var selectedRange by remember { mutableStateOf("Week") }
     var selectedMetric by remember { mutableStateOf("Steps") }
     var chartMode by remember { mutableStateOf(0) } // 0=Bars, 1=Line, 2=Both
+
+    val weekLabel = stringResource(R.string.st_StepTrendsScreen_w7e8)
+    val monthLabel = stringResource(R.string.st_StepTrendsScreen_m9o0)
+    val yearLabel = stringResource(R.string.st_StepTrendsScreen_y1e2)
+    val stepsLabel = stringResource(R.string.st_StepTrendsScreen_s3t4)
+    val distanceLabel = stringResource(R.string.st_StepTrendsScreen_d5i6)
+    val caloriesLabel = stringResource(R.string.st_StepTrendsScreen_c7a8)
 
     val rawHistory = state.rawHistoryForRange
     val totalVal = when (selectedMetric) {
@@ -96,8 +105,8 @@ fun StepTrendsScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "ACTIVITY",
-                subtitle = "Trends & Insights",
+                title = stringResource(R.string.st_StepTrendsScreen_a1c2),
+                subtitle = stringResource(R.string.st_StepTrendsScreen_t3i4),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -109,7 +118,7 @@ fun StepTrendsScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_StepTrendsScreen_b5a6))
                     }
                 },
                 actions = {
@@ -151,7 +160,7 @@ fun StepTrendsScreen(
                         StaggeredEntrance(index = 0) {
                             ToolzConnectedButtonGroup(
                                 selectedIndex = when (selectedRange) { "Week" -> 0; "Month" -> 1; else -> 2 },
-                                options = listOf("WEEK", "MONTH", "YEAR"),
+                                options = listOf(weekLabel, monthLabel, yearLabel),
                                 onOptionSelected = { i ->
                                     val r = when (i) { 0 -> "Week"; 1 -> "Month"; else -> "Year" }
                                     selectedRange = r
@@ -167,7 +176,9 @@ fun StepTrendsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                listOf("Steps", "Distance", "Calories").forEach { m ->
+                                listOf("Steps" to stepsLabel, "Distance" to distanceLabel, "Calories" to caloriesLabel).forEach { pair ->
+                                    val m = pair.first
+                                    val label = pair.second
                                     val isSelected = selectedMetric == m
                                     Surface(
                                         onClick = { 
@@ -180,7 +191,7 @@ fun StepTrendsScreen(
                                     ) {
                                         Box(modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                             Text(
-                                                m.uppercase(),
+                                                label.uppercase(),
                                                 style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.Black,
                                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary
@@ -233,16 +244,16 @@ fun StepTrendsScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                                     SummaryStat(
                                         modifier = Modifier.weight(1.2f),
-                                        label = "AVERAGE",
+                                        label = stringResource(R.string.st_StepTrendsScreen_a9v0),
                                         value = formattedAvg,
                                         icon = Icons.AutoMirrored.Rounded.TrendingUp,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     SummaryStat(
                                         modifier = Modifier.weight(1f),
-                                        label = "STREAK",
+                                        label = stringResource(R.string.st_StepTrendsScreen_s1t2),
                                         value = "${state.streak}",
-                                        unit = "DAYS",
+                                        unit = stringResource(R.string.st_StepTrendsScreen_d7a8),
                                         icon = Icons.Rounded.Bolt,
                                         color = Color(0xFFFF9800)
                                     )
@@ -250,15 +261,15 @@ fun StepTrendsScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                                     SummaryStat(
                                         modifier = Modifier.weight(1f),
-                                        label = "ACTIVE",
+                                        label = stringResource(R.string.st_StepTrendsScreen_a3c4),
                                         value = "${state.activeDaysCount}",
-                                        unit = "DAYS",
+                                        unit = stringResource(R.string.st_StepTrendsScreen_d7a8),
                                         icon = Icons.Rounded.CheckCircle,
                                         color = Color(0xFF4CAF50)
                                     )
                                     SummaryStat(
                                         modifier = Modifier.weight(1.2f),
-                                        label = "TOTAL",
+                                        label = stringResource(R.string.st_StepTrendsScreen_t5o6),
                                         value = formattedTotal,
                                         icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                                         color = Color(0xFF2196F3)
@@ -282,7 +293,7 @@ fun StepTrendsScreen(
                         ) { (_, _, history) ->
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Text(
-                                    "HISTORY BREAKDOWN",
+                                    stringResource(R.string.st_StepTrendsScreen_h9b0),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.primary,
@@ -448,9 +459,9 @@ private fun ChartCard(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.AutoMirrored.Rounded.TrendingUp, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text("Avg ${String.format(Locale.getDefault(), "%,.0f", avgSteps)} steps/d", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_StepTrendsScreen_avg_steps, String.format(Locale.getDefault(), "%,.0f", avgSteps)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
-                Text("Goal: ${String.format(Locale.getDefault(), "%,d", goal)} steps", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(stringResource(R.string.st_StepTrendsScreen_goal_steps, String.format(Locale.getDefault(), "%,d", goal)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
         }
     }

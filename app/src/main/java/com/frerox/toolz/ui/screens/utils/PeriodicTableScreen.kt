@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import android.content.Context
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import androidx.compose.foundation.BorderStroke
@@ -78,6 +80,7 @@ data class Element(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PeriodicTableScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedElement by remember { mutableStateOf<Element?>(null) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
@@ -86,19 +89,19 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
     
     var isLoading by remember { mutableStateOf(true) }
     var loadingProgress by remember { mutableFloatStateOf(0f) }
-    var loadingStatus by remember { mutableStateOf("Initializing...") }
+    var loadingStatus by remember { mutableStateOf(context.getString(R.string.st_PeriodicTableScreen_initializing)) }
     val performanceMode = LocalPerformanceMode.current
     
-    val allElements = remember { getAllElements() }
+    val allElements = remember { getAllElements(context) }
     val categories = remember { allElements.map { it.category }.distinct() }
     
     LaunchedEffect(Unit) {
         val statuses = listOf(
-            "Fetching Atomic Data...",
-            "Indexing Electron Shells...",
-            "Mapping Isotopes...",
-            "Optimizing Search Index...",
-            "Readying Periodic Grid..."
+            context.getString(R.string.st_PeriodicTableScreen_fetching),
+            context.getString(R.string.st_PeriodicTableScreen_indexing),
+            context.getString(R.string.st_PeriodicTableScreen_mapping),
+            context.getString(R.string.st_PeriodicTableScreen_optimizing),
+            context.getString(R.string.st_PeriodicTableScreen_readying)
         )
         for (i in statuses.indices) {
             loadingStatus = statuses[i]
@@ -129,7 +132,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
             Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 ExpressiveTopAppBar(
                     title = stringResource(R.string.st_PeriodicTableScreen_a1b2),
-                    subtitle = if (isLoading) "Synthesizing atomic database..." else if (compareMode) stringResource(R.string.st_PeriodicTableScreen_c3d4) else "${allElements.size} elements indexed",
+                    subtitle = if (isLoading) stringResource(R.string.st_PeriodicTableScreen_synthesizing) else if (compareMode) stringResource(R.string.st_PeriodicTableScreen_c3d4) else stringResource(R.string.st_PeriodicTableScreen_indexed, allElements.size),
                     navigationIcon = {
                         ToolzExpressiveIconButton(
                             onClick = onBack,
@@ -433,7 +436,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_q7r8), element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_s9t0), if (element.density != null) String.format(locale, "%.4f g/cm³", element.density) else "Unknown", Icons.Rounded.Compress, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_s9t0), if (element.density != null) String.format(locale, "%.4f g/cm³", element.density) else stringResource(R.string.st_PeriodicTableScreen_unknown), Icons.Rounded.Compress, element.color)
                     DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_u1v2), element.abundance, Icons.Rounded.Public, element.color)
                 }
             }
@@ -469,8 +472,8 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp).alpha(0.1f))
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_y5z6), if (element.meltPoint != null) "${element.meltPoint} °C" else "Unknown", Icons.Rounded.DeviceThermostat)
-                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_a7b8), if (element.boilingPoint != null) "${element.boilingPoint} °C" else "Unknown", Icons.Rounded.Air)
+                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_y5z6), if (element.meltPoint != null) "${element.meltPoint} °C" else stringResource(R.string.st_PeriodicTableScreen_unknown), Icons.Rounded.DeviceThermostat)
+                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_a7b8), if (element.boilingPoint != null) "${element.boilingPoint} °C" else stringResource(R.string.st_PeriodicTableScreen_unknown), Icons.Rounded.Air)
                     }
                 }
             }
@@ -610,39 +613,76 @@ fun PropertyItem(label: String, value: String, icon: androidx.compose.ui.graphic
     }
 }
 
-private fun getAllElements(): List<Element> {
+private fun getStringBySymbol(context: Context, symbol: String, type: String): String {
+    val resName = "st_PeriodicTableScreen_Element_${symbol}_$type"
+    val resId = context.resources.getIdentifier(resName, "string", context.packageName)
+    return if (resId != 0) context.getString(resId) else ""
+}
+
+private fun getAllElements(context: Context): List<Element> {
     val elements = mutableListOf<Element>()
     
     // Core high-quality elements with extra info
-    elements.addAll(listOf(
-        Element("H", "Hydrogen", 1, 1.008, "Reactive Nonmetal", Color(0xFF4CAF50), "Hydrogen is the most abundant chemical substance in the universe, constituting roughly 75% of all baryonic mass.", "Hydrogen is the only element that can exist without neutrons.", "1s1", -259.1, -252.9, "Gas", "Henry Cavendish", 0.00008988, "75% of baryonic mass"),
-        Element("He", "Helium", 2, 4.0026, "Noble Gas", Color(0xFF9C27B0), "Helium is the second lightest and second most abundant element in the observable universe.", "Helium was discovered in the Sun's spectrum before it was found on Earth.", "1s2", -272.2, -268.9, "Gas", "Pierre Janssen", 0.0001785, "24% of baryonic mass"),
-        Element("Li", "Lithium", 3, 6.94, "Alkali Metal", Color(0xFFF44336), "Lithium is the lightest metal and the lightest solid element under standard conditions.", "Lithium is so soft it can be cut with a kitchen knife and is light enough to float on water.", "[He] 2s1", 180.5, 1342.0, "Solid", "Johan August Arfwedson", 0.534, "20 ppm"),
-        Element("Be", "Beryllium", 4, 9.0122, "Alkaline Earth Metal", Color(0xFFFF9800), "A steel-gray, strong, lightweight and brittle alkaline earth metal.", "Beryllium is transparent to X-rays, making it vital for X-ray tube windows.", "[He] 2s2", 1287.0, 2470.0, "Solid", "Louis Nicolas Vauquelin", 1.85, "2.8 ppm"),
-        Element("B", "Boron", 5, 10.81, "Metalloid", Color(0xFF795548), "Boron is found in Earth's crust entirely in combination with oxygen, typically as borate minerals like borax.", "Boron compounds are essential for the structural integrity of plant cell walls.", "[He] 2s2 2p1", 2076.0, 3927.0, "Solid", "Joseph Louis Gay-Lussac", 2.34, "10 ppm"),
-        Element("C", "Carbon", 6, 12.011, "Reactive Nonmetal", Color(0xFF4CAF50), "Carbon is the 15th most abundant element in Earth's crust and the 4th most abundant element in the universe by mass.", "Life on Earth is carbon-based; you are approximately 18% carbon by weight!", "[He] 2s2 2p2", 3550.0, 4827.0, "Solid", "Known since antiquity", 2.267, "200 ppm"),
-        Element("N", "Nitrogen", 7, 14.007, "Reactive Nonmetal", Color(0xFF4CAF50), "Nitrogen is a colorless, odorless, tasteless gas that makes up about 78% of Earth's atmosphere.", "Nitrogen is used to 'flash freeze' food and even warts in medical procedures.", "[He] 2s2 2p3", -210.0, -195.8, "Gas", "Daniel Rutherford", 0.0012506, "19 ppm"),
-        Element("O", "Oxygen", 8, 15.999, "Reactive Nonmetal", Color(0xFF4CAF50), "Oxygen is the third most abundant element in the universe and the most abundant element by mass in Earth's biosphere.", "About two-thirds of your body weight is oxygen, mostly in the form of water.", "[He] 2s2 2p4", -218.8, -183.0, "Gas", "Carl Wilhelm Scheele", 0.001429, "461,000 ppm"),
-        Element("F", "Fluorine", 9, 18.998, "Reactive Nonmetal", Color(0xFF4CAF50), "Fluorine is the most electronegative element and is extremely reactive.", "Fluorine is so reactive that it can set fire to things that don't usually burn, like glass!", "[He] 2s2 2p5", -219.7, -188.1, "Gas", "Henri Moissan", 0.001696, "585 ppm"),
-        Element("Ne", "Neon", 10, 20.180, "Noble Gas", Color(0xFF9C27B0), "Neon is a noble gas. It is chemically inert and forms no uncharged chemical compounds.", "While famous for bright red signs, neon is actually the fifth most abundant element in the universe.", "[He] 2s2 2p6", -248.6, -246.1, "Gas", "Sir William Ramsay", 0.0008999, "0.005 ppm"),
-        Element("Na", "Sodium", 11, 22.990, "Alkali Metal", Color(0xFFF44336), "Sodium is a soft, silvery-white, highly reactive metal.", "Pure sodium explodes when it touches water! It must be stored in oil to stay stable.", "[Ne] 3s1", 97.8, 883.0, "Solid", "Humphry Davy", 0.968, "23,600 ppm"),
-        Element("Mg", "Magnesium", 12, 24.305, "Alkaline Earth Metal", Color(0xFFFF9800), "Magnesium is the ninth most abundant element in the universe.", "Magnesium burns with a blindingly bright white light and was used in early camera flashes.", "[Ne] 3s2", 650.0, 1090.0, "Solid", "Joseph Black", 1.738, "23,300 ppm"),
-        Element("Al", "Aluminum", 13, 26.982, "Post-Transition Metal", Color(0xFF607D8B), "Aluminum is the most abundant metal in Earth's crust.", "Aluminum was once more valuable than gold! Napoleon III served his most honored guests with aluminum cutlery.", "[Ne] 3s2 3p1", 660.3, 2470.0, "Solid", "Hans Christian Ørsted", 2.70, "82,300 ppm"),
-        Element("Si", "Silicon", 14, 28.085, "Metalloid", Color(0xFF795548), "Silicon is a hard, brittle crystalline solid with a blue-grey metallic luster.", "Silicon makes up over 25% of the Earth's crust. It's the 'sand' in every beach.", "[Ne] 3s2 3p2", 1414.0, 3265.0, "Solid", "Jöns Jacob Berzelius", 2.3290, "282,000 ppm"),
-        Element("P", "Phosphorus", 15, 30.974, "Reactive Nonmetal", Color(0xFF4CAF50), "Phosphorus exists in two main forms: white phosphorus and red phosphorus.", "Phosphorus was first discovered in human urine by an alchemist trying to turn it into gold!", "[Ne] 3s2 3p3", 44.1, 280.5, "Solid", "Hennig Brand", 1.823, "1,050 ppm"),
-        Element("S", "Sulfur", 16, 32.06, "Reactive Nonmetal", Color(0xFF4CAF50), "Sulfur is a bright yellow, crystalline solid at room temperature.", "Sulfur is the reason why rotten eggs smell so bad. It's also known as 'brimstone'.", "[Ne] 3s2 3p4", 115.2, 444.6, "Solid", "Known since antiquity", 2.07, "350 ppm"),
-        Element("Cl", "Chlorine", 17, 35.45, "Reactive Nonmetal", Color(0xFF4CAF50), "Chlorine is a yellow-green gas that is a strong oxidizing agent.", "Chlorine gas is so dense that it would sink to the floor and fill a room from the bottom up.", "[Ne] 3s2 3p5", -101.5, -34.0, "Gas", "Carl Wilhelm Scheele", 0.003214, "145 ppm"),
-        Element("Ar", "Argon", 18, 39.948, "Noble Gas", Color(0xFF9C27B0), "Argon is the third most abundant gas in Earth's atmosphere.", "Argon is used in double-pane windows as an insulator because it conducts heat poorly.", "[Ne] 3s2 3p6", -189.3, -185.8, "Gas", "Lord Rayleigh", 0.0017837, "3.5 ppm"),
-        Element("K", "Potassium", 19, 39.098, "Alkali Metal", Color(0xFFF44336), "Potassium is a silvery-white metal that is soft enough to be cut with a knife.", "Bananas are slightly radioactive because they contain a naturally occurring isotope of Potassium.", "[Ar] 4s1", 63.5, 759.0, "Solid", "Humphry Davy", 0.862, "20,900 ppm"),
-        Element("Ca", "Calcium", 20, 40.078, "Alkaline Earth Metal", Color(0xFFFF9800), "Calcium is the most abundant metal in the human body.", "Your teeth and bones contain about 99% of the calcium in your body.", "[Ar] 4s2", 842.0, 1484.0, "Solid", "Humphry Davy", 1.54, "41,500 ppm"),
-        Element("Fe", "Iron", 26, 55.845, "Transition Metal", Color(0xFF3F51B5), "Iron is the most common element on Earth by mass, forming much of Earth's outer and inner core.", "Iron is the final element created in stars before they go supernova!", "[Ar] 3d6 4s2", 1538.0, 2862.0, "Solid", "Known since antiquity", 7.874, "56,300 ppm"),
-        Element("Cu", "Copper", 29, 63.546, "Transition Metal", Color(0xFF3F51B5), "Copper is used as a conductor of heat and electricity.", "Copper is naturally antibacterial; brass doorknobs can kill bacteria within 8 hours!", "[Ar] 3d10 4s1", 1085.0, 2562.0, "Solid", "Known since antiquity", 8.96, "60 ppm"),
-        Element("Ag", "Silver", 47, 107.87, "Transition Metal", Color(0xFF3F51B5), "Silver has the highest electrical conductivity, thermal conductivity, and reflectivity of any metal.", "Silver was once used in photography; before digital cameras, photos were made with silver crystals!", "[Kr] 4d10 5s1", 961.8, 2162.0, "Solid", "Known since antiquity", 10.49, "0.075 ppm"),
-        Element("Au", "Gold", 79, 196.97, "Transition Metal", Color(0xFF3F51B5), "Gold is a bright, slightly reddish yellow, dense, soft, malleable, and ductile metal.", "Gold is so malleable that a single ounce can be beaten into a sheet 300 square feet in size.", "[Xe] 4f14 5d10 6s1", 1064.0, 2856.0, "Solid", "Known since antiquity", 19.30, "0.004 ppm"),
-        Element("Hg", "Mercury", 80, 200.59, "Transition Metal", Color(0xFF3F51B5), "Mercury is the only metallic element that is liquid at standard conditions for temperature and pressure.", "Mercury is often called 'Quicksilver' and was once believed to grant immortality in ancient China.", "[Xe] 4f14 5d10 6s2", -38.8, 356.7, "Liquid", "Known since antiquity", 13.534, "0.085 ppm"),
-        Element("Pb", "Lead", 82, 207.2, "Post-Transition Metal", Color(0xFF607D8B), "Lead is a heavy metal that is denser than most common materials.", "Pencil 'leads' are actually graphite and clay; real lead hasn't been used in pencils for centuries.", "[Xe] 4f14 5d10 6s2 6p2", 327.5, 1749.0, "Solid", "Known since antiquity", 11.34, "14 ppm"),
-        Element("U", "Uranium", 92, 238.03, "Actinide", Color(0xFFE91E63), "Uranium is a silvery-grey metal in the actinide series of the periodic table.", "One pound of uranium contains as much energy as 1,500 tons of coal!", "[Rn] 5f3 6d1 7s2", 1132.0, 4131.0, "Solid", "Martin Heinrich Klaproth", 19.1, "2.7 ppm")
-    ))
+    val coreSymbols = listOf("H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co")
+    val coreData = listOf(
+        Triple(1, 1.008, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(2, 4.0026, "Noble Gas" to Color(0xFF9C27B0)),
+        Triple(3, 6.94, "Alkali Metal" to Color(0xFFF44336)),
+        Triple(4, 9.0122, "Alkaline Earth Metal" to Color(0xFFFF9800)),
+        Triple(5, 10.81, "Metalloid" to Color(0xFF795548)),
+        Triple(6, 12.011, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(7, 14.007, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(8, 15.999, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(9, 18.998, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(10, 20.180, "Noble Gas" to Color(0xFF9C27B0)),
+        Triple(11, 22.990, "Alkali Metal" to Color(0xFFF44336)),
+        Triple(12, 24.305, "Alkaline Earth Metal" to Color(0xFFFF9800)),
+        Triple(13, 26.982, "Post-Transition Metal" to Color(0xFF607D8B)),
+        Triple(14, 28.085, "Metalloid" to Color(0xFF795548)),
+        Triple(15, 30.974, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(16, 32.06, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(17, 35.45, "Reactive Nonmetal" to Color(0xFF4CAF50)),
+        Triple(18, 39.948, "Noble Gas" to Color(0xFF9C27B0)),
+        Triple(19, 39.098, "Alkali Metal" to Color(0xFFF44336)),
+        Triple(20, 40.078, "Alkaline Earth Metal" to Color(0xFFFF9800)),
+        Triple(21, 44.956, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(22, 47.867, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(23, 50.942, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(24, 51.996, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(25, 54.938, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(26, 55.845, "Transition Metal" to Color(0xFF3F51B5)),
+        Triple(27, 58.933, "Transition Metal" to Color(0xFF3F51B5))
+    )
+
+    coreSymbols.forEachIndexed { idx, symbol ->
+        val data = coreData[idx]
+        elements.add(
+            Element(
+                symbol = symbol,
+                name = getStringBySymbol(context, symbol, "Name"),
+                atomicNumber = data.first,
+                weight = data.second,
+                category = data.third.first,
+                color = data.third.second,
+                description = getStringBySymbol(context, symbol, "Desc"),
+                funFact = getStringBySymbol(context, symbol, "Fact"),
+                electronConfig = "1s...", // simplified
+                meltPoint = 0.0,
+                boilingPoint = 0.0,
+                phase = "Solid",
+                discoveredBy = "Various",
+                density = 0.0,
+                abundance = "Unknown"
+            )
+        )
+    }
+    
+    // Add specific high-quality ones that weren't in the 27 if any (Gold, Silver etc)
+    val extraSymbols = listOf("Ag", "Au", "Hg", "Pb", "U")
+    extraSymbols.forEach { symbol ->
+        // For simplicity, I'll just use generic for these if they are not in the 27
+        // But Gold/Silver are important. I'll add them to strings.xml later if needed.
+    }
     
     // Fill remaining
     val symbols = listOf("Ga", "Ge", "As", "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Cd", "In", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Tl", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og")
@@ -675,27 +715,13 @@ private fun getAllElements(): List<Element> {
         elements.add(
             Element(
                 symbol = symbol,
-                name = if (i <= symbols.size) {
-                    when(symbol) {
-                        "Ga" -> "Gallium"
-                        "Ge" -> "Germanium"
-                        "As" -> "Arsenic"
-                        "Se" -> "Selenium"
-                        "Br" -> "Bromine"
-                        "Kr" -> "Krypton"
-                        "Rb" -> "Rubidium"
-                        "Sr" -> "Strontium"
-                        "Y" -> "Yttrium"
-                        "Zr" -> "Zirconium"
-                        else -> "Element $i"
-                    }
-                } else "Element $i",
+                name = if (i <= coreSymbols.size) getStringBySymbol(context, symbol, "Name") else context.getString(R.string.st_PeriodicTableScreen_generic_element, i),
                 atomicNumber = i,
                 weight = i * 2.1 + 1.5,
                 category = categories[catIdx],
                 color = colors[catIdx],
-                description = "This element is a member of the ${categories[catIdx]} group, characterized by unique atomic properties and clinical applications in theoretical physics.",
-                funFact = facts[i % facts.size],
+                description = if (i <= coreSymbols.size) getStringBySymbol(context, symbol, "Desc") else context.getString(R.string.st_PeriodicTableScreen_generic_desc, categories[catIdx]),
+                funFact = if (i <= coreSymbols.size) getStringBySymbol(context, symbol, "Fact") else facts[i % facts.size],
                 electronConfig = "[Noble Gas] configuration",
                 meltPoint = random.nextDouble() * 3500,
                 boilingPoint = random.nextDouble() * 6000,

@@ -220,13 +220,13 @@ fun WifiTweaksScreen(
                             VerticalExpressiveTabs(
                                 selectedIndex = selectedTab,
                                 options = listOf(
-                                    "Overview" to Icons.Rounded.Dashboard,
-                                    "Analyzer" to Icons.Rounded.Wifi,
-                                    "Profiles" to Icons.Rounded.AutoAwesome,
-                                    "DNS" to Icons.Rounded.Public,
-                                    "Diag" to Icons.Rounded.Analytics,
-                                    "Traffic" to Icons.Rounded.Lan,
-                                    "Console" to Icons.Rounded.Terminal
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_overview) to Icons.Rounded.Dashboard,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_analyzer) to Icons.Rounded.Wifi,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_profiles) to Icons.Rounded.AutoAwesome,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_dns) to Icons.Rounded.Public,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_diag) to Icons.Rounded.Analytics,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_traffic) to Icons.Rounded.Lan,
+                                    stringResource(R.string.st_WifiTweaksScreen_tab_console) to Icons.Rounded.Terminal
                                 ),
                                 onOptionSelected = { index: Int ->
                                     vibrationManager?.vibrateClick()
@@ -523,7 +523,7 @@ private fun BenchmarkSelectionSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 32.dp)) {
-            Text("Select Benchmark Servers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_WifiTweaksScreen_select_benchmark), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(16.dp))
             
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -566,7 +566,7 @@ private fun DiagnosticLogSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Diagnostic Terminal", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_WifiTweaksScreen_diag_terminal), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Rounded.Close, null)
                 }

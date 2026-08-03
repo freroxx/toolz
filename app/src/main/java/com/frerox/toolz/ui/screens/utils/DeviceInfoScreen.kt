@@ -484,7 +484,7 @@ private fun HeroHeader(
                             ) {
                                 StatusPill(
                                     icon = Icons.Rounded.CheckCircle,
-                                    text = "Verified ${formatTime(status.updated)}",
+                                    text = stringResource(R.string.st_DeviceInfoScreen_verified, formatTime(status.updated)),
                                     color = MaterialTheme.colorScheme.tertiary,
                                 )
 
@@ -774,7 +774,7 @@ private fun LocalHardwareSection(
         SectionLabel(
             icon = Icons.Rounded.DeveloperBoard,
             title = stringResource(R.string.st_DeviceInfoScreen_c3d4),
-            subtitle = "Direct read from system services",
+            subtitle = stringResource(R.string.st_DeviceInfoScreen_local_hardware),
         )
 
         InfoMetricGrid(
@@ -784,8 +784,8 @@ private fun LocalHardwareSection(
                 MetricItem(Icons.Rounded.Smartphone, stringResource(R.string.st_DeviceInfoScreen_e1f2), "${data.screenRes} @ ${data.refreshRate}Hz"),
                 MetricItem(Icons.Rounded.BatteryChargingFull, stringResource(R.string.st_DeviceInfoScreen_g3h4), "${data.batteryLevel}% • ${data.batteryHealth}"),
                 MetricItem(Icons.Rounded.Android, stringResource(R.string.st_DeviceInfoScreen_i5j6), "${data.androidVersion} (API ${data.apiLevel})"),
-                MetricItem(Icons.Rounded.Sensors, stringResource(R.string.st_DeviceInfoScreen_k7l8), "${data.sensorsCount} detected sensors"),
-                MetricItem(Icons.Rounded.CameraAlt, stringResource(R.string.st_DeviceInfoScreen_m9n0), data.cameras.takeIf { it.isNotEmpty() }?.joinToString() ?: "No Camera Info"),
+                MetricItem(Icons.Rounded.Sensors, stringResource(R.string.st_DeviceInfoScreen_k7l8), stringResource(R.string.st_DeviceInfoScreen_detected_sensors, data.sensorsCount)),
+                MetricItem(Icons.Rounded.CameraAlt, stringResource(R.string.st_DeviceInfoScreen_m9n0), data.cameras.takeIf { it.isNotEmpty() }?.joinToString() ?: stringResource(R.string.st_DeviceInfoScreen_no_camera_info)),
                 MetricItem(Icons.Rounded.Wifi, stringResource(R.string.st_DeviceInfoScreen_o1p2), data.wifiIp),
             ),
         )
