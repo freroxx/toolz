@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -64,8 +66,8 @@ fun BatteryInfoScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "POWER ANALYTICS",
-                subtitle = "Hardware energy distribution",
+                title = stringResource(R.string.st_BatteryInfoScreen_a1b2),
+                subtitle = stringResource(R.string.st_BatteryInfoScreen_c3d4),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -75,7 +77,7 @@ fun BatteryInfoScreen(
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             .bouncyClick(onClick = onBack)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_BatteryInfoScreen_e5f6))
                     }
                 },
                 actions = {
@@ -88,7 +90,7 @@ fun BatteryInfoScreen(
                                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                                 .bouncyClick(onClick = { viewModel.loadRemoteSpecs(forceRefresh = true) })
                         ) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Retry", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_BatteryInfoScreen_g7h8), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
@@ -136,11 +138,11 @@ fun BatteryInfoScreen(
                                 .fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            StatusItem(Modifier.weight(1f), "STATUS", state.status.uppercase(), if (state.isCharging) Icons.Rounded.Bolt else Icons.Rounded.Power)
+                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_i9j0), state.status.uppercase(), if (state.isCharging) Icons.Rounded.Bolt else Icons.Rounded.Power)
                             VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            StatusItem(Modifier.weight(1f), "HEALTH", state.health.uppercase(), Icons.Rounded.HealthAndSafety)
+                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_k1l2), state.health.uppercase(), Icons.Rounded.HealthAndSafety)
                             VerticalDivider(modifier = Modifier.height(32.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            StatusItem(Modifier.weight(1f), "TEMP", "${state.temperature}°C", Icons.Rounded.Thermostat)
+                            StatusItem(Modifier.weight(1f), stringResource(R.string.st_BatteryInfoScreen_m3n4), "${state.temperature}°C", Icons.Rounded.Thermostat)
                         }
                     }
                 }
@@ -159,7 +161,7 @@ fun BatteryInfoScreen(
                             ) {
                                 Column(modifier = Modifier.padding(vertical = 12.dp)) {
                                     ListItem(
-                                        headlineContent = { Text("HARDWARE SPECS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp) },
+                                        headlineContent = { Text(stringResource(R.string.st_BatteryInfoScreen_o5p6), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp) },
                                         supportingContent = { Text(state.remoteSpec?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         leadingContent = {
                                             Surface(
@@ -194,18 +196,18 @@ fun BatteryInfoScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         StaggeredEntrance(index = 3, modifier = Modifier.weight(1f)) {
-                            MetricCard("VOLTAGE", "${state.voltage}mV", Icons.Rounded.ElectricBolt)
+                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_a7b8), "${state.voltage}mV", Icons.Rounded.ElectricBolt)
                         }
                         StaggeredEntrance(index = 4, modifier = Modifier.weight(1f)) {
-                            MetricCard("CAPACITY", "${state.capacityMah}mAh", Icons.Rounded.BatteryChargingFull)
+                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_c9d0), "${state.capacityMah}mAh", Icons.Rounded.BatteryChargingFull)
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         StaggeredEntrance(index = 5, modifier = Modifier.weight(1f)) {
-                            MetricCard("TECHNOLOGY", state.technology, Icons.Rounded.Memory)
+                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_e1f2), state.technology, Icons.Rounded.Memory)
                         }
                         StaggeredEntrance(index = 6, modifier = Modifier.weight(1f)) {
-                            MetricCard("SOURCE", state.powerSource, Icons.Rounded.Usb)
+                            MetricCard(stringResource(R.string.st_BatteryInfoScreen_g3h4), state.powerSource, Icons.Rounded.Usb)
                         }
                     }
                 }
@@ -221,18 +223,18 @@ fun BatteryInfoScreen(
                     ) {
                         Column(modifier = Modifier.padding(vertical = 12.dp)) {
                             ListItem(
-                                headlineContent = { Text("SYSTEM DIAGNOSTICS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp) },
+                                headlineContent = { Text(stringResource(R.string.st_BatteryInfoScreen_q7r8), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.sp) },
                                 leadingContent = { Icon(Icons.Rounded.Analytics, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                             )
                             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             ListItem(
-                                headlineContent = { Text("Real-time Current", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                headlineContent = { Text(stringResource(R.string.st_BatteryInfoScreen_s9t0), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                                 trailingContent = { Text("${state.currentNowMa} mA", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.ExtraBold) },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                             )
                             ListItem(
-                                headlineContent = { Text("Charge Counter", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                headlineContent = { Text(stringResource(R.string.st_BatteryInfoScreen_u1v2), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                                 trailingContent = { Text("${state.chargeCounterUah} uAh", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.ExtraBold) },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                             )
@@ -326,7 +328,7 @@ fun ExpressiveBatteryGauge(level: Int, isCharging: Boolean) {
             if (isCharging) {
                 Spacer(Modifier.height(4.dp))
                 ExpressiveStatePill(
-                    text = if (level >= 100) "Full" else "Charging",
+                    text = if (level >= 100) stringResource(R.string.st_BatteryInfoScreen_w3x4) else stringResource(R.string.st_BatteryInfoScreen_y5z6),
                     icon = if (level >= 100) Icons.Rounded.BatteryFull else Icons.Rounded.Bolt,
                     color = if (level >= 100) Color(0xFF66BB6A) else Color(0xFF00E5FF),
                     modifier = Modifier.bouncyClick(onClick = {})

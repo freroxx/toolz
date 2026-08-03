@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.frerox.toolz.R
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -96,35 +97,35 @@ private data class TypeMeta(
 )
 
 private val kTypeMeta: Map<String, TypeMeta> @Composable get() = mapOf(
-    "URL"      to TypeMeta(Icons.Rounded.Language,           Color(0xFF1A73E8), "URL"),
-    "SOCIAL"   to TypeMeta(Icons.Rounded.Public,             Color(0xFF0D47A1), "Social"),
-    "PHONE"    to TypeMeta(Icons.Rounded.Call,               Color(0xFF34A853), "Phone"),
-    "OTP"      to TypeMeta(Icons.Rounded.Lock,               Color(0xFFFFA000), "OTP"),
-    "EMAIL"    to TypeMeta(Icons.Rounded.Mail,               Color(0xFFEA4335), "Email"),
-    "MATHS"    to TypeMeta(Icons.Rounded.Functions,          Color(0xFF9C27B0), "Maths"),
-    "PERSONAL" to TypeMeta(Icons.Rounded.AutoAwesome,        Color(0xFFE91E63), "Personal"),
-    "CODE"     to TypeMeta(Icons.Rounded.Terminal,           Color(0xFF00BCD4), "Code"),
-    "ADDRESS"  to TypeMeta(Icons.Rounded.Place,              Color(0xFFFF5722), "Address"),
-    "CRYPTO"   to TypeMeta(Icons.Rounded.CurrencyBitcoin,    Color(0xFFF7931A), "Crypto"),
-    "TODO"     to TypeMeta(Icons.Rounded.AssignmentTurnedIn, Color(0xFF4CAF50), "Todo"),
-    "RECIPE"   to TypeMeta(Icons.Rounded.Restaurant,         Color(0xFFFF9800), "Recipe"),
-    "FLIGHT"   to TypeMeta(Icons.Rounded.Flight,             Color(0xFF2196F3), "Flight"),
-    "EVENT"    to TypeMeta(Icons.Rounded.Event,              Color(0xFF9C27B0), "Event"),
-    "QUOTE"    to TypeMeta(Icons.Rounded.FormatQuote,        Color(0xFF607D8B), "Quote"),
-    "TEXT"     to TypeMeta(Icons.Rounded.Notes,              Color(0xFF78909C), "Text"),
+    "URL"      to TypeMeta(Icons.Rounded.Language,           Color(0xFF1A73E8), stringResource(R.string.st_ClipboardScreen_8f1a)),
+    "SOCIAL"   to TypeMeta(Icons.Rounded.Public,             Color(0xFF0D47A1), stringResource(R.string.st_ClipboardScreen_3d5b)),
+    "PHONE"    to TypeMeta(Icons.Rounded.Call,               Color(0xFF34A853), stringResource(R.string.st_ClipboardScreen_9e2c)),
+    "OTP"      to TypeMeta(Icons.Rounded.Lock,               Color(0xFFFFA000), stringResource(R.string.st_ClipboardScreen_1a2b)),
+    "EMAIL"    to TypeMeta(Icons.Rounded.Mail,               Color(0xFFEA4335), stringResource(R.string.st_ClipboardScreen_7c4d)),
+    "MATHS"    to TypeMeta(Icons.Rounded.Functions,          Color(0xFF9C27B0), stringResource(R.string.st_ClipboardScreen_5f6e)),
+    "PERSONAL" to TypeMeta(Icons.Rounded.AutoAwesome,        Color(0xFFE91E63), stringResource(R.string.st_ClipboardScreen_2b8a)),
+    "CODE"     to TypeMeta(Icons.Rounded.Terminal,           Color(0xFF00BCD4), stringResource(R.string.st_ClipboardScreen_4d9c)),
+    "ADDRESS"  to TypeMeta(Icons.Rounded.Place,              Color(0xFFFF5722), stringResource(R.string.st_ClipboardScreen_6a1b)),
+    "CRYPTO"   to TypeMeta(Icons.Rounded.CurrencyBitcoin,    Color(0xFFF7931A), stringResource(R.string.st_ClipboardScreen_1b2c)),
+    "TODO"     to TypeMeta(Icons.Rounded.AssignmentTurnedIn, Color(0xFF4CAF50), stringResource(R.string.st_ClipboardScreen_3c4d)),
+    "RECIPE"   to TypeMeta(Icons.Rounded.Restaurant,         Color(0xFFFF9800), stringResource(R.string.st_ClipboardScreen_5d6e)),
+    "FLIGHT"   to TypeMeta(Icons.Rounded.Flight,             Color(0xFF2196F3), stringResource(R.string.st_ClipboardScreen_7e8f)),
+    "EVENT"    to TypeMeta(Icons.Rounded.Event,              Color(0xFF9C27B0), stringResource(R.string.st_ClipboardScreen_9f0a)),
+    "QUOTE"    to TypeMeta(Icons.Rounded.FormatQuote,        Color(0xFF607D8B), stringResource(R.string.st_ClipboardScreen_a1b2)),
+    "TEXT"     to TypeMeta(Icons.Rounded.Notes,              Color(0xFF78909C), stringResource(R.string.st_ClipboardScreen_c3d4)),
 )
 
 @Composable
 private fun typeMeta(type: String): TypeMeta =
     kTypeMeta[type] ?: TypeMeta(Icons.Rounded.ContentPaste, MaterialTheme.colorScheme.primary, type)
 
-private fun Long.toRelativeTime(): String {
+private fun Long.toRelativeTime(context: android.content.Context): String {
     val diff = System.currentTimeMillis() - this
     return when {
-        diff < 60_000L      -> "Just now"
-        diff < 3_600_000L   -> "${diff / 60_000}m ago"
-        diff < 86_400_000L  -> "${diff / 3_600_000}h ago"
-        diff < 604_800_000L -> "${diff / 86_400_000}d ago"
+        diff < 60_000L      -> context.getString(R.string.st_ClipboardScreen_e5f6)
+        diff < 3_600_000L   -> "${diff / 60_000}${context.getString(R.string.st_ClipboardScreen_g7h8)}"
+        diff < 86_400_000L  -> "${diff / 3_600_000}${context.getString(R.string.st_ClipboardScreen_i9j0)}"
+        diff < 604_800_000L -> "${diff / 86_400_000}${context.getString(R.string.st_ClipboardScreen_k1l2)}"
         else                -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(this))
     }
 }
@@ -203,7 +204,7 @@ fun ClipboardScreen(
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("Toolz Clip", entry.content))
         vibrationManager?.vibrateClick()
-        Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.st_ClipboardScreen_m3n4), Toast.LENGTH_SHORT).show()
     }
 
     SupportingPaneScaffold(
@@ -387,11 +388,11 @@ fun ClipboardScreen(
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             icon  = { Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Clear History?", fontWeight = FontWeight.Black) },
+            title = { Text(stringResource(R.string.st_ClipboardScreen_g3h5), fontWeight = FontWeight.Black) },
             text  = {
                 Text(
-                    "This removes all ${entries.size - pinnedCount} unpinned items. " +
-                            "$pinnedCount pinned item${if (pinnedCount != 1) "s" else ""} will be kept."
+                    stringResource(R.string.st_ClipboardScreen_i5j7) + " ${entries.size - pinnedCount} " + stringResource(R.string.st_ClipboardScreen_k7l9) + " " +
+                            "$pinnedCount " + stringResource(R.string.st_ClipboardScreen_m9n1) + "${if (pinnedCount != 1) "s" else ""} " + stringResource(R.string.st_ClipboardScreen_o1p3)
                 )
             },
             confirmButton = {
@@ -405,11 +406,11 @@ fun ClipboardScreen(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor   = MaterialTheme.colorScheme.onError,
                     ),
-                ) { Text("Clear All", fontWeight = FontWeight.Black) }
+                ) { Text(stringResource(R.string.st_ClipboardScreen_q3r5), fontWeight = FontWeight.Black) }
             },
             dismissButton = {
                 ToolzOutlinedExpressiveButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.st_ClipboardScreen_s5t7))
                 }
             },
             shape = BouncyShape,
@@ -469,8 +470,8 @@ private fun ClipboardFeedPane(
                     title    = "Clipboard",
                     subtitle = when {
                         isAiSearching -> "AI searching…"
-                        allEntries.isEmpty() -> "Empty"
-                        else -> "${allEntries.size} item${if (allEntries.size != 1) "s" else ""}"
+                        allEntries.isEmpty() -> stringResource(R.string.st_ClipboardScreen_o5p6)
+                        else -> "${allEntries.size} " + if (allEntries.size != 1) stringResource(R.string.st_ClipboardScreen_s9t0) else stringResource(R.string.st_ClipboardScreen_q7r8)
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -505,7 +506,7 @@ private fun ClipboardFeedPane(
                             ) { active ->
                                 Icon(
                                     if (active) Icons.Rounded.SearchOff else Icons.Rounded.Search,
-                                    contentDescription = if (active) "Close search" else "Open search",
+                                    contentDescription = if (active) stringResource(R.string.st_ClipboardScreen_u1v2) else stringResource(R.string.st_ClipboardScreen_w3x4),
                                     tint = if (active) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -555,7 +556,7 @@ private fun ClipboardFeedPane(
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         placeholder    = {
-                            Text(if (offlineMode) "Search clips…" else "Search or ask AI…")
+                            Text(if (offlineMode) stringResource(R.string.st_ClipboardScreen_y5z6) else stringResource(R.string.st_ClipboardScreen_a7b8))
                         },
                         leadingIcon    = {
                             Icon(
@@ -596,7 +597,7 @@ private fun ClipboardFeedPane(
                             ExpressiveFilterChip(
                                 selected = activeTypeFilter == null,
                                 onClick = { onTypeFilterChange("ALL") },
-                                label = { Text("All", fontWeight = FontWeight.Bold) },
+                                label = { Text(stringResource(R.string.st_ClipboardScreen_c9d0), fontWeight = FontWeight.Bold) },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Rounded.AllInclusive, null,
@@ -666,9 +667,9 @@ private fun ClipboardFeedPane(
                         val aiCount     = allEntries.count { it.isAiProcessed }
                         
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            StatPill(Icons.Rounded.ContentPaste, "${allEntries.size}", "items")
+                            StatPill(Icons.Rounded.ContentPaste, "${allEntries.size}", if (allEntries.size != 1) stringResource(R.string.st_ClipboardScreen_s9t0) else stringResource(R.string.st_ClipboardScreen_q7r8))
                             if (pinnedCount > 0)
-                                StatPill(Icons.Rounded.PushPin, "$pinnedCount", "pinned")
+                                StatPill(Icons.Rounded.PushPin, "$pinnedCount", stringResource(R.string.st_ClipboardScreen_e1f2))
                             if (aiCount > 0)
                                 StatPill(Icons.Rounded.AutoAwesome, "$aiCount", "AI")
                         }
@@ -725,7 +726,7 @@ private fun ClipboardFeedPane(
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        "No results for \"$searchQuery\"",
+                                        stringResource(R.string.st_ClipboardScreen_g3h4) + " \"$searchQuery\"",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     )
@@ -889,7 +890,7 @@ private fun SwipeToDismissClipEntry(
             ) {
                 Icon(
                     Icons.Rounded.Delete,
-                    contentDescription = "Delete",
+                    contentDescription = stringResource(R.string.st_ClipboardScreen_m9n0),
                     tint     = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(end = 28.dp).graphicsLayer { scaleX = scale; scaleY = scale },
                 )
@@ -1020,7 +1021,7 @@ private fun ClipboardCard(
                     )
                     Icon(
                         Icons.Rounded.PushPin,
-                        contentDescription = if (entry.isPinned) "Unpin" else "Pin",
+                        contentDescription = if (entry.isPinned) stringResource(R.string.st_ClipboardScreen_o1p2) else stringResource(R.string.st_ClipboardScreen_q3r4),
                         tint     = if (entry.isPinned) meta.color
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
                         modifier = Modifier.size(16.dp).graphicsLayer {
@@ -1077,7 +1078,7 @@ private fun ClipboardCard(
                             )
                         }
                         Text(
-                            text  = if (isSummarizing) "Summarizing…" else entry.summary ?: "",
+                            text  = if (isSummarizing) stringResource(R.string.st_ClipboardScreen_s5t6) else entry.summary ?: "",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isSummarizing) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onTertiaryContainer,
@@ -1095,13 +1096,13 @@ private fun ClipboardCard(
                 verticalArrangement   = Arrangement.spacedBy(6.dp),
             ) {
                 QuickChip(
-                    label = "Copy",
+                    label = stringResource(R.string.st_ClipboardScreen_o5p7),
                     icon  = Icons.Rounded.ContentCopy,
                     onClick = onCopy,
                 )
                 if (entry.summary == null && !offlineMode) {
                     QuickChip(
-                        label     = if (isSummarizing) "Thinking…" else "Summarize",
+                        label     = if (isSummarizing) stringResource(R.string.st_ClipboardScreen_u7v8) else stringResource(R.string.st_ClipboardScreen_w9x0),
                         icon      = Icons.Rounded.AutoAwesome,
                         isAi      = true,
                         isLoading = isSummarizing,
@@ -1109,24 +1110,24 @@ private fun ClipboardCard(
                     )
                 }
                 QuickChip(
-                    label   = "Task",
+                    label   = stringResource(R.string.st_ClipboardScreen_a1b3),
                     icon    = Icons.AutoMirrored.Rounded.PlaylistAdd,
                     onClick = { onAction("convert_to_task") },
                 )
                 QuickChip(
-                    label   = "Share",
+                    label   = stringResource(R.string.st_ClipboardScreen_c3d5),
                     icon    = Icons.Rounded.Share,
                     onClick = { onAction("share") },
                 )
                 // Contextual
                 when (entry.type) {
                     "PHONE"         -> {
-                        QuickChip("Call",  Icons.Rounded.Call)               { onAction("call") }
-                        QuickChip("WhatsApp", Icons.Rounded.Textsms)         { onAction("whatsapp") }
+                        QuickChip(stringResource(R.string.st_ClipboardScreen_e5f7),  Icons.Rounded.Call)               { onAction("call") }
+                        QuickChip(stringResource(R.string.st_ClipboardScreen_g7h9), Icons.Rounded.Textsms)         { onAction("whatsapp") }
                     }
-                    "URL", "SOCIAL" -> QuickChip("Open", Icons.Rounded.OpenInBrowser) { onAction("open_url") }
-                    "EMAIL"         -> QuickChip("Email", Icons.Rounded.Email)          { onAction("email") }
-                    "CRYPTO"        -> QuickChip("Explore", Icons.Rounded.TravelExplore) { onAction("open_url") }
+                    "URL", "SOCIAL" -> QuickChip(stringResource(R.string.st_ClipboardScreen_i9j1), Icons.Rounded.OpenInBrowser) { onAction("open_url") }
+                    "EMAIL"         -> QuickChip(stringResource(R.string.st_ClipboardScreen_7c4d), Icons.Rounded.Email)          { onAction("email") }
+                    "CRYPTO"        -> QuickChip(stringResource(R.string.st_ClipboardScreen_k1l3), Icons.Rounded.TravelExplore) { onAction("open_url") }
                 }
             }
         }
@@ -1211,9 +1212,9 @@ private fun ClipboardDetailContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                Text("Detail", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_ClipboardScreen_m3n5), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close")
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_TabManagementScreen_1a2b))
                 }
             }
         }
@@ -1313,7 +1314,7 @@ private fun ClipboardDetailContent(
             ToolzExpressiveButton(onClick = onCopy, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Copy")
+                Text(stringResource(R.string.st_ClipboardScreen_o5p7))
             }
             if (entry.summary == null && !offlineMode) {
                 ToolzOutlinedExpressiveButton(
@@ -1323,20 +1324,20 @@ private fun ClipboardDetailContent(
                 ) {
                     Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (isSummarizing) "…" else "AI")
+                    Text(if (isSummarizing) "…" else stringResource(R.string.st_ClipboardScreen_q7r9))
                 }
             }
         }
 
         // Contextual action buttons
         val contextActions = buildList<Triple<String, ImageVector, String>> {
-            add(Triple("Share",          Icons.Rounded.Share,           "share"))
-            add(Triple("To Task",        Icons.AutoMirrored.Rounded.PlaylistAdd, "convert_to_task"))
+            add(Triple(stringResource(R.string.st_ClipboardScreen_c3d5),          Icons.Rounded.Share,           "share"))
+            add(Triple(stringResource(R.string.st_ClipboardScreen_s9t1),        Icons.AutoMirrored.Rounded.PlaylistAdd, "convert_to_task"))
             when (entry.type) {
-                "PHONE"         -> { add(Triple("Call", Icons.Rounded.Call, "call")); add(Triple("WhatsApp", Icons.Rounded.Textsms, "whatsapp")) }
-                "URL", "SOCIAL" -> add(Triple("Open URL", Icons.Rounded.OpenInBrowser, "open_url"))
-                "EMAIL"         -> add(Triple("Send Email", Icons.Rounded.Email, "email"))
-                "CRYPTO"        -> add(Triple("Explore", Icons.Rounded.TravelExplore, "open_url"))
+                "PHONE"         -> { add(Triple(stringResource(R.string.st_ClipboardScreen_e5f7), Icons.Rounded.Call, "call")); add(Triple(stringResource(R.string.st_ClipboardScreen_g7h9), Icons.Rounded.Textsms, "whatsapp")) }
+                "URL", "SOCIAL" -> add(Triple(stringResource(R.string.st_ClipboardScreen_u1v3), Icons.Rounded.OpenInBrowser, "open_url"))
+                "EMAIL"         -> add(Triple(stringResource(R.string.st_ClipboardScreen_w3x5), Icons.Rounded.Email, "email"))
+                "CRYPTO"        -> add(Triple(stringResource(R.string.st_ClipboardScreen_k1l3), Icons.Rounded.TravelExplore, "open_url"))
             }
         }
         FlowRow(
@@ -1364,7 +1365,7 @@ private fun ClipboardDetailContent(
         ) {
             Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Delete", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_CleanerScreen_a1b2), fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1388,16 +1389,16 @@ private fun ClipboardContextSheet(
     val sheetState = rememberModalBottomSheetState()
 
     val menuItems = buildList<Triple<String, ImageVector, () -> Unit>> {
-        add(Triple("Copy",              Icons.Rounded.ContentCopy)           { onCopy() })
-        add(Triple(if (entry.isPinned) "Unpin" else "Pin", Icons.Rounded.PushPin) { onPin() })
-        add(Triple("Share",             Icons.Rounded.Share)                 { onAction("share") })
-        add(Triple("Convert to Task",   Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") })
+        add(Triple(stringResource(R.string.st_ClipboardScreen_o5p7),              Icons.Rounded.ContentCopy)           { onCopy() })
+        add(Triple(if (entry.isPinned) stringResource(R.string.st_ClipboardScreen_o1p2) else stringResource(R.string.st_ClipboardScreen_q3r4), Icons.Rounded.PushPin) { onPin() })
+        add(Triple(stringResource(R.string.st_ClipboardScreen_c3d5),             Icons.Rounded.Share)                 { onAction("share") })
+        add(Triple(stringResource(R.string.st_ClipboardScreen_y5z7),   Icons.AutoMirrored.Rounded.PlaylistAdd) { onAction("convert_to_task") })
         if (entry.summary == null && !offlineMode)
-            add(Triple("AI Summarize",  Icons.Rounded.AutoAwesome)           { onSummarize() })
+            add(Triple(stringResource(R.string.st_ClipboardScreen_a7b9),  Icons.Rounded.AutoAwesome)           { onSummarize() })
         when (entry.type) {
-            "PHONE"         -> { add(Triple("Call", Icons.Rounded.Call) { onAction("call") }); add(Triple("WhatsApp", Icons.Rounded.Textsms) { onAction("whatsapp") }) }
-            "URL", "SOCIAL" -> add(Triple("Open URL", Icons.Rounded.OpenInBrowser) { onAction("open_url") })
-            "EMAIL"         -> add(Triple("Send Email", Icons.Rounded.Email)        { onAction("email") })
+            "PHONE"         -> { add(Triple(stringResource(R.string.st_ClipboardScreen_e5f7), Icons.Rounded.Call) { onAction("call") }); add(Triple(stringResource(R.string.st_ClipboardScreen_g7h9), Icons.Rounded.Textsms) { onAction("whatsapp") }) }
+            "URL", "SOCIAL" -> add(Triple(stringResource(R.string.st_ClipboardScreen_u1v3), Icons.Rounded.OpenInBrowser) { onAction("open_url") })
+            "EMAIL"         -> add(Triple(stringResource(R.string.st_ClipboardScreen_w3x5), Icons.Rounded.Email)        { onAction("email") })
         }
     }
 
@@ -1478,7 +1479,7 @@ private fun ClipboardContextSheet(
             ) {
                 Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Delete", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_CleanerScreen_a1b2), fontWeight = FontWeight.Black)
             }
         }
     }
@@ -1519,12 +1520,12 @@ private fun EmptyClipboardState() {
                 )
             }
             Text(
-                "Clipboard is empty",
+                stringResource(R.string.st_ClipboardScreen_c9d1),
                 style      = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
             )
             Text(
-                "Copy anything — text, links, OTPs, code — and it will appear here automatically.",
+                stringResource(R.string.st_ClipboardScreen_e1f3),
                 style      = MaterialTheme.typography.bodySmall,
                 color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 textAlign  = TextAlign.Center,

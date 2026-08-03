@@ -72,6 +72,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.ui.screens.media.ai.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -126,6 +128,11 @@ fun KaraokeView(
     val context         = LocalContext.current
     val scope           = rememberCoroutineScope()
     val performanceMode = LocalPerformanceMode.current
+
+    val prsMsg = stringResource(R.string.st_KaraokeScreen_prs1)
+    val rfefMsg = stringResource(R.string.st_KaraokeScreen_rfef2)
+    val stmkMsg = stringResource(R.string.st_KaraokeScreen_stmk3)
+    val ftsrMsg = stringResource(R.string.st_KaraokeScreen_ftsr4)
 
     // ── State ─────────────────────────────────────────────────────────────────
     var phase               by remember(track.uri) { mutableStateOf(KaraokePhase.SPLASH) }
@@ -239,7 +246,7 @@ fun KaraokeView(
                             onDone       = { success ->
                                 if (success) {
                                     (context as? android.app.Activity)?.runOnUiThread {
-                                        Toast.makeText(context, "Previous recording saved", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, prsMsg, Toast.LENGTH_SHORT).show()
                                     }
                                 }
                                 runCatching { File(file.absolutePath.replace(".m4a", ".json")).delete() }
@@ -638,7 +645,7 @@ fun KaraokeView(
                     recordingFile?.let { file ->
                         if (!file.exists() || file.length() == 0L) {
                             Log.e("Karaoke", "Recording file is empty or missing")
-                            Toast.makeText(context, "Recording failed (empty file)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, rfefMsg, Toast.LENGTH_SHORT).show()
                             return@let
                         }
 
@@ -653,9 +660,9 @@ fun KaraokeView(
                             onDone       = { success ->
                                 (context as? android.app.Activity)?.runOnUiThread {
                                     if (success) {
-                                        Toast.makeText(context, "Saved to Music/Karaoke", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, stmkMsg, Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "Failed to save recording", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, ftsrMsg, Toast.LENGTH_SHORT).show()
                                     }
                                     // Clean up temp files
                                     runCatching { File(file.absolutePath.replace(".m4a", ".json")).delete() }
@@ -723,8 +730,8 @@ fun KaraokeView(
                 pendingSingConfidentlyMode = null
             },
             icon = { Icon(if (isSpeechToggle) Icons.Rounded.RecordVoiceOver else Icons.Rounded.Mic, null) },
-            title = { Text("Restart Required") },
-            text = { Text("Changing this setting requires the karaoke session to restart to avoid audio conflicts and bugs. Do you want to restart now?") },
+            title = { Text(stringResource(R.string.st_KaraokeScreen_rr5)) },
+            text = { Text(stringResource(R.string.st_KaraokeScreen_rr_desc6)) },
             confirmButton = {
                 TextButton(onClick = {
                     val newSpeechState = pendingSpeechCorrectionToggle
@@ -753,7 +760,7 @@ fun KaraokeView(
                     minSplashTimeElapsed = false
                     showSettings = false
                 }) {
-                    Text("Restart Song")
+                    Text(stringResource(R.string.st_KaraokeScreen_rs7))
                 }
             },
             dismissButton = {
@@ -761,7 +768,7 @@ fun KaraokeView(
                     pendingSpeechCorrectionToggle = null
                     pendingSingConfidentlyMode = null
                 }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.st_KaraokeScreen_c8))
                 }
             }
         )
@@ -875,7 +882,7 @@ private fun KaraokeSplash(trackTitle: String, trackUri: String?, onSkip: () -> U
             }
 
             Text(
-                "KARAOKE",
+                stringResource(R.string.st_KaraokeScreen_k31),
                 style       = MaterialTheme.typography.displaySmall,
                 fontWeight  = FontWeight.Black,
                 color       = MaterialTheme.colorScheme.primary,
@@ -896,7 +903,7 @@ private fun KaraokeSplash(trackTitle: String, trackUri: String?, onSkip: () -> U
                 onClick = onSkip,
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
             ) {
-                Text("READY? TAP TO SKIP", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(stringResource(R.string.st_KaraokeScreen_rtts32), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
             }
         }
     }
@@ -936,7 +943,7 @@ private fun KaraokeCountdown(tick: Int) {
                 )
             }
             Text(
-                "GET READY",
+                stringResource(R.string.st_KaraokeScreen_gr33),
                 style       = MaterialTheme.typography.labelLarge,
                 fontWeight  = FontWeight.Black,
                 letterSpacing = 6.sp,
@@ -970,7 +977,7 @@ private fun KaraokeHeader(
             AnimatedContent(targetState = isReconnecting, label = "karaokeHeaderStatus") { reconnecting ->
                 if (reconnecting) {
                     Text(
-                        "RECONNECTING MIC…",
+                        stringResource(R.string.st_KaraokeScreen_rm34),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -978,7 +985,7 @@ private fun KaraokeHeader(
                     )
                 } else {
                     Text(
-                        "KARAOKE MODE",
+                        stringResource(R.string.st_KaraokeScreen_km35),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -1300,7 +1307,7 @@ private fun KaraokeLoadingLyrics() {
                 strokeWidth = 3.dp
             )
             Text(
-                "Loading lyrics…",
+                stringResource(R.string.st_KaraokeScreen_ll36),
                 style   = MaterialTheme.typography.bodyMedium,
                 color   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                 fontWeight = FontWeight.Medium
@@ -1412,9 +1419,9 @@ private fun RecordingStatusPill(
     }
     
     val text = when {
-        isRecording && !isPaused -> "● REC"
-        isPaused && isRecording -> "⏸ PAUSED"
-        else -> "○ NOT RECORDING"
+        isRecording && !isPaused -> stringResource(R.string.st_KaraokeScreen_rec37)
+        isPaused && isRecording -> stringResource(R.string.st_KaraokeScreen_p38)
+        else -> stringResource(R.string.st_KaraokeScreen_nr39)
     }
 
     Surface(
@@ -1666,7 +1673,7 @@ private fun MicToggleButton(
                     // recording and make it obvious the mic is in AI-listen mode.
                     Icon(
                         imageVector        = Icons.Rounded.RecordVoiceOver,
-                        contentDescription = "Speech correction active",
+                        contentDescription = stringResource(R.string.st_KaraokeScreen_sca40),
                         tint               = iconTint,
                         modifier           = Modifier.size(24.dp).alpha(iconAlpha)
                     )
@@ -1781,13 +1788,19 @@ private fun KaraokeEvaluation(
     onDone           : () -> Unit,
     onAudioSaved     : () -> Unit
 ) {
+    val gSMsg = stringResource(R.string.st_KaraokeScreen_gS42)
+    val gAMsg = stringResource(R.string.st_KaraokeScreen_gA43)
+    val gBMsg = stringResource(R.string.st_KaraokeScreen_gB44)
+    val gCMsg = stringResource(R.string.st_KaraokeScreen_gC45)
+    val gDMsg = stringResource(R.string.st_KaraokeScreen_gD46)
+
     val (grade, gradeColor, message) = remember(score) {
         when {
-            score >= 95 -> Triple("S", Color(0xFFFFD700), "Legendary Performance! 👑")
-            score >= 85 -> Triple("A", Color(0xFF42A5F5), "Superb Vocals! 🌟")
-            score >= 70 -> Triple("B", Color(0xFF66BB6A), "Solid Performance! 🎵")
-            score >= 50 -> Triple("C", Color(0xFFFFA726), "Nice Try! 💪")
-            else        -> Triple("D", Color(0xFFEF5350), "Don't Give Up! 🎤")
+            score >= 95 -> Triple("S", Color(0xFFFFD700), gSMsg)
+            score >= 85 -> Triple("A", Color(0xFF42A5F5), gAMsg)
+            score >= 70 -> Triple("B", Color(0xFF66BB6A), gBMsg)
+            score >= 50 -> Triple("C", Color(0xFFFFA726), gCMsg)
+            else        -> Triple("D", Color(0xFFEF5350), gDMsg)
         }
     }
 
@@ -1837,7 +1850,7 @@ private fun KaraokeEvaluation(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "PERFORMANCE REVIEW",
+                        stringResource(R.string.st_KaraokeScreen_pr41),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 4.sp,
@@ -1916,9 +1929,9 @@ private fun KaraokeEvaluation(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            EvalStat("CORRECT", "$correctWords", Icons.Rounded.DoneAll, gradeColor)
-                            EvalStat("ACCURACY", "$score%", Icons.Rounded.TrackChanges, gradeColor)
-                            EvalStat("TOTAL",   "$totalWords", Icons.Rounded.List,
+                            EvalStat(stringResource(R.string.st_KaraokeScreen_c47), "$correctWords", Icons.Rounded.DoneAll, gradeColor)
+                            EvalStat(stringResource(R.string.st_KaraokeScreen_a48), "$score%", Icons.Rounded.TrackChanges, gradeColor)
+                            EvalStat(stringResource(R.string.st_KaraokeScreen_t49),   "$totalWords", Icons.Rounded.List,
                                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                         }
 
@@ -1930,7 +1943,7 @@ private fun KaraokeEvaluation(
                             ) {
                                 if (totalLines > 0) {
                                     EvalStat(
-                                        "LINES",
+                                        stringResource(R.string.st_KaraokeScreen_l50),
                                         "$correctLines/$totalLines",
                                         Icons.Rounded.Lyrics,
                                         gradeColor.copy(alpha = 0.85f)
@@ -1938,7 +1951,7 @@ private fun KaraokeEvaluation(
                                 }
                                 if (maxStreak > 0) {
                                     EvalStat(
-                                        "BEST STREAK",
+                                        stringResource(R.string.st_KaraokeScreen_bs51),
                                         "$maxStreak",
                                         Icons.Rounded.Whatshot,
                                         Color(0xFFFF7043)
@@ -1955,7 +1968,7 @@ private fun KaraokeEvaluation(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "ACCURACY",
+                                    stringResource(R.string.st_KaraokeScreen_acc52),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -1982,7 +1995,7 @@ private fun KaraokeEvaluation(
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Rounded.AutoAwesome, null, tint = gradeColor, modifier = Modifier.size(16.dp))
                                     Text(
-                                        "PERFECT LINE",
+                                        stringResource(R.string.st_KaraokeScreen_pl53),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Black,
                                         color = gradeColor.copy(alpha = 0.7f),
@@ -2020,7 +2033,7 @@ private fun KaraokeEvaluation(
                             Icon(Icons.Rounded.Save, null, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                "SAVE",
+                                stringResource(R.string.st_KaraokeScreen_s54),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 1.sp
@@ -2036,7 +2049,7 @@ private fun KaraokeEvaluation(
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                     ) {
                         Text(
-                            "CONTINUE",
+                            stringResource(R.string.st_KaraokeScreen_cont55),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
                             fontSize      = 18.sp,
@@ -2179,7 +2192,7 @@ fun SingConfidentlyBottomSheet(
             }
 
             Text(
-                "Sing Confidently",
+                stringResource(R.string.st_KaraokeScreen_sc56),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
@@ -2187,7 +2200,7 @@ fun SingConfidentlyBottomSheet(
             )
 
             Text(
-                "For your maximum karaoke experience, we recommend choosing the instrumental version of this song.",
+                stringResource(R.string.st_KaraokeScreen_sc_desc57),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -2259,14 +2272,14 @@ fun SingConfidentlyBottomSheet(
                     onClick = onKeep,
                     modifier = Modifier.weight(1f).height(54.dp),
                 ) {
-                    Text("Keep Original", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_KaraokeScreen_ko58), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 com.frerox.toolz.ui.components.ToolzExpressiveButton(
                     onClick = onSwitch,
                     enabled = !isResolving,
                     modifier = Modifier.weight(1f).height(54.dp)
                 ) {
-                    Text("Switch", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_KaraokeScreen_s59), fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2304,7 +2317,7 @@ fun ManualPickSheet(
                 active = false,
                 onActiveChange = {},
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                placeholder = { Text("Search Instrumental...") },
+                placeholder = { Text(stringResource(R.string.st_KaraokeScreen_si_hint9)) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 trailingIcon = { 
                     if (isSearching) {
@@ -2363,7 +2376,7 @@ fun ManualPickSheet(
                             ) {
                                 Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
                                     Text(
-                                        "USE",
+                                        stringResource(R.string.st_KaraokeScreen_u10),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -2382,7 +2395,7 @@ fun ManualPickSheet(
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                             enabled = !isSearching
                         ) {
-                            Text("Load More")
+                            Text(stringResource(R.string.st_KaraokeScreen_lm11))
                         }
                     }
                 }
@@ -2444,10 +2457,10 @@ fun KaraokeSettingsModal(
                     }
                 }
                 Column {
-                    Text("Karaoke Settings",
+                    Text(stringResource(R.string.st_KaraokeScreen_ks12),
                         style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black)
-                    Text("Customize your experience",
+                    Text(stringResource(R.string.st_KaraokeScreen_cye13),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
@@ -2457,27 +2470,27 @@ fun KaraokeSettingsModal(
 
             SettingsToggleRow(
                 icon           = Icons.Rounded.RecordVoiceOver,
-                title          = "Speech Correction",
+                title          = stringResource(R.string.st_KaraokeScreen_sc14),
                 subtitle       = if (speechCorrectionEnabled)
-                    "Score evaluated at end of song"
+                    stringResource(R.string.st_KaraokeScreen_seaos15)
                 else
-                    "Free singing — no scoring",
+                    stringResource(R.string.st_KaraokeScreen_fsns16),
                 checked        = speechCorrectionEnabled,
                 onCheckedChange = onSpeechCorrectionToggle
             )
 
             SettingsToggleRow(
                 icon           = Icons.Rounded.Mic,
-                title          = "Auto-record",
-                subtitle       = "Starts recording automatically when Karaoke starts",
+                title          = stringResource(R.string.st_KaraokeScreen_ar17),
+                subtitle       = stringResource(R.string.st_KaraokeScreen_ar_desc18),
                 checked        = autoRecordEnabled,
                 onCheckedChange = onAutoRecordToggle
             )
 
             SettingsToggleRow(
                 icon           = Icons.Rounded.FastForward,
-                title          = "Quick Sing",
-                subtitle       = "Skips long intros and pauses between lyrics",
+                title          = stringResource(R.string.st_KaraokeScreen_qs19),
+                subtitle       = stringResource(R.string.st_KaraokeScreen_qs_desc20),
                 checked        = quickSingEnabled,
                 onCheckedChange = onQuickSingToggle
             )
@@ -2499,8 +2512,8 @@ fun KaraokeSettingsModal(
                             Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Text("Sing Confidently", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text("Instrumental mode", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(stringResource(R.string.st_KaraokeScreen_sc21), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.st_KaraokeScreen_im22), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         }
                     }
                 }
@@ -2509,7 +2522,12 @@ fun KaraokeSettingsModal(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                 ) {
                     val modes = com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.values()
-                    val labels = listOf("Off", "Auto", "Auto-Play", "Manual")
+                    val labels = listOf(
+                        stringResource(R.string.st_KaraokeScreen_off23),
+                        stringResource(R.string.st_KaraokeScreen_auto24),
+                        stringResource(R.string.st_KaraokeScreen_autoplay25),
+                        stringResource(R.string.st_KaraokeScreen_manual26)
+                    )
                     modes.forEachIndexed { index, mode ->
                         SegmentedButton(
                             shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
@@ -2528,8 +2546,8 @@ fun KaraokeSettingsModal(
 
             SettingsToggleRow(
                 icon           = Icons.Rounded.Spellcheck,
-                title          = "Synced Words",
-                subtitle       = "Highlights lyrics word by word",
+                title          = stringResource(R.string.st_KaraokeScreen_sw27),
+                subtitle       = stringResource(R.string.st_KaraokeScreen_sw_desc28),
                 checked        = wordSyncEnabled,
                 onCheckedChange = onWordSyncToggle
             )
@@ -2543,9 +2561,9 @@ fun KaraokeSettingsModal(
                     tint     = MaterialTheme.colorScheme.onSurface)
                 Text(
                     if (speechCorrectionEnabled)
-                        "Speech Correction uses the mic exclusively. Recording is disabled while it's active."
+                        stringResource(R.string.st_KaraokeScreen_sc_info29)
                     else
-                        "Press the record button to start recording. You can save the audio after singing.",
+                        stringResource(R.string.st_KaraokeScreen_ptr_info30),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                 )

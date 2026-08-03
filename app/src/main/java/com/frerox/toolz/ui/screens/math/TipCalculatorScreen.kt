@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -69,14 +71,14 @@ fun TipCalculatorScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "TIP CALCULATOR",
-                subtitle = "Precise tips!",
+                title = stringResource(R.string.st_TipCalculatorScreen_f1a2),
+                subtitle = stringResource(R.string.st_TipCalculatorScreen_3d5b),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_TipCalculatorScreen_9e2c))
                     }
                 },
                 actions = {
@@ -128,7 +130,7 @@ fun TipCalculatorScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "TOTAL PER PERSON",
+                            stringResource(R.string.st_TipCalculatorScreen_1a2b),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 2.sp,
@@ -148,9 +150,9 @@ fun TipCalculatorScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            ResultSubItem("BILL + TIP", String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
+                            ResultSubItem(stringResource(R.string.st_TipCalculatorScreen_7c4d), String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, (state.billAmount.toDoubleOrNull() ?: 0.0) + state.totalTip))
                             VerticalDivider(modifier = Modifier.height(40.dp), color = Color.White.copy(alpha = 0.2f))
-                            ResultSubItem("TOTAL TIP", String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, state.totalTip))
+                            ResultSubItem(stringResource(R.string.st_TipCalculatorScreen_5f6e), String.format(Locale.getDefault(), "%s%.2f", state.currencySymbol, state.totalTip))
                         }
                     }
                 }
@@ -172,7 +174,7 @@ fun TipCalculatorScreen(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                "CALCULATION DATA",
+                                stringResource(R.string.st_TipCalculatorScreen_2b8a),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
@@ -187,7 +189,7 @@ fun TipCalculatorScreen(
                             onValueChange = { viewModel.onBillChange(it) },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Bill Amount (${state.currencyCode})") },
-                            placeholder = { Text("0.00") },
+                            placeholder = { Text(stringResource(R.string.st_TipCalculatorScreen_4d9c)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             prefix = { Text("${state.currencySymbol} ", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
                             shape = RoundedCornerShape(20.dp),
@@ -208,7 +210,7 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("TIP PERCENTAGE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                            Text(stringResource(R.string.st_TipCalculatorScreen_6a1b), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                             Surface(
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(8.dp)
@@ -258,8 +260,8 @@ fun TipCalculatorScreen(
                             value = state.customTip,
                             onValueChange = { viewModel.onCustomTipChange(it) },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Custom Tip %") },
-                            placeholder = { Text("Enter percentage") },
+                            label = { Text(stringResource(R.string.st_TipCalculatorScreen_1b2c)) },
+                            placeholder = { Text(stringResource(R.string.st_TipCalculatorScreen_3c4d)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             suffix = { Text("%", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary) },
                             shape = RoundedCornerShape(16.dp),
@@ -280,7 +282,7 @@ fun TipCalculatorScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("PERSON COUNT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                            Text(stringResource(R.string.st_TipCalculatorScreen_5d6e), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                             
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 ExpressiveCard(
@@ -364,7 +366,7 @@ fun CurrencySelectorSheet(onDismiss: () -> Unit, onSelect: (String, String) -> U
                 .padding(bottom = 32.dp)
         ) {
             Text(
-                "SELECT CURRENCY",
+                stringResource(R.string.st_TipCalculatorScreen_7e8f),
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,

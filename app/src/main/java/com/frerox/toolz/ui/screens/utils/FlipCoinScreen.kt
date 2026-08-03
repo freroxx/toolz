@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -172,8 +174,8 @@ fun FlipCoinScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "COIN FLIP",
-                subtitle = "Random Outcome Hub",
+                title = stringResource(R.string.st_FlipCoinScreen_a1b2),
+                subtitle = stringResource(R.string.st_FlipCoinScreen_c3d4),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -185,7 +187,7 @@ fun FlipCoinScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_FlipCoinScreen_e5f6))
                     }
                 },
                 actions = {
@@ -196,7 +198,7 @@ fun FlipCoinScreen(
                         },
                         modifier = Modifier.padding(end = 4.dp)
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Clear History")
+                        Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_FlipCoinScreen_g7h8))
                     }
                     IconButton(
                         onClick = { 
@@ -205,7 +207,7 @@ fun FlipCoinScreen(
                         },
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.st_FlipCoinScreen_i9j0))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -227,13 +229,15 @@ fun FlipCoinScreen(
                     }
                 },
                 trailingContent = {
+                    val flipLabel = stringResource(R.string.st_FlipCoinScreen_k1l2)
+                    val statsLabel = stringResource(R.string.st_FlipCoinScreen_m3n4)
                     clickableItem(
                         onClick = {
                             vibrationManager?.vibrateClick()
                             showStats = !showStats
                         },
                         icon = { Icon(if (showStats) Icons.Rounded.Casino else Icons.Rounded.History, null) },
-                        label = if (showStats) "FLIP" else "STATS"
+                        label = if (showStats) flipLabel else statsLabel
                     )
                 }
             )
@@ -254,7 +258,7 @@ fun FlipCoinScreen(
                 StaggeredEntrance(index = 0) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            if (showStats) "OUTCOME ANALYTICS" else "RECENT SEQUENCE",
+                            if (showStats) stringResource(R.string.st_FlipCoinScreen_o5p6) else stringResource(R.string.st_FlipCoinScreen_q7r8),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
@@ -284,11 +288,11 @@ fun FlipCoinScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("HEADS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFA000))
+                                            Text(stringResource(R.string.st_FlipCoinScreen_s9t0), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFA000))
                                             Text("$headsCount", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                                         }
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("TAILS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF757575))
+                                            Text(stringResource(R.string.st_FlipCoinScreen_u1v2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(0xFF757575))
                                             Text("$tailsCount", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                                         }
                                         Box(
@@ -296,7 +300,7 @@ fun FlipCoinScreen(
                                         )
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             val winRate = if (totalFlips > 0) (headsCount.toFloat() / totalFlips * 100).toInt() else 0
-                                            Text("H RATE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            Text(stringResource(R.string.st_FlipCoinScreen_w3x4), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                             Text("$winRate%", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                                         }
                                     }
@@ -307,7 +311,7 @@ fun FlipCoinScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (history.isEmpty()) {
-                                            Text("NO HISTORY RECORDED", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                                            Text(stringResource(R.string.st_FlipCoinScreen_y5z6), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                                         } else {
                                             history.take(8).forEachIndexed { index, heads ->
                                                 Box(
@@ -425,7 +429,7 @@ fun FlipCoinScreen(
                 // Energetic Result Presentation
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AnimatedContent(
-                        targetState = if (isFlipping) "FLIPPING..." else if (isHeads) "HEADS" else "TAILS",
+                        targetState = if (isFlipping) stringResource(R.string.st_FlipCoinScreen_a7b8) else if (isHeads) stringResource(R.string.st_FlipCoinScreen_s9t0) else stringResource(R.string.st_FlipCoinScreen_u1v2),
                         transitionSpec = {
                             (slideInVertically(initialOffsetY = { 40 }) + fadeIn(animationSpec = tween(200))) togetherWith
                             (slideOutVertically(targetOffsetY = { -40 }) + fadeOut(animationSpec = tween(200)))
@@ -463,7 +467,7 @@ fun FlipCoinScreen(
                     ) {
                         Icon(Icons.Rounded.Casino, null, modifier = Modifier.size(32.dp))
                         Spacer(Modifier.width(16.dp))
-                        Text("FLIP COIN", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                        Text(stringResource(R.string.st_FlipCoinScreen_a1b2), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                     }
                 }
                 
@@ -517,7 +521,7 @@ fun FlipCoinSettingsSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "COIN SETTINGS",
+                    text = stringResource(R.string.st_FlipCoinScreen_c9d0),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black
                 )
@@ -529,7 +533,7 @@ fun FlipCoinSettingsSheet(
             Spacer(Modifier.height(24.dp))
             
             Text(
-                "CUSTOM COIN SIDES",
+                stringResource(R.string.st_FlipCoinScreen_e1f2),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,
@@ -543,14 +547,14 @@ fun FlipCoinSettingsSheet(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 CoinSidePicker(
-                    label = "HEADS",
+                    label = stringResource(R.string.st_FlipCoinScreen_s9t0),
                     imageUri = headsImageUri,
                     onPick = { headsLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     onDelete = { scope.launch { repository.setFlipCoinHeadsImageUri(null) } },
                     modifier = Modifier.weight(1f)
                 )
                 CoinSidePicker(
-                    label = "TAILS",
+                    label = stringResource(R.string.st_FlipCoinScreen_u1v2),
                     imageUri = tailsImageUri,
                     onPick = { tailsLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     onDelete = { scope.launch { repository.setFlipCoinTailsImageUri(null) } },
@@ -572,7 +576,7 @@ fun FlipCoinSettingsSheet(
             ) {
                 Icon(Icons.Rounded.Refresh, null)
                 Spacer(Modifier.width(12.dp))
-                Text("RESET TO DEFAULTS", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_FlipCoinScreen_g3h4), fontWeight = FontWeight.Bold)
             }
         }
     }

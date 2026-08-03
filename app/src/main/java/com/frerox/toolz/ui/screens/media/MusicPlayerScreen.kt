@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.media
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import kotlinx.coroutines.flow.StateFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.Manifest
@@ -663,7 +665,7 @@ private fun ScreenTopBar(
         // showing the one thing that actually changes as you navigate:
         // which tab you're on. Selection mode still overrides both with
         // the live count, since that's the more urgent piece of state.
-        title = if (state.isSelectionMode) "${state.selectedTracks.size} Selected" else "Music Player",
+        title = if (state.isSelectionMode) "${state.selectedTracks.size} Selected" else stringResource(R.string.st_MusicPlayerScreen_mp3),
         subtitle = if (state.isSelectionMode) null else currentTabLabel,
         navigationIcon = {
             ToolzExpressiveIconButton(
@@ -711,10 +713,10 @@ private fun ScreenTopBar(
                                     SortDropdownItem("By Title", Icons.Rounded.Title) {
                                         onSort(SortOrder.TITLE); onShowSortMenu(false)
                                     }
-                                    SortDropdownItem("By Artist", Icons.Rounded.Person) {
+                                    SortDropdownItem(stringResource(R.string.st_MusicPlayerScreen_ba7), Icons.Rounded.Person) {
                                         onSort(SortOrder.ARTIST); onShowSortMenu(false)
                                     }
-                                    SortDropdownItem("By Recent", Icons.Rounded.Schedule) {
+                                    SortDropdownItem(stringResource(R.string.st_MusicPlayerScreen_br8), Icons.Rounded.Schedule) {
                                         onSort(SortOrder.RECENT); onShowSortMenu(false)
                                     }
                                 }
@@ -795,7 +797,7 @@ private fun ScreenTopBar(
                         onQueryChange = onSearchChange,
                         placeholder = {
                             Text(
-                                "Search tracks, artists…",
+                                stringResource(R.string.st_MusicPlayerScreen_st_hint4),
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -897,7 +899,7 @@ private fun ScreenBottomBar(
         ) {
             val trackToDisplay = state.currentTrack ?: MusicTrack(
                 uri = "loading",
-                title = if (isResolving) "Resolving Stream..." else "Loading song…",
+                title = if (isResolving) stringResource(R.string.st_MusicPlayerScreen_rs1) else stringResource(R.string.st_MusicPlayerScreen_ls2),
                 artist = "Catalog",
                 album = "Online",
                 duration = 0
@@ -1174,7 +1176,7 @@ fun TrackList(
             if (offlineTracks.isNotEmpty()) {
                 item(key = "offline_header") {
                     TrackSectionHeader(
-                        label = "Offline",
+                        label = stringResource(R.string.st_MusicPlayerScreen_off10),
                         count = offlineTracks.size,
                         icon = Icons.Rounded.Storage,
                         color = MaterialTheme.colorScheme.primary,
@@ -1225,7 +1227,7 @@ fun TrackList(
             if (showOnlineSection) {
                 item(key = "online_header") {
                     TrackSectionHeader(
-                        label = "Online",
+                        label = stringResource(R.string.st_MusicPlayerScreen_on11),
                         count = onlineTracks.size,
                         icon = Icons.Rounded.Cloud,
                         color = MaterialTheme.colorScheme.secondary,
@@ -1336,6 +1338,7 @@ private fun TrackListItem(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
     if (state.performanceMode) {
         TrackItem(
             track = track,
@@ -1357,7 +1360,7 @@ private fun TrackListItem(
             karaokeEnabled = state.karaokeEnabled,
             onKaraokeClick = {
                 if (track.aiLyrics.isNullOrEmpty() && track.sourceUrl == null) {
-                    android.widget.Toast.makeText(context, "No available lyrics were found", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, nalwfMsg, android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.playTrack(track, tracks)
                     viewModel.toggleKaraokeMode()
@@ -1387,7 +1390,7 @@ private fun TrackListItem(
             karaokeEnabled = state.karaokeEnabled,
             onKaraokeClick = {
                 if (track.aiLyrics.isNullOrEmpty() && track.sourceUrl == null) {
-                    android.widget.Toast.makeText(context, "No available lyrics were found", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, nalwfMsg, android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.playTrack(track, tracks)
                     viewModel.toggleKaraokeMode()
@@ -1413,13 +1416,13 @@ private fun EmptyMusicPlaceholder(onScan: () -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurface
             )
             Spacer(Modifier.height(20.dp))
-            Text("No tracks found", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
-            Text("Scan your device to discover music", color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.st_MusicPlayerScreen_ntf15), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+            Text(stringResource(R.string.st_MusicPlayerScreen_sdtm16), color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center)
             Spacer(Modifier.height(28.dp))
             ToolzExpressiveButton(onClick = onScan, shape = RoundedCornerShape(20.dp)) {
                 Icon(Icons.Rounded.Search, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("SCAN NOW", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_MusicPlayerScreen_sn17), fontWeight = FontWeight.Black)
             }
         }
     }
@@ -1486,6 +1489,9 @@ fun TrackItem(
     )
     val cardShape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp, topEnd = 22.dp, bottomEnd = 22.dp)
 
+    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
+    val context = LocalContext.current
+    
     ExpressiveCard(
         onClick = onClick,
         onLongClick = onLongClick,
@@ -1567,7 +1573,7 @@ fun TrackItem(
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = Color.White, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.st_MusicPlayerScreen_sel18), tint = Color.White, modifier = Modifier.size(24.dp))
                     }
                 }
             }
@@ -1612,7 +1618,7 @@ fun TrackItem(
                         IconButton(onClick = onDownload, modifier = Modifier.size(38.dp)) {
                             Icon(
                                 Icons.Rounded.Download,
-                                contentDescription = "Download",
+                                contentDescription = stringResource(R.string.st_MusicPlayerScreen_d19),
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1628,7 +1634,7 @@ fun TrackItem(
                     ) {
                         Icon(
                             if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                            contentDescription = if (track.isFavorite) "Remove from favorites" else "Add to favorites",
+                            contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
                             tint = if (track.isFavorite) Color(0xFFE0555C) else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                             modifier = Modifier
                                 .size(20.dp)
@@ -1640,7 +1646,7 @@ fun TrackItem(
                         IconButton(onClick = { showMenu = true }, modifier = Modifier.size(38.dp)) {
                             Icon(
                                 Icons.Rounded.MoreVert,
-                                contentDescription = "More options",
+                                contentDescription = stringResource(R.string.st_MusicPlayerScreen_mo22),
                                 tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1651,13 +1657,13 @@ fun TrackItem(
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Add to playlist", fontWeight = FontWeight.Medium) },
+                                text = { Text(stringResource(R.string.st_MusicPlayerScreen_atp23), fontWeight = FontWeight.Medium) },
                                 onClick = { showPlaylistPicker = true; showMenu = false },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp)) }
                             )
                             if (karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null)) {
                                 DropdownMenuItem(
-                                    text = { Text("Open in Karaoke", fontWeight = FontWeight.Medium) },
+                                    text = { Text(stringResource(R.string.st_MusicPlayerScreen_oik24), fontWeight = FontWeight.Medium) },
                                     onClick = { onKaraokeClick(); showMenu = false },
                                     leadingIcon = { Icon(Icons.Rounded.MicExternalOn, contentDescription = null, modifier = Modifier.size(18.dp)) }
                                 )
@@ -1774,7 +1780,7 @@ fun TrackCard(track: MusicTrack, onClick: () -> Unit, cardWidth: Dp = 152.dp) {
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.fillMaxWidth()
             )
-            val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
+            val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: stringResource(R.string.st_MusicPlayerScreen_ua25)
             Text(
                 text = artistText,
                 style = MaterialTheme.typography.labelSmall,
@@ -1889,8 +1895,8 @@ fun FolderList(state: MusicUiState, onFolderClick: (String, List<MusicTrack>) ->
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Rounded.FolderOff, null, modifier = Modifier.size(72.dp).alpha(0.1f), tint = MaterialTheme.colorScheme.onSurface)
-                Text("No folders found", color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                Text("Add a custom folder using the + button above", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 40.dp))
+                Text(stringResource(R.string.st_MusicPlayerScreen_nff28), color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.st_MusicPlayerScreen_acfutba29), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 40.dp))
             }
         }
         return
@@ -1954,6 +1960,9 @@ fun FolderCard(
     // the icon chip's circle visible as "a blue dot" with the label
     // effectively invisible next to it. The accent color is now reserved
     // for the icon chip and a small trailing indicator only.
+    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
+    val context = LocalContext.current
+    
     ExpressiveCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().height(148.dp).bouncyClick(onClick = onClick),
@@ -2128,7 +2137,7 @@ fun FolderTracksDialog(
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                             ) {
                                 Text(
-                                    "• PLAYING",
+                                    stringResource(R.string.st_MusicPlayerScreen_p30),
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
@@ -2154,7 +2163,7 @@ fun FolderTracksDialog(
             ExpressiveSearchField(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it },
-                placeholder = { Text("Search tracks…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(stringResource(R.string.st_MusicPlayerScreen_st_hint31), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
                 trailingIcon = {
                     androidx.compose.animation.AnimatedVisibility(
@@ -2171,7 +2180,7 @@ fun FolderTracksDialog(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Rounded.Close,
-                                    contentDescription = "Clear search",
+                                    contentDescription = stringResource(R.string.st_MusicPlayerScreen_cs5),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(14.dp)
                                 )
@@ -2191,7 +2200,7 @@ fun FolderTracksDialog(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.SearchOff, null, modifier = Modifier.size(48.dp).alpha(0.12f), tint = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(8.dp))
-                        Text("No matches", color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_MusicPlayerScreen_nm32), color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
@@ -2275,7 +2284,7 @@ fun LibrarySection(
                 QuickAccessCard(
                     modifier = Modifier.weight(1f).height(138.dp),
                     icon = Icons.Rounded.Favorite,
-                    label = "Favorites",
+                    label = stringResource(R.string.st_MusicPlayerScreen_f33),
                     count = state.favoriteTracks.size,
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -2285,7 +2294,7 @@ fun LibrarySection(
                 QuickAccessCard(
                     modifier = Modifier.weight(1f).height(138.dp),
                     icon = Icons.Rounded.History,
-                    label = "Recent",
+                    label = stringResource(R.string.st_MusicPlayerScreen_r34),
                     count = state.recentlyPlayed.size,
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -2295,7 +2304,7 @@ fun LibrarySection(
                 QuickAccessCard(
                     modifier = Modifier.weight(1f).height(138.dp),
                     icon = Icons.Rounded.TrendingUp,
-                    label = "Top Played",
+                    label = stringResource(R.string.st_MusicPlayerScreen_tp35),
                     count = state.mostPlayed.size,
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -2307,7 +2316,7 @@ fun LibrarySection(
         // ── Recently Played carousel ──────────────────────────────────────────
         if (state.recentlyPlayed.isNotEmpty()) {
             item {
-                RowSectionHeader("RECENTLY PLAYED") { showRecentDetail = true }
+                RowSectionHeader(stringResource(R.string.st_MusicPlayerScreen_rp36)) { showRecentDetail = true }
                 Spacer(Modifier.height(12.dp))
                 TrackCarouselRow(
                     tracks = state.recentlyPlayed.take(12),
@@ -2319,7 +2328,7 @@ fun LibrarySection(
         // ── Most Played carousel ──────────────────────────────────────────────
         if (state.mostPlayed.isNotEmpty()) {
             item {
-                RowSectionHeader("MOST PLAYED") { showMostPlayedDetail = true }
+                RowSectionHeader(stringResource(R.string.st_MusicPlayerScreen_mop37)) { showMostPlayedDetail = true }
                 Spacer(Modifier.height(12.dp))
                 TrackCarouselRow(
                     tracks = state.mostPlayed.take(12),
@@ -2341,7 +2350,7 @@ fun LibrarySection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SectionLabel(if (state.playlists.isEmpty()) "PLAYLISTS" else "PLAYLISTS · ${state.playlists.size}")
+                SectionLabel(if (state.playlists.isEmpty()) stringResource(R.string.st_MusicPlayerScreen_pl39) else stringResource(R.string.st_MusicPlayerScreen_pl39) + " · ${state.playlists.size}")
                 Surface(
                     onClick = onCreatePlaylist,
                     shape = RoundedCornerShape(12.dp),
@@ -2355,7 +2364,7 @@ fun LibrarySection(
                     ) {
                         Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                         Text(
-                            "NEW",
+                            stringResource(R.string.st_MusicPlayerScreen_n9),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 0.6.sp,
@@ -2405,7 +2414,7 @@ fun LibrarySection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SectionLabel(if (state.folders.isEmpty()) "FOLDERS" else "FOLDERS · ${state.folders.size}")
+                SectionLabel(if (state.folders.isEmpty()) stringResource(R.string.st_MusicPlayerScreen_fl42) else stringResource(R.string.st_MusicPlayerScreen_fl42) + " · ${state.folders.size}")
                 Surface(
                     onClick = onAddFolder,
                     shape = RoundedCornerShape(12.dp),
@@ -2419,7 +2428,7 @@ fun LibrarySection(
                     ) {
                         Icon(Icons.Rounded.CreateNewFolder, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                         Text(
-                            "ADD",
+                            stringResource(R.string.st_MusicPlayerScreen_a43),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 0.6.sp,
@@ -2474,7 +2483,7 @@ fun LibrarySection(
     // Detail overlays
     if (showFavoritesDetail) {
         PlaylistDetailView(
-            playlist = Playlist(name = "Favorites", trackUris = state.favoriteTracks.map { it.uri }),
+            playlist = Playlist(name = stringResource(R.string.st_MusicPlayerScreen_f33), trackUris = state.favoriteTracks.map { it.uri }),
             allTracks = state.tracks,
             onDismiss = { showFavoritesDetail = false },
             onPlayPlaylist = { _, shuffle -> if (state.favoriteTracks.isNotEmpty()) {
@@ -2493,7 +2502,7 @@ fun LibrarySection(
     }
     if (showRecentDetail) {
         PlaylistDetailView(
-            playlist = Playlist(name = "Recently Played", trackUris = state.recentlyPlayed.map { it.uri }),
+            playlist = Playlist(name = stringResource(R.string.st_MusicPlayerScreen_r34), trackUris = state.recentlyPlayed.map { it.uri }),
             allTracks = state.tracks,
             onDismiss = { showRecentDetail = false },
             onPlayPlaylist = { _, shuffle -> if (state.recentlyPlayed.isNotEmpty()) {
@@ -2510,7 +2519,7 @@ fun LibrarySection(
     }
     if (showMostPlayedDetail) {
         PlaylistDetailView(
-            playlist = Playlist(name = "Most Played", trackUris = state.mostPlayed.map { it.uri }),
+            playlist = Playlist(name = stringResource(R.string.st_MusicPlayerScreen_tp35), trackUris = state.mostPlayed.map { it.uri }),
             allTracks = state.tracks,
             onDismiss = { showMostPlayedDetail = false },
             onPlayPlaylist = { _, shuffle -> if (state.mostPlayed.isNotEmpty()) {
@@ -2531,12 +2540,12 @@ fun LibrarySection(
         var newName by remember(playlist.id) { mutableStateOf(playlist.name) }
         AlertDialog(
             onDismissRequest = { playlistToRename = null },
-            title = { Text("Rename Playlist", fontWeight = FontWeight.Black) },
+            title = { Text(stringResource(R.string.st_MusicPlayerScreen_rp46), fontWeight = FontWeight.Black) },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
-                    label = { Text("Name") },
+                    label = { Text(stringResource(R.string.st_MusicPlayerScreen_n47)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -2556,10 +2565,10 @@ fun LibrarySection(
                     },
                     shape = RoundedCornerShape(12.dp),
                     enabled = newName.isNotBlank()
-                ) { Text("RENAME", fontWeight = FontWeight.Black) }
+                ) { Text(stringResource(R.string.st_MusicPlayerScreen_rn48), fontWeight = FontWeight.Black) }
             },
             dismissButton = {
-                TextButton(onClick = { playlistToRename = null }) { Text("CANCEL") }
+                TextButton(onClick = { playlistToRename = null }) { Text(stringResource(R.string.st_MusicPlayerScreen_c49)) }
             },
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface
@@ -2609,6 +2618,9 @@ private fun QuickAccessCard(
     // leaving the label column flat, unrounded ground to sit on. The
     // bottom padding is also given its own (larger) inset so the text
     // block clears the curve with margin instead of hugging it.
+    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
+    val context = LocalContext.current
+    
     ExpressiveCard(
         onClick = onClick,
         modifier = modifier.bouncyClick(onClick = onClick),
@@ -2669,6 +2681,9 @@ fun PlaylistCard(
 
     val performanceMode = LocalPerformanceMode.current
 
+    val nalwfMsg = stringResource(R.string.st_MusicPlayerScreen_nalwf14)
+    val context = LocalContext.current
+    
     ExpressiveCard(
         onClick = onClick,
         onLongClick = { showContextMenu = true },
@@ -3199,21 +3214,25 @@ fun PlaylistDetailView(
                                     // favorite toggle used in the full player, so the "loved" state
                                     // is legible against any card background, not just a red tint
                                     // floating on transparency.
+                                    val haptic = LocalHapticFeedback.current
                                     ToolzExpressiveIconButton(
-                                        onClick = { onToggleFavorite(track) },
-                                        modifier = Modifier.size(36.dp),
-                                        shape = CircleShape,
-                                        colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    ) {
-                                        Icon(
-                                            if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                            contentDescription = if (track.isFavorite) "Remove from favorites" else "Add to favorites",
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onToggleFavorite(track)
+                },
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = if (track.isFavorite) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (track.isFavorite) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Icon(
+                    if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
 
                                     if (track.path == null && track.sourceUrl != null) {
                                         ToolzExpressiveIconButton(
@@ -3225,7 +3244,7 @@ fun PlaylistDetailView(
                                                 contentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
                                             )
                                         ) {
-                                            Icon(Icons.Rounded.Download, contentDescription = "Download", modifier = Modifier.size(19.dp))
+                                            Icon(Icons.Rounded.Download, contentDescription = stringResource(R.string.st_MusicPlayerScreen_d19), modifier = Modifier.size(19.dp))
                                         }
                                     }
 
@@ -3344,6 +3363,9 @@ fun FullPlayerView(
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
     val track = state.currentTrack ?: return
     val configuration = LocalConfiguration.current
+    
+    val pauseCd = stringResource(R.string.st_MusicPlayerScreen_pause68)
+    val playCd = stringResource(R.string.st_MusicPlayerScreen_play69)
 
     // ── Keep screen awake while the full player is open ──
     // Tied to isPlaying: stays awake while actively playing, lets the
@@ -3605,7 +3627,7 @@ fun FullPlayerView(
                                 ) {
                                     Icon(
                                         Icons.Rounded.KeyboardArrowDown,
-                                        contentDescription = "Collapse player",
+                                        contentDescription = stringResource(R.string.st_MusicPlayerScreen_cp59),
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
@@ -3668,32 +3690,32 @@ fun FullPlayerView(
                                             onDismissRequest = { showOverflowMenu = false },
                                             shape = RoundedCornerShape(24.dp)
                                         ) {
-                                            DropdownMenuItem(text = { Text("Circular art") }, onClick = { onSetArtShape("CIRCLE"); showOverflowMenu = false }, leadingIcon = { RadioButton(selected = state.artShape == "CIRCLE", onClick = null) })
-                                            DropdownMenuItem(text = { Text("Square art") }, onClick = { onSetArtShape("SQUARE"); showOverflowMenu = false }, leadingIcon = { RadioButton(selected = state.artShape == "SQUARE", onClick = null) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.st_MusicPlayerScreen_ca60)) }, onClick = { onSetArtShape("CIRCLE"); showOverflowMenu = false }, leadingIcon = { RadioButton(selected = state.artShape == "CIRCLE", onClick = null) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.st_MusicPlayerScreen_sa61)) }, onClick = { onSetArtShape("SQUARE"); showOverflowMenu = false }, leadingIcon = { RadioButton(selected = state.artShape == "SQUARE", onClick = null) })
                                             HorizontalDivider(modifier = Modifier.alpha(0.08f).padding(vertical = 4.dp))
-                                            DropdownMenuItem(text = { Text("Rotate art") }, onClick = { onToggleRotation() }, leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) })
-                                            DropdownMenuItem(text = { Text("Sleep timer") }, onClick = { showOverflowMenu = false; showSleepTimerPicker = true }, leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.st_MusicPlayerScreen_ra62)) }, onClick = { onToggleRotation() }, leadingIcon = { Switch(checked = state.rotationEnabled, onCheckedChange = null, modifier = Modifier.scale(0.75f)) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.st_MusicPlayerScreen_st63)) }, onClick = { showOverflowMenu = false; showSleepTimerPicker = true }, leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary) })
                                             if (isOnlineCatalogTrack) {
                                                 DropdownMenuItem(
-                                                    text = { Text("Quality · ${catalogStreamQuality.lowercase().replaceFirstChar { it.uppercase() }}") },
+                                                    text = { Text(stringResource(R.string.st_MusicPlayerScreen_sq88) + " · ${catalogStreamQuality.lowercase().replaceFirstChar { it.uppercase() }}") },
                                                     onClick = { showOverflowMenu = false; showCatalogQualitySheet = true },
                                                     leadingIcon = { Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.primary) }
                                                 )
                                             }
                                             DropdownMenuItem(
-                                                text = { Text("Music settings") },
+                                                text = { Text(stringResource(R.string.st_MusicPlayerScreen_ms64)) },
                                                 onClick = { showOverflowMenu = false; onToggleMusicSettings() },
                                                 leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = MaterialTheme.colorScheme.primary) }
                                             )
                                             HorizontalDivider(modifier = Modifier.alpha(0.08f).padding(vertical = 4.dp))
                                             DropdownMenuItem(
-                                                text = { Text("Lyrics settings") },
+                                                text = { Text(stringResource(R.string.st_MusicPlayerScreen_ls_menu65)) },
                                                 onClick = { showOverflowMenu = false; showLyricsCustomization = true },
                                                 leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = MaterialTheme.colorScheme.primary) }
                                             )
                                             HorizontalDivider(modifier = Modifier.alpha(0.08f).padding(vertical = 4.dp))
                                             DropdownMenuItem(
-                                                text = { Text("Stop & exit", color = MaterialTheme.colorScheme.error) },
+                                                text = { Text(stringResource(R.string.st_MusicPlayerScreen_se66), color = MaterialTheme.colorScheme.error) },
                                                 onClick = {
                                                     showOverflowMenu = false
                                                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -3854,7 +3876,7 @@ fun FullPlayerView(
                                                 ) {
                                                     Icon(Icons.Rounded.MicOff, null, modifier = Modifier.size(18.dp))
                                                     Text(
-                                                        "Tap to grant mic access for visualizer",
+                                                        stringResource(R.string.st_MusicPlayerScreen_ttgmafv78),
                                                         style = MaterialTheme.typography.labelSmall,
                                                         fontWeight = FontWeight.Bold
                                                     )
@@ -4129,7 +4151,7 @@ fun FullPlayerView(
                                     ) {
                                         Icon(
                                             if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                            contentDescription = if (track.isFavorite) "Remove from favorites" else "Add to favorites",
+                                            contentDescription = if (track.isFavorite) stringResource(R.string.st_MusicPlayerScreen_rff20) else stringResource(R.string.st_MusicPlayerScreen_atf21),
                                             modifier = Modifier
                                                 .size(20.dp)
                                                 .graphicsLayer {
@@ -4178,7 +4200,7 @@ fun FullPlayerView(
                                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous track", modifier = Modifier.size(36.dp))
+                                    Icon(Icons.Rounded.SkipPrevious, contentDescription = stringResource(R.string.st_MusicPlayerScreen_pt67), modifier = Modifier.size(36.dp))
                                 }
 
                                 val playScale by animateFloatAsState(
@@ -4201,7 +4223,7 @@ fun FullPlayerView(
                                         .width(110.dp)
                                         .height(64.dp)
                                         .scale(if (state.performanceMode) 1f else playScale)
-                                        .semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" },
+                                        .semantics { contentDescription = if (state.isPlaying) pauseCd else playCd },
                                     shape = RoundedCornerShape(playShape.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = dynamicColors.primary,
@@ -4244,7 +4266,7 @@ fun FullPlayerView(
                                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 ) {
-                                    Icon(Icons.Rounded.SkipNext, contentDescription = "Next track", modifier = Modifier.size(36.dp))
+                                    Icon(Icons.Rounded.SkipNext, contentDescription = stringResource(R.string.st_MusicPlayerScreen_nt70), modifier = Modifier.size(36.dp))
                                 }
                             }
 
@@ -4265,7 +4287,7 @@ fun FullPlayerView(
                                         onClick = onToggleShuffle,
                                         checkedIcon = Icons.Rounded.ShuffleOn,
                                         uncheckedIcon = Icons.Rounded.Shuffle,
-                                        contentDescription = "Shuffle"
+                                        contentDescription = stringResource(R.string.st_MusicPlayerScreen_shuf71)
                                     )
                                     SegmentToggle(
                                         checked = state.repeatMode != Player.REPEAT_MODE_OFF,
@@ -4287,7 +4309,7 @@ fun FullPlayerView(
                                         onClick = { showQueue = true },
                                         checkedIcon = Icons.AutoMirrored.Rounded.QueueMusic,
                                         uncheckedIcon = Icons.AutoMirrored.Rounded.QueueMusic,
-                                        contentDescription = "Queue"
+                                        contentDescription = stringResource(R.string.st_MusicPlayerScreen_q72)
                                     )
                                     if (state.isOnline) {
                                         if (state.karaokeEnabled && (!track.aiLyrics.isNullOrEmpty() || track.sourceUrl != null || aiState.instrumentalMatch != null)) {
@@ -4305,7 +4327,7 @@ fun FullPlayerView(
                                             onClick = onOpenAi,
                                             checkedIcon = Icons.Rounded.AutoAwesome,
                                             uncheckedIcon = Icons.Rounded.Lyrics,
-                                            contentDescription = "AI lyrics"
+                                            contentDescription = stringResource(R.string.st_MusicPlayerScreen_ail73)
                                         )
                                     }
                                 }
@@ -4416,7 +4438,7 @@ private fun SegmentToggle(
                 .verticalScroll(rememberScrollState())
         ) {
             Text(
-                "Music Settings",
+                stringResource(R.string.st_MusicPlayerScreen_ms_title74),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(vertical = 16.dp)
@@ -4428,7 +4450,7 @@ private fun SegmentToggle(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "Playback Speed",
+                    stringResource(R.string.st_MusicPlayerScreen_ps75),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -4475,23 +4497,23 @@ private fun SegmentToggle(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            "Audio Visualizer",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "Show animated halo around art",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(R.string.st_MusicPlayerScreen_av76),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    stringResource(R.string.st_MusicPlayerScreen_sahaa77),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                     ExpressiveSwitch(
                         checked = state.showVisualizer,
                         onCheckedChange = {
@@ -4513,21 +4535,21 @@ private fun SegmentToggle(
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
                                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                                modifier = Modifier.padding(horizontal = 32.dp).zIndex(10f)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        "Needs microphone access to react to audio",
+                                        stringResource(R.string.st_MusicPlayerScreen_nmatrta79),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onErrorContainer,
                                         modifier = Modifier.weight(1f)
                                     )
                                     TextButton(onClick = { micPermission.launchPermissionRequest() }) {
-                                        Text("Grant")
+                                        Text(stringResource(R.string.st_MusicPlayerScreen_g80))
                                     }
                                 }
                             }
@@ -4539,12 +4561,12 @@ private fun SegmentToggle(
                         ) {
                             Column {
                                 Text(
-                                    "Auto Sensitivity",
+                                    stringResource(R.string.st_MusicPlayerScreen_asens81),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    "Adapts to how loud/dynamic each song is",
+                                    stringResource(R.string.st_MusicPlayerScreen_athldes82),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -4567,12 +4589,12 @@ private fun SegmentToggle(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        "Sensitivity",
+                                        stringResource(R.string.st_MusicPlayerScreen_sens83),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold
                                     )
                                     TextButton(onClick = { onSetVisualizerSensitivity(0.5f) }) {
-                                        Text("Reset", style = MaterialTheme.typography.labelSmall)
+                                        Text(stringResource(R.string.st_MusicPlayerScreen_r84), style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                                 ExpressiveSlider(
@@ -4592,7 +4614,7 @@ private fun SegmentToggle(
 
         Spacer(Modifier.height(24.dp))
             Text(
-                "Equalizer",
+                stringResource(R.string.st_MusicPlayerScreen_eq85),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
@@ -6099,6 +6121,10 @@ fun MiniPlayer(
     val isDark = LocalIsDarkTheme.current
     val dynamicColors = rememberDynamicColors(track.thumbnailUri)
     val targetProgress = if (duration > 0) progress.toFloat() / duration else 0f
+    
+    val pauseCd = stringResource(R.string.st_MusicPlayerScreen_pause68)
+    val playCd = stringResource(R.string.st_MusicPlayerScreen_play69)
+    val enjoyMusicText = stringResource(R.string.st_MusicPlayerScreen_etm87)
 
     var offsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(
@@ -6606,7 +6632,7 @@ fun MiniPlayer(
                                         )
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            "Enjoy the music",
+                                            stringResource(R.string.st_MusicPlayerScreen_etm87),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = lyricColor.copy(alpha = 0.35f),
                                             fontWeight = FontWeight.Bold,

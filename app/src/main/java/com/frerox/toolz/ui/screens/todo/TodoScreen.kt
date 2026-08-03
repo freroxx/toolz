@@ -19,6 +19,8 @@
 
 package com.frerox.toolz.ui.screens.todo
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -291,14 +293,14 @@ fun TodoScreen(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             ExpressiveTopAppBar(
-                title = "My Tasks",
+                title = stringResource(R.string.st_TodoScreen_a1b2),
                 subtitle = "${uiState.completedToday.size} of $totalCount done today",
                 navigationIcon = {
                     if (onNavigateBack != null) {
                         IconButton(onClick = onNavigateBack) {
                             Icon(
                                 Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "Navigate back"
+                                contentDescription = stringResource(R.string.st_TodoScreen_c3d4)
                             )
                         }
                     }
@@ -306,7 +308,7 @@ fun TodoScreen(
                 actions = {
                     Box {
                         IconButton(onClick = { showSortMenu = true }) {
-                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Sort tasks")
+                            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = stringResource(R.string.st_TodoScreen_e5f6))
                         }
                         SortDropdownMenu(
                             expanded = showSortMenu,
@@ -527,9 +529,9 @@ private fun TaskProgressHeader(
                 Column(modifier = Modifier.weight(1f)) {
                     AnimatedContent(
                         targetState = when {
-                            totalCount == 0 -> "Nothing here yet"
-                            completionFraction >= 1f -> "All done today 🎉"
-                            completedCount == 0 -> "Ready to crush it?"
+                            totalCount == 0 -> stringResource(R.string.st_TodoScreen_g7h8)
+                            completionFraction >= 1f -> stringResource(R.string.st_TodoScreen_i9j0)
+                            completedCount == 0 -> stringResource(R.string.st_TodoScreen_k1l2)
                             else -> "$completedCount done, ${totalCount - completedCount} to go"
                         },
                         transitionSpec = {
@@ -546,7 +548,7 @@ private fun TaskProgressHeader(
                         )
                     }
                     Text(
-                        text = "Today's progress",
+                        text = stringResource(R.string.st_TodoScreen_m3n4),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.65f),
                         fontWeight = FontWeight.SemiBold
@@ -653,7 +655,7 @@ private fun SessionBanner(
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 )
             ) {
-                Icon(Icons.Rounded.Stop, contentDescription = "Stop session", modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.st_TodoScreen_o5p6), modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -741,7 +743,7 @@ private fun SwipeDismissBackground(targetValue: SwipeToDismissBoxValue) {
     ) {
         Icon(
             Icons.Rounded.Delete,
-            contentDescription = "Delete task",
+            contentDescription = stringResource(R.string.st_TodoScreen_q7r8),
             tint = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = iconAlpha),
             modifier = Modifier
                 .size(26.dp)
@@ -1025,7 +1027,7 @@ private fun SessionIconButton(
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                 )
             ) {
-                Icon(Icons.Rounded.Stop, contentDescription = "Stop session", modifier = Modifier.size(18.dp))
+                Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.st_TodoScreen_o5p6), modifier = Modifier.size(18.dp))
             }
         } else {
             FilledTonalIconButton(
@@ -1035,7 +1037,7 @@ private fun SessionIconButton(
                 },
                 modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Rounded.PlayArrow, contentDescription = "Start session", modifier = Modifier.size(18.dp))
+                Icon(Icons.Rounded.PlayArrow, contentDescription = stringResource(R.string.st_TodoScreen_w5x6), modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -1187,7 +1189,7 @@ private fun CompletedTaskCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.Check,
-                            contentDescription = "Mark incomplete",
+                            contentDescription = stringResource(R.string.st_TodoScreen_s9t0),
                             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             modifier = Modifier.size(16.dp)
                         )
@@ -1208,7 +1210,7 @@ private fun CompletedTaskCard(
 
                 Icon(
                     Icons.Rounded.ChevronRight,
-                    contentDescription = "View task",
+                    contentDescription = stringResource(R.string.st_TodoScreen_u1v2),
                     tint = MaterialTheme.colorScheme.outlineVariant,
                     modifier = Modifier.size(18.dp)
                 )
@@ -1253,7 +1255,7 @@ private fun CompletedSectionHeader(
         )
         Icon(
             if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-            contentDescription = if (expanded) "Collapse" else "Expand",
+            contentDescription = if (expanded) stringResource(R.string.st_TodoScreen_w3x4) else stringResource(R.string.st_TodoScreen_y5z6),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             modifier = Modifier.size(18.dp)
         )
@@ -1283,9 +1285,9 @@ private fun EmptyTasksPlaceholder(filter: TaskFilter) {
         )
         Text(
             text = when (filter) {
-                TaskFilter.ALL -> "All clear!"
-                TaskFilter.TODAY -> "Nothing due today"
-                TaskFilter.UPCOMING -> "No upcoming tasks"
+                TaskFilter.ALL -> stringResource(R.string.st_TodoScreen_a7b8)
+                TaskFilter.TODAY -> stringResource(R.string.st_TodoScreen_c9d0)
+                TaskFilter.UPCOMING -> stringResource(R.string.st_TodoScreen_e1f2)
             },
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
@@ -1293,9 +1295,9 @@ private fun EmptyTasksPlaceholder(filter: TaskFilter) {
         )
         Text(
             text = when (filter) {
-                TaskFilter.ALL -> "Tap + below to add your first task"
-                TaskFilter.TODAY -> "Set due dates to see tasks here"
-                TaskFilter.UPCOMING -> "Tasks due in the next two weeks appear here"
+                TaskFilter.ALL -> stringResource(R.string.st_TodoScreen_g3h4)
+                TaskFilter.TODAY -> stringResource(R.string.st_TodoScreen_i5j6)
+                TaskFilter.UPCOMING -> stringResource(R.string.st_TodoScreen_k7l8)
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
@@ -1403,7 +1405,7 @@ private fun QuickAddBar(
                         Box {
                             if (title.isEmpty()) {
                                 Text(
-                                    text = "Add a new task…",
+                                    text = stringResource(R.string.st_TodoScreen_m9n0),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     fontWeight = FontWeight.Medium
@@ -1428,7 +1430,7 @@ private fun QuickAddBar(
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         )
                     ) {
-                        Icon(Icons.Rounded.Check, contentDescription = "Add task", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = stringResource(R.string.st_TodoScreen_o1p2), modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -1456,7 +1458,7 @@ private fun QuickAddBar(
                     ) {
                         Icon(
                             Icons.Rounded.Flag,
-                            contentDescription = "Priority",
+                            contentDescription = stringResource(R.string.st_TodoScreen_q3r4),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
@@ -1500,7 +1502,7 @@ private fun QuickAddBar(
                         Spacer(Modifier.weight(1f))
 
                         // Date picker toggle
-                        val dateLabel = selectedDueDate?.let { formatDueDate(it) } ?: "Date"
+                        val dateLabel = selectedDueDate?.let { formatDueDate(it) } ?: stringResource(R.string.st_TodoScreen_s5t6)
                         ExpressiveFilterChip(
                             selected = selectedDueDate != null,
                             onClick = {
@@ -1573,10 +1575,10 @@ private fun QuickAddBar(
                 TextButton(onClick = {
                     selectedDueDate = datePickerState.selectedDateMillis
                     showDatePicker = false
-                }) { Text("OK") }
+                }) { Text(stringResource(R.string.st_TodoScreen_u7v8)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+                TextButton(onClick = { showDatePicker = false }) { Text(stringResource(R.string.st_TodoScreen_w9x0)) }
             }
         ) {
             DatePicker(state = datePickerState)
@@ -1659,7 +1661,7 @@ private fun TaskDetailSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (task.isCompleted) "Completed Task" else "Edit Task",
+                    text = if (task.isCompleted) stringResource(R.string.st_TodoScreen_y1z2) else stringResource(R.string.st_TodoScreen_a3b4),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     modifier = Modifier.weight(1f)
@@ -1667,7 +1669,7 @@ private fun TaskDetailSheet(
                 IconButton(onClick = { showDeleteConfirm = true }) {
                     Icon(
                         Icons.Rounded.Delete,
-                        contentDescription = "Delete task",
+                        contentDescription = stringResource(R.string.st_TodoScreen_q7r8),
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                     )
                 }
@@ -1677,7 +1679,7 @@ private fun TaskDetailSheet(
             OutlinedTextField(
                 value = editTitle,
                 onValueChange = { editTitle = it },
-                label = { Text("Task title") },
+                label = { Text(stringResource(R.string.st_TodoScreen_c5d6)) },
                 modifier = Modifier.fillMaxWidth(),
                 shape = SmallExpressiveShape,
                 singleLine = true,
@@ -1690,7 +1692,7 @@ private fun TaskDetailSheet(
             OutlinedTextField(
                 value = editDescription,
                 onValueChange = { editDescription = it },
-                label = { Text("Notes (optional)") },
+                label = { Text(stringResource(R.string.st_TodoScreen_e7f8)) },
                 modifier = Modifier.fillMaxWidth(),
                 shape = SmallExpressiveShape,
                 minLines = 2,
@@ -1702,7 +1704,7 @@ private fun TaskDetailSheet(
 
             // ── Priority row ──────────────────────────────────────────────────
             Text(
-                "Priority",
+                stringResource(R.string.st_TodoScreen_q3r4),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1766,7 +1768,7 @@ private fun TaskDetailSheet(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Category",
+                        stringResource(R.string.st_TodoScreen_g9h0),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1796,7 +1798,7 @@ private fun TaskDetailSheet(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "Due date:",
+                    stringResource(R.string.st_TodoScreen_i1j2),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1806,7 +1808,7 @@ private fun TaskDetailSheet(
                     onClick = { showDatePicker = true },
                     label = {
                         Text(
-                            text = editDueDate?.let(::formatDueDate) ?: "Set date",
+                            text = editDueDate?.let(::formatDueDate) ?: stringResource(R.string.st_TodoScreen_k3l4),
                             style = MaterialTheme.typography.labelSmall
                         )
                     },
@@ -1853,7 +1855,7 @@ private fun TaskDetailSheet(
                         ) {
                             Icon(
                                 Icons.Rounded.Close,
-                                contentDescription = "Remove sub-task",
+                                contentDescription = stringResource(R.string.st_TodoScreen_m5n6),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
                                 modifier = Modifier.size(14.dp)
                             )
@@ -1870,7 +1872,7 @@ private fun TaskDetailSheet(
                     OutlinedTextField(
                         value = newSubTaskText,
                         onValueChange = { newSubTaskText = it },
-                        placeholder = { Text("Add sub-task…", style = MaterialTheme.typography.bodySmall) },
+                        placeholder = { Text(stringResource(R.string.st_TodoScreen_o7p8), style = MaterialTheme.typography.bodySmall) },
                         modifier = Modifier.weight(1f),
                         shape = SmallExpressiveShape,
                         singleLine = true,
@@ -1906,7 +1908,7 @@ private fun TaskDetailSheet(
                             },
                             modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(Icons.Rounded.Add, contentDescription = "Add", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_TodoScreen_q9r0), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -1919,7 +1921,7 @@ private fun TaskDetailSheet(
                 onClick = { save() },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save Changes", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_TodoScreen_s1t2), fontWeight = FontWeight.Bold)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -1943,7 +1945,7 @@ private fun TaskDetailSheet(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        if (isSessionTask && isSessionActive) "Stop" else "Focus",
+                        if (isSessionTask && isSessionActive) stringResource(R.string.st_TodoScreen_u3v4) else stringResource(R.string.st_TodoScreen_w5x6),
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -1957,7 +1959,7 @@ private fun TaskDetailSheet(
                 ) {
                     Icon(Icons.Rounded.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Calendar", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.st_TodoScreen_y7z8), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1978,14 +1980,14 @@ private fun TaskDetailSheet(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Delete task?",
+                        stringResource(R.string.st_TodoScreen_a9b0),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "This action cannot be undone.",
+                        stringResource(R.string.st_TodoScreen_c1d2),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -1998,7 +2000,7 @@ private fun TaskDetailSheet(
                         ToolzOutlinedExpressiveButton(
                             onClick = { showDeleteConfirm = false },
                             modifier = Modifier.weight(1f)
-                        ) { Text("Cancel") }
+                        ) { Text(stringResource(R.string.st_TodoScreen_w9x0)) }
                         ToolzExpressiveButton(
                             onClick = { onDeleteTask(); showDeleteConfirm = false },
                             modifier = Modifier.weight(1f),
@@ -2006,7 +2008,7 @@ private fun TaskDetailSheet(
                                 containerColor = MaterialTheme.colorScheme.error,
                                 contentColor = MaterialTheme.colorScheme.onError
                             )
-                        ) { Text("Delete", fontWeight = FontWeight.Bold) }
+                        ) { Text(stringResource(R.string.st_TodoScreen_e3f4), fontWeight = FontWeight.Bold) }
                     }
                 }
             }
@@ -2019,10 +2021,10 @@ private fun TaskDetailSheet(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = { editDueDate = state.selectedDateMillis; showDatePicker = false }) {
-                    Text("OK")
+                    Text(stringResource(R.string.st_TodoScreen_u7v8))
                 }
             },
-            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text(stringResource(R.string.st_TodoScreen_w9x0)) } }
         ) { DatePicker(state = state) }
     }
 }
@@ -2123,7 +2125,7 @@ private fun SortDropdownMenu(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Text(
-            text = "Sort by",
+            text = stringResource(R.string.st_TodoScreen_g5h6),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -2135,10 +2137,10 @@ private fun SortDropdownMenu(
                 text = {
                     Text(
                         text = when (order) {
-                            TaskSortOrder.URGENCY -> "Urgency"
-                            TaskSortOrder.PRIORITY -> "Priority"
-                            TaskSortOrder.DATE_ADDED -> "Date Added"
-                            TaskSortOrder.DUE_DATE -> "Due Date"
+                            TaskSortOrder.URGENCY -> stringResource(R.string.st_TodoScreen_i7j8)
+                            TaskSortOrder.PRIORITY -> stringResource(R.string.st_TodoScreen_q3r4)
+                            TaskSortOrder.DATE_ADDED -> stringResource(R.string.st_TodoScreen_k9l0)
+                            TaskSortOrder.DUE_DATE -> stringResource(R.string.st_TodoScreen_m1n2)
                         },
                         fontWeight = if (order == currentOrder) FontWeight.Bold else FontWeight.Normal,
                         color = if (order == currentOrder) MaterialTheme.colorScheme.primary

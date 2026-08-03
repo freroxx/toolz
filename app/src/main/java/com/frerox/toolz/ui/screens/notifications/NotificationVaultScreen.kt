@@ -81,6 +81,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -150,6 +152,8 @@ fun NotificationVaultScreen(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val scope = rememberCoroutineScope()
+    
+    val copiedMsg = stringResource(R.string.st_FileConverterScreen_ctc41)
 
     // Adaptive navigator
     val navigator = rememberSupportingPaneScaffoldNavigator()
@@ -303,7 +307,7 @@ fun NotificationVaultScreen(
                                 clipboard.setPrimaryClip(
                                     ClipData.newPlainText("Notification", "${n.title}\n${n.text}")
                                 )
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, copiedMsg, Toast.LENGTH_SHORT).show()
                             },
                         )
                     }
@@ -318,7 +322,7 @@ fun NotificationVaultScreen(
                             )
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                "Select a notification",
+                                stringResource(R.string.st_NotificationVaultScreen_san5),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             )
@@ -593,11 +597,11 @@ private fun NotificationFeedPane(
         topBar = {
             Column {
                 ExpressiveTopAppBar(
-                    title = "Vault",
+                    title = stringResource(R.string.st_NotificationVaultScreen_v1),
                     subtitle = if (notifications.isEmpty()) "No captures" else "${notifications.size} archived",
                     navigationIcon = {
                         IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_FileConverterScreen_b3))
                         }
                     },
                     actions = {
@@ -703,7 +707,7 @@ private fun NotificationFeedPane(
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
                             .padding(bottom = 8.dp),
-                        placeholder = { Text("Search notifications…") },
+                        placeholder = { Text(stringResource(R.string.st_NotificationVaultScreen_sn_hint2)) },
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         trailingIcon = {
                             AnimatedVisibility(visible = searchQuery.isNotEmpty()) {
@@ -776,13 +780,13 @@ private fun NotificationFeedPane(
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Listener Disabled",
+                                    stringResource(R.string.st_NotificationVaultScreen_ld3),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.error,
                                 )
                                 Text(
-                                    "Tap to grant notification access.",
+                                    stringResource(R.string.st_NotificationVaultScreen_ttgna4),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                 )
@@ -1206,12 +1210,12 @@ private fun NotificationDetailContent(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Notification Detail",
+                    stringResource(R.string.st_NotificationVaultScreen_nd6),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                 )
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close")
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_CatalogScreen_c3))
                 }
             }
         }
@@ -1267,7 +1271,7 @@ private fun NotificationDetailContent(
                 }
                 // App details button
                 FilledTonalIconButton(onClick = onViewAppDetails) {
-                    Icon(Icons.Rounded.Info, contentDescription = "App details")
+                    Icon(Icons.Rounded.Info, contentDescription = stringResource(R.string.st_NotepadScreen_sel_icon15))
                 }
             }
         }
@@ -1345,7 +1349,7 @@ private fun NotificationDetailContent(
 
         // ── Remap to category ──────────────────────────────────────────────
         Text(
-            "Map App to Category",
+            stringResource(R.string.st_NotificationVaultScreen_matc7),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1379,7 +1383,7 @@ private fun NotificationDetailContent(
             ) {
                 Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Copy")
+                Text(stringResource(R.string.st_NotificationVaultScreen_c8))
             }
             ToolzOutlinedExpressiveButton(
                 onClick = onHideApp,
@@ -1387,7 +1391,7 @@ private fun NotificationDetailContent(
             ) {
                 Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Hide App")
+                Text(stringResource(R.string.st_NotificationVaultScreen_ha9))
             }
         }
         ToolzExpressiveButton(
@@ -1400,7 +1404,7 @@ private fun NotificationDetailContent(
         ) {
             Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Delete Notification", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_NotificationVaultScreen_dn10), fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1927,16 +1931,16 @@ private fun EmptyVaultState(isFiltering: Boolean) {
             }
 
             Text(
-                text = if (isFiltering) "No matches found" else "Vault is secure",
+                text = if (isFiltering) stringResource(R.string.st_NotepadScreen_nmf22) else stringResource(R.string.st_NotificationVaultScreen_vis11),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = if (isFiltering)
-                    "Adjust your filters and try again."
+                    stringResource(R.string.st_NotepadScreen_tadk25)
                 else
-                    "Incoming notifications will be captured and archived here.",
+                    stringResource(R.string.st_NotificationVaultScreen_inwbcaah12),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )

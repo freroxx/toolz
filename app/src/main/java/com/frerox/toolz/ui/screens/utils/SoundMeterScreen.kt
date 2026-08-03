@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -108,8 +110,8 @@ fun SoundMeterContent(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "SOUND METER",
-                subtitle = if (isRecording) "Monitoring active environment" else "Ready to measure sound levels",
+                title = stringResource(R.string.st_SoundMeterScreen_a1b2),
+                subtitle = if (isRecording) stringResource(R.string.st_SoundMeterScreen_c3d4) else stringResource(R.string.st_SoundMeterScreen_e5f6),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -118,7 +120,7 @@ fun SoundMeterContent(
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SoundMeterScreen_g7h8))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -162,7 +164,7 @@ fun SoundMeterContent(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "DECIBELS",
+                                    text = stringResource(R.string.st_SoundMeterScreen_i9j0),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = activeColor,
@@ -180,7 +182,7 @@ fun SoundMeterContent(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    "PEAK LEVEL",
+                                    stringResource(R.string.st_SoundMeterScreen_k1l2),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.outline
@@ -193,7 +195,7 @@ fun SoundMeterContent(
                             }
                             
                             ExpressiveStatePill(
-                                text = if (isRecording) "Monitoring" else "Idle",
+                                text = if (isRecording) stringResource(R.string.st_SoundMeterScreen_m3n4) else stringResource(R.string.st_SoundMeterScreen_o5p6),
                                 icon = if (isRecording) Icons.Rounded.GraphicEq else Icons.Rounded.MicNone,
                                 color = if (isRecording) activeColor else MaterialTheme.colorScheme.outline
                             )
@@ -233,7 +235,7 @@ fun SoundMeterContent(
                                     contentDescription = null
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (isRecording) "STOP MEASURING" else "START MEASURING", fontWeight = FontWeight.Black)
+                                Text(if (isRecording) stringResource(R.string.st_SoundMeterScreen_q7r8) else stringResource(R.string.st_SoundMeterScreen_s9t0), fontWeight = FontWeight.Black)
                             }
 
                             ToolzOutlinedExpressiveButton(
@@ -333,13 +335,13 @@ fun PermissionRequestState(onRequest: () -> Unit) {
         }
         Spacer(Modifier.height(32.dp))
         Text(
-            "AUDIO ACCESS REQUIRED", 
+            stringResource(R.string.st_SoundMeterScreen_u1v2), 
             style = MaterialTheme.typography.headlineSmall, 
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center
         )
         Text(
-            "Sound Meter needs microphone access to measure real-time decibel levels. Your audio is never recorded or stored.",
+            stringResource(R.string.st_SoundMeterScreen_w3x4),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
@@ -349,7 +351,7 @@ fun PermissionRequestState(onRequest: () -> Unit) {
             modifier = Modifier.fillMaxWidth().height(64.dp),
             shape = LargeExpressiveShape
         ) {
-            Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_SoundMeterScreen_y5z6), fontWeight = FontWeight.Black)
         }
     }
 }

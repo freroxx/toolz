@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.network
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -134,7 +136,7 @@ fun WifiTweaksScreen(
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    "Network tweaks",
+                                    stringResource(R.string.st_WifiTweaksScreen_f1a2),
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Black
                                 )
@@ -143,7 +145,7 @@ fun WifiTweaksScreen(
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
                                     Text(
-                                        "Beta",
+                                        stringResource(R.string.st_WifiTweaksScreen_3d5b),
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
@@ -164,7 +166,7 @@ fun WifiTweaksScreen(
                                 vibrationManager?.vibrateClick()
                                 onBack()
                             }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_WifiTweaksScreen_9e2c))
                             }
                         },
                         actions = {
@@ -175,7 +177,7 @@ fun WifiTweaksScreen(
                                 if (uiState.isScanning) {
                                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                                 } else {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+                                    Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_WifiTweaksScreen_1a2b))
                                 }
                             }
                         },
@@ -755,7 +757,7 @@ private fun OverviewTab(
     ) {
         item {
             Text(
-                text = "Network Snapshot",
+                text = stringResource(R.string.st_WifiTweaksScreen_7c4d),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -823,7 +825,7 @@ private fun PerformanceTrendCard(state: WifiTweaksUiState) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Latency Trend", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_WifiTweaksScreen_5f6e), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 state.stability.publicPingMs?.let {
                     Text("${it}ms", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
@@ -924,7 +926,7 @@ private fun QuickActionFloatingCard(onFix: () -> Unit, onReset: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.FlashOn, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Fix My Connection")
+                Text(stringResource(R.string.st_WifiTweaksScreen_2b8a))
             }
             OutlinedButton(
                 onClick = onReset,
@@ -934,7 +936,7 @@ private fun QuickActionFloatingCard(onFix: () -> Unit, onReset: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.SettingsBackupRestore, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Reset All")
+                Text(stringResource(R.string.st_WifiTweaksScreen_4d9c))
             }
         }
     }
@@ -958,9 +960,9 @@ private fun LiveFeedbackCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Signal Soundscape", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_6a1b), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Text(
-                        "Frequency shifts with signal strength. Walk around to find the peak.",
+                        stringResource(R.string.st_WifiTweaksScreen_1b2c),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1094,7 +1096,7 @@ private fun OverviewHeroCard(
                             Icon(Icons.Rounded.NetworkCheck, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                         Spacer(Modifier.width(8.dp))
-                        Text(if (state.isScanning) "Scanning" else "Scan room", style = MaterialTheme.typography.labelLarge)
+                        Text(if (state.isScanning) "Scanning" else stringResource(R.string.st_WifiTweaksScreen_c3d4), style = MaterialTheme.typography.labelLarge)
                     }
                     OutlinedButton(
                         onClick = onOpenWifiSettings, 
@@ -1103,7 +1105,7 @@ private fun OverviewHeroCard(
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Settings", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.st_WifiTweaksScreen_e5f6), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -1156,7 +1158,7 @@ private fun StabilityMonitorCard(state: WifiTweaksUiState) {
         )
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Stability Monitor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_WifiTweaksScreen_3c4d), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 StabilityItem("Gateway", state.stability.gatewayPingMs?.toString() ?: "--", "ms")
@@ -1199,7 +1201,7 @@ private fun InsightStrip(state: WifiTweaksUiState) {
         )
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Advisor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_WifiTweaksScreen_5d6e), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
             Text(
                 text = state.advice.recommendation,
                 style = MaterialTheme.typography.bodyLarge
@@ -1293,7 +1295,7 @@ private fun AnalyzerTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Spectrum Visualizer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_7e8f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
                         SpectrumVisualizer(
                             results = state.scanResults,
@@ -1321,7 +1323,7 @@ private fun AnalyzerTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Nearby networks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_WifiTweaksScreen_9f0a), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                             Text(
                                 text = state.lastScanTimestamp?.let {
                                     "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}"
@@ -1406,7 +1408,7 @@ private fun AnalyzerTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Channel advisor", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_a1b2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     if (state.congestion.isEmpty()) {
                         Text(
                             "Scan nearby networks to see congestion by channel.",
@@ -1571,7 +1573,7 @@ private fun ProfilesTab(
         }
 
         item {
-            Text("Ready-to-use Profiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_WifiTweaksScreen_y5z6), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 state.profiles.forEach { profile ->
@@ -1640,7 +1642,7 @@ private fun DnsEngineTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("DNS Benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_WifiTweaksScreen_a7b8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                             Text("${state.selectedBenchmarkProviders.size} servers selected", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1686,7 +1688,7 @@ private fun DnsEngineTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Custom Private DNS", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_c9d0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     OutlinedTextField(
                         value = customHost,
                         onValueChange = { customHost = it },
@@ -1716,7 +1718,7 @@ private fun DnsEngineTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_WifiTweaksScreen_e1f2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                         
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("ALL", "SEC", "SPD").forEach { filter ->
@@ -1810,7 +1812,7 @@ private fun DiagnosticsTab(
     ) {
         item {
             Text(
-                text = "Health Audit",
+                text = stringResource(R.string.st_WifiTweaksScreen_g3h4),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -1831,7 +1833,7 @@ private fun DiagnosticsTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Real-world Speed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_WifiTweaksScreen_i5j6), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
                                 text = if (state.speedTest.isRunning) state.speedTest.phaseLabel else "Last result: ${state.speedTest.downloadSpeedMbps.roundToInt()} Mbps",
                                 style = MaterialTheme.typography.bodySmall,
@@ -1853,7 +1855,7 @@ private fun DiagnosticsTab(
                                 Icon(Icons.Rounded.Speed, null, modifier = Modifier.size(18.dp))
                             }
                             Spacer(Modifier.width(8.dp))
-                            Text("Start Test")
+                            Text(stringResource(R.string.st_WifiTweaksScreen_g7h8))
                         }
                     }
 
@@ -1877,13 +1879,13 @@ private fun DiagnosticsTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Trace Route", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_i9j0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     
                     OutlinedTextField(
                         value = traceTarget,
                         onValueChange = { traceTarget = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Target Host") },
+                        label = { Text(stringResource(R.string.st_WifiTweaksScreen_k1l2)) },
                         shape = RoundedCornerShape(20.dp),
                         trailingIcon = {
                             IconButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing) {
@@ -1923,7 +1925,7 @@ private fun DiagnosticsTab(
 
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Low-level Config", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
+                Text(stringResource(R.string.st_WifiTweaksScreen_m3n4), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
                 ElevatedCard(
                     shape = RoundedCornerShape(32.dp),
                     colors = CardDefaults.elevatedCardColors(
@@ -1945,7 +1947,7 @@ private fun DiagnosticsTab(
                 ) {
                     Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Copy Report")
+                    Text(stringResource(R.string.st_WifiTweaksScreen_o5p6))
                 }
                 ToolzOutlinedExpressiveButton(
                     onClick = onOpenWifiSettings,
@@ -1953,7 +1955,7 @@ private fun DiagnosticsTab(
                 ) {
                     Icon(Icons.Rounded.Settings, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("OS Settings")
+                    Text(stringResource(R.string.st_WifiTweaksScreen_q7r8))
                 }
             }
             ToolzOutlinedExpressiveButton(
@@ -1962,7 +1964,7 @@ private fun DiagnosticsTab(
             ) {
                 Icon(Icons.Rounded.DeveloperMode, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Developer Options")
+                Text(stringResource(R.string.st_WifiTweaksScreen_s9t0))
             }
         }
     }
@@ -1988,7 +1990,7 @@ private fun TrafficTab(
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Real-time Throughput", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_WifiTweaksScreen_u1v2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -2119,7 +2121,7 @@ private fun ShizukuCockpit(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "PRIVILEGED ENGINE", 
+                        stringResource(R.string.st_WifiTweaksScreen_w3x4), 
                         style = MaterialTheme.typography.labelSmall, 
                         fontWeight = FontWeight.Black,
                         color = contentColor.copy(alpha = 0.6f),

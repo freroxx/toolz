@@ -83,6 +83,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -155,9 +157,9 @@ private fun NoteCardOptionsSheet(
     val noteColor = Color(note.color)
     val onColor   = noteContentColor(noteColor)
     val sizeOptions = listOf(
-        NOTE_CARD_SIZE_SMALL  to "Small"  to "Compact, quick to scan",
-        NOTE_CARD_SIZE_MEDIUM to "Medium" to "Balanced layout for everyday notes",
-        NOTE_CARD_SIZE_LARGE  to "Large"  to "Expanded width for rich media",
+        NOTE_CARD_SIZE_SMALL  to stringResource(R.string.st_NotepadScreen_s2)  to stringResource(R.string.st_NotepadScreen_cqs3),
+        NOTE_CARD_SIZE_MEDIUM to stringResource(R.string.st_NotepadScreen_m4) to stringResource(R.string.st_NotepadScreen_blfen5),
+        NOTE_CARD_SIZE_LARGE  to stringResource(R.string.st_NotepadScreen_l6)  to stringResource(R.string.st_NotepadScreen_ewfrm7),
     )
 
     ModalBottomSheet(
@@ -184,14 +186,14 @@ private fun NoteCardOptionsSheet(
         ) {
             // Label + title
             Text(
-                "CARD LAYOUT",
+                stringResource(R.string.st_NotepadScreen_cl1),
                 style         = MaterialTheme.typography.labelSmall,
                 fontWeight    = FontWeight.Black,
                 letterSpacing = 2.sp,
                 color         = onColor.copy(0.55f),
             )
             Text(
-                note.title.ifBlank { "Untitled note" },
+                note.title.ifBlank { stringResource(R.string.st_NotepadScreen_u28) + " note" },
                 style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color      = onColor,
@@ -263,8 +265,8 @@ private fun NoteCardOptionsSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 listOf(
-                    Triple(Icons.Rounded.SelectAll, "Select",    onSelect),
-                    Triple(Icons.Rounded.ContentCopy, "Duplicate", onDuplicate),
+                    Triple(Icons.Rounded.SelectAll, stringResource(R.string.st_NotepadScreen_sel8),    onSelect),
+                    Triple(Icons.Rounded.ContentCopy, stringResource(R.string.st_NotepadScreen_dup9), onDuplicate),
                 ).forEach { (icon, text, action) ->
                     Surface(
                         modifier = Modifier
@@ -408,6 +410,9 @@ fun NotepadScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope    = rememberCoroutineScope()
     var hasEntered by remember { mutableStateOf(false) }
+    
+    val noteDeletedMsg = stringResource(R.string.st_NotepadScreen_nd10)
+    val undoLabel = stringResource(R.string.st_NotepadScreen_u11)
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -657,14 +662,24 @@ fun NotepadScreen(
                         )
                 ) {
                     val appbarTitle = when {
-                        isSelectionMode -> "${selectedNoteIds.size} Selected"
-                        viewedNoteId != null -> viewedNote?.title ?: "Note"
-                        else -> "Notepad"
+                        isSelectionMode -> "${selectedNoteIds.size} " + stringResource(R.string.st_NotepadScreen_sel8)
+                        viewedNoteId != null -> viewedNote?.title ?: stringResource(R.string.st_NotepadScreen_d29)
+                        else -> stringResource(R.string.st_NotepadScreen_np12)
                     }
                     val appbarSubtitle = when {
-                        isSelectionMode -> "Select notes to take action"
-                        viewedNoteId != null -> SimpleDateFormat("MMMM d", Locale.getDefault()).format(Date(viewedNote?.timestamp ?: 0))
-                        else -> "Capture your thoughts"
+                        isSelectionMode -> stringResource(R.string.st_NotepadScreen_sntta13)
+                        viewedNoteId != null -> {
+                            val config = androidx.compose.ui.platform.LocalConfiguration.current
+                            remember(viewedNote?.timestamp, config) {
+                                val locale = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                                    config.locales[0]
+                                } else {
+                                    config.locale
+                                }
+                                SimpleDateFormat("MMMM d", locale).format(Date(viewedNote?.timestamp ?: 0))
+                            }
+                        }
+                        else -> stringResource(R.string.st_NotepadScreen_cyt14)
                     }
 
                     ExpressiveTopAppBar(
@@ -715,7 +730,7 @@ fun NotepadScreen(
                                     modifier = Modifier.size(42.dp)
                                 ) {
                                     Icon(
-                                        Icons.Rounded.Checklist, "Select", 
+                                        Icons.Rounded.Checklist, stringResource(R.string.st_NotepadScreen_sel8), 
                                         Modifier.size(20.dp)
                                     )
                                 }
@@ -731,7 +746,7 @@ fun NotepadScreen(
                                     ) {
                                         Icon(
                                             Icons.Rounded.Sort,
-                                            "Sort",
+                                            stringResource(R.string.st_NotepadScreen_sort_icon16),
                                             Modifier.size(20.dp)
                                         )
                                     }
@@ -742,9 +757,9 @@ fun NotepadScreen(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     ) {
                                         listOf(
-                                            NoteSort.DATE to "Date modified",
-                                            NoteSort.TITLE to "Title (A–Z)",
-                                            NoteSort.COLOR to "By colour",
+                                            NoteSort.DATE to stringResource(R.string.st_NotepadScreen_dm17),
+                                            NoteSort.TITLE to stringResource(R.string.st_NotepadScreen_taz18),
+                                            NoteSort.COLOR to stringResource(R.string.st_NotepadScreen_bc19),
                                         ).forEach { (sort, label) ->
                                             DropdownMenuItem(
                                                 text = {
@@ -781,7 +796,7 @@ fun NotepadScreen(
                                 ) {
                                     Icon(
                                         Icons.Rounded.DeleteOutline,
-                                        "Trash",
+                                        stringResource(R.string.st_NotepadScreen_trash20),
                                         Modifier.size(20.dp),
                                         tint = MaterialTheme.colorScheme.onSurface,
                                     )
@@ -806,7 +821,7 @@ fun NotepadScreen(
                                     .focusRequester(searchFocusRequester),
                                 placeholder = {
                                     Text(
-                                        "Search your thoughts...",
+                                        stringResource(R.string.st_NotepadScreen_syt_hint21),
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                 },
@@ -987,8 +1002,8 @@ fun NotepadScreen(
                                                     viewModel.deleteNote(note)
                                                     deletingNoteId = null
                                                     val r = snackbar.showSnackbar(
-                                                        "Note deleted",
-                                                        actionLabel = "UNDO",
+                                                        noteDeletedMsg,
+                                                        actionLabel = undoLabel,
                                                         duration    = SnackbarDuration.Short,
                                                     )
                                                     if (r == SnackbarResult.ActionPerformed) {
@@ -1106,7 +1121,7 @@ fun NotepadScreen(
                                 )
 
                                 Text(
-                                    note.title.ifEmpty { "Untitled" },
+                                    note.title.ifEmpty { stringResource(R.string.st_NotepadScreen_u28) },
                                     style      = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Black,
                                     color      = onColor,
@@ -1129,8 +1144,8 @@ fun NotepadScreen(
                                         }
                                         note.attachedAudioUri?.let { uri ->
                                             val track = musicState.tracks.find { it.uri == uri }
-                                            MusicPill(
-                                                title = note.attachedAudioName ?: "Audio",
+                                MusicPill(
+                                                title = note.attachedAudioName ?: stringResource(R.string.st_NotepadScreen_ma38),
                                                 isPlaying = musicState.isPlaying && musicState.currentTrack?.uri == uri,
                                                 isCurrentTrack = musicState.currentTrack?.uri == uri,
                                                 thumbnail = track?.thumbnailUri,
@@ -1274,9 +1289,9 @@ private fun NotesEmptyState(isSearching: Boolean, selectedCategory: String) {
             Spacer(Modifier.height(32.dp))
             Text(
                 text = when {
-                    isSearching        -> "No matches found"
+                    isSearching        -> stringResource(R.string.st_NotepadScreen_nmf22)
                     selectedCategory != "All" -> "No $selectedCategory yet"
-                    else               -> "Your canvas awaits"
+                    else               -> stringResource(R.string.st_NotepadScreen_yca24)
                 },
                 style      = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
@@ -1286,9 +1301,9 @@ private fun NotesEmptyState(isSearching: Boolean, selectedCategory: String) {
             Spacer(Modifier.height(12.dp))
             Text(
                 text = when {
-                    isSearching -> "Try a different keyword or clear the search"
-                    selectedCategory != "All" -> "Switch to All to see all notes"
-                    else        -> "Tap the button below to start writing your first note"
+                    isSearching -> stringResource(R.string.st_NotepadScreen_tadk25)
+                    selectedCategory != "All" -> stringResource(R.string.st_NotepadScreen_stataan26)
+                    else        -> stringResource(R.string.st_NotepadScreen_ttbtswyfn27)
                 },
                 style     = MaterialTheme.typography.bodyMedium,
                 color     = MaterialTheme.colorScheme.onSurface.copy(0.38f),
@@ -1936,7 +1951,7 @@ private fun ViewerFloatingActions(
                 ),
                 modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Rounded.Edit, "Edit", modifier = Modifier.size(24.dp))
+                Icon(Icons.Rounded.Edit, stringResource(R.string.st_MusicPlayerScreen_rn_item51), modifier = Modifier.size(24.dp))
             }
             
             VerticalDivider(modifier = Modifier.height(24.dp), color = noteColor.copy(0.2f))
@@ -1949,7 +1964,7 @@ private fun ViewerFloatingActions(
                 ),
                 modifier = Modifier.size(48.dp)
             ) {
-                Icon(Icons.Rounded.Close, "Close", modifier = Modifier.size(24.dp))
+                Icon(Icons.Rounded.Close, stringResource(R.string.st_CatalogScreen_c3), modifier = Modifier.size(24.dp))
             }
         }
     }
@@ -2011,7 +2026,7 @@ fun AiSummarySheet(
                         tint = accentColor,
                     )
                     Text(
-                        "AI SUMMARY",
+                        stringResource(R.string.st_NowPlayingAiScreen_an9),
                         style         = MaterialTheme.typography.labelMedium,
                         fontWeight    = FontWeight.Black,
                         color         = accentColor,
@@ -2047,7 +2062,7 @@ fun AiSummarySheet(
                         Box(Modifier.size(8.dp).alpha(a).background(accentColor, CircleShape))
                     }
                     Spacer(Modifier.width(8.dp))
-                    Text("Analysing note…", style = MaterialTheme.typography.bodyMedium, color = accentColor.copy(0.5f))
+                    Text(stringResource(R.string.st_NowPlayingAiScreen_an9), style = MaterialTheme.typography.bodyMedium, color = accentColor.copy(0.5f))
                 }
             } else if (summary != null) {
                 Surface(
@@ -2065,7 +2080,7 @@ fun AiSummarySheet(
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "Generated by Groq · llama-3.3-70b-versatile",
+                    stringResource(R.string.st_NowPlayingAiScreen_gbg10),
                     style = MaterialTheme.typography.labelSmall,
                     color = accentColor.copy(0.28f),
                 )
@@ -2142,7 +2157,7 @@ private fun VerticalColorPickerBanner(
                         tint = onColor
                     )
                     Text(
-                        "EDITOR COLOR",
+                        stringResource(R.string.st_NowPlayingAiScreen_ec11),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = onColor,
@@ -2271,7 +2286,7 @@ private fun AiStyleBanner(style: AiNoteStyle, onColor: Color, onAccept: () -> Un
             ) {
                 Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(14.dp), tint = onColor)
                 Text(
-                    "AI STYLE SUGGESTION",
+                    stringResource(R.string.st_NotepadScreen_ass35),
                     style         = MaterialTheme.typography.labelSmall,
                     fontWeight    = FontWeight.Black,
                     color         = onColor,
@@ -2301,10 +2316,10 @@ private fun AiStyleBanner(style: AiNoteStyle, onColor: Color, onAccept: () -> Un
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(onClick = onAccept, color = onColor.copy(0.18f), shape = MediumExpressiveShape) {
-                    Text("APPLY", Modifier.padding(horizontal = 14.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor, letterSpacing = 1.sp)
+                    Text(stringResource(R.string.st_NotepadScreen_a34), Modifier.padding(horizontal = 14.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = onColor, letterSpacing = 1.sp)
                 }
                 Surface(onClick = onDismiss, color = Color.Transparent, shape = MediumExpressiveShape, border = BorderStroke(1.dp, onColor.copy(0.15f))) {
-                    Text("DISMISS", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = onColor.copy(0.6f))
+                    Text(stringResource(R.string.st_NotepadScreen_dis36), Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = onColor.copy(0.6f))
                 }
             }
         }
@@ -2335,18 +2350,18 @@ private fun AttachmentMenuSheet(
                 .navigationBarsPadding()
         ) {
             @Suppress("DEPRECATION")
-            Text("ATTACH",
+            Text(stringResource(R.string.st_NotepadScreen_att37),
                 style         = MaterialTheme.typography.labelSmall,
                 fontWeight    = FontWeight.Black,
                 color         = MaterialTheme.colorScheme.primary,
                 letterSpacing = 2.sp,
                 modifier      = Modifier.padding(bottom = 16.dp, start = 4.dp),
             )
-            AttachmentTypeItem("Music / Audio", "Attach a track or voice memo", Icons.Rounded.MusicNote,     Color(0xFFFF4081)) { onPickAudio() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_ma38), "Attach a track or voice memo", Icons.Rounded.MusicNote,     Color(0xFFFF4081)) { onPickAudio() }
             Spacer(Modifier.height(10.dp))
-            AttachmentTypeItem("PDF Document",  "Attach a document reference", Icons.Rounded.Description, Color(0xFF2196F3)) { onPickPdf() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_pd39),  "Attach a document reference", Icons.Rounded.Description, Color(0xFF2196F3)) { onPickPdf() }
             Spacer(Modifier.height(10.dp))
-            AttachmentTypeItem("Image",         "Attach a photo or graphic", Icons.Rounded.Image, Color(0xFF4CAF50)) { onPickImage() }
+            AttachmentTypeItem(stringResource(R.string.st_NotepadScreen_i40),         "Attach a photo or graphic", Icons.Rounded.Image, Color(0xFF4CAF50)) { onPickImage() }
         }
     }
 }
@@ -2966,7 +2981,7 @@ fun CustomColorDialog(
         containerColor   = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape            = BouncyShape,
         title = {
-            Text("CUSTOM COLOUR", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp, style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.st_NotepadScreen_cc32), fontWeight = FontWeight.Black, letterSpacing = 1.5.sp, style = MaterialTheme.typography.labelMedium)
         },
         text = {
             Column(
@@ -2985,7 +3000,7 @@ fun CustomColorDialog(
                 OutlinedTextField(
                     value         = hex,
                     onValueChange = { if (it.length <= 6) hex = it.uppercase().filter { c -> c in "0123456789ABCDEF" } },
-                    label         = { Text("HEX CODE") },
+                    label         = { Text(stringResource(R.string.st_NotepadScreen_hc33)) },
                     prefix        = { Text("#") },
                     modifier      = Modifier.fillMaxWidth(),
                     shape         = LargeExpressiveShape,
@@ -3003,10 +3018,10 @@ fun CustomColorDialog(
                     haptic.click()
                     try { onColorSelected(android.graphics.Color.parseColor("#$hex")) } catch (_: Exception) {}
                 },
-            ) { Text("APPLY", fontWeight = FontWeight.Black) }
+            ) { Text(stringResource(R.string.st_NotepadScreen_a34), fontWeight = FontWeight.Black) }
         },
         dismissButton = {
-            TextButton(onClick = { haptic.click(); onDismiss() }) { Text("CANCEL") }
+            TextButton(onClick = { haptic.click(); onDismiss() }) { Text(stringResource(R.string.st_NotepadScreen_c31)) }
         },
     )
 }
@@ -4208,7 +4223,7 @@ private fun AiToolsPopup(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 @Suppress("DEPRECATION")
-                Text("AI NOTE TOOLS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_NotepadScreen_ant47), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
             }
             Row {
                 ToolzExpressiveIconButton(
@@ -4356,7 +4371,7 @@ private fun AiToolsPopup(
                                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
                                     }
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Summary", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.st_MusicPlayerScreen_q72), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                 }
                                 
                                 if (aiSummary != null && !aiLoading) {
@@ -4428,7 +4443,7 @@ private fun ModelSettingsView(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text("Select AI Model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_MusicPlayerScreen_ail73), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
             lazyItems(models) { model ->
@@ -4453,10 +4468,10 @@ private fun AiMenu(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!isViewerMode && !isSelectionMode) {
-            AiMenuItem("Generate a note", "Create a new note from scratch", Icons.Rounded.Add, onGenerate)
+            AiMenuItem(stringResource(R.string.st_NowPlayingAiScreen_an9), "Create a new note from scratch", Icons.Rounded.Add, onGenerate)
         }
-        AiMenuItem("Edit", if (isViewerMode || (isSelectionMode && !isViewerMode)) "Transform this note" else "Transform an existing note", Icons.Rounded.Edit, onEdit)
-        AiMenuItem("Summarize", if (isViewerMode || (isSelectionMode && !isViewerMode)) "Get a quick breakdown" else "Get a quick breakdown", Icons.Rounded.Summarize, onSummarize)
+        AiMenuItem(stringResource(R.string.st_MusicPlayerScreen_rn_item51), if (isViewerMode || (isSelectionMode && !isViewerMode)) "Transform this note" else "Transform an existing note", Icons.Rounded.Edit, onEdit)
+        AiMenuItem(stringResource(R.string.st_NowPlayingAiScreen_an9), if (isViewerMode || (isSelectionMode && !isViewerMode)) "Get a quick breakdown" else "Get a quick breakdown", Icons.Rounded.Summarize, onSummarize)
     }
 }
 
@@ -4497,7 +4512,7 @@ private fun NotePicker(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text("Select a Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_NotepadScreen_sel8) + " a Note", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             lazyItems(notes) { note ->
@@ -4537,7 +4552,7 @@ private fun PromptInput(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(16.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Text(if (isGenerate) "Generate a note" else "What should AI do?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(if (isGenerate) stringResource(R.string.st_NowPlayingAiScreen_an9) else "What should AI do?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         }
         TextField(
             value = prompt,
@@ -4593,14 +4608,14 @@ private fun TrashBottomSheet(
             ) {
                 Column {
                     Text(
-                        "TRASH",
+                        stringResource(R.string.st_NotepadScreen_t48),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
                         letterSpacing = 2.sp
                     )
                     Text(
-                        "${deletedNotes.size} notes",
+                        "${deletedNotes.size} " + stringResource(R.string.st_NotepadScreen_np12),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f)
                     )
@@ -4612,7 +4627,7 @@ private fun TrashBottomSheet(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(0.3f))
                     ) {
-                        Text("EMPTY TRASH", fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_NotepadScreen_et49), fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -4622,7 +4637,7 @@ private fun TrashBottomSheet(
             if (deletedNotes.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "Trash is empty",
+                        stringResource(R.string.st_NotepadScreen_tie50),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                     )
@@ -4648,7 +4663,7 @@ private fun TrashBottomSheet(
                                     Modifier.size(8.dp).background(Color(note.color), CircleShape)
                                 )
                                 Column(Modifier.weight(1f)) {
-                                    val title = if (note.title.isBlank()) "Untitled" else note.title
+                                    val title = if (note.title.isBlank()) stringResource(R.string.st_NotepadScreen_u28) else note.title
                                     Text(
                                         title,
                                         fontWeight = FontWeight.Bold,
@@ -4662,12 +4677,12 @@ private fun TrashBottomSheet(
                                     )
                                 }
                                 
-                                IconButton(onClick = { haptic.click(); onRestore(note) }) {
-                                    Icon(Icons.Rounded.Restore, "Restore", tint = MaterialTheme.colorScheme.primary)
+                                    IconButton(onClick = { haptic.click(); onRestore(note) }) {
+                                    Icon(Icons.Rounded.Restore, stringResource(R.string.st_NotepadScreen_trash20), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 
                                 IconButton(onClick = { haptic.click(); onDeletePermanently(note) }) {
-                                    Icon(Icons.Rounded.DeleteForever, "Delete", tint = MaterialTheme.colorScheme.error)
+                                    Icon(Icons.Rounded.DeleteForever, stringResource(R.string.st_NotepadScreen_d44), tint = MaterialTheme.colorScheme.error)
                                 }
                             }
                         }

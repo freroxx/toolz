@@ -19,6 +19,8 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -138,13 +140,13 @@ fun ScannerScreen(
                 title = { },
                 navigationIcon = {
                     FilledTonalIconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_ScannerScreen_f1a2))
                     }
                 },
                 actions = {
                     if (onNavigateToGenerator != null) {
                         FilledTonalIconButton(onClick = onNavigateToGenerator) {
-                            Icon(Icons.Rounded.QrCode, contentDescription = "QR Generator")
+                            Icon(Icons.Rounded.QrCode, contentDescription = stringResource(R.string.st_ScannerScreen_3d5b))
                         }
                     }
                     FilledTonalIconButton(
@@ -155,7 +157,7 @@ fun ScannerScreen(
                     ) {
                         Icon(
                             if (isFlashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
-                            contentDescription = "Flash"
+                            contentDescription = stringResource(R.string.st_ScannerScreen_9e2c)
                         )
                     }
                 },
@@ -196,7 +198,7 @@ fun ScannerScreen(
                         onClose = { scanResult = "" },
                         onCopy = {
                             clipboardManager.setText(AnnotatedString(scanResult))
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.st_ScannerScreen_3c4d), Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
@@ -307,14 +309,14 @@ fun ResultCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Scan Result",
+                    stringResource(R.string.st_ScannerScreen_1a2b),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Rounded.Close,
-                        contentDescription = "Close",
+                        contentDescription = stringResource(R.string.st_ScannerScreen_7c4d),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -338,7 +340,7 @@ fun ResultCard(
                 ) {
                     Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Copy")
+                    Text(stringResource(R.string.st_ScannerScreen_5f6e))
                 }
 
                 if (result.startsWith("http") || result.startsWith("www")) {
@@ -353,7 +355,7 @@ fun ResultCard(
                     ) {
                         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Open")
+                        Text(stringResource(R.string.st_ScannerScreen_2b8a))
                     }
                 }
             }
@@ -378,21 +380,21 @@ fun PermissionRequestView(onRequest: () -> Unit) {
         )
         Spacer(Modifier.height(24.dp))
         Text(
-            "Camera Permission",
+            stringResource(R.string.st_ScannerScreen_4d9c),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Camera access is needed to scan QR codes and barcodes.",
+            stringResource(R.string.st_ScannerScreen_6a1b),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(32.dp))
         Button(onClick = onRequest) {
-            Text("Grant Permission")
+            Text(stringResource(R.string.st_ScannerScreen_1b2c))
         }
     }
 }

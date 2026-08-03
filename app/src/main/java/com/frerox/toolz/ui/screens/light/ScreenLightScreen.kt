@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.app.Activity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -155,7 +157,7 @@ fun ScreenLightScreen(
                 border = BorderStroke(1.dp, contentColor.copy(alpha = 0.1f))
             ) {
                 Text(
-                    "TAP TO CONFIGURE",
+                    stringResource(R.string.st_ScreenLightScreen_f1a2),
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
                     style = MaterialTheme.typography.labelMedium,
                     color = contentColor.copy(alpha = 0.6f),
@@ -182,7 +184,7 @@ fun ScreenLightScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.Lock,
-                            contentDescription = "Locked",
+                            contentDescription = stringResource(R.string.st_ScreenLightScreen_3d5b),
                             tint = contentColor,
                             modifier = Modifier.size(64.dp)
                         )
@@ -190,7 +192,7 @@ fun ScreenLightScreen(
                 }
                 Spacer(Modifier.height(32.dp))
                 Text(
-                    "SCREEN LOCKED",
+                    stringResource(R.string.st_ScreenLightScreen_9e2c),
                     style = MaterialTheme.typography.headlineMedium,
                     color = contentColor,
                     fontWeight = FontWeight.Black,
@@ -198,7 +200,7 @@ fun ScreenLightScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "LONG PRESS TO UNLOCK",
+                    stringResource(R.string.st_ScreenLightScreen_1a2b),
                     style = MaterialTheme.typography.labelLarge,
                     color = contentColor.copy(alpha = 0.6f),
                     fontWeight = FontWeight.Bold,
@@ -231,7 +233,7 @@ fun ScreenLightScreen(
                             contentColor = contentColor
                         )
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.st_ScreenLightScreen_7c4d))
                     }
                     
                     Surface(
@@ -239,7 +241,7 @@ fun ScreenLightScreen(
                         shape = SmallExpressiveShape
                     ) {
                         Text(
-                            "SCREEN LIGHT",
+                            stringResource(R.string.st_ScreenLightScreen_5f6e),
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Black,
@@ -257,7 +259,7 @@ fun ScreenLightScreen(
                             contentColor = contentColor
                         )
                     ) {
-                        Icon(Icons.Rounded.LockOpen, "Lock")
+                        Icon(Icons.Rounded.LockOpen, stringResource(R.string.st_ScreenLightScreen_2b8a))
                     }
                 }
 
@@ -287,7 +289,7 @@ fun ScreenLightScreen(
                                 Icon(Icons.Rounded.LightMode, null, tint = contentColor, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Text(
-                                    "BRIGHTNESS",
+                                    stringResource(R.string.st_ScreenLightScreen_4d9c),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Black,
                                     color = contentColor,
@@ -317,7 +319,7 @@ fun ScreenLightScreen(
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
-                                        "STROBE",
+                                        stringResource(R.string.st_ScreenLightScreen_6a1b),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Black
                                     )
@@ -381,7 +383,7 @@ fun ScreenLightScreen(
                                    Icon(Icons.Rounded.Speed, null, tint = contentColor, modifier = Modifier.size(18.dp))
                                    Spacer(Modifier.width(12.dp))
                                    Text(
-                                       "STROBE SPEED",
+                                       stringResource(R.string.st_ScreenLightScreen_1b2c),
                                        style = MaterialTheme.typography.labelSmall,
                                        fontWeight = FontWeight.Black,
                                        color = contentColor,

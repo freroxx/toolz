@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -99,8 +101,8 @@ fun UnitConverterScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Unit Converter",
-                subtitle = if (compact) "Quick mode" else "Scientific conversions",
+                title = stringResource(R.string.st_UnitConverterScreen_f1a2),
+                subtitle = if (compact) stringResource(R.string.st_UnitConverterScreen_3d5b) else stringResource(R.string.st_UnitConverterScreen_9e2c),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -109,7 +111,7 @@ fun UnitConverterScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_UnitConverterScreen_1a2b))
                     }
                 },
                 actions = {
@@ -125,7 +127,7 @@ fun UnitConverterScreen(
                     ) {
                         Icon(
                             imageVector = if (compact) Icons.Rounded.UnfoldMore else Icons.Rounded.UnfoldLess,
-                            contentDescription = if (compact) "Switch to full view" else "Switch to quick view"
+                            contentDescription = if (compact) stringResource(R.string.st_UnitConverterScreen_7c4d) else stringResource(R.string.st_UnitConverterScreen_5f6e)
                         )
                     }
                 },
@@ -207,7 +209,7 @@ fun UnitConverterScreen(
                     if (state.type == ConversionType.CURRENCY) {
                         Spacer(Modifier.height(18.dp))
                         NoticeBanner(
-                            text = "Exchange rates are fixed reference values for demonstration, not live market rates.",
+                            text = stringResource(R.string.st_UnitConverterScreen_c3d4),
                             icon = Icons.Rounded.Info
                         )
                     }
@@ -342,7 +344,7 @@ private fun DialRibbon(
             }
 
             RibbonField(
-                label = "From",
+                label = stringResource(R.string.st_UnitConverterScreen_2b8a),
                 isInput = true,
                 value = state.inputValue,
                 unit = state.fromUnit,
@@ -372,7 +374,7 @@ private fun DialRibbon(
             }
 
             RibbonField(
-                label = "To",
+                label = stringResource(R.string.st_UnitConverterScreen_4d9c),
                 isInput = false,
                 value = state.outputValue,
                 unit = state.toUnit,
@@ -453,7 +455,7 @@ private fun ConversionDial(
             }
             Icon(
                 imageVector = Icons.Rounded.SwapVert,
-                contentDescription = "Swap units",
+                contentDescription = stringResource(R.string.st_UnitConverterScreen_6a1b),
                 tint = iconColor,
                 modifier = Modifier
                     .size(if (compact) 20.dp else 24.dp)
@@ -478,7 +480,7 @@ private fun FavoriteStar(isFavorite: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         Icon(
             imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+            contentDescription = if (isFavorite) stringResource(R.string.st_UnitConverterScreen_1b2c) else stringResource(R.string.st_UnitConverterScreen_3c4d),
             tint = if (isFavorite) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp).graphicsLayer { scaleX = scale; scaleY = scale }
         )
@@ -737,14 +739,14 @@ private fun UnitPickerSheet(
                 .padding(bottom = 24.dp)
         ) {
             Text(
-                "Choose a unit",
+                stringResource(R.string.st_UnitConverterScreen_e5f6),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                "Tap to select \u00b7 hold to pin to the top",
+                stringResource(R.string.st_UnitConverterScreen_g7h8),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -770,7 +772,7 @@ private fun UnitPickerSheet(
                                 tint = MaterialTheme.colorScheme.tertiary
                             )
                             Text(
-                                "Pinned",
+                                stringResource(R.string.st_UnitConverterScreen_i9j0),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.tertiary
@@ -954,7 +956,7 @@ private fun ResultCopyBar(state: UnitConverterState, onCopy: () -> Unit) {
                     if (state.isApproximate) {
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Approximate",
+                            text = stringResource(R.string.st_UnitConverterScreen_7e8f),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )
@@ -965,7 +967,7 @@ private fun ResultCopyBar(state: UnitConverterState, onCopy: () -> Unit) {
                     Crossfade(targetState = justCopied, label = "copyIcon") { copied ->
                         Icon(
                             imageVector = if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
-                            contentDescription = "Copy result",
+                            contentDescription = stringResource(R.string.st_UnitConverterScreen_5d6e),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
@@ -1018,7 +1020,7 @@ private fun ConversionShelf(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text("Favorites", fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_UnitConverterScreen_9f0a), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     )
@@ -1033,7 +1035,7 @@ private fun ConversionShelf(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text("Recent", fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_UnitConverterScreen_a1b2), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     )
@@ -1052,7 +1054,7 @@ private fun ConversionShelf(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = if (hasFavorites) "Favorites" else "Recent",
+                        text = if (hasFavorites) stringResource(R.string.st_UnitConverterScreen_9f0a) else stringResource(R.string.st_UnitConverterScreen_a1b2),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

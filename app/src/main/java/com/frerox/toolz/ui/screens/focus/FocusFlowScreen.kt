@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import coil3.compose.rememberAsyncImagePainter
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.focus.AppCategory
 import com.frerox.toolz.data.focus.AppUsageInfo
 import com.frerox.toolz.ui.components.*
@@ -127,8 +129,8 @@ fun FocusFlowScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Focus Flow",
-                subtitle = if (isWeekly) "Detailed app usage" else "Daily attention analytics",
+                title = stringResource(R.string.st_FocusFlowScreen_8f1a),
+                subtitle = if (isWeekly) stringResource(R.string.st_FocusFlowScreen_3d5b) else stringResource(R.string.st_FocusFlowScreen_9e2c),
                 navigationIcon = {
                     ToolzTonalExpressiveIconButton(
                         onClick  = { onNavigateBack() },
@@ -166,7 +168,7 @@ fun FocusFlowScreen(
                                 )
                             ) {
                                 Icon(
-                                    Icons.Rounded.AutoAwesome, "Refresh AI",
+                                    Icons.Rounded.AutoAwesome, stringResource(R.string.st_FocusFlowScreen_1a2b),
                                     modifier = Modifier.size(18.dp),
                                     tint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 )
@@ -195,7 +197,7 @@ fun FocusFlowScreen(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Rounded.Refresh, "Refresh", modifier = Modifier.size(20.dp))
+                        Icon(Icons.Rounded.Refresh, stringResource(R.string.st_FocusFlowScreen_7c4d), modifier = Modifier.size(20.dp))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -287,14 +289,14 @@ fun FocusFlowScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         MetricCard(
-                            label    = "Screen time",
+                            label    = stringResource(R.string.st_FocusFlowScreen_i9j0),
                             value    = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
                             icon     = Icons.Rounded.PhoneAndroid,
                             color    = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f),
                         )
                         MetricCard(
-                            label    = "Apps used",
+                            label    = stringResource(R.string.st_FocusFlowScreen_k1l2),
                             value    = "$appsCount",
                             icon     = Icons.Rounded.Apps,
                             color    = MaterialTheme.colorScheme.secondary,
@@ -331,7 +333,7 @@ fun FocusFlowScreen(
                             verticalAlignment     = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Analytics",
+                                stringResource(R.string.st_FocusFlowScreen_o5p6),
                                 modifier = Modifier.padding(horizontal = 12.dp),
                                 style    = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
@@ -344,13 +346,13 @@ fun FocusFlowScreen(
                                 ExpressiveFilterChip(
                                     selected = !isWeekly,
                                     onClick = { haptic.tick(); viewModel.toggleWeekly(false) },
-                                    label = { Text("Daily") },
+                                    label = { Text(stringResource(R.string.st_FocusFlowScreen_q7r8)) },
                                     shape = SquircleShape
                                 )
                                 ExpressiveFilterChip(
                                     selected = isWeekly,
                                     onClick = { haptic.tick(); viewModel.toggleWeekly(true) },
-                                    label = { Text("Weekly") },
+                                    label = { Text(stringResource(R.string.st_FocusFlowScreen_s9t0)) },
                                     shape = SquircleShape
                                 )
                             }
@@ -401,7 +403,7 @@ fun FocusFlowScreen(
                                 }
                                 Spacer(Modifier.height(24.dp))
                                 Text(
-                                    if (!hasUsagePermission) "Usage access not granted" else "No events recorded today",
+                                    if (!hasUsagePermission) stringResource(R.string.st_FocusFlowScreen_u1v2) else stringResource(R.string.st_FocusFlowScreen_w3x4),
                                     fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
@@ -410,9 +412,9 @@ fun FocusFlowScreen(
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     if (!hasUsagePermission)
-                                        "Usage access is required to accurately track your screen time. Tap the banner above to grant it."
+                                        stringResource(R.string.st_FocusFlowScreen_y5z6)
                                     else
-                                        "Some OEMs (Xiaomi, Samsung) restrict background event access. Try opening a few apps and refreshing.",
+                                        stringResource(R.string.st_FocusFlowScreen_a7b8),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
@@ -427,7 +429,7 @@ fun FocusFlowScreen(
                                         },
                                         shape = SquircleShape
                                     ) {
-                                        Text("Re-grant usage access", fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(R.string.st_FocusFlowScreen_c9d0), fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -500,12 +502,12 @@ fun FocusFlowScreen(
                 containerColor   = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape            = SquircleShape,
                 icon             = { Icon(Icons.Rounded.DriveFileRenameOutline, contentDescription = null) },
-                title            = { Text("Rename app") },
+                title            = { Text(stringResource(R.string.st_FocusFlowScreen_5f6e)) },
                 text             = {
                     OutlinedTextField(
                         value         = nameInput,
                         onValueChange = { nameInput = it },
-                        label         = { Text("Custom name") },
+                        label         = { Text(stringResource(R.string.st_FocusFlowScreen_2b8a)) },
                         modifier      = Modifier.fillMaxWidth(),
                         singleLine    = true,
                         shape         = SmallExpressiveShape,
@@ -518,11 +520,11 @@ fun FocusFlowScreen(
                             appToRename = null
                         },
                         shape = SquircleShape,
-                    ) { Text("Save") }
+                    ) { Text(stringResource(R.string.st_FocusFlowScreen_4d9c)) }
                 },
                 dismissButton = {
                     ToolzExpressiveTextButton(onClick = { appToRename = null }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.st_FocusFlowScreen_6a1b))
                     }
                 },
             )
@@ -532,8 +534,8 @@ fun FocusFlowScreen(
             AlertDialog(
                 onDismissRequest = { showResetAllConfirm = false },
                 icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                title = { Text("Reset all focus data?") },
-                text = { Text("This will clear all custom app limits, categories, and renamed apps. This cannot be undone.") },
+                title = { Text(stringResource(R.string.st_FocusFlowScreen_1b2c)) },
+                text = { Text(stringResource(R.string.st_FocusFlowScreen_3c4d)) },
                 confirmButton = {
                     ToolzExpressiveButton(
                         onClick = {
@@ -542,11 +544,11 @@ fun FocusFlowScreen(
                         },
                         shape = SquircleShape,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) { Text("Reset everything") }
+                    ) { Text(stringResource(R.string.st_FocusFlowScreen_5d6e)) }
                 },
                 dismissButton = {
                     ToolzExpressiveTextButton(onClick = { showResetAllConfirm = false }) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.st_FocusFlowScreen_6a1b))
                     }
                 },
                 shape = SquircleShape,
@@ -588,18 +590,18 @@ private fun PermissionBanner(canDrawOverlays: Boolean, onResolveClick: () -> Uni
                     )
                 }
             }
-            Column(Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (!canDrawOverlays) "Overlay required" else "Accessibility required",
+                    if (!canDrawOverlays) stringResource(R.string.st_FocusFlowScreen_7e8f) else stringResource(R.string.st_FocusFlowScreen_9f0a),
                     fontWeight = FontWeight.ExtraBold,
                     style      = MaterialTheme.typography.titleMedium,
                     color      = MaterialTheme.colorScheme.onErrorContainer,
                 )
                 Text(
                     if (!canDrawOverlays)
-                        "Needed to block distracting apps."
+                        stringResource(R.string.st_FocusFlowScreen_a1b2)
                     else
-                        "Needed for the real-time engine.",
+                        stringResource(R.string.st_FocusFlowScreen_c3d4),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                 )
@@ -641,15 +643,15 @@ private fun UsagePermissionBanner(onGrantClick: () -> Unit) {
                     Icon(Icons.Rounded.Visibility, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(28.dp))
                 }
             }
-            Column(Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Enable tracking",
+                    stringResource(R.string.st_FocusFlowScreen_e5f6),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Text(
-                    "Usage access is required for analytics.",
+                    stringResource(R.string.st_FocusFlowScreen_g7h8),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                 )
@@ -789,16 +791,16 @@ fun FocusSessionHeader(
     } else null
 
     val statusLabel = when {
-        score >= 85 -> "Elite focus"
-        score >= 70 -> "High focus"
-        score >= 40 -> "Balanced"
-        score >= 20 -> "Low focus"
-        else -> "Time to refocus"
+        score >= 85 -> stringResource(R.string.st_FocusFlowScreen_q3r4)
+        score >= 70 -> stringResource(R.string.st_FocusFlowScreen_s5t6)
+        score >= 40 -> stringResource(R.string.st_FocusFlowScreen_u7v8)
+        score >= 20 -> stringResource(R.string.st_FocusFlowScreen_w9x0)
+        else -> stringResource(R.string.st_FocusFlowScreen_a1b3)
     }
     val supportLabel = when {
-        score >= 70 -> "Keeping distractions in check."
-        score >= 40 -> "A steady day — room to tighten."
-        else -> "Distractions are winning."
+        score >= 70 -> stringResource(R.string.st_FocusFlowScreen_c3d5)
+        score >= 40 -> stringResource(R.string.st_FocusFlowScreen_e5f7)
+        else -> stringResource(R.string.st_FocusFlowScreen_g7h9)
     }
 
     val animatedScore by animateIntAsState(
@@ -892,7 +894,7 @@ fun FocusSessionHeader(
                         }
                     }
 
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         when (session.state) {
                             FocusSessionState.RUNNING, FocusSessionState.PAUSED -> {
                                 ExpressiveStatePill(
@@ -988,7 +990,7 @@ fun FocusSessionHeader(
                             ) {
                                 Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Start focus session", fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_FocusFlowScreen_a1b3_v2), fontWeight = FontWeight.SemiBold)
                             }
                             if (!performanceMode && !offlineModeEnabled) {
                                 ToolzTonalExpressiveIconButton(
@@ -1038,7 +1040,7 @@ fun FocusSessionHeader(
                             ) {
                                 Icon(Icons.Rounded.Check, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Dismiss", fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_FocusFlowScreen_c3d5_v2), fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -1083,8 +1085,8 @@ fun FocusSessionPickerSheet(
                     }
                 }
                 Column {
-                    Text("Focus session", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("How long for this block?", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_FocusFlowScreen_e5f7_v2), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.st_FocusFlowScreen_g7h9_v2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -1099,7 +1101,7 @@ fun FocusSessionPickerSheet(
                         label = {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                                 Text("$mins", fontWeight = FontWeight.Bold)
-                                Text("min", style = MaterialTheme.typography.labelSmall)
+                                Text(stringResource(R.string.st_FocusFlowScreen_i9j1), style = MaterialTheme.typography.labelSmall)
                             }
                         },
                         modifier = Modifier.weight(1f).height(64.dp),
@@ -1139,7 +1141,7 @@ private fun UncategorizedAppsSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Classification triage",
+                stringResource(R.string.st_FocusFlowScreen_m3n4),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1726,16 +1728,16 @@ fun FocusAppSettingsSheet(
                     Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
                 }
                 ToolzTonalExpressiveIconButton(onClick = { showResetConfirm = true }, shape = SquircleShape) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Rounded.RestartAlt, contentDescription = stringResource(R.string.st_FocusFlowScreen_7c4d), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
             Spacer(Modifier.height(24.dp))
 
-            Text("Classification", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.st_FocusFlowScreen_m3n5), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(true to "Focus", false to "Distract").forEach { (isProd, label) ->
+                listOf(true to stringResource(R.string.st_FocusFlowScreen_e1f2), false to stringResource(R.string.st_FocusFlowScreen_g3h4)).forEach { (isProd, label) ->
                     val isSelected  = isCurrentlyProductive == isProd
                     val activeColor = if (isProd) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     
@@ -1766,7 +1768,7 @@ fun FocusAppSettingsSheet(
             val isToolzApp = app.packageName == context.packageName
 
             if (!isToolzApp) {
-                Text("Daily time limit", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.st_FocusFlowScreen_k7l8), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15, 30, 60, 120).forEach { mins ->
@@ -1796,7 +1798,7 @@ fun FocusAppSettingsSheet(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                        Text("None", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_FocusFlowScreen_i5j6), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1836,7 +1838,7 @@ fun FocusAppSettingsSheet(
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape    = SquircleShape,
                 ) {
-                    Text("Apply settings", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.st_FocusFlowScreen_o1p2_v2), fontWeight = FontWeight.SemiBold)
                 }
             } else {
                 Surface(
@@ -1867,7 +1869,7 @@ fun FocusAppSettingsSheet(
                     shape    = SquircleShape,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                 ) {
-                    Text("Done", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.st_FocusFlowScreen_q7r9), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1877,17 +1879,17 @@ fun FocusAppSettingsSheet(
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             icon = { Icon(Icons.Rounded.RestartAlt, contentDescription = null) },
-            title = { Text("Reset app?") },
+            title = { Text(stringResource(R.string.st_FocusFlowScreen_s9t1)) },
             text = { Text("Clear all custom settings for ${app.appName}?") },
             confirmButton = {
                 ToolzExpressiveTextButton(onClick = {
                     onResetApp()
                     showResetConfirm = false
                     onDismiss()
-                }) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.st_FocusFlowScreen_w3x5), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                ToolzExpressiveTextButton(onClick = { showResetConfirm = false }) { Text("Cancel") }
+                ToolzExpressiveTextButton(onClick = { showResetConfirm = false }) { Text(stringResource(R.string.st_FocusFlowScreen_y5z7)) }
             },
             shape = SquircleShape
         )
@@ -2253,7 +2255,7 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                         modifier = Modifier.size(80.dp)
                     )
                     Spacer(Modifier.height(24.dp))
-                    Text("Generating custom tips…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.st_FocusFlowScreen_a7b9), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                 }
             } else {
                 Box(modifier = Modifier.weight(1f, fill = false)) {
@@ -2292,15 +2294,15 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showInstructionsDialog = false },
             icon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
-            title = { Text("AI guidance") },
+            title = { Text(stringResource(R.string.st_FocusFlowScreen_c9d1)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Tell the AI your focus goals.", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.st_FocusFlowScreen_e1f3), style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(
                         value = textInput,
                         onValueChange = { textInput = it },
                         modifier = Modifier.fillMaxWidth().height(120.dp),
-                        placeholder = { Text("e.g. Focus on reading more.") },
+                        placeholder = { Text(stringResource(R.string.st_FocusFlowScreen_g3h5)) },
                         shape = SmallExpressiveShape
                     )
                 }
@@ -2314,12 +2316,12 @@ fun ScreenTipsSheet(viewModel: FocusFlowViewModel, onDismiss: () -> Unit) {
                     },
                     shape = SmallExpressiveShape
                 ) {
-                    Text("Save")
+                    Text(stringResource(R.string.st_FocusFlowScreen_i5j7))
                 }
             },
             dismissButton = {
                 ToolzExpressiveTextButton(onClick = { showInstructionsDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.st_FocusFlowScreen_k7l9))
                 }
             },
             shape = SquircleShape,

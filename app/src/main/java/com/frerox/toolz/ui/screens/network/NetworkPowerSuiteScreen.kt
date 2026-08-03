@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.network
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.app.Activity
 import android.os.Parcelable
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -286,14 +288,14 @@ fun NetworkPowerSuiteScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 ExpressiveTopAppBar(
-                    title = "NETWORK SUITE",
+                    title = stringResource(R.string.st_NetworkPowerSuiteScreen_f1a2),
                     subtitle = if (uiState.wifiState.ssid.isNotEmpty()) uiState.wifiState.ssid else "Scanning connectivity",
                     navigationIcon = {
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
                         }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_NetworkPowerSuiteScreen_3d5b))
                         }
                     },
                     actions = {
@@ -301,7 +303,7 @@ fun NetworkPowerSuiteScreen(
                             vibrationManager?.vibrateClick()
                             viewModel.refreshSuite()
                         }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh suite")
+                            Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_NetworkPowerSuiteScreen_9e2c))
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -577,7 +579,7 @@ private fun OverviewTab(
 
         item {
             GlassCard(
-                title = "Local Link",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_1a2b),
                 icon = Icons.Rounded.Wifi,
                 subtitle = "Active profile"
             ) {
@@ -588,7 +590,7 @@ private fun OverviewTab(
         }
         item {
             GlassCard(
-                title = "Public Identity",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_7c4d),
                 icon = Icons.Rounded.Public,
                 subtitle = "Identity",
                 trailing = {
@@ -607,7 +609,7 @@ private fun OverviewTab(
         }
         item(span = StaggeredGridItemSpan.FullLine) {
             GlassCard(
-                title = "Visual Topology",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_5f6e),
                 icon = Icons.Rounded.Hub,
                 subtitle = "Live mesh data pulses",
                 trailing = {
@@ -616,7 +618,7 @@ private fun OverviewTab(
                         enabled = !uiState.isScanningDevices,
                         shape = RoundedCornerShape(20.dp)
                     ) {
-                        Text(if (uiState.isScanningDevices) "Scanning" else "Scan Subnet")
+                        Text(if (uiState.isScanningDevices) "Scanning" else stringResource(R.string.st_NetworkPowerSuiteScreen_2b8a))
                     }
                 }
             ) {
@@ -625,7 +627,7 @@ private fun OverviewTab(
         }
         item {
             GlassCard(
-                title = "Privileged Radios",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_4d9c),
                 icon = Icons.Rounded.CellTower,
                 subtitle = "Automation"
             ) {
@@ -635,7 +637,7 @@ private fun OverviewTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Mobile Data", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_NetworkPowerSuiteScreen_6a1b), fontWeight = FontWeight.Bold)
                     }
                     Switch(
                         checked = uiState.isDataEnabled,
@@ -653,7 +655,7 @@ private fun OverviewTab(
         }
         item {
             GlassCard(
-                title = "Port Sentry",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_1b2c),
                 icon = Icons.Rounded.Security,
                 subtitle = "Probe gateway"
             ) {
@@ -663,7 +665,7 @@ private fun OverviewTab(
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (uiState.isScanningPorts) "Probing..." else "Probe Ports")
+                    Text(if (uiState.isScanningPorts) "Probing..." else stringResource(R.string.st_NetworkPowerSuiteScreen_3c4d))
                 }
             }
         }
@@ -745,7 +747,7 @@ private fun DnsTab(
     ) {
         item {
             GlassCard(
-                title = "Ultimate DNS Engine",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_5d6e),
                 icon = Icons.Rounded.Dns,
                 subtitle = "Parallel benchmark of top resolvers",
                 trailing = {
@@ -783,7 +785,7 @@ private fun DnsTab(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(modifier = Modifier.weight(1f)) {
                     GlassCard(
-                        title = "System DNS",
+                        title = stringResource(R.string.st_NetworkPowerSuiteScreen_7e8f),
                         icon = Icons.Rounded.VpnKey,
                         subtitle = "Shizuku bridge"
                     ) {
@@ -792,7 +794,7 @@ private fun DnsTab(
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ProtectedActionButton(
-                                label = "Reset",
+                                label = stringResource(R.string.st_NetworkPowerSuiteScreen_9f0a),
                                 privilegedReady = privilegedReady,
                                 onClick = onResetDns,
                                 modifier = Modifier.weight(1f)
@@ -802,7 +804,7 @@ private fun DnsTab(
                 }
                 Box(modifier = Modifier.weight(1f)) {
                     GlassCard(
-                        title = "Cache",
+                        title = stringResource(R.string.st_NetworkPowerSuiteScreen_a1b2),
                         icon = Icons.Rounded.AutoGraph,
                         subtitle = "Netd metrics"
                     ) {
@@ -810,7 +812,7 @@ private fun DnsTab(
                         MetricRow("Entries", uiState.cacheAnalytics.entryCount?.toString() ?: "0")
                         Spacer(Modifier.height(14.dp))
                         ProtectedActionButton(
-                            label = "Flush",
+                            label = stringResource(R.string.st_NetworkPowerSuiteScreen_c3d4),
                             privilegedReady = privilegedReady,
                             onClick = onFlushCache,
                             colors = ButtonDefaults.buttonColors(
@@ -826,7 +828,7 @@ private fun DnsTab(
 
         item {
             Text(
-                "Benchmark Results",
+                stringResource(R.string.st_NetworkPowerSuiteScreen_e5f6),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
@@ -850,7 +852,7 @@ private fun DnsTab(
 
         item {
             GlassCard(
-                title = "Manual Endpoint",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_g7h8),
                 icon = Icons.Rounded.Bolt,
                 subtitle = "Custom resolver properties"
             ) {
@@ -858,13 +860,13 @@ private fun DnsTab(
                     OutlinedTextField(
                         value = customHostname,
                         onValueChange = onCustomHostnameChange,
-                        label = { Text("Private DNS hostname") },
+                        label = { Text(stringResource(R.string.st_NetworkPowerSuiteScreen_i9j0)) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp)
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ProtectedActionButton(
-                            label = "Apply Custom Host",
+                            label = stringResource(R.string.st_NetworkPowerSuiteScreen_k1l2),
                             privilegedReady = privilegedReady,
                             onClick = onApplyCustomHost,
                             modifier = Modifier.weight(1f)
@@ -893,7 +895,7 @@ private fun DiagnosticsTab(
     ) {
         item(span = StaggeredGridItemSpan.FullLine) {
             GlassCard(
-                title = "Ping Master",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_m3n4),
                 icon = Icons.Rounded.Timeline,
                 subtitle = "60-second latency stream with jitter alert"
             ) {
@@ -915,7 +917,7 @@ private fun DiagnosticsTab(
         }
         item {
             GlassCard(
-                title = "Speed Test",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_o5p6),
                 icon = Icons.Rounded.Speed,
                 subtitle = "Throughput probe with animated phase"
             ) {
@@ -944,7 +946,7 @@ private fun DiagnosticsTab(
         }
         item {
             GlassCard(
-                title = "Trace Route",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_q7r8),
                 icon = Icons.Rounded.Route,
                 subtitle = "Hop-by-hop path summary"
             ) {
@@ -973,7 +975,7 @@ private fun DiagnosticsTab(
         }
         item(span = StaggeredGridItemSpan.FullLine) {
             GlassCard(
-                title = "VPN + Route Control",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_s9t0),
                 icon = Icons.Rounded.Lan,
                 subtitle = "Tunnel state, audits, and live route tables"
             ) {
@@ -1026,7 +1028,7 @@ private fun TrafficTab(
     ) {
         item(span = StaggeredGridItemSpan.FullLine) {
             GlassCard(
-                title = "Deep Traffic Inspection",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_u1v2),
                 icon = Icons.Rounded.NetworkCheck,
                 subtitle = "Live socket inventory and radio context",
                 trailing = {
@@ -1057,7 +1059,7 @@ private fun TrafficTab(
         }
         item {
             GlassCard(
-                title = "Cellular Audit",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_w3x4),
                 icon = Icons.Rounded.CellTower,
                 subtitle = "Current access tech and signal state"
             ) {
@@ -1069,7 +1071,7 @@ private fun TrafficTab(
         }
         item {
             GlassCard(
-                title = "Neighbor Table",
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_y5z6),
                 icon = Icons.Rounded.Memory,
                 subtitle = "ARP / route-side awareness"
             ) {

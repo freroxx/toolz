@@ -16,6 +16,8 @@
  */
 
 package com.frerox.toolz.ui.screens.time
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -115,7 +117,7 @@ fun WorldClockScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "WORLD CLOCK",
+                title = stringResource(R.string.st_WorldClockScreen_a1b2),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -129,7 +131,7 @@ fun WorldClockScreen(
                                 SmallExpressiveShape,
                             ),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_WorldClockScreen_c3d4))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -191,7 +193,7 @@ fun WorldClockScreen(
                                 query = uiState.searchQuery,
                                 onQueryChange = viewModel::setSearchQuery,
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search city, country or zone…") },
+                                placeholder = { Text(stringResource(R.string.st_WorldClockScreen_e5f6)) },
                                 leadingIcon = {
                                     Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
                                 },
@@ -283,7 +285,7 @@ fun WorldClockScreen(
                         // Section header
                         item {
                             Text(
-                                text = "MY WORLD CLOCKS",
+                                text = stringResource(R.string.st_WorldClockScreen_g7h8),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
@@ -335,7 +337,7 @@ fun WorldClockScreen(
                                 query = uiState.searchQuery,
                                 onQueryChange = viewModel::setSearchQuery,
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Search city, country or zone…") },
+                                placeholder = { Text(stringResource(R.string.st_WorldClockScreen_e5f6)) },
                                 leadingIcon = {
                                     Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
                                 },
@@ -419,7 +421,7 @@ fun WorldClockScreen(
                     // ── Section header ───────────────────────────────────────────────
                     item {
                         Text(
-                            text = "MY WORLD CLOCKS",
+                            text = stringResource(R.string.st_WorldClockScreen_g7h8),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
@@ -525,7 +527,7 @@ private fun MapSection(
                                     query = uiState.searchQuery,
                                     onQueryChange = viewModel::setSearchQuery,
                                     modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Search city, country or zone…") },
+                                    placeholder = { Text(stringResource(R.string.st_WorldClockScreen_e5f6)) },
                                     leadingIcon = {
                                         Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary)
                                     },
@@ -674,7 +676,7 @@ private fun MapControlsPill(
             IconButton(onClick = onLocate, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = if (uiState.userLatLon != null) Icons.Rounded.MyLocation else Icons.Rounded.LocationOn,
-                    contentDescription = "My Location",
+                    contentDescription = stringResource(R.string.st_WorldClockScreen_i5j6),
                     tint = if (uiState.userLatLon != null) Color(0xFF00E676) else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
@@ -702,7 +704,7 @@ private fun MapControlsPill(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Icon(Icons.Rounded.Map, null, modifier = Modifier.size(15.dp), tint = normalContentColor)
-                    Text("Normal", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = normalContentColor)
+                    Text(stringResource(R.string.st_WorldClockScreen_i9j0), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = normalContentColor)
                 }
             }
 
@@ -728,7 +730,7 @@ private fun MapControlsPill(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
                     Icon(Icons.Rounded.Satellite, null, modifier = Modifier.size(15.dp), tint = satContentColor)
-                    Text("Satellite", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = satContentColor)
+                    Text(stringResource(R.string.st_WorldClockScreen_k1l2), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = satContentColor)
                 }
             }
 
@@ -741,7 +743,7 @@ private fun MapControlsPill(
                 IconButton(onClick = onToggleSearch, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = if (isSearchVisible) Icons.Rounded.SearchOff else Icons.Rounded.Search,
-                        contentDescription = "Search",
+                        contentDescription = stringResource(R.string.st_WorldClockScreen_m3n4),
                         tint = searchTint,
                         modifier = Modifier.size(20.dp),
                     )
@@ -757,7 +759,7 @@ private fun MapControlsPill(
                 IconButton(onClick = onToggleInfo, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Rounded.Info,
-                        contentDescription = "Info",
+                        contentDescription = stringResource(R.string.st_WorldClockScreen_o5p6),
                         tint = infoTint,
                         modifier = Modifier.size(20.dp),
                     )
@@ -768,7 +770,7 @@ private fun MapControlsPill(
             IconButton(onClick = onToggleFullScreen, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = if (isFullScreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
-                    contentDescription = "Toggle Fullscreen",
+                    contentDescription = stringResource(R.string.st_WorldClockScreen_q7r8),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
@@ -884,7 +886,7 @@ private fun SelectedTimePanel(
                     ) {
                         Icon(
                             Icons.Rounded.ContentCopy, 
-                            contentDescription = "Copy",
+                            contentDescription = stringResource(R.string.st_WorldClockScreen_s9t0),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
@@ -898,7 +900,7 @@ private fun SelectedTimePanel(
                         ) {
                             Icon(
                                 Icons.Rounded.Add, 
-                                contentDescription = "Add",
+                                contentDescription = stringResource(R.string.st_WorldClockScreen_u1v2),
                                 tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -955,7 +957,7 @@ private fun SavedClockCard(
                             color = MaterialTheme.colorScheme.primaryContainer,
                         ) {
                             Text(
-                                text = "Local",
+                                text = stringResource(R.string.st_WorldClockScreen_w3x4),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1020,7 +1022,7 @@ private fun SavedClockCard(
                     ) {
                         Icon(
                             Icons.Rounded.Close,
-                            contentDescription = "Remove",
+                            contentDescription = stringResource(R.string.st_WorldClockScreen_y5z6),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp),
                         )
@@ -1055,12 +1057,12 @@ private fun EmptyClockDeck(onPick: () -> Unit) {
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
             )
             Text(
-                "Explore the world map",
+                stringResource(R.string.st_WorldClockScreen_a7b8),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "Tap any dot on the map to see its local time, then track it here.",
+                stringResource(R.string.st_WorldClockScreen_c9d0),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -1089,16 +1091,16 @@ private fun WorldClockFloatingActions(
                 onClick = onSave,
                 enabled = selected != null && !selected.saved,
             ) {
-                Icon(Icons.Rounded.Add, "Track City")
+                Icon(Icons.Rounded.Add, stringResource(R.string.st_WorldClockScreen_e1f2))
             }
             ToolzExpressiveIconButton(
                 onClick = onCopy,
                 enabled = selected != null,
             ) {
-                Icon(Icons.Rounded.ContentCopy, "Copy Time")
+                Icon(Icons.Rounded.ContentCopy, stringResource(R.string.st_WorldClockScreen_g3h4))
             }
             ToolzExpressiveIconButton(onClick = onLocate) {
-                Icon(Icons.Rounded.MyLocation, "My Location")
+                Icon(Icons.Rounded.MyLocation, stringResource(R.string.st_WorldClockScreen_i5j6))
             }
         },
     )

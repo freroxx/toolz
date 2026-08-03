@@ -86,6 +86,7 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
+import com.frerox.toolz.R
 import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -161,14 +162,14 @@ fun CleanerScreen(
             // Dynamic title based on state
             val title = when {
                 gridCategory != null -> gridCategory!!.name
-                else -> "File Cleaner"
+                else -> stringResource(R.string.st_CleanerScreen_9e2c)
             }
             val subtitle = when (val s = scanState) {
                 is ScanState.Scanning -> "Scanning ${s.filesScanned} files…"
                 is ScanState.Results  -> "${s.filesScanned} files analysed"
                 is ScanState.Cleaning -> "Cleaning in progress…"
                 is ScanState.Done     -> "Optimisation complete"
-                else                  -> "Deep storage analysis"
+                else                  -> stringResource(R.string.st_CleanerScreen_1a2b)
             }
 
             ExpressiveTopAppBar(
@@ -179,7 +180,7 @@ fun CleanerScreen(
                         vibrationManager?.vibrateClick()
                         if (gridCategory != null) viewModel.closeGridView() else onBack()
                     }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_CleanerScreen_8f1a))
                     }
                 },
                 actions = {
@@ -190,7 +191,7 @@ fun CleanerScreen(
                         }) {
                             Icon(
                                 Icons.Rounded.Close,
-                                contentDescription = "Cancel scan",
+                                contentDescription = stringResource(R.string.st_CleanerScreen_3d5b),
                                 tint = MaterialTheme.colorScheme.error,
                             )
                         }
@@ -356,13 +357,13 @@ private fun IdleDashboard(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Full Access Recommended",
+                            stringResource(R.string.st_CleanerScreen_7c4d),
                             style      = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Black,
                             color      = MaterialTheme.colorScheme.error,
                         )
                         Text(
-                            "Grant storage permission for deeper analysis.",
+                            stringResource(R.string.st_CleanerScreen_5f6e),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
@@ -383,7 +384,7 @@ private fun IdleDashboard(
             Icon(Icons.Rounded.TravelExplore, null, Modifier.size(22.dp))
             Spacer(Modifier.width(14.dp))
             Text(
-                "Deep Scan Device",
+                stringResource(R.string.st_CleanerScreen_2b8a),
                 fontWeight = FontWeight.Black,
                 style      = MaterialTheme.typography.titleMedium,
             )
@@ -402,14 +403,14 @@ private fun StorageStatsRow(storageInfo: StorageInfo) {
     ) {
         StorageStatCard(
             modifier = Modifier.weight(1f),
-            label    = "Used",
+            label    = stringResource(R.string.st_CleanerScreen_4d9c),
             value    = Formatter.formatFileSize(context, storageInfo.usedBytes),
             icon     = Icons.Rounded.Storage,
             accent   = MaterialTheme.colorScheme.primary,
         )
         StorageStatCard(
             modifier = Modifier.weight(1f),
-            label    = "Free",
+            label    = stringResource(R.string.st_CleanerScreen_6a1b),
             value    = Formatter.formatFileSize(context, storageInfo.freeBytes),
             icon     = Icons.Rounded.FolderOpen,
             accent   = kSuccess,
@@ -417,7 +418,7 @@ private fun StorageStatsRow(storageInfo: StorageInfo) {
         if (storageInfo.cleanableBytes > 0) {
             StorageStatCard(
                 modifier = Modifier.weight(1f),
-                label    = "Cleanable",
+                label    = stringResource(R.string.st_CleanerScreen_1b2c),
                 value    = Formatter.formatFileSize(context, storageInfo.cleanableBytes),
                 icon     = Icons.Rounded.AutoDelete,
                 accent   = MaterialTheme.colorScheme.error,
@@ -554,7 +555,7 @@ private fun StorageArcIndicator(
                     ) {
                         Icon(Icons.Rounded.AutoDelete, null, Modifier.size(14.dp), tint = kSuccess)
                         Text(
-                            "${Formatter.formatFileSize(context, cleanableBytes)} cleanable",
+                            "${Formatter.formatFileSize(context, cleanableBytes)} " + stringResource(R.string.st_CleanerScreen_3c4d),
                             style      = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color      = kSuccess,
@@ -616,12 +617,12 @@ private fun ScanningView(state: ScanState.Scanning) {
         ) {
             ScanStatPill(
                 icon  = Icons.Rounded.FindInPage,
-                label = "Files scanned",
+                label = stringResource(R.string.st_CleanerScreen_5d6e),
                 value = "${state.filesScanned}",
             )
             ScanStatPill(
                 icon  = Icons.Rounded.DeleteSweep,
-                label = "Junk found",
+                label = stringResource(R.string.st_CleanerScreen_7e8f),
                 value = Formatter.formatFileSize(LocalContext.current, state.foundSize),
             )
         }
@@ -836,7 +837,7 @@ private fun ResultsHeader(totalSize: Long, filesScanned: Int, onRescan: () -> Un
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Optimisable",
+                    stringResource(R.string.st_CleanerScreen_9f0a),
                     style      = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color      = MaterialTheme.colorScheme.primary,
@@ -965,7 +966,7 @@ private fun CategoryCard(
                                 color = kSuccess.copy(alpha = 0.18f),
                             ) {
                                 Text(
-                                    "Auto",
+                                    stringResource(R.string.st_CleanerScreen_a1b2),
                                     modifier   = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
                                     style      = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
@@ -1228,7 +1229,7 @@ private fun DuplicateGroupRow(
                             color    = if (index == 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            if (index == 0) "Keep (Original)" else "Delete (Duplicate)",
+                            if (index == 0) stringResource(R.string.st_CleanerScreen_c3d4) else stringResource(R.string.st_CleanerScreen_d5e6),
                             style      = MaterialTheme.typography.labelSmall,
                             color      = if (index == 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold,
@@ -1320,7 +1321,7 @@ private fun SectionGridView(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Close grid")
+                        Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_CleanerScreen_e5f6))
                     }
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -1485,7 +1486,7 @@ private fun GridItemCard(
                         is CleanItem.GenericFile -> item.file.name
                         is CleanItem.Corpse      -> item.entry.packageName
                         is CleanItem.UnusedApp   -> item.entry.appName
-                        is CleanItem.Duplicate   -> item.group.files.firstOrNull()?.path?.substringAfterLast('/') ?: "Duplicate"
+                        is CleanItem.Duplicate   -> item.group.files.firstOrNull()?.path?.substringAfterLast('/') ?: stringResource(R.string.st_CleanerScreen_g7h8)
                     },
                     style    = MaterialTheme.typography.labelSmall,
                     color    = Color.White,
@@ -1574,7 +1575,7 @@ private fun CleaningView(state: ScanState.Cleaning) {
                     color      = primary,
                 )
                 Text(
-                    "CLEANING",
+                    stringResource(R.string.st_CleanerScreen_i9j0),
                     style       = MaterialTheme.typography.labelSmall,
                     fontWeight  = FontWeight.Black,
                     letterSpacing = 2.sp,
@@ -1634,7 +1635,7 @@ private fun DoneView(result: CleanResult, onDone: () -> Unit) {
         Spacer(Modifier.height(32.dp))
 
         Text(
-            "Device Optimised",
+            stringResource(R.string.st_CleanerScreen_k1l2),
             style      = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Black,
             color      = MaterialTheme.colorScheme.primary,
@@ -1648,7 +1649,7 @@ private fun DoneView(result: CleanResult, onDone: () -> Unit) {
             fontWeight = FontWeight.Black,
         )
         Text(
-            "freed across ${result.deletedCount} items",
+            stringResource(R.string.st_CleanerScreen_m3n4) + " ${result.deletedCount} items",
             style  = MaterialTheme.typography.bodyLarge,
             color  = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Bold,
@@ -1656,7 +1657,7 @@ private fun DoneView(result: CleanResult, onDone: () -> Unit) {
 
         AnimatedVisibility(visible = result.failedCount > 0) {
             Text(
-                "${result.failedCount} items skipped (access restricted)",
+                "${result.failedCount} " + stringResource(R.string.st_CleanerScreen_o5p6),
                 style      = MaterialTheme.typography.bodySmall,
                 color      = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.Bold,
@@ -1673,7 +1674,7 @@ private fun DoneView(result: CleanResult, onDone: () -> Unit) {
         ) {
             Icon(Icons.Rounded.Home, null, Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
-            Text("Return to Dashboard", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.st_CleanerScreen_q7r8), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleSmall)
         }
     }
 }
@@ -1697,18 +1698,18 @@ private fun ErrorView(message: String, onRetry: () -> Unit, onDismiss: () -> Uni
             }
         }
         Spacer(Modifier.height(24.dp))
-        Text("Scan Interrupted", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Text(stringResource(R.string.st_CleanerScreen_s9t0), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(8.dp))
         Text(message, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(40.dp))
         ToolzExpressiveButton(onClick = onRetry, modifier = Modifier.fillMaxWidth().height(58.dp)) {
             Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
             Spacer(Modifier.width(10.dp))
-            Text("Try Again", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_CleanerScreen_u1v2), fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.height(12.dp))
         ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-            Text("Go Back", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_CleanerScreen_w3x4), fontWeight = FontWeight.Black)
         }
     }
 }
@@ -1778,14 +1779,14 @@ private fun SlideToCleanButton(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Slide to clean",
+                stringResource(R.string.st_CleanerScreen_y5z6),
                 style      = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,
                 color      = primary,
             )
             if (selectedBytes < cleanableBytes) {
                 Text(
-                    "${Formatter.formatFileSize(context, selectedBytes)} selected",
+                    "${Formatter.formatFileSize(context, selectedBytes)} " + stringResource(R.string.st_CleanerScreen_a7b8),
                     style = MaterialTheme.typography.labelSmall,
                     color = primary.copy(alpha = 0.6f),
                 )
@@ -1843,21 +1844,21 @@ private fun PermissionEducationDialog(onGrantClick: () -> Unit, onDismiss: () ->
                 modifier = Modifier.size(44.dp),
             )
         },
-        title = { Text("Storage Access Needed", fontWeight = FontWeight.Black) },
+        title = { Text(stringResource(R.string.st_CleanerScreen_c9d0), fontWeight = FontWeight.Black) },
         text = {
             Text(
-                "Full storage access is required to detect deep junk files, orphaned data from uninstalled apps, and duplicate content across your device.",
+                stringResource(R.string.st_CleanerScreen_e1f2),
                 textAlign = TextAlign.Center,
             )
         },
         confirmButton = {
             ToolzExpressiveButton(onClick = onGrantClick) {
-                Text("Grant Access", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_CleanerScreen_g3h4), fontWeight = FontWeight.Black)
             }
         },
         dismissButton = {
             ToolzOutlinedExpressiveButton(onClick = onDismiss) {
-                Text("Not Now")
+                Text(stringResource(R.string.st_CleanerScreen_i5j6))
             }
         },
         shape = BouncyShape,
@@ -1936,7 +1937,7 @@ private fun openFile(
                         setDataAndType(uri, mime)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     },
-                    "Open file with",
+                    context.getString(R.string.st_CleanerScreen_k7l8),
                 )
             )
         }

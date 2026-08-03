@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -62,14 +64,14 @@ fun LightMeterScreen(
     val unitLabel = if (state.unit == LightUnit.LUX) "LUX" else "FC"
 
     val (statusLabel, statusColor, statusDesc) = when {
-        currentLux < 5 -> Triple("Pitch Black", MaterialTheme.colorScheme.outline, "Absolute void of light")
-        currentLux < 20 -> Triple("Very Dim", MaterialTheme.colorScheme.secondary, "Shadowy environment")
-        currentLux < 100 -> Triple("Mood Lighting", MaterialTheme.colorScheme.primary, "Relaxed atmosphere")
-        currentLux < 250 -> Triple("Residential", MaterialTheme.colorScheme.tertiary, "Comfortable interior")
-        currentLux < 500 -> Triple("Office Standard", MaterialTheme.colorScheme.primary, "Optimal workspace")
-        currentLux < 1000 -> Triple("Detailed Task", MaterialTheme.colorScheme.secondary, "Precision work environment")
-        currentLux < 5000 -> Triple("Overcast Day", MaterialTheme.colorScheme.primary, "Bright natural ambient")
-        else -> Triple("Direct Sunlight", MaterialTheme.colorScheme.primary, "Extreme light intensity")
+        currentLux < 5 -> Triple(stringResource(R.string.st_LightMeterScreen_9f0a), MaterialTheme.colorScheme.outline, stringResource(R.string.st_LightMeterScreen_o5p6))
+        currentLux < 20 -> Triple(stringResource(R.string.st_LightMeterScreen_a1b2), MaterialTheme.colorScheme.secondary, stringResource(R.string.st_LightMeterScreen_q7r8))
+        currentLux < 100 -> Triple(stringResource(R.string.st_LightMeterScreen_c3d4), MaterialTheme.colorScheme.primary, stringResource(R.string.st_LightMeterScreen_s9t0))
+        currentLux < 250 -> Triple(stringResource(R.string.st_LightMeterScreen_e5f6), MaterialTheme.colorScheme.tertiary, stringResource(R.string.st_LightMeterScreen_u1v2))
+        currentLux < 500 -> Triple(stringResource(R.string.st_LightMeterScreen_g7h8), MaterialTheme.colorScheme.primary, stringResource(R.string.st_LightMeterScreen_w3x4))
+        currentLux < 1000 -> Triple(stringResource(R.string.st_LightMeterScreen_i9j0), MaterialTheme.colorScheme.secondary, stringResource(R.string.st_LightMeterScreen_y5z6))
+        currentLux < 5000 -> Triple(stringResource(R.string.st_LightMeterScreen_k1l2), MaterialTheme.colorScheme.primary, stringResource(R.string.st_LightMeterScreen_a7b8))
+        else -> Triple(stringResource(R.string.st_LightMeterScreen_m3n4), MaterialTheme.colorScheme.primary, stringResource(R.string.st_LightMeterScreen_c9d0))
     }
 
     val animatedLux by animateFloatAsState(
@@ -86,8 +88,8 @@ fun LightMeterScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "LIGHT METER",
-                subtitle = "Ambient illumination analytics",
+                title = stringResource(R.string.st_LightMeterScreen_f1a2),
+                subtitle = stringResource(R.string.st_LightMeterScreen_3d5b),
                 navigationIcon = {
                     ToolzExpressiveIconButton(
                         onClick = onBack,
@@ -97,7 +99,7 @@ fun LightMeterScreen(
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_LightMeterScreen_9e2c))
                     }
                 },
                 actions = {
@@ -109,7 +111,7 @@ fun LightMeterScreen(
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(if (state.unit == LightUnit.LUX) Icons.Rounded.Lightbulb else Icons.Rounded.FlashlightOn, "Toggle Unit")
+                        Icon(if (state.unit == LightUnit.LUX) Icons.Rounded.Lightbulb else Icons.Rounded.FlashlightOn, stringResource(R.string.st_LightMeterScreen_1a2b))
                     }
                     ToolzExpressiveIconButton(
                         onClick = { viewModel.resetStats() },
@@ -119,7 +121,7 @@ fun LightMeterScreen(
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Reset Stats")
+                        Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_LightMeterScreen_7c4d))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -247,7 +249,7 @@ fun LightMeterScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
                                 Text(
-                                    "LIVE HISTORY",
+                                    stringResource(R.string.st_LightMeterScreen_5f6e),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
@@ -267,7 +269,7 @@ fun LightMeterScreen(
                         ) {
                             InfoCard(
                                 modifier = Modifier.weight(1f),
-                                label = "SESSION PEAK",
+                                label = stringResource(R.string.st_LightMeterScreen_2b8a),
                                 value = if (state.maxLux < 10) "%.1f".format(state.maxLux.toUnit(state.unit)) else state.maxLux.toUnit(state.unit).toInt().toString(),
                                 unit = unitLabel,
                                 color = MaterialTheme.colorScheme.primary
@@ -276,9 +278,9 @@ fun LightMeterScreen(
                             val examReady = currentLux >= 500
                             InfoCard(
                                 modifier = Modifier.weight(1f),
-                                label = "TASK READY",
+                                label = stringResource(R.string.st_LightMeterScreen_4d9c),
                                 value = if (examReady) "OPTIMAL" else "LOW",
-                                unit = "LEVEL",
+                                unit = stringResource(R.string.st_LightMeterScreen_3c4d),
                                 color = if (examReady) Color(0xFF4CAF50) else Color(0xFFF44336)
                             )
                         }
@@ -294,14 +296,14 @@ fun LightMeterScreen(
                         ) {
                             InfoCard(
                                 modifier = Modifier.weight(1f),
-                                label = "AVERAGE",
+                                label = stringResource(R.string.st_LightMeterScreen_6a1b),
                                 value = if (state.avgLux < 10) "%.1f".format(state.avgLux.toUnit(state.unit)) else state.avgLux.toUnit(state.unit).toInt().toString(),
                                 unit = unitLabel,
                                 color = MaterialTheme.colorScheme.secondary
                             )
                             InfoCard(
                                 modifier = Modifier.weight(1f),
-                                label = "MINIMUM",
+                                label = stringResource(R.string.st_LightMeterScreen_1b2c),
                                 value = if (state.minLux == Float.MAX_VALUE) "-" else if (state.minLux < 10) "%.1f".format(state.minLux.toUnit(state.unit)) else state.minLux.toUnit(state.unit).toInt().toString(),
                                 unit = unitLabel,
                                 color = MaterialTheme.colorScheme.tertiary
@@ -421,9 +423,9 @@ fun NoSensorState() {
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
-        Text("SENSOR NOT DETECTED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        Text(stringResource(R.string.st_LightMeterScreen_5d6e), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
         Text(
-            "This tool requires a hardware light sensor which appears to be missing on this device.",
+            stringResource(R.string.st_LightMeterScreen_7e8f),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 16.dp)

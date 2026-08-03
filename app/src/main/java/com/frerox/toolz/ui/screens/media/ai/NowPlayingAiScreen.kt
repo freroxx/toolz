@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.media.ai
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -265,7 +267,7 @@ fun AiHeader(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
-                        "T-MUSIC",
+                        stringResource(R.string.st_NowPlayingAiScreen_tm1),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 2.sp,
@@ -274,14 +276,14 @@ fun AiHeader(
                     AnimatedContent(targetState = uiState.isReconnecting, label = "micStatus") { reconnecting ->
                         if (reconnecting) {
                             Text(
-                                "reconnecting mic…",
+                                stringResource(R.string.st_NowPlayingAiScreen_rm2),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Black
                             )
                         } else {
                             Text(
-                                "Powered by Frerox",
+                                stringResource(R.string.st_NowPlayingAiScreen_pf3),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                                 fontWeight = FontWeight.SemiBold
@@ -332,7 +334,7 @@ fun AiHeader(
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(Icons.Rounded.Refresh, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Text("Refresh", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.st_NowPlayingAiScreen_r4), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 Surface(
@@ -489,8 +491,8 @@ fun LyricsTab(
             state.lyrics.isEmpty() || state.lyrics == "Lyrics not found." ->
                 AiEmptyState(
                     icon = Icons.Rounded.Lyrics,
-                    message = "No lyrics found",
-                    sub = "Tap Refresh to fetch lyrics"
+                    message = stringResource(R.string.st_NowPlayingAiScreen_nlf5),
+                    sub = stringResource(R.string.st_NowPlayingAiScreen_trtfl6)
                 )
 
             state.isSynced -> {
@@ -633,7 +635,7 @@ fun LyricsTab(
                         )
                     }
                     Text(
-                        if (state.isAutoScrollEnabled) "SYNCED" else "MANUAL",
+                        if (state.isAutoScrollEnabled) stringResource(R.string.st_NowPlayingAiScreen_s7) else stringResource(R.string.st_NowPlayingAiScreen_m8),
                         fontWeight = FontWeight.Black,
                         style = MaterialTheme.typography.labelMedium,
                         letterSpacing = 1.sp
@@ -850,7 +852,7 @@ fun MoreInfoTab(state: AiMoreInfoState, isKeyMissing: Boolean, onSaveKey: (Strin
         ) {
             if (state.artistVitals.isNotEmpty()) {
                 InfoCard(
-                    title = "Artist Heritage",
+                    title = stringResource(R.string.st_NowPlayingAiScreen_ah26),
                     content = state.artistVitals,
                     icon = Icons.Rounded.Person,
                     accentColor = MaterialTheme.colorScheme.primary
@@ -858,7 +860,7 @@ fun MoreInfoTab(state: AiMoreInfoState, isKeyMissing: Boolean, onSaveKey: (Strin
             }
             if (state.songMeaning.isNotEmpty()) {
                 InfoCard(
-                    title = "Deep Meaning",
+                    title = stringResource(R.string.st_NowPlayingAiScreen_dm27),
                     content = state.songMeaning,
                     icon = Icons.AutoMirrored.Rounded.MenuBook,
                     accentColor = MaterialTheme.colorScheme.secondary
@@ -938,8 +940,8 @@ fun TasteTab(
     ) {
         // Section 1: Curated For You
         RecommendationSection(
-            title = "CURATED FOR YOU",
-            subtitle = "Based on the vibe of this song",
+            title = stringResource(R.string.st_NowPlayingAiScreen_cfy28),
+            subtitle = stringResource(R.string.st_NowPlayingAiScreen_botvots29),
             icon = Icons.Rounded.Recommend,
             accentColor = MaterialTheme.colorScheme.primary,
             isLoading = state.isLoadingCurated,
@@ -952,8 +954,8 @@ fun TasteTab(
 
         // Section 2: Same Artist
         RecommendationSection(
-            title = "MORE FROM ARTIST",
-            subtitle = "Similar tracks by the same creator",
+            title = stringResource(R.string.st_NowPlayingAiScreen_mfa30),
+            subtitle = stringResource(R.string.st_NowPlayingAiScreen_stbtsc31),
             icon = Icons.Rounded.Person,
             accentColor = MaterialTheme.colorScheme.secondary,
             isLoading = state.isLoadingArtist,
@@ -1012,7 +1014,7 @@ private fun RecommendationSection(
             recommendations.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "No recommendations found",
+                        stringResource(R.string.st_NowPlayingAiScreen_nrf32),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
@@ -1169,7 +1171,7 @@ fun RecommendationCard(
             modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             DropdownMenuItem(
-                text = { Text("Play Now", fontWeight = FontWeight.SemiBold) },
+                text = { Text(stringResource(R.string.st_NowPlayingAiScreen_pn33), fontWeight = FontWeight.SemiBold) },
                 onClick = {
                     showMenu = false
                     onPlay()
@@ -1178,7 +1180,7 @@ fun RecommendationCard(
             )
             if (rec.videoId != null) {
                 DropdownMenuItem(
-                    text = { Text("View on YouTube", fontWeight = FontWeight.SemiBold) },
+                    text = { Text(stringResource(R.string.st_NowPlayingAiScreen_voyt34), fontWeight = FontWeight.SemiBold) },
                     onClick = {
                         showMenu = false
                         onViewOnYouTube()
@@ -1436,14 +1438,14 @@ fun GroqApiKeySetupUI(
         }
 
         Text(
-            "GROQ KEY REQUIRED",
+            stringResource(R.string.st_NowPlayingAiScreen_gkr19),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Black,
             letterSpacing = 1.sp
         )
 
         Text(
-            "To use AI insights and recommendations, you need to provide a Groq API key.",
+            stringResource(R.string.st_NowPlayingAiScreen_gkr_desc20),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -1453,8 +1455,8 @@ fun GroqApiKeySetupUI(
             value = key,
             onValueChange = { key = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Groq API Key") },
-            placeholder = { Text("gsk_...") },
+            label = { Text(stringResource(R.string.st_NowPlayingAiScreen_gak21)) },
+            placeholder = { Text(stringResource(R.string.st_NowPlayingAiScreen_gak_hint22)) },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -1469,7 +1471,7 @@ fun GroqApiKeySetupUI(
             shape = RoundedCornerShape(16.dp),
             enabled = key.isNotBlank()
         ) {
-            Text("Save API Key", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_NowPlayingAiScreen_sak23), fontWeight = FontWeight.Bold)
         }
 
         TextButton(
@@ -1479,7 +1481,7 @@ fun GroqApiKeySetupUI(
             }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Get key from console.groq.com", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_NowPlayingAiScreen_gkfcgc24), fontWeight = FontWeight.Bold)
                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(16.dp))
             }
         }
@@ -1489,7 +1491,7 @@ fun GroqApiKeySetupUI(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            "HOW TO SETUP",
+            stringResource(R.string.st_NowPlayingAiScreen_hts25),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary

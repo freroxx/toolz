@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.animation.*
@@ -210,11 +212,11 @@ fun RulerScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Ruler",
+                title = stringResource(R.string.st_RulerScreen_a1b2),
                 subtitle = when {
-                    twoPointMode && !hasAnchor -> "Tap a start point"
-                    twoPointMode -> "Two-point measure"
-                    else -> "Drag to measure"
+                    twoPointMode && !hasAnchor -> stringResource(R.string.st_RulerScreen_c3d4)
+                    twoPointMode -> stringResource(R.string.st_RulerScreen_e5f6)
+                    else -> stringResource(R.string.st_RulerScreen_g7h8)
                 },
                 navigationIcon = {
                     IconButton(
@@ -227,7 +229,7 @@ fun RulerScreen(
                             .clip(SmallExpressiveShape)
                             .background(colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_RulerScreen_i9j0))
                     }
                 },
                 actions = {
@@ -244,7 +246,7 @@ fun RulerScreen(
                         shape = SmallExpressiveShape,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Icon(Icons.Rounded.SwapVert, contentDescription = "Two-point measure")
+                        Icon(Icons.Rounded.SwapVert, contentDescription = stringResource(R.string.st_RulerScreen_e5f6))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -283,7 +285,7 @@ fun RulerScreen(
                             modifier = Modifier.size(48.dp),
                             shape = SmallExpressiveShape
                         ) {
-                            Icon(Icons.Rounded.Flip, contentDescription = "Flip orientation")
+                            Icon(Icons.Rounded.Flip, contentDescription = stringResource(R.string.st_RulerScreen_k1l2))
                         }
 
                         ToolzExpressiveIconButton(
@@ -298,7 +300,7 @@ fun RulerScreen(
                                 else colorScheme.surfaceContainerHigh
                             )
                         ) {
-                            Icon(Icons.Rounded.GridOn, contentDescription = "Snap to gridline")
+                            Icon(Icons.Rounded.GridOn, contentDescription = stringResource(R.string.st_RulerScreen_m3n4))
                         }
 
                         ToolzExpressiveIconButton(
@@ -313,17 +315,18 @@ fun RulerScreen(
                                 else colorScheme.surfaceContainerHigh
                             )
                         ) {
-                            Icon(Icons.Rounded.History, contentDescription = "History")
+                            Icon(Icons.Rounded.History, contentDescription = stringResource(R.string.st_RulerScreen_o5p6))
                         }
                     },
                     trailingContent = {
+                        val resetLabel = stringResource(R.string.st_RulerScreen_q7r8)
                         clickableItem(
                             onClick = {
                                 haptic.click()
                                 resetMeasurement()
                             },
                             icon = { Icon(Icons.Rounded.Refresh, null) },
-                            label = "Reset"
+                            label = resetLabel
                         )
                     }
                 )
@@ -493,8 +496,8 @@ fun RulerScreen(
                                 Icon(Icons.Rounded.Straighten, contentDescription = null, tint = primary, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Text(
-                                    text = if (twoPointMode) "Tap a start point, then drag"
-                                    else "Drag anywhere to measure",
+                                    text = if (twoPointMode) stringResource(R.string.st_RulerScreen_c9d0)
+                                    else stringResource(R.string.st_RulerScreen_e1f2),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = onSurface.copy(alpha = 0.7f)
@@ -773,7 +776,7 @@ private fun MeasurementReadout(
         ) {
             if (twoPointMode) {
                 ExpressiveStatePill(
-                    text = if (hasAnchor) "Distance" else "Drop a start point",
+                    text = if (hasAnchor) stringResource(R.string.st_RulerScreen_s9t0) else stringResource(R.string.st_RulerScreen_u1v2),
                     icon = Icons.Rounded.SwapVert,
                     color = secondary
                 )
@@ -828,7 +831,7 @@ private fun MeasurementReadout(
                         containerColor = colorScheme.surfaceContainerHighest
                     )
                 ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.st_RulerScreen_w3x4))
                 }
 
                 FilledIconButton(
@@ -837,7 +840,7 @@ private fun MeasurementReadout(
                     modifier = Modifier.size(64.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = primary)
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Save measurement")
+                    Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_RulerScreen_y5z6))
                 }
 
                 FilledTonalIconButton(
@@ -848,7 +851,7 @@ private fun MeasurementReadout(
                         containerColor = colorScheme.surfaceContainerHighest
                     )
                 ) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Dismiss")
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_RulerScreen_a7b8))
                 }
             }
         }
@@ -874,7 +877,7 @@ private fun HistoryCarousel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Recent measurements",
+                    stringResource(R.string.st_RulerScreen_g3h4),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

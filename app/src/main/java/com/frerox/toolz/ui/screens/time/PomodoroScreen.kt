@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.time
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -155,7 +157,7 @@ fun PomodoroScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Pomodoro",
+                title = stringResource(R.string.st_PomodoroScreen_a1b2),
                 subtitle = state.mode.supportingLabel,
                 titleHorizontalAlignment = Alignment.Start,
                 navigationIcon = {
@@ -168,7 +170,7 @@ fun PomodoroScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_PomodoroScreen_4f2d))
                     }
                 },
                 actions = {
@@ -181,7 +183,7 @@ fun PomodoroScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.st_PomodoroScreen_c3d4))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -337,7 +339,7 @@ private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
-                        text = if (state.isRunning) state.mode.label else "Ready",
+                        text = if (state.isRunning) state.mode.label else stringResource(R.string.st_PomodoroScreen_d5e6),
                         icon = if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
                         color = activeColor,
                     )
@@ -378,7 +380,7 @@ private fun PomodoroStatsRow(state: PomodoroState, activeColor: Color) {
         StatCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-            label = "Today",
+            label = stringResource(R.string.st_PomodoroScreen_f7g8),
             value = "${state.sessionsCompleted}/${state.sessionsGoal}",
             accent = activeColor,
             progress = (state.sessionsCompleted.toFloat() / state.sessionsGoal.toFloat()).coerceIn(0f, 1f)
@@ -386,7 +388,7 @@ private fun PomodoroStatsRow(state: PomodoroState, activeColor: Color) {
         StatCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Timer, contentDescription = null) },
-            label = "Next",
+            label = stringResource(R.string.st_PomodoroScreen_h9i0),
             value = nextPhaseLabel(state),
             accent = MaterialTheme.colorScheme.secondary,
         )
@@ -470,9 +472,9 @@ private fun CompletionBanner(mode: PomodoroMode, onSilence: () -> Unit) {
             Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Session complete", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_PomodoroScreen_j1k2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 Text(
-                    if (mode == PomodoroMode.WORK) "Break is ready. Tap to silence." else "Focus is ready. Tap to silence.",
+                    if (mode == PomodoroMode.WORK) stringResource(R.string.st_PomodoroScreen_l3m4) else stringResource(R.string.st_PomodoroScreen_n5o6),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -489,6 +491,11 @@ private fun PomodoroControlDock(
     onReset: () -> Unit,
     onSkip: () -> Unit,
 ) {
+    val resetLabel = stringResource(R.string.st_PomodoroScreen_p7q8)
+    val skipLabel = stringResource(R.string.st_PomodoroScreen_r9s0)
+    val pauseLabel = stringResource(R.string.st_PomodoroScreen_u1v2)
+    val startLabel = stringResource(R.string.st_PomodoroScreen_w3x4)
+
     ToolzHorizontalFloatingToolbar(
         expanded = true,
         modifier = Modifier
@@ -499,12 +506,12 @@ private fun PomodoroControlDock(
             clickableItem(
                 onClick = onReset,
                 icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
-                label = "Reset",
+                label = resetLabel,
             )
             clickableItem(
                 onClick = onSkip,
                 icon = { Icon(Icons.Rounded.SkipNext, contentDescription = null) },
-                label = "Skip",
+                label = skipLabel,
             )
         },
     ) {
@@ -523,7 +530,7 @@ private fun PomodoroControlDock(
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(8.dp))
-            Text(if (state.isRunning) "Pause" else "Start", fontWeight = FontWeight.Black)
+            Text(if (state.isRunning) pauseLabel else startLabel, fontWeight = FontWeight.Black)
         }
     }
 }
@@ -535,17 +542,19 @@ private fun PomodoroMode.activeColor(): Color = when (this) {
     PomodoroMode.LONG_BREAK -> MaterialTheme.colorScheme.secondary
 }
 
+@Composable
 private fun phaseMessage(state: PomodoroState): String = when {
-    state.isRunning && state.mode == PomodoroMode.WORK -> "Protect this block and stay with one task."
-    state.isRunning -> "Take the recovery seriously."
-    state.isFinished -> "The next phase is queued."
-    else -> "Choose a phase, then start when you are ready."
+    state.isRunning && state.mode == PomodoroMode.WORK -> stringResource(R.string.st_PomodoroScreen_y5z6)
+    state.isRunning -> stringResource(R.string.st_PomodoroScreen_a7b8)
+    state.isFinished -> stringResource(R.string.st_PomodoroScreen_c9d0)
+    else -> stringResource(R.string.st_PomodoroScreen_e1f2)
 }
 
+@Composable
 private fun nextPhaseLabel(state: PomodoroState): String = when {
-    state.mode != PomodoroMode.WORK -> "Focus"
-    (state.sessionsCompleted + 1) % 4 == 0 -> "Long break"
-    else -> "Short break"
+    state.mode != PomodoroMode.WORK -> stringResource(R.string.st_PomodoroScreen_g3h4)
+    (state.sessionsCompleted + 1) % 4 == 0 -> stringResource(R.string.st_PomodoroScreen_i5j6)
+    else -> stringResource(R.string.st_PomodoroScreen_k7l8)
 }
 
 private fun formatPomodoroTime(timeMillis: Long, locale: Locale): String {

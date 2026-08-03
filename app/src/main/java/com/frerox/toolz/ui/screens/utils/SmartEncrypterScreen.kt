@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -174,7 +176,7 @@ fun SmartEncrypterScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Encrypter", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
+                        Text(stringResource(R.string.st_SmartEncrypterScreen_a1b2), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
                         AnimatedVisibility(visible = uiState.isLiveEnabled) {
                             LiveIndicator()
                         }
@@ -185,7 +187,7 @@ fun SmartEncrypterScreen(
                         onClick = onBack,
                         modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SmartEncrypterScreen_e5f6))
                     }
                 },
                 actions = {
@@ -194,25 +196,25 @@ fun SmartEncrypterScreen(
                             IconButton(onClick = viewModel::toggleLiveMode) {
                                 Icon(
                                     if (uiState.isLiveEnabled) Icons.Rounded.Bolt else Icons.Rounded.FlashOff,
-                                    contentDescription = "Live mode",
+                                    contentDescription = stringResource(R.string.st_SmartEncrypterScreen_g7h8),
                                     tint = if (uiState.isLiveEnabled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             IconButton(onClick = viewModel::toggleSecureMode) {
                                 Icon(
                                     if (uiState.isSecureMode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                    contentDescription = "Secure mode",
+                                    contentDescription = stringResource(R.string.st_SmartEncrypterScreen_i9j0),
                                     tint = if (uiState.isSecureMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     }
                     IconButton(onClick = { showHistory = true }) {
-                        Icon(Icons.Rounded.History, contentDescription = "History")
+                        Icon(Icons.Rounded.History, contentDescription = stringResource(R.string.st_SmartEncrypterScreen_k1l2))
                     }
                     if (!uiState.isProcessingFile) {
                         IconButton(onClick = { showClearConfirm = true }) {
-                            Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset")
+                            Icon(Icons.Rounded.RestartAlt, contentDescription = stringResource(R.string.st_SmartEncrypterScreen_m3n4))
                         }
                     }
                 },
@@ -232,7 +234,7 @@ fun SmartEncrypterScreen(
             item {
                 ToolzConnectedButtonGroup(
                     selectedIndex = if (uiState.isFileMode) 1 else 0,
-                    options = listOf("Text", "File"),
+                    options = listOf(stringResource(R.string.st_SmartEncrypterScreen_o5p6), stringResource(R.string.st_SmartEncrypterScreen_q7r8)),
                     unCheckedIcons = listOf(Icons.AutoMirrored.Rounded.TextSnippet, Icons.Rounded.Description),
                     checkedIcons = listOf(Icons.AutoMirrored.Rounded.TextSnippet, Icons.Rounded.Description),
                     onOptionSelected = { viewModel.toggleFileMode() },
@@ -269,7 +271,7 @@ fun SmartEncrypterScreen(
                         )
                     } else {
                         CryptoPanel(
-                            title = "Input",
+                            title = stringResource(R.string.st_SmartEncrypterScreen_s9t0),
                             icon = Icons.AutoMirrored.Rounded.TextSnippet
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -277,7 +279,7 @@ fun SmartEncrypterScreen(
                                     value = uiState.inputText,
                                     onValueChange = viewModel::onInputChanged,
                                     modifier = Modifier.fillMaxWidth().animateContentSize(),
-                                    placeholder = { Text("Enter text to encrypt, hash, or encode") },
+                                    placeholder = { Text(stringResource(R.string.st_SmartEncrypterScreen_u1v2)) },
                                     visualTransformation = if (uiState.isSecureMode) PasswordVisualTransformation() else VisualTransformation.None,
                                     keyboardOptions = KeyboardOptions(keyboardType = if (uiState.isSecureMode) KeyboardType.Password else KeyboardType.Text),
                                     shape = RoundedCornerShape(24.dp),
@@ -294,7 +296,7 @@ fun SmartEncrypterScreen(
                                                 .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                                                 .size(36.dp)
                                         ) {
-                                            Icon(Icons.Rounded.ContentPaste, "Paste", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+                                            Icon(Icons.Rounded.ContentPaste, stringResource(R.string.st_SmartEncrypterScreen_w3x4), tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
                                         }
                                     }
                                 )
@@ -329,7 +331,7 @@ fun SmartEncrypterScreen(
 
             item {
                 CryptoPanel(
-                    title = "Algorithm",
+                    title = stringResource(R.string.st_SmartEncrypterScreen_c9d0),
                     icon = Icons.Rounded.Tune
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -379,7 +381,7 @@ fun SmartEncrypterScreen(
                     exit = fadeOut() + shrinkVertically()
                 ) {
                     CryptoPanel(
-                        title = "Security key",
+                        title = stringResource(R.string.st_SmartEncrypterScreen_e1f2),
                         icon = Icons.Rounded.Security
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -388,7 +390,7 @@ fun SmartEncrypterScreen(
                                 value = uiState.password,
                                 onValueChange = viewModel::onPasswordChanged,
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("Enter secret password") },
+                                placeholder = { Text(stringResource(R.string.st_SmartEncrypterScreen_g3h4)) },
                                 visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 shape = RoundedCornerShape(20.dp),
@@ -398,7 +400,7 @@ fun SmartEncrypterScreen(
                                     IconButton(onClick = { showPassword = !showPassword }) {
                                         Icon(
                                             if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                            contentDescription = if (showPassword) "Hide password" else "Show password",
+                                            contentDescription = if (showPassword) stringResource(R.string.st_SmartEncrypterScreen_i5j6) else stringResource(R.string.st_SmartEncrypterScreen_k7l8),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -416,10 +418,10 @@ fun SmartEncrypterScreen(
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
+                              ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                    Text("Auto-clear result after 30s", style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource(R.string.st_SmartEncrypterScreen_u7v8), style = MaterialTheme.typography.bodyMedium)
                                 }
                                 Switch(
                                     checked = uiState.isAutoClearEnabled,
@@ -446,7 +448,7 @@ fun SmartEncrypterScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         ActionButton(
-                            text = if (isDecryptSuggested) "Decrypt" else "Encrypt",
+                            text = if (isDecryptSuggested) stringResource(R.string.st_SmartEncrypterScreen_w9x0) else stringResource(R.string.st_SmartEncrypterScreen_a1b3),
                             icon = if (isDecryptSuggested) Icons.Rounded.NoEncryption else Icons.Rounded.EnhancedEncryption,
                             onClick = { if (isDecryptSuggested) viewModel.decrypt() else viewModel.encrypt() },
                             isLoading = uiState.isLoading,
@@ -457,7 +459,7 @@ fun SmartEncrypterScreen(
 
                         if (canToggle) {
                             ActionButton(
-                                text = if (isDecryptSuggested) "Encrypt" else "Decrypt",
+                                text = if (isDecryptSuggested) stringResource(R.string.st_SmartEncrypterScreen_a1b3) else stringResource(R.string.st_SmartEncrypterScreen_w9x0),
                                 icon = if (isDecryptSuggested) Icons.Rounded.EnhancedEncryption else Icons.Rounded.NoEncryption,
                                 onClick = { if (isDecryptSuggested) viewModel.encrypt() else viewModel.decrypt() },
                                 isLoading = uiState.isLoading,
@@ -586,7 +588,7 @@ fun SmartEncrypterScreen(
                                     )
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Success!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.st_SmartEncrypterScreen_i7j8), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                                     Text(
                                         processedFile?.name ?: "File saved", 
                                         style = MaterialTheme.typography.bodyMedium, 
@@ -617,7 +619,7 @@ fun SmartEncrypterScreen(
                                 ) {
                                     Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Open File")
+                                    Text(stringResource(R.string.st_SmartEncrypterScreen_k9l0))
                                 }
                                 
                                 ToolzTonalExpressiveIconButton(
@@ -635,7 +637,7 @@ fun SmartEncrypterScreen(
                                     modifier = Modifier.size(60.dp),
                                     shape = RoundedCornerShape(20.dp)
                                 ) {
-                                    Icon(Icons.Rounded.Share, null)
+                                    Icon(Icons.Rounded.Share, stringResource(R.string.st_SmartEncrypterScreen_m1n2))
                                 }
 
                                 ToolzOutlinedExpressiveIconButton(
@@ -774,7 +776,7 @@ private fun LiveIndicator() {
                 .background(MaterialTheme.colorScheme.tertiary.copy(alpha = alpha))
         )
         Text(
-            "Live",
+            stringResource(R.string.st_SmartEncrypterScreen_c3d4),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.tertiary,
             fontWeight = FontWeight.Medium

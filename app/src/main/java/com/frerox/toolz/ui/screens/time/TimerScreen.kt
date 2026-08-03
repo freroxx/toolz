@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.time
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -177,7 +179,7 @@ fun TimerScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Timer",
+                title = stringResource(R.string.st_TimerScreen_a1b2),
                 subtitle = timerSubtitle(state),
                 titleHorizontalAlignment = Alignment.Start,
                 navigationIcon = {
@@ -190,7 +192,7 @@ fun TimerScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_TimerScreen_c3d4))
                     }
                 },
                 actions = {
@@ -203,7 +205,7 @@ fun TimerScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.st_TimerScreen_e5f6))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -264,28 +266,28 @@ fun TimerScreen(
 
         if (showSettings) {
             TimeSettingsBottomSheet(
-                title = "Timer Settings",
+                title = stringResource(R.string.st_TimerScreen_g7h8),
                 onDismiss = { showSettings = false },
                 accent = accent
             ) {
-                SettingsSection(title = "Behavior", icon = Icons.Rounded.Settings, accent = accent) {
+                SettingsSection(title = stringResource(R.string.st_TimerScreen_i9j0), icon = Icons.Rounded.Settings, accent = accent) {
                     PreferenceRow(
-                        title = "Repeat-ready",
-                        subtitle = "Dismiss alarm back to the last duration",
+                        title = stringResource(R.string.st_TimerScreen_k1l2),
+                        subtitle = stringResource(R.string.st_TimerScreen_m3n4),
                         checked = state.repeatLastDuration,
                         onCheckedChange = viewModel::setRepeatLastDuration,
                     )
                     PreferenceRow(
-                        title = "Keep screen awake",
-                        subtitle = "Useful for kitchen, workout, or desk timing",
+                        title = stringResource(R.string.st_TimerScreen_o5p6),
+                        subtitle = stringResource(R.string.st_TimerScreen_q7r8),
                         checked = state.keepScreenOn,
                         onCheckedChange = viewModel::setKeepScreenOn,
                     )
                 }
-                SettingsSection(title = "Alerts", icon = Icons.Rounded.Notifications, accent = accent) {
+                SettingsSection(title = stringResource(R.string.st_TimerScreen_s9t0), icon = Icons.Rounded.Notifications, accent = accent) {
                     PreferenceRow(
-                        title = "Gradual Volume",
-                        subtitle = "Increase alarm volume slowly",
+                        title = stringResource(R.string.st_TimerScreen_u1v2),
+                        subtitle = stringResource(R.string.st_TimerScreen_w3x4),
                         checked = state.gradualVolume,
                         onCheckedChange = viewModel::setGradualVolume,
                     )
@@ -416,7 +418,7 @@ private fun TimerDial(state: TimerState, accent: Color) {
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
-                        text = if (state.isRunning) "Counting down" else if (state.isRinging) "Ringing" else "Ready",
+                        text = if (state.isRunning) stringResource(R.string.st_TimerScreen_y5z6) else if (state.isRinging) stringResource(R.string.st_TimerScreen_a7b8) else stringResource(R.string.st_TimerScreen_c9d0),
                         icon = timerStatusIcon(state),
                         color = accent,
                     )
@@ -476,7 +478,7 @@ private fun TimerWheelPicker(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Set Duration",
+                    stringResource(R.string.st_TimerScreen_e1f2),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black
                 )
@@ -506,7 +508,7 @@ private fun TimerWheelPicker(
                         onClick = { onTimeSelected(0, state.selectedSeconds) },
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                     ) {
-                        Text("Reset to wheels", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_TimerScreen_g3h4), fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
@@ -543,7 +545,7 @@ private fun TimerPresets(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "History Presets",
+                stringResource(R.string.st_TimerScreen_i5j6),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -592,7 +594,7 @@ private fun PresetCard(
     } else {
         "$minutes"
     }
-    val unitLabel = if (minutes > 0 && seconds == 0) "MIN" else ""
+    val unitLabel = if (minutes > 0 && seconds == 0) stringResource(R.string.st_TimerScreen_k7l8) else ""
 
     ExpressiveCard(
         onClick = { onPresetSelected(minutes, seconds) },
@@ -661,12 +663,12 @@ private fun LockPresetDialog(
                 ) {
                     Column {
                         Text(
-                            "Lock Preset",
+                            stringResource(R.string.st_TimerScreen_m9n0),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Black
                         )
                         Text(
-                            "This slot will be locked to this duration",
+                            stringResource(R.string.st_TimerScreen_o1p2),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -692,7 +694,7 @@ private fun LockPresetDialog(
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = MediumExpressiveShape
                     ) {
-                        Text("CANCEL", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_TimerScreen_q3r4), fontWeight = FontWeight.Bold)
                     }
                     ToolzExpressiveButton(
                         onClick = { onConfirm(mins, secs) },
@@ -700,7 +702,7 @@ private fun LockPresetDialog(
                         shape = MediumExpressiveShape,
                         colors = ButtonDefaults.buttonColors(containerColor = accent)
                     ) {
-                        Text("LOCK", fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_TimerScreen_s5t6), fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -748,14 +750,14 @@ private fun TimerDetailRow(state: TimerState, accent: Color) {
         TimerMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.HourglassEmpty, contentDescription = null) },
-            label = "Duration",
+            label = stringResource(R.string.st_TimerScreen_u7v8),
             value = formatTimerTime(state.initialTime),
             accent = accent,
         )
         TimerMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Alarm, contentDescription = null) },
-            label = "Remaining",
+            label = stringResource(R.string.st_TimerScreen_w9x0),
             value = formatTimerTime(displayMillis(state)),
             accent = MaterialTheme.colorScheme.secondary,
         )
@@ -803,8 +805,8 @@ private fun TimerFinishedBanner(onDismissAlarm: () -> Unit) {
             Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Timer complete", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text("Tap to dismiss the alarm.", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.st_TimerScreen_y1z2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_TimerScreen_a3b4), style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -819,6 +821,13 @@ private fun TimerControlDock(
     onReset: () -> Unit,
     onToggleAlarms: () -> Unit,
 ) {
+    val onLabel = stringResource(R.string.st_TimerScreen_c5d6)
+    val offLabel = stringResource(R.string.st_TimerScreen_e7f8)
+    val resetLabel = stringResource(R.string.st_TimerScreen_g9h0)
+    val pauseLabel = stringResource(R.string.st_TimerScreen_i1j2)
+    val dismissLabel = stringResource(R.string.st_TimerScreen_k3l4)
+    val startLabel = stringResource(R.string.st_TimerScreen_m5n6)
+
     ToolzHorizontalFloatingToolbar(
         expanded = true,
         modifier = Modifier
@@ -835,12 +844,12 @@ private fun TimerControlDock(
                         tint = if (state.alarmsEnabled) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                 },
-                label = if (state.alarmsEnabled) "On" else "Off",
+                label = if (state.alarmsEnabled) onLabel else offLabel,
             )
             clickableItem(
                 onClick = onReset,
                 icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
-                label = "Reset",
+                label = resetLabel,
             )
         },
     ) {
@@ -864,9 +873,9 @@ private fun TimerControlDock(
             Spacer(Modifier.width(8.dp))
             Text(
                 when {
-                    state.isRunning -> "Pause"
-                    state.isRinging -> "Dismiss"
-                    else -> "Start"
+                    state.isRunning -> pauseLabel
+                    state.isRinging -> dismissLabel
+                    else -> startLabel
                 },
                 fontWeight = FontWeight.Black
             )
@@ -874,11 +883,12 @@ private fun TimerControlDock(
     }
 }
 
+@Composable
 private fun timerSubtitle(state: TimerState): String = when {
-    state.isRunning -> "Counting down"
-    state.isRinging -> "Time is up"
-    state.isPaused -> "Paused"
-    else -> "Precision countdown"
+    state.isRunning -> stringResource(R.string.st_TimerScreen_y5z6)
+    state.isRinging -> stringResource(R.string.st_TimerScreen_a7b8)
+    state.isPaused -> stringResource(R.string.st_TimerScreen_q9r0)
+    else -> stringResource(R.string.st_TimerScreen_s1t2)
 }
 
 private fun timerStatusIcon(state: TimerState) = when {
@@ -925,7 +935,7 @@ private fun CustomDurationDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("Set Duration", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_TimerScreen_e1f2), fontWeight = FontWeight.Bold)
         },
         text = {
             OutlinedTextField(
@@ -935,7 +945,7 @@ private fun CustomDurationDialog(
                         text = it
                     }
                 },
-                label = { Text("Minutes") },
+                label = { Text(stringResource(R.string.st_TimerScreen_u3v4)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
@@ -957,7 +967,7 @@ private fun CustomDurationDialog(
                 },
                 colors = ButtonDefaults.textButtonColors(contentColor = accent)
             ) {
-                Text("Confirm", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_TimerScreen_w5x6), fontWeight = FontWeight.Black)
             }
         },
         dismissButton = {
@@ -965,7 +975,7 @@ private fun CustomDurationDialog(
                 onClick = onDismiss,
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
             ) {
-                Text("Cancel")
+                Text(stringResource(R.string.st_TimerScreen_y7z8))
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,

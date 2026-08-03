@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -85,8 +87,8 @@ fun CalculatorScreen(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
-                    title = "Math Engine",
-                    subtitle = if (state.isScientific) "Scientific mode" else "Standard mode",
+                    title = stringResource(R.string.st_CalculatorScreen_f1a2),
+                    subtitle = if (state.isScientific) stringResource(R.string.st_CalculatorScreen_7e8f) + " mode" else stringResource(R.string.st_CalculatorScreen_5d6e) + " mode",
                     navigationIcon = {
                         ToolzExpressiveIconButton(
                             onClick = {
@@ -98,7 +100,7 @@ fun CalculatorScreen(
                             ),
                             shape = MediumExpressiveShape,
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_CalculatorScreen_3d5b))
                         }
                     },
                     actions = {
@@ -112,7 +114,7 @@ fun CalculatorScreen(
                             ),
                             shape = MediumExpressiveShape,
                         ) {
-                            Icon(Icons.Rounded.History, contentDescription = "Calculation history")
+                            Icon(Icons.Rounded.History, contentDescription = stringResource(R.string.st_CalculatorScreen_9e2c))
                         }
                         Spacer(Modifier.width(4.dp))
                     },
@@ -186,7 +188,7 @@ fun CalculatorMainContent(state: CalculatorState, viewModel: CalculatorViewModel
         // ── Standard / Scientific mode toggle ─────────────────────────────────
         ToolzConnectedButtonGroup(
             selectedIndex = if (state.isScientific) 1 else 0,
-            options = listOf("Standard", "Scientific"),
+            options = listOf(stringResource(R.string.st_CalculatorScreen_5d6e), stringResource(R.string.st_CalculatorScreen_7e8f)),
             onOptionSelected = { idx ->
                 val wantScientific = idx == 1
                 if (wantScientific != state.isScientific) {
@@ -387,7 +389,7 @@ fun CalculatorDisplay(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    "tap to copy",
+                    stringResource(R.string.st_CalculatorScreen_1a2b),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
                 )
@@ -743,7 +745,7 @@ fun CalculatorHistoryContent(
                 }
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "HISTORY",
+                    stringResource(R.string.st_CalculatorScreen_7c4d),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
@@ -769,7 +771,7 @@ fun CalculatorHistoryContent(
                 ) {
                     Icon(
                         Icons.Rounded.DeleteOutline,
-                        contentDescription = "Clear history",
+                        contentDescription = stringResource(R.string.st_CalculatorScreen_5f6e),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -803,13 +805,13 @@ fun CalculatorHistoryContent(
                         }
                     }
                     Text(
-                        "No calculations yet",
+                        stringResource(R.string.st_CalculatorScreen_2b8a),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
-                        "Results appear here after you press =",
+                        stringResource(R.string.st_CalculatorScreen_4d9c),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                         textAlign = TextAlign.Center,
@@ -864,7 +866,7 @@ fun CalculatorHistoryContent(
                                 )
                                 // Use as input hint
                                 Text(
-                                    text = "tap to use",
+                                    text = stringResource(R.string.st_CalculatorScreen_6a1b),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                                     modifier = Modifier.padding(top = 4.dp),
@@ -887,15 +889,15 @@ fun ConstantsDialog(onDismiss: () -> Unit, onSelect: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
 
     val constants = listOf(
-        Triple("π", "Pi",          "3.14159265"),
-        Triple("e", "Euler's",     "2.71828182"),
-        Triple("φ", "Golden ratio","1.61803398"),
-        Triple("c", "Speed of light", "299792458"),
-        Triple("G", "Gravitation", "6.6743e-11"),
-        Triple("h", "Planck",      "6.62607e-34"),
-        Triple("k", "Boltzmann",   "1.38064e-23"),
-        Triple("Nₐ", "Avogadro",  "6.02214e23"),
-        Triple("R", "Gas const.",  "8.31446"),
+        Triple("π", stringResource(R.string.st_CalculatorScreen_9f0a),          "3.14159265"),
+        Triple("e", stringResource(R.string.st_CalculatorScreen_a1b2),     "2.71828182"),
+        Triple("φ", stringResource(R.string.st_CalculatorScreen_c3d4),"1.61803398"),
+        Triple("c", stringResource(R.string.st_CalculatorScreen_e5f6), "299792458"),
+        Triple("G", stringResource(R.string.st_CalculatorScreen_g7h8), "6.6743e-11"),
+        Triple("h", stringResource(R.string.st_CalculatorScreen_i9j0),      "6.62607e-34"),
+        Triple("k", stringResource(R.string.st_CalculatorScreen_k1l2),   "1.38064e-23"),
+        Triple("Nₐ", stringResource(R.string.st_CalculatorScreen_m3n4),  "6.02214e23"),
+        Triple("R", stringResource(R.string.st_CalculatorScreen_o5p6),  "8.31446"),
     )
 
     AlertDialog(
@@ -920,7 +922,7 @@ fun ConstantsDialog(onDismiss: () -> Unit, onSelect: (String) -> Unit) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "Scientific Constants",
+                    stringResource(R.string.st_CalculatorScreen_1b2c),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                 )
@@ -984,7 +986,7 @@ fun ConstantsDialog(onDismiss: () -> Unit, onSelect: (String) -> Unit) {
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_CalculatorScreen_3c4d), fontWeight = FontWeight.Bold)
             }
         },
     )

@@ -63,6 +63,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -219,7 +221,7 @@ private fun VaultMainContent(
         topBar = {
             ExpressiveTopAppBar(
                 title = "Vault",
-                subtitle = "Encrypted & Secure",
+                subtitle = stringResource(R.string.st_PasswordVaultScreen_e1a2),
                 largeFlexible = true,
                 titleHorizontalAlignment = Alignment.Start,
                 navigationIcon = {
@@ -236,7 +238,7 @@ private fun VaultMainContent(
                     ) {
                         Icon(
                             Icons.Rounded.ArrowBackIosNew,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.st_PasswordVaultScreen_b3c4),
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -257,11 +259,11 @@ private fun VaultMainContent(
                                     try {
                                         context.startActivity(Intent("android.settings.AUTOFILL_SETTINGS"))
                                     } catch (e2: Exception) {
-                                        Toast.makeText(context, "Autofill settings not found", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_a1b2), Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             } else {
-                                Toast.makeText(context, "Autofill is active ✓", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_c3d4), Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = IconButtonDefaults.filledIconButtonColors(
@@ -269,7 +271,7 @@ private fun VaultMainContent(
                         ),
                         shape = MediumExpressiveShape,
                     ) {
-                        Icon(Icons.Rounded.SettingsSuggest, contentDescription = "Autofill settings")
+                        Icon(Icons.Rounded.SettingsSuggest, contentDescription = stringResource(R.string.st_PasswordVaultScreen_e5f6))
                     }
                     Spacer(Modifier.width(8.dp))
                     ToolzExpressiveIconButton(
@@ -282,7 +284,7 @@ private fun VaultMainContent(
                         ),
                         shape = MediumExpressiveShape,
                     ) {
-                        Icon(Icons.Rounded.FileUpload, contentDescription = "Import CSV")
+                        Icon(Icons.Rounded.FileUpload, contentDescription = stringResource(R.string.st_PasswordVaultScreen_g7h8))
                     }
                     Spacer(Modifier.width(4.dp))
                 },
@@ -291,10 +293,10 @@ private fun VaultMainContent(
         },
         floatingActionButton = {
             ExpressiveFabMenu(
-                contentDescription = "Vault actions",
+                contentDescription = stringResource(R.string.st_PasswordVaultScreen_i9j0),
                 items = listOf(
-                    Triple("Password Generator", Icons.Rounded.AutoAwesome, onGeneratorClick),
-                    Triple("Add Credential", Icons.Rounded.Add, onAddClick),
+                    Triple(stringResource(R.string.st_PasswordVaultScreen_k1l2), Icons.Rounded.AutoAwesome, onGeneratorClick),
+                    Triple(stringResource(R.string.st_PasswordVaultScreen_m3n4), Icons.Rounded.Add, onAddClick),
                 ),
             )
         },
@@ -322,7 +324,7 @@ private fun VaultMainContent(
                 ) {
                     StaggeredEntrance(index = 0, modifier = Modifier.weight(1f)) {
                         VaultStatCard(
-                            label = "Total",
+                            label = stringResource(R.string.st_PasswordVaultScreen_o5p6),
                             value = vaultStats.total.toString(),
                             icon = Icons.Rounded.Inventory2,
                             accentColor = MaterialTheme.colorScheme.primary,
@@ -330,7 +332,7 @@ private fun VaultMainContent(
                     }
                     StaggeredEntrance(index = 1, modifier = Modifier.weight(1f)) {
                         VaultStatCard(
-                            label = "Breached",
+                            label = stringResource(R.string.st_PasswordVaultScreen_q7r8),
                             value = vaultStats.breached.toString(),
                             icon = Icons.Rounded.GppBad,
                             accentColor = if (vaultStats.breached > 0)
@@ -341,7 +343,7 @@ private fun VaultMainContent(
                     }
                     StaggeredEntrance(index = 2, modifier = Modifier.weight(1f)) {
                         VaultStatCard(
-                            label = "Weak",
+                            label = stringResource(R.string.st_PasswordVaultScreen_s9t0),
                             value = vaultStats.weak.toString(),
                             icon = Icons.Rounded.Password,
                             accentColor = if (vaultStats.weak > 0)
@@ -373,7 +375,7 @@ private fun VaultMainContent(
                             vibrationManager?.vibrateTick()
                             viewModel.onSearchQueryChange(it)
                         },
-                        placeholder = { Text("Search vault…") },
+                        placeholder = { Text(stringResource(R.string.st_PasswordVaultScreen_u1v2)) },
                         leadingIcon = {
                             Icon(
                                 Icons.Rounded.Search,
@@ -388,7 +390,7 @@ private fun VaultMainContent(
                                 exit = scaleOut() + fadeOut(),
                             ) {
                                 IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Clear search")
+                                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_PasswordVaultScreen_w3x4))
                                 }
                             }
                         },
@@ -487,7 +489,7 @@ fun BiometricGate(onSuccess: () -> Unit) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.Fingerprint,
-                            contentDescription = "Unlock Vault",
+                            contentDescription = stringResource(R.string.st_PasswordVaultScreen_a7b8),
                             modifier = Modifier.size(62.dp),
                             tint = MaterialTheme.colorScheme.onPrimary,
                         )
@@ -498,7 +500,7 @@ fun BiometricGate(onSuccess: () -> Unit) {
             Spacer(Modifier.height(44.dp))
 
             Text(
-                "Vault Encrypted",
+                stringResource(R.string.st_PasswordVaultScreen_c9d0),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-1.5).sp,
@@ -506,7 +508,7 @@ fun BiometricGate(onSuccess: () -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Verify your identity to reveal secrets",
+                stringResource(R.string.st_PasswordVaultScreen_e1f2),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Medium,
@@ -527,7 +529,7 @@ fun BiometricGate(onSuccess: () -> Unit) {
                 Icon(Icons.Rounded.Fingerprint, contentDescription = null)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Authenticate",
+                    stringResource(R.string.st_PasswordVaultScreen_g3h4),
                     fontWeight = FontWeight.Black,
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -637,7 +639,7 @@ fun ScanButton(isScanning: Boolean, onClick: () -> Unit) {
             } else {
                 Icon(
                     Icons.Rounded.Security,
-                    contentDescription = "Scan vault",
+                    contentDescription = stringResource(R.string.st_PasswordVaultScreen_y5z6),
                     modifier = Modifier.size(24.dp),
                 )
             }
@@ -713,14 +715,14 @@ fun EmptySearchResult() {
             }
         }
         Text(
-            "NO MATCHES FOUND",
+            stringResource(R.string.st_PasswordVaultScreen_i5j6),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
             letterSpacing = 2.sp,
         )
         Text(
-            "Try adjusting your search query.",
+            stringResource(R.string.st_PasswordVaultScreen_k7l8),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
@@ -752,13 +754,13 @@ fun EmptyVaultState() {
             }
         }
         Text(
-            "Vault is Empty",
+            stringResource(R.string.st_PasswordVaultScreen_m9n0),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            "Tap the + button to add your first credential.",
+            stringResource(R.string.st_PasswordVaultScreen_o1p2),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -1015,7 +1017,7 @@ fun CredentialCard(
                             ) {
                                 Icon(Icons.Rounded.LockOpen, contentDescription = null)
                                 Spacer(Modifier.width(10.dp))
-                                Text("Set Password", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_PasswordVaultScreen_a3b5), fontWeight = FontWeight.Black)
                             }
                         }
 
@@ -1031,7 +1033,7 @@ fun CredentialCard(
                                 onCopy = { old ->
                                     vibrationManager?.vibrateClick()
                                     clipboardManager.setText(AnnotatedString(old))
-                                    Toast.makeText(context, "Old password copied", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_g9h1), Toast.LENGTH_SHORT).show()
                                 },
                             )
                         }
@@ -1057,7 +1059,7 @@ fun CredentialCard(
                             ) {
                                 Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Edit", fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_PasswordVaultScreen_k3l5), fontWeight = FontWeight.Bold)
                             }
 
                             if (!isIncomplete) {
@@ -1082,7 +1084,7 @@ fun CredentialCard(
                                 ) {
                                     Icon(Icons.Rounded.Security, null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Scan", fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.st_PasswordVaultScreen_m5n7), fontWeight = FontWeight.Bold)
                                 }
                             }
 
@@ -1098,7 +1100,7 @@ fun CredentialCard(
                             ) {
                                 Icon(Icons.Rounded.Delete, null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Delete", fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_PasswordVaultScreen_o7p9), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1249,7 +1251,7 @@ private fun PasswordRevealSurface(
             IconButton(onClick = onToggleReveal) {
                 Icon(
                     if (revealed) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                    contentDescription = if (revealed) "Hide password" else "Show password",
+                    contentDescription = if (revealed) stringResource(R.string.st_PasswordVaultScreen_w9x0) else stringResource(R.string.st_PasswordVaultScreen_y1z2),
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -1261,7 +1263,7 @@ private fun PasswordRevealSurface(
 private fun PasswordHistorySection(history: List<String>, onCopy: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            "PASSWORD HISTORY",
+            stringResource(R.string.st_PasswordVaultScreen_e7f9),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
@@ -1290,7 +1292,7 @@ private fun PasswordHistorySection(history: List<String>, onCopy: (String) -> Un
                     ) {
                         Icon(
                             Icons.Rounded.ContentCopy,
-                            contentDescription = "Copy old password",
+                            contentDescription = stringResource(R.string.st_PasswordVaultScreen_i1j3),
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -1369,7 +1371,7 @@ fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                "STRENGTH",
+                stringResource(R.string.st_PasswordVaultScreen_c5d7),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1468,7 +1470,7 @@ fun GeneratorBottomSheet(
         ) {
             // Title
             Text(
-                "Password Engine",
+                stringResource(R.string.st_PasswordVaultScreen_q9r1),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-1.5).sp,
@@ -1542,7 +1544,7 @@ fun GeneratorBottomSheet(
                         ) {
                             Icon(
                                 Icons.Rounded.Refresh,
-                                contentDescription = "Regenerate",
+                                contentDescription = stringResource(R.string.st_PasswordVaultScreen_s1t3),
                                 modifier = Modifier.size(24.dp),
                             )
                         }
@@ -1560,7 +1562,7 @@ fun GeneratorBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        "Length",
+                        stringResource(R.string.st_PasswordVaultScreen_u3v5),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
@@ -1654,7 +1656,7 @@ fun GeneratorBottomSheet(
                 onClick = {
                     vibrationManager?.vibrateClick()
                     clipboardManager.setText(AnnotatedString(generatedPassword))
-                    Toast.makeText(context, "Password copied to clipboard", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.st_PasswordVaultScreen_w5x7), Toast.LENGTH_SHORT).show()
                     onDismiss()
                 },
                 modifier = Modifier
@@ -1665,7 +1667,7 @@ fun GeneratorBottomSheet(
                 Icon(Icons.Rounded.ContentPaste, contentDescription = null)
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    "Copy Password",
+                    stringResource(R.string.st_PasswordVaultScreen_y7z9),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                 )
@@ -1706,7 +1708,7 @@ fun DeleteConfirmDialog(
         },
         title = {
             Text(
-                "Delete Credential?",
+                stringResource(R.string.st_PasswordVaultScreen_a9b1),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
@@ -1732,7 +1734,7 @@ fun DeleteConfirmDialog(
             ) {
                 Icon(Icons.Rounded.DeleteForever, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Delete Forever", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_PasswordVaultScreen_c1d3), fontWeight = FontWeight.Black)
             }
         },
         dismissButton = {
@@ -1741,7 +1743,7 @@ fun DeleteConfirmDialog(
                 modifier = Modifier.fillMaxWidth(),
                 shape = LargeExpressiveShape,
             ) {
-                Text("Cancel", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_PasswordVaultScreen_e3f5), fontWeight = FontWeight.Bold)
             }
         },
     )
@@ -1798,7 +1800,7 @@ fun AddPasswordDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (initialEntity == null) "New Entry" else "Edit Entry",
+                    if (initialEntity == null) stringResource(R.string.st_PasswordVaultScreen_g5h7) else stringResource(R.string.st_PasswordVaultScreen_i7j9),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Black,
                     letterSpacing = (-1).sp,
@@ -1814,7 +1816,7 @@ fun AddPasswordDialog(
                     ),
                     shape = SmallExpressiveShape,
                 ) {
-                    Icon(Icons.Rounded.Apps, contentDescription = "Import from App")
+                    Icon(Icons.Rounded.Apps, contentDescription = stringResource(R.string.st_PasswordVaultScreen_k9l1))
                 }
             }
         },
@@ -1826,7 +1828,7 @@ fun AddPasswordDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Service Name") },
+                    label = { Text(stringResource(R.string.st_PasswordVaultScreen_m1n3)) },
                     shape = MediumExpressiveShape,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1842,7 +1844,7 @@ fun AddPasswordDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("URL / App Package") },
+                    label = { Text(stringResource(R.string.st_PasswordVaultScreen_o3p5)) },
                     shape = MediumExpressiveShape,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1858,7 +1860,7 @@ fun AddPasswordDialog(
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
-                    label = { Text("Username / Email") },
+                    label = { Text(stringResource(R.string.st_PasswordVaultScreen_q5r7)) },
                     shape = MediumExpressiveShape,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1874,7 +1876,7 @@ fun AddPasswordDialog(
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Password") },
+                    label = { Text(stringResource(R.string.st_PasswordVaultScreen_s7t9)) },
                     shape = MediumExpressiveShape,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -1895,7 +1897,7 @@ fun AddPasswordDialog(
                             Icon(
                                 if (passwordVisible) Icons.Rounded.VisibilityOff
                                 else Icons.Rounded.Visibility,
-                                contentDescription = if (passwordVisible) "Hide" else "Show",
+                                contentDescription = if (passwordVisible) stringResource(R.string.st_PasswordVaultScreen_u9v1) else stringResource(R.string.st_PasswordVaultScreen_w1x3),
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -1935,7 +1937,7 @@ fun AddPasswordDialog(
                 Icon(Icons.Rounded.Lock, contentDescription = null)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    if (initialEntity == null) "Secure Credentials" else "Update Credentials",
+                    if (initialEntity == null) stringResource(R.string.st_PasswordVaultScreen_y3z5) else stringResource(R.string.st_PasswordVaultScreen_a5b7),
                     fontWeight = FontWeight.Black,
                 )
             }
@@ -1948,7 +1950,7 @@ fun AddPasswordDialog(
                     .height(48.dp),
                 shape = LargeExpressiveShape,
             ) {
-                Text("Cancel", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_PasswordVaultScreen_e3f5), fontWeight = FontWeight.Bold)
             }
         },
     )
@@ -1977,7 +1979,7 @@ fun AppPickerDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = {
             Text(
-                "Select Source App",
+                stringResource(R.string.st_PasswordVaultScreen_c7d9),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
             )
@@ -2028,7 +2030,7 @@ fun AppPickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_PasswordVaultScreen_m7n9), fontWeight = FontWeight.Bold)
             }
         },
     )

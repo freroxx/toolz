@@ -50,7 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -524,7 +524,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                     Spacer(Modifier.height(32.dp))
 
                     Text(
-                        "ENGINE UPGRADE READY",
+                        stringResource(R.string.st_MainActivity_8f1a),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Black,
                         color = MaterialTheme.colorScheme.primary,
@@ -532,7 +532,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                     )
 
                     Text(
-                        "New Version Available",
+                        stringResource(R.string.st_MainActivity_3d5b),
                         style = MaterialTheme.typography.displaySmall,
                         fontWeight = FontWeight.Black,
                         textAlign = TextAlign.Center
@@ -557,11 +557,11 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.History, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 Spacer(Modifier.width(8.dp))
-                                Text("CHANGELOG", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_MainActivity_9e2c), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
                             }
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                changelog ?: "Performance optimizations and stability improvements.",
+                                changelog ?: stringResource(R.string.st_MainActivity_1a2b),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -588,7 +588,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                     ) {
                         Icon(Icons.Rounded.Download, null)
                         Spacer(Modifier.width(12.dp))
-                        Text("UPDATE NOW", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                        Text(stringResource(R.string.st_MainActivity_7c4d), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
 
                     Spacer(Modifier.height(12.dp))
@@ -601,7 +601,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                         },
                         modifier = Modifier.fillMaxWidth().height(56.dp)
                     ) {
-                        Text("REMIND ME LATER", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                        Text(stringResource(R.string.st_MainActivity_5f6e), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
                     }
                 }
             }
@@ -644,7 +644,7 @@ fun ToolzNavHost(
                             uri.toString().lowercase().endsWith(".pdf")
                 
                 if (isPdf) {
-                    var title = "Document"
+                    var title = context.getString(R.string.st_MainActivity_2b8a)
                     try {
                         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                             val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)

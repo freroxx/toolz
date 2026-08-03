@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
@@ -138,7 +140,7 @@ fun MagnifierScreen(
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    Toast.makeText(context, "Image saved to gallery", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.st_MagnifierScreen_6a1b), Toast.LENGTH_SHORT).show()
                 }
 
                 override fun onError(exc: ImageCaptureException) {
@@ -151,14 +153,14 @@ fun MagnifierScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "MAGNIFIER ENGINE",
-                subtitle = "Optical zoom precision",
+                title = stringResource(R.string.st_MagnifierScreen_f1a2),
+                subtitle = stringResource(R.string.st_MagnifierScreen_3d5b),
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(surfaceVariantColor.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_MagnifierScreen_9e2c))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -232,7 +234,7 @@ fun MagnifierScreen(
                             contentColor = MaterialTheme.colorScheme.onPrimary,
                             shape = RoundedCornerShape(20.dp)
                         ) {
-                            Icon(Icons.Rounded.Camera, contentDescription = "Capture", modifier = Modifier.size(28.dp))
+                            Icon(Icons.Rounded.Camera, contentDescription = stringResource(R.string.st_MagnifierScreen_1a2b), modifier = Modifier.size(28.dp))
                         }
                     }
                     
@@ -252,7 +254,7 @@ fun MagnifierScreen(
                                 Spacer(Modifier.width(12.dp))
                                 @Suppress("DEPRECATION")
                                 Text(
-                                    "OPTICAL ZOOM", 
+                                    stringResource(R.string.st_MagnifierScreen_7c4d), 
                                     style = MaterialTheme.typography.labelSmall, 
                                     fontWeight = FontWeight.Black,
                                     color = primaryColor,
@@ -294,9 +296,9 @@ fun MagnifierScreen(
                                 Icon(Icons.Rounded.ZoomIn, null, modifier = Modifier.padding(32.dp), tint = primaryColor.copy(alpha = 0.5f))
                             }
                             Spacer(Modifier.height(32.dp))
-                            Text("CAMERA ACCESS REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                            Text(stringResource(R.string.st_MagnifierScreen_5f6e), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                             Text(
-                                "Magnifier needs camera access to provide high-resolution zoom capabilities.", 
+                                stringResource(R.string.st_MagnifierScreen_2b8a), 
                                 textAlign = TextAlign.Center,
                                 color = onSurfaceVariantColor.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(top = 16.dp, bottom = 32.dp)
@@ -306,7 +308,7 @@ fun MagnifierScreen(
                                 shape = RoundedCornerShape(24.dp),
                                 modifier = Modifier.fillMaxWidth().height(64.dp)
                             ) {
-                                Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_MagnifierScreen_4d9c), fontWeight = FontWeight.Black)
                             }
                         }
                     }

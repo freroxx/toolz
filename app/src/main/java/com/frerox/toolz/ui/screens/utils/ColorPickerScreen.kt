@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import android.graphics.Bitmap
 import android.util.Log
@@ -94,10 +96,10 @@ fun ColorPickerScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Color Picker", style = MaterialTheme.typography.titleLarge) },
+                title = { Text(stringResource(R.string.st_ColorPickerScreen_a1b2), style = MaterialTheme.typography.titleLarge) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_ColorPickerScreen_c3d4))
                     }
                 },
                 actions = {
@@ -294,7 +296,7 @@ fun ColorPickerScreen(
                                     },
                                     modifier = Modifier.size(48.dp)
                                 ) {
-                                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy")
+                                    Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.st_ColorPickerScreen_e5f6))
                                 }
                             }
                         }
@@ -307,7 +309,7 @@ fun ColorPickerScreen(
                             .padding(vertical = 8.dp)
                     ) {
                         Text(
-                            "HISTORY", 
+                            stringResource(R.string.st_ColorPickerScreen_g7h8), 
                             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.labelMedium, 
                             fontWeight = FontWeight.Bold, 
@@ -333,7 +335,7 @@ fun ColorPickerScreen(
                             if (colorHistory.isEmpty()) {
                                 item {
                                     Text(
-                                        "Saved colors will appear here", 
+                                        stringResource(R.string.st_ColorPickerScreen_i9j0), 
                                         style = MaterialTheme.typography.bodyMedium, 
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                         modifier = Modifier.padding(vertical = 8.dp)
@@ -356,9 +358,9 @@ fun ColorPickerScreen(
                                 }
                             }
                             Spacer(Modifier.height(32.dp))
-                            Text("IMAGERY ACCESS REQUIRED", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                            Text(stringResource(R.string.st_ColorPickerScreen_k1l2), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                             Text(
-                                "To extract color data from your physical environment, Toolz needs access to the camera module. All processing is local.", 
+                                stringResource(R.string.st_ColorPickerScreen_m3n4), 
                                 textAlign = TextAlign.Center, 
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 style = MaterialTheme.typography.bodyLarge,
@@ -369,7 +371,7 @@ fun ColorPickerScreen(
                                 shape = RoundedCornerShape(20.dp),
                                 modifier = Modifier.fillMaxWidth().height(64.dp)
                             ) {
-                                Text("GRANT PERMISSION", fontWeight = FontWeight.Black)
+                                Text(stringResource(R.string.st_ColorPickerScreen_o5p6), fontWeight = FontWeight.Black)
                             }
                         }
                     }

@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.math
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -129,14 +131,14 @@ fun EquationSolverScreenContent(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
-                    title = "EQUATION SOLVER",
-                    subtitle = "Complex algebraic resolution",
+                    title = stringResource(R.string.st_EquationSolverScreen_f1a2),
+                    subtitle = stringResource(R.string.st_EquationSolverScreen_3d5b),
                     navigationIcon = {
                         IconButton(
                             onClick = onBack,
                             modifier = Modifier.padding(12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_EquationSolverScreen_9e2c))
                         }
                     },
                     actions = {
@@ -144,7 +146,7 @@ fun EquationSolverScreenContent(
                             onClick = onShowHistory,
                             modifier = Modifier.padding(end = 12.dp).size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                         ) {
-                            Icon(Icons.Rounded.History, contentDescription = "History")
+                            Icon(Icons.Rounded.History, contentDescription = stringResource(R.string.st_EquationSolverScreen_1a2b))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -165,9 +167,9 @@ fun EquationSolverScreenContent(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     val statusText = when {
-                        state.isSolving -> "Solving..."
-                        state.result.isNotEmpty() -> "Solved"
-                        else -> "Ready"
+                        state.isSolving -> stringResource(R.string.st_EquationSolverScreen_7c4d)
+                        state.result.isNotEmpty() -> stringResource(R.string.st_EquationSolverScreen_5f6e)
+                        else -> stringResource(R.string.st_EquationSolverScreen_2b8a)
                     }
                     val statusIcon = when {
                         state.isSolving -> Icons.Rounded.PlayArrow
@@ -285,7 +287,7 @@ fun EquationSolverScreenContent(
                                     elevation = 0.dp
                                 ) {
                                     Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("SOLUTION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                        Text(stringResource(R.string.st_EquationSolverScreen_4d9c), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                                         Text(state.result, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center)
                                     }
                                 }
@@ -298,7 +300,7 @@ fun EquationSolverScreenContent(
                                     shape = SmallExpressiveShape,
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                                 ) {
-                                    Text("HOW TO SOLVE?", fontWeight = FontWeight.Black)
+                                    Text(stringResource(R.string.st_EquationSolverScreen_6a1b), fontWeight = FontWeight.Black)
                                 }
                             }
                         }
@@ -568,7 +570,7 @@ fun StepsBottomSheet(
     ) {
         Column(modifier = Modifier.fillMaxHeight(0.7f).padding(horizontal = 28.dp).padding(bottom = 48.dp)) {
             Text(
-                "SOLUTION STEPS",
+                stringResource(R.string.st_EquationSolverScreen_1b2c),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,
@@ -614,7 +616,7 @@ fun HistoryBottomSheet(
     ) {
         Column(modifier = Modifier.fillMaxHeight(0.6f).padding(horizontal = 28.dp).padding(bottom = 32.dp)) {
             Text(
-                "HISTORY LOG",
+                stringResource(R.string.st_EquationSolverScreen_3c4d),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,

@@ -184,6 +184,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
@@ -353,11 +355,11 @@ fun CatalogContent(
     if (showPlaylistPicker && playlistTargetTrack != null) {
         AlertDialog(
             onDismissRequest = { showPlaylistPicker = false },
-            title = { Text("Add to playlist", fontWeight = FontWeight.Black) },
+            title = { Text(stringResource(R.string.st_CatalogScreen_atp1), fontWeight = FontWeight.Black) },
             text = {
                 if (playlists.isEmpty()) {
                     Text(
-                        "Create a playlist in Library first, then you can save catalog tracks here.",
+                        stringResource(R.string.st_CatalogScreen_capilf2),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
@@ -401,7 +403,7 @@ fun CatalogContent(
                 TextButton(onClick = {
                     showPlaylistPicker = false
                     playlistTargetTrack = null
-                }) { Text("Close") }
+                }) { Text(stringResource(R.string.st_CatalogScreen_c3)) }
             }
         )
     }
@@ -507,13 +509,13 @@ fun CatalogContent(
 
                 if (state.query.isBlank()) {
                     if (state.isLoading) {
-                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Catalog", listMode = true) }
-                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Recommendations", listMode = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = stringResource(R.string.st_CatalogScreen_cat4), listMode = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = stringResource(R.string.st_CatalogScreen_rec8), listMode = true) }
                     } else {
                         if (state.quickPicks.isNotEmpty()) {
                             item(span = StaggeredGridItemSpan.FullLine) {
                                 SectionHeader(
-                                    title = "Quick picks",
+                                    title = stringResource(R.string.st_CatalogScreen_qp6),
                                     subtitle = "${state.quickPicks.size} ready to play",
                                     icon = Icons.Rounded.AutoAwesome
                                 )
@@ -540,7 +542,7 @@ fun CatalogContent(
 
                         item(span = StaggeredGridItemSpan.FullLine) {
                             SectionHeader(
-                                title = "Trending",
+                                title = stringResource(R.string.st_CatalogScreen_tr7),
                                 subtitle = "${state.trending.size.coerceAtMost(9)} tracks",
                                 icon = Icons.AutoMirrored.Rounded.TrendingUp
                             )
@@ -566,7 +568,7 @@ fun CatalogContent(
 
                         item(span = StaggeredGridItemSpan.FullLine) {
                             SectionHeader(
-                                title = "Recommended",
+                                title = stringResource(R.string.st_CatalogScreen_rec8),
                                 subtitle = state.recommendationTitle.removePrefix("Just for you · ").ifBlank {
                                     "Based on your listening"
                                 },
@@ -626,14 +628,14 @@ fun CatalogContent(
                                     Icon(Icons.Rounded.SearchOff, null, modifier = Modifier.size(56.dp).alpha(0.35f))
                                     Spacer(Modifier.height(12.dp))
                                     Text(
-                                        "No songs found for \"${state.query}\"",
+                                        stringResource(R.string.st_CatalogScreen_nmf9) + " \"${state.query}\"",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         textAlign = TextAlign.Center
                                     )
                                     Spacer(Modifier.height(8.dp))
                                     Text(
-                                        "Try an artist name, a mood, or a cleaner title.",
+                                        stringResource(R.string.st_CatalogScreen_tan10),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center
                                     )
@@ -782,13 +784,13 @@ private fun CatalogTopActions(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Catalog",
+                    stringResource(R.string.st_CatalogScreen_cat4),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    "Online tracks",
+                    stringResource(R.string.st_CatalogScreen_ot5),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1388,7 +1390,7 @@ private fun DownloadButton(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Rounded.Check,
-                        contentDescription = "Downloaded",
+                        contentDescription = stringResource(R.string.st_CatalogScreen_d11),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(if (compact) 16.dp else 18.dp)
                     )
@@ -1423,7 +1425,7 @@ private fun DownloadButton(
             ) {
                 Icon(
                     Icons.Rounded.FileDownload,
-                    contentDescription = "Download",
+                    contentDescription = stringResource(R.string.st_CatalogScreen_dwn16),
                     modifier = Modifier.size(if (compact) 18.dp else 20.dp)
                 )
             }
@@ -1451,7 +1453,7 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
-            TextButton(onClick = onRetry) { Text("Retry") }
+            TextButton(onClick = onRetry) { Text(stringResource(R.string.st_CatalogScreen_c3)) }
         }
     }
 }
@@ -1661,7 +1663,7 @@ private fun CatalogTrackActionsSheet(
                         AssistChip(
                             onClick = {},
                             enabled = false,
-                            label = { Text(if (isDownloaded) "Downloaded" else "Online") },
+                            label = { Text(if (isDownloaded) stringResource(R.string.st_CatalogScreen_d11) else stringResource(R.string.st_CatalogScreen_on12)) },
                             leadingIcon = {
                                 Icon(
                                     if (isDownloaded) Icons.Rounded.Check else Icons.Rounded.GraphicEq,
@@ -1678,11 +1680,11 @@ private fun CatalogTrackActionsSheet(
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
 
-            CatalogActionRow("Play now", Icons.Rounded.PlayArrow, onPlayNow)
-            CatalogActionRow("Play next", Icons.AutoMirrored.Rounded.QueueMusic, onPlayNext)
-            CatalogActionRow(if (isDownloaded) "Download saved" else "Download", Icons.Rounded.Download, onDownload, enabled = !isDownloaded)
-            CatalogActionRow("Add to playlist", Icons.AutoMirrored.Rounded.PlaylistAdd, onAddToPlaylist)
-            CatalogActionRow("Play in karaoke", Icons.Rounded.MicExternalOn, onOpenKaraoke)
+            CatalogActionRow(stringResource(R.string.st_CatalogScreen_pn13), Icons.Rounded.PlayArrow, onPlayNow)
+            CatalogActionRow(stringResource(R.string.st_CatalogScreen_pnx14), Icons.AutoMirrored.Rounded.QueueMusic, onPlayNext)
+            CatalogActionRow(if (isDownloaded) stringResource(R.string.st_CatalogScreen_ds15) else stringResource(R.string.st_CatalogScreen_dwn16), Icons.Rounded.Download, onDownload, enabled = !isDownloaded)
+            CatalogActionRow(stringResource(R.string.st_CatalogScreen_atp1), Icons.AutoMirrored.Rounded.PlaylistAdd, onAddToPlaylist)
+            CatalogActionRow(stringResource(R.string.st_CatalogScreen_pik17), Icons.Rounded.MicExternalOn, onOpenKaraoke)
         }
     }
 }
@@ -1737,7 +1739,7 @@ fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Welcome to Catalog",
+                    stringResource(R.string.st_CatalogScreen_wtc18),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
@@ -1746,7 +1748,7 @@ fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
         },
         text = {
             Text(
-                "Search, stream, and download online songs with a cleaner Discover experience. Long press any track for quicker actions.",
+                stringResource(R.string.st_CatalogScreen_wtc_desc19),
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1761,7 +1763,7 @@ fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Text("Start exploring", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_CatalogScreen_se20), fontWeight = FontWeight.Bold)
             }
         },
         shape = RoundedCornerShape(32.dp)
@@ -1792,15 +1794,15 @@ fun DownloadOptionsBottomSheet(
                 .padding(bottom = 32.dp)
                 .navigationBarsPadding()
         ) {
-            Text("Download", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_CatalogScreen_dwn16), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Choose how the track should be saved for offline playback.",
+                stringResource(R.string.st_CatalogScreen_cht1tbs21),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(24.dp))
 
-            Text("Format", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.st_CatalogScreen_f22), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 listOf("M4A", "OPUS", "MP3").forEachIndexed { index, format ->
@@ -1816,7 +1818,7 @@ fun DownloadOptionsBottomSheet(
 
             Spacer(Modifier.height(24.dp))
 
-            Text("Quality", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.st_CatalogScreen_q23), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("HIGH", "MEDIUM", "LOW").forEach { quality ->
@@ -1837,9 +1839,9 @@ fun DownloadOptionsBottomSheet(
                                 Text(quality, fontWeight = FontWeight.Bold)
                                 Text(
                                     when (quality) {
-                                        "HIGH" -> "Largest file, best detail"
-                                        "MEDIUM" -> "Balanced quality and size"
-                                        else -> "Smaller file, lighter download"
+                                        "HIGH" -> stringResource(R.string.st_CatalogScreen_lfbd24)
+                                        "MEDIUM" -> stringResource(R.string.st_CatalogScreen_bqas25)
+                                        else -> stringResource(R.string.st_CatalogScreen_sfld26)
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1865,7 +1867,7 @@ fun DownloadOptionsBottomSheet(
             ) {
                 Icon(Icons.Rounded.Download, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Start download", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_CatalogScreen_sd27), fontWeight = FontWeight.Bold)
             }
         }
     }

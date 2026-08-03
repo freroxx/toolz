@@ -65,6 +65,8 @@ import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.frerox.toolz.ui.components.*
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -179,8 +181,8 @@ fun FileConverterScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "FILE CONVERTER",
-                subtitle = "CONVERT ANY FILE FORMAT",
+                title = stringResource(R.string.st_FileConverterScreen_fc1),
+                subtitle = stringResource(R.string.st_FileConverterScreen_cf2),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -192,7 +194,7 @@ fun FileConverterScreen(
                             .clip(SmallExpressiveShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_FileConverterScreen_b3))
                     }
                 },
                 actions = {
@@ -208,7 +210,7 @@ fun FileConverterScreen(
                     ) {
                         Icon(
                             imageVector = if (highQuality) Icons.Rounded.HighQuality else Icons.Rounded.Speed,
-                            contentDescription = "Quality",
+                            contentDescription = stringResource(R.string.st_FileConverterScreen_q4),
                             tint = if (highQuality) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
                         )
                     }
@@ -299,7 +301,7 @@ fun FileConverterScreen(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.History, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
                         Text(
-                            text       = "Conversion History",
+                            text       = stringResource(R.string.st_FileConverterScreen_ch5),
                             style      = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
                             color      = MaterialTheme.colorScheme.onSurface,
@@ -377,7 +379,7 @@ private fun IdleView(
             ) {
                 Icon(Icons.Rounded.Info, null, Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("LEARN ABOUT THE ENGINE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text(stringResource(R.string.st_FileConverterScreen_lae6), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
         }
     }
@@ -439,13 +441,13 @@ private fun HeroSelectionZone(
                 }
                 Spacer(Modifier.height(24.dp))
                 Text(
-                    text       = "Tap to Select Files",
+                    text       = stringResource(R.string.st_FileConverterScreen_tsf7),
                     style      = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     textAlign  = TextAlign.Center,
                 )
                 Text(
-                    text      = "CONVERT MORE THAN 50 FILE FORMATS",
+                    text      = stringResource(R.string.st_FileConverterScreen_cmf8),
                     style     = MaterialTheme.typography.labelMedium,
                     color     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center,
@@ -490,12 +492,12 @@ private fun QualityConfigCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (highQuality) "Elite Quality" else "Performance Mode",
+                    if (highQuality) stringResource(R.string.st_FileConverterScreen_eq9) else stringResource(R.string.st_FileConverterScreen_pm10),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    if (highQuality) "Best visual/audio fidelity · Lanczos" else "Fastest conversion · Smaller files",
+                    if (highQuality) stringResource(R.string.st_FileConverterScreen_bva11) else stringResource(R.string.st_FileConverterScreen_fc12),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -528,7 +530,7 @@ private fun QuickTypesGrid(onShowAllFormats: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Supported Asset Types",
+                text = stringResource(R.string.st_FileConverterScreen_sat25),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black
             )
@@ -541,7 +543,7 @@ private fun QuickTypesGrid(onShowAllFormats: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
             ) {
                 Text(
-                    "VIEW ALL →",
+                    stringResource(R.string.st_FileConverterScreen_va26),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
@@ -648,7 +650,7 @@ private fun ConvertingView(
 
         // Clean typography for state
         Text(
-            text = "Converting Assets",
+            text = stringResource(R.string.st_FileConverterScreen_ca27),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Black,
         )
@@ -697,7 +699,7 @@ private fun ConvertingView(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
-                Text("Cancel", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.st_FileConverterScreen_c28), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -719,6 +721,7 @@ private fun SuccessView(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val successColor = Color(0xFF1E88E5) // Clean blue instead of heavy green
+    val sf30 = stringResource(R.string.st_FileConverterScreen_sf30)
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -752,12 +755,12 @@ private fun SuccessView(
         // Minimalist Typography
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = "Success!",
+                text = stringResource(R.string.st_FileConverterScreen_s29),
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Black,
             )
             Text(
-                text = "${outputFiles.size} file${if (outputFiles.size > 1) "s" else ""} ready to use.",
+                text = "${outputFiles.size} file${if (outputFiles.size > 1) "s" else ""} " + stringResource(R.string.st_FileConverterScreen_rtu55),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                 textAlign = TextAlign.Center
@@ -790,7 +793,7 @@ private fun SuccessView(
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                        context.startActivity(Intent.createChooser(intent, "Share File"))
+                        context.startActivity(Intent.createChooser(intent, sf30))
                     } catch (_: Exception) {}
                 },
                 modifier = Modifier.weight(1f).height(60.dp),
@@ -798,7 +801,7 @@ private fun SuccessView(
             ) {
                 Icon(Icons.Rounded.IosShare, null, Modifier.size(22.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Share", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_FileConverterScreen_sh31), fontWeight = FontWeight.Black)
             }
 
             ToolzExpressiveButton(
@@ -810,7 +813,7 @@ private fun SuccessView(
                 shape = LargeExpressiveShape,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Done", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_FileConverterScreen_d32), fontWeight = FontWeight.Black)
             }
         }
     }
@@ -826,6 +829,7 @@ private fun ConversionSummaryCard(
 ) {
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val oa38 = stringResource(R.string.st_FileConverterScreen_oa38)
     
     val totalInputSize = remember(selectedFiles) { selectedFiles.sumOf { it.size } }
     val totalOutputSize = remember(outputPaths) { outputPaths.sumOf { File(it).length() } }
@@ -848,7 +852,7 @@ private fun ConversionSummaryCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("FORMAT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                    Text(stringResource(R.string.st_FileConverterScreen_f33), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = if (selectedFiles.size == 1) selectedFiles.first().name.substringAfterLast(".", "UNKNOWN").uppercase() else "MIXED",
@@ -866,9 +870,9 @@ private fun ConversionSummaryCard(
                 }
                 
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("QUALITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+                    Text(stringResource(R.string.st_FileConverterScreen_q34), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
                     Text(
-                        text = if (highQuality) "ELITE" else "PERFORMANCE",
+                        text = if (highQuality) stringResource(R.string.st_FileConverterScreen_eq9).uppercase() else stringResource(R.string.st_FileConverterScreen_pm10).uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = if (highQuality) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
@@ -885,12 +889,12 @@ private fun ConversionSummaryCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("TOTAL SIZE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.st_FileConverterScreen_ts35), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Text(formatFileSize(totalOutputSize), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 }
                 
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("CHANGE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.st_FileConverterScreen_ch36), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(
                             imageVector = if (sizeDiff <= 0) Icons.Rounded.TrendingDown else Icons.Rounded.TrendingUp,
@@ -909,7 +913,7 @@ private fun ConversionSummaryCard(
             }
             
             // Thumbnails
-            Text("FILES", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+            Text(stringResource(R.string.st_FileConverterScreen_fls37), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -929,7 +933,7 @@ private fun ConversionSummaryCard(
                                     setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
-                                context.startActivity(Intent.createChooser(intent, "Open Asset"))
+                                context.startActivity(Intent.createChooser(intent, oa38))
                             } catch (_: Exception) {}
                         },
                         modifier = Modifier.size(80.dp),
@@ -993,12 +997,12 @@ private fun ErrorDialog(message: String, onDismiss: () -> Unit) {
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-                Text("Conversion Failed", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.st_FileConverterScreen_cf39), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("We are sorry, but the engine encountered an error while processing your files.", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.st_FileConverterScreen_err40), style = MaterialTheme.typography.bodyMedium)
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -1021,12 +1025,12 @@ private fun ErrorDialog(message: String, onDismiss: () -> Unit) {
                 onClick = {
                     vibrationManager?.vibrateTick()
                     clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(message))
-                    android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, stringResource(R.string.st_FileConverterScreen_ctc41), android.widget.Toast.LENGTH_SHORT).show()
                 }
             ) {
                 Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("COPY ERROR LOG", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_FileConverterScreen_cel42), fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1036,7 +1040,7 @@ private fun ErrorDialog(message: String, onDismiss: () -> Unit) {
                     onDismiss()
                 }
             ) {
-                Text("CLOSE", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_FileConverterScreen_cl43), fontWeight = FontWeight.Bold)
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1071,8 +1075,8 @@ fun EngineInfoSheet(onDismiss: () -> Unit) {
             
             Spacer(Modifier.height(24.dp))
             
-            Text("Toolz File Converter", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("ARCHITECTURE & WORKFLOW", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+            Text(stringResource(R.string.st_FileConverterScreen_tfc44), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_FileConverterScreen_aw45), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
             
             Spacer(Modifier.height(32.dp))
             
@@ -1080,29 +1084,29 @@ fun EngineInfoSheet(onDismiss: () -> Unit) {
                 item {
                     InfoSection(
                         icon = Icons.Rounded.Code,
-                        title = "Core Architecture",
-                        description = "Our engine is built on a custom native integration of FFmpeg, ensuring desktop-class performance and support for hundreds of legacy and modern codecs entirely offline."
+                        title = stringResource(R.string.st_FileConverterScreen_ca46),
+                        description = stringResource(R.string.st_FileConverterScreen_ca_desc47)
                     )
                 }
                 item {
                     InfoSection(
                         icon = Icons.Rounded.Speed,
-                        title = "Performance vs. Quality",
-                        description = "Performance mode utilizes hardware-accelerated encoders (MediaCodec) when available, focusing on speed. Quality mode uses software-based Lanczos scaling and high-bitrate libx264/libx265 for maximum fidelity."
+                        title = stringResource(R.string.st_FileConverterScreen_pq48),
+                        description = stringResource(R.string.st_FileConverterScreen_pq_desc49)
                     )
                 }
                 item {
                     InfoSection(
                         icon = Icons.Rounded.Security,
-                        title = "Privacy First",
-                        description = "No data ever leaves your device. All processing happens locally in isolated background services. We don't use cloud APIs, protecting your sensitive media from third-party servers."
+                        title = stringResource(R.string.st_FileConverterScreen_pf50),
+                        description = stringResource(R.string.st_FileConverterScreen_pf_desc51)
                     )
                 }
                 item {
                     InfoSection(
                         icon = Icons.Rounded.Layers,
-                        title = "Batch Pipeline",
-                        description = "The engine manages a concurrent queue, automatically handling multiple file types in a single session. It intelligently routes images, videos, and PDFs to specialized sub-engines."
+                        title = stringResource(R.string.st_FileConverterScreen_bp52),
+                        description = stringResource(R.string.st_FileConverterScreen_bp_desc53)
                     )
                 }
             }
@@ -1114,7 +1118,7 @@ fun EngineInfoSheet(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(64.dp),
                 shape = LargeExpressiveShape
             ) {
-                Text("GOT IT", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text(stringResource(R.string.st_FileConverterScreen_gi54), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
             
             Spacer(Modifier.height(32.dp))
@@ -1159,7 +1163,7 @@ private fun OutputFileCard(
                     setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                context.startActivity(Intent.createChooser(intent, "Open Asset"))
+                context.startActivity(Intent.createChooser(intent, stringResource(R.string.st_FileConverterScreen_oa38)))
             } catch (_: Exception) {}
         },
         modifier = Modifier.fillMaxWidth(),
@@ -1190,7 +1194,7 @@ private fun OutputFileCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(file.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(formatFileSize(file.length()) + " · Ready to use", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                Text(formatFileSize(file.length()) + " · " + stringResource(R.string.st_FileConverterScreen_rtu55), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
             }
             Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
         }
@@ -1213,7 +1217,7 @@ private fun RecentConversionItem(
                         setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    context.startActivity(Intent.createChooser(intent, "Open File"))
+                    context.startActivity(Intent.createChooser(intent, stringResource(R.string.st_FileConverterScreen_of56)))
                 }
             } catch (_: Exception) {}
         },
@@ -1274,7 +1278,7 @@ fun ConversionTypeSheet(
         Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(horizontal = 24.dp).navigationBarsPadding()) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text("Select Output Format", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_FileConverterScreen_sof57), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                     if (fileCount > 1) {
                         Text("BATCH CONVERTING $fileCount FILES", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                     }
@@ -1286,7 +1290,7 @@ fun ConversionTypeSheet(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search formats (mp4, webp, pdf...)") },
+                placeholder = { Text(stringResource(R.string.st_FileConverterScreen_sf_hint58)) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
@@ -1323,7 +1327,7 @@ fun AllFormatsSheet(onDismiss: () -> Unit) {
     ) {
         Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 24.dp).navigationBarsPadding()) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Library of Formats", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_FileConverterScreen_lof59), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null) }
             }
             Spacer(Modifier.height(20.dp))
@@ -1331,7 +1335,7 @@ fun AllFormatsSheet(onDismiss: () -> Unit) {
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search 50+ supported formats...") },
+                placeholder = { Text(stringResource(R.string.st_FileConverterScreen_sf50_hint60)) },
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true

@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
@@ -190,8 +192,8 @@ private fun DeviceInfoScreenContent(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "DEVICE INFO",
-                subtitle = "Hardware Snapshot",
+                title = stringResource(R.string.st_DeviceInfoScreen_a1b2),
+                subtitle = stringResource(R.string.st_DeviceInfoScreen_c3d4),
                 navigationIcon = {
                     ToolzExpressiveIconButton(
                         onClick = onBack,
@@ -200,7 +202,7 @@ private fun DeviceInfoScreenContent(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                         ),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_DeviceInfoScreen_e5f6))
                     }
                 },
                 actions = {
@@ -216,7 +218,7 @@ private fun DeviceInfoScreenContent(
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         ),
                     ) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh specs")
+                        Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_DeviceInfoScreen_g7h8))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -275,8 +277,8 @@ private fun DeviceInfoScreenContent(
                         item {
                             SectionLabel(
                                 icon = Icons.Rounded.TableRows,
-                                title = "Market Specifications",
-                                subtitle = "Full technical breakdown",
+                                title = stringResource(R.string.st_DeviceInfoScreen_u1v2),
+                                subtitle = stringResource(R.string.st_DeviceInfoScreen_w3x4),
                                 modifier = Modifier.padding(horizontal = 24.dp)
                             )
                         }
@@ -466,7 +468,7 @@ private fun HeroHeader(
                     when {
                         status.loading -> StatusPill(
                             icon = Icons.Rounded.Refresh,
-                            text = "Matching Device Profile...",
+                            text = stringResource(R.string.st_DeviceInfoScreen_i9j0),
                             color = MaterialTheme.colorScheme.primary,
                         )
 
@@ -489,7 +491,7 @@ private fun HeroHeader(
                                 if (status.isFromCache) {
                                     StatusPill(
                                         icon = Icons.Rounded.Storage,
-                                        text = "CACHED",
+                                        text = stringResource(R.string.st_DeviceInfoScreen_k1l2),
                                         color = MaterialTheme.colorScheme.secondary,
                                     )
                                 }
@@ -509,7 +511,7 @@ private fun HeroHeader(
                                     ),
                                     shape = CircleShape
                                 ) {
-                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "View Source", modifier = Modifier.size(20.dp))
+                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = stringResource(R.string.st_DeviceInfoScreen_m3n4), modifier = Modifier.size(20.dp))
                                 }
                             }
                         }
@@ -573,7 +575,7 @@ private fun ErrorRetryPill(
         ) {
             Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Try Again", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_DeviceInfoScreen_o5p6), fontWeight = FontWeight.Black)
         }
     }
 }
@@ -583,8 +585,8 @@ private fun QuickSpecsSection(quickSpecs: List<QuickSpecItem>) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SectionLabel(
             icon = Icons.Rounded.PhoneAndroid,
-            title = "Hardware Highlights",
-            subtitle = "Key features from matched profile",
+            title = stringResource(R.string.st_DeviceInfoScreen_q7r8),
+            subtitle = stringResource(R.string.st_DeviceInfoScreen_s9t0),
             modifier = Modifier.padding(horizontal = 24.dp)
         )
         
@@ -771,20 +773,20 @@ private fun LocalHardwareSection(
     ) {
         SectionLabel(
             icon = Icons.Rounded.DeveloperBoard,
-            title = "Hardware Snapshot",
+            title = stringResource(R.string.st_DeviceInfoScreen_c3d4),
             subtitle = "Direct read from system services",
         )
 
         InfoMetricGrid(
             items = listOf(
-                MetricItem(Icons.Rounded.Memory, "Processor", data.soc),
-                MetricItem(Icons.Rounded.Storage, "Memory", "${formatSize(data.availRam)} free / ${formatSize(data.totalRam)}"),
-                MetricItem(Icons.Rounded.Smartphone, "Screen", "${data.screenRes} @ ${data.refreshRate}Hz"),
-                MetricItem(Icons.Rounded.BatteryChargingFull, "Battery", "${data.batteryLevel}% • ${data.batteryHealth}"),
-                MetricItem(Icons.Rounded.Android, "Software", "${data.androidVersion} (API ${data.apiLevel})"),
-                MetricItem(Icons.Rounded.Sensors, "Sensors", "${data.sensorsCount} detected sensors"),
-                MetricItem(Icons.Rounded.CameraAlt, "Optics", data.cameras.takeIf { it.isNotEmpty() }?.joinToString() ?: "No Camera Info"),
-                MetricItem(Icons.Rounded.Wifi, "Connectivity", data.wifiIp),
+                MetricItem(Icons.Rounded.Memory, stringResource(R.string.st_DeviceInfoScreen_a7b8), data.soc),
+                MetricItem(Icons.Rounded.Storage, stringResource(R.string.st_DeviceInfoScreen_c9d0), "${formatSize(data.availRam)} free / ${formatSize(data.totalRam)}"),
+                MetricItem(Icons.Rounded.Smartphone, stringResource(R.string.st_DeviceInfoScreen_e1f2), "${data.screenRes} @ ${data.refreshRate}Hz"),
+                MetricItem(Icons.Rounded.BatteryChargingFull, stringResource(R.string.st_DeviceInfoScreen_g3h4), "${data.batteryLevel}% • ${data.batteryHealth}"),
+                MetricItem(Icons.Rounded.Android, stringResource(R.string.st_DeviceInfoScreen_i5j6), "${data.androidVersion} (API ${data.apiLevel})"),
+                MetricItem(Icons.Rounded.Sensors, stringResource(R.string.st_DeviceInfoScreen_k7l8), "${data.sensorsCount} detected sensors"),
+                MetricItem(Icons.Rounded.CameraAlt, stringResource(R.string.st_DeviceInfoScreen_m9n0), data.cameras.takeIf { it.isNotEmpty() }?.joinToString() ?: "No Camera Info"),
+                MetricItem(Icons.Rounded.Wifi, stringResource(R.string.st_DeviceInfoScreen_o1p2), data.wifiIp),
             ),
         )
     }
@@ -939,8 +941,8 @@ private fun MarketShimmer(modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(24.dp)) {
         SectionLabel(
             icon = Icons.Rounded.Refresh,
-            title = "Syncing with Catalog",
-            subtitle = "Fetching official hardware specifications...",
+            title = stringResource(R.string.st_DeviceInfoScreen_q3r4),
+            subtitle = stringResource(R.string.st_DeviceInfoScreen_s5t6),
         )
         
         repeat(3) {
@@ -964,18 +966,18 @@ private fun EditQueryDialog(
     var text by remember { mutableStateOf(currentQuery) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manual Search Query", fontWeight = FontWeight.ExtraBold) },
+        title = { Text(stringResource(R.string.st_DeviceInfoScreen_u7v8), fontWeight = FontWeight.ExtraBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Manually enter a model name (e.g., 'Pixel 9 Pro' or 'Galaxy S25 Ultra') if matching failed.",
+                    stringResource(R.string.st_DeviceInfoScreen_w9x0),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { newValue: String -> text = newValue },
-                    label = { Text("Device Model") },
+                    label = { Text(stringResource(R.string.st_DeviceInfoScreen_a1b3)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = MediumExpressiveShape
@@ -987,12 +989,12 @@ private fun EditQueryDialog(
                 onClick = { onConfirm(text) },
                 shape = SmallExpressiveShape
             ) {
-                Text("Search", fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_DeviceInfoScreen_c3d5), fontWeight = FontWeight.Black)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_DeviceInfoScreen_e5f7), fontWeight = FontWeight.Bold)
             }
         },
         shape = LargeExpressiveShape,

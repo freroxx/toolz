@@ -46,6 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.focus.CaffeinateApp
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -105,8 +107,8 @@ fun CaffeinateScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "CAFFEINATE",
-                subtitle = if (isRunning) "KEEP AWAKE ACTIVE" else "System sleep prevention",
+                title = stringResource(R.string.st_CaffeinateScreen_8f1a),
+                subtitle = if (isRunning) stringResource(R.string.st_CaffeinateScreen_3d5b) else stringResource(R.string.st_CaffeinateScreen_9e2c),
                 navigationIcon = {
                     IconButton(
                         onClick = onNavigateBack,
@@ -120,7 +122,7 @@ fun CaffeinateScreen(
                         IconButton(onClick = { viewModel.refreshAppCategories() }, enabled = !isCategorizing) {
                             Icon(
                                 Icons.Rounded.AutoAwesome,
-                                contentDescription = "AI Categorize",
+                                contentDescription = stringResource(R.string.st_CaffeinateScreen_1a2b),
                                 tint = if (isCategorizing) MaterialTheme.colorScheme.primary.copy(0.3f) else MaterialTheme.colorScheme.primary
                             )
                         }
@@ -313,14 +315,14 @@ fun AccessibilityBridgeIndicator(
             Column(modifier = Modifier.weight(1f)) {
                 @Suppress("DEPRECATION")
                 Text(
-                    if (isEnabled) "BRIDGE CONNECTED" else "BRIDGE DISCONNECTED",
+                    if (isEnabled) stringResource(R.string.st_CaffeinateScreen_7c4d) else stringResource(R.string.st_CaffeinateScreen_5f6e),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp,
                     color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                 )
                 Text(
-                    if (isEnabled) "Accessibility automation active" else "Requires Accessibility Service for auto-triggering",
+                    if (isEnabled) stringResource(R.string.st_CaffeinateScreen_2b8a) else stringResource(R.string.st_CaffeinateScreen_4d9c),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -337,7 +339,7 @@ fun AccessibilityBridgeIndicator(
                     )
                 ) {
                     @Suppress("DEPRECATION")
-                    Text("FIX", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.st_CaffeinateScreen_6a1b), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                 }
             } else {
                 Icon(
@@ -375,8 +377,8 @@ fun PermissionBanner(onAuthorize: () -> Unit) {
             }
             Column(modifier = Modifier.weight(1f)) {
                 @Suppress("DEPRECATION")
-                Text("NOTIFICATION REQUIRED", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                Text("Needed to keep screen awake while active", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.st_CaffeinateScreen_1b2c), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.st_CaffeinateScreen_3c4d), style = MaterialTheme.typography.bodySmall)
             }
             Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
         }
@@ -603,7 +605,7 @@ fun LiquidToggleButton(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (isRunning) "ACTIVE" else if (isAutoRunning) "AUTO" else "START",
+                if (isRunning) stringResource(R.string.st_CaffeinateScreen_5d6e) else if (isAutoRunning) stringResource(R.string.st_CaffeinateScreen_7e8f) else stringResource(R.string.st_CaffeinateScreen_9f0a),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 2.sp,
@@ -641,9 +643,9 @@ fun ReminderSettingsCard(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     @Suppress("DEPRECATION")
-                    Text("REMINDER ALERT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text(stringResource(R.string.st_CaffeinateScreen_a1b2), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     Text(
-                        if (isInfinite) "Running indefinitely" else "Alert every $interval mins",
+                        if (isInfinite) stringResource(R.string.st_CaffeinateScreen_c3d4) else "Alert every $interval mins",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -658,8 +660,8 @@ fun ReminderSettingsCard(
             AnimatedVisibility(visible = !isInfinite) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("5m", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
-                        Text("120m", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
+                        Text(stringResource(R.string.st_CaffeinateScreen_m3n4), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
+                        Text(stringResource(R.string.st_CaffeinateScreen_o5p6), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
                     }
                     ExpressiveSlider(
                         value = interval.toFloat(),
@@ -721,9 +723,9 @@ fun CategoryManagerUI(
                     )
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("AUTO-CAFFEINATE ALL", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
+                    Text(stringResource(R.string.st_CaffeinateScreen_e5f6), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.sp)
                     Text(
-                        "Enable for all non-system apps",
+                        stringResource(R.string.st_CaffeinateScreen_g7h8),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -742,7 +744,7 @@ fun CategoryManagerUI(
         ) {
             @Suppress("DEPRECATION")
             Text(
-                "AUTO-COFFEE CATEGORIES",
+                stringResource(R.string.st_CaffeinateScreen_i9j0),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,

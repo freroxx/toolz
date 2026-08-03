@@ -71,6 +71,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.browser.AdBlockList
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.password.PasswordEntity
@@ -494,7 +496,7 @@ fun WebViewScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.KeyboardArrowUp,
-                            contentDescription = "Show Bar",
+                            contentDescription = stringResource(R.string.st_WebViewScreen_g7h8),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
@@ -542,7 +544,7 @@ fun WebViewScreen(
                     Spacer(Modifier.height(16.dp))
 
                     Text(
-                        "Search or type URL",
+                        stringResource(R.string.st_WebViewScreen_8f1a),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
@@ -766,7 +768,7 @@ private fun TopChrome(
             // Back
             IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                    Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.st_WebViewScreen_7c4d),
                     modifier = Modifier.size(20.dp),
                     tint     = MaterialTheme.colorScheme.onSurface,
                 )
@@ -844,7 +846,7 @@ private fun TopChrome(
                         )
                     } else {
                         Icon(
-                            Icons.Rounded.Refresh, "Reload",
+                            Icons.Rounded.Refresh, stringResource(R.string.st_WebViewScreen_9e2c),
                             modifier = Modifier.size(20.dp),
                             tint     = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -856,7 +858,7 @@ private fun TopChrome(
             Box {
                 IconButton(onClick = { showOptions = true }, modifier = Modifier.size(40.dp)) {
                     Icon(
-                        Icons.Rounded.MoreVert, "More",
+                        Icons.Rounded.MoreVert, stringResource(R.string.st_WebViewScreen_1a2b),
                         modifier = Modifier.size(22.dp),
                         tint     = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -909,7 +911,7 @@ private fun TopChrome(
                     value         = findQuery,
                     onValueChange = onFindQueryChange,
                     placeholder   = {
-                        Text("Find in page…", style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.st_WebViewScreen_3d5b), style = MaterialTheme.typography.bodyMedium)
                     },
                     modifier      = Modifier
                         .weight(1f)
@@ -1076,7 +1078,7 @@ private fun BrowserOptionsSheet(
                 .navigationBarsPadding()
         ) {
             Text(
-                "Browser Options",
+                stringResource(R.string.st_WebViewScreen_e5f6),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.padding(bottom = 20.dp)
@@ -1089,27 +1091,27 @@ private fun BrowserOptionsSheet(
             ) {
                 OptionQuickAction(
                     icon = Icons.Rounded.Refresh,
-                    label = "Reload",
+                    label = stringResource(R.string.st_WebViewScreen_9e2c),
                     onClick = { onReload(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
                 OptionQuickAction(
                     icon = if (canGoForward) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowForward,
-                    label = "Forward",
+                    label = stringResource(R.string.st_WebViewScreen_5f6e),
                     enabled = canGoForward,
                     onClick = { onForward(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
                 OptionQuickAction(
                     icon = if (isBookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                    label = if (isBookmarked) "Saved" else "Bookmark",
+                    label = if (isBookmarked) stringResource(R.string.st_WebViewScreen_2b8a) else stringResource(R.string.st_WebViewScreen_4d9c),
                     active = isBookmarked,
                     onClick = { onBookmarkToggle(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
                 OptionQuickAction(
                     icon = Icons.Rounded.Key,
-                    label = "Password",
+                    label = stringResource(R.string.st_WebViewScreen_6a1b),
                     onClick = { onShowPasswords(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
@@ -1126,21 +1128,21 @@ private fun BrowserOptionsSheet(
                 Column {
                     OptionToggleRow(
                         icon = Icons.Rounded.DesktopMac,
-                        label = "Desktop Site",
+                        label = stringResource(R.string.st_WebViewScreen_1b2c),
                         checked = isDesktopMode,
                         onCheckedChange = { onToggleDesktop(); onDismiss() }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     OptionToggleRow(
                         icon = Icons.Rounded.Shield,
-                        label = "Ad-blocker",
+                        label = stringResource(R.string.st_WebViewScreen_3c4d),
                         checked = adBlockEnabled,
                         onCheckedChange = { onToggleAdBlock(); onDismiss() }
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     OptionToggleRow(
                         icon = Icons.Rounded.ViewStream,
-                        label = "Show Web Pill",
+                        label = stringResource(R.string.st_WebViewScreen_5d6e),
                         checked = floatingToolbarVisible,
                         onCheckedChange = { onToggleFloatingToolbar(); onDismiss() }
                     )
@@ -1151,11 +1153,11 @@ private fun BrowserOptionsSheet(
 
             // Actions list
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OptionActionRow("Find in page", Icons.Rounded.Search, onToggleFind, onDismiss)
-                OptionActionRow("Downloads", Icons.Rounded.Download, onShowDownloads, onDismiss)
-                OptionActionRow("Share page", Icons.Rounded.Share, onShare, onDismiss)
-                OptionActionRow("Copy link", Icons.Rounded.ContentCopy, onCopy, onDismiss)
-                OptionActionRow("Open in external browser", Icons.Rounded.OpenInBrowser, onOpenExternal, onDismiss)
+                OptionActionRow(stringResource(R.string.st_AiAssistantScreen_9f0a), Icons.Rounded.Search, onToggleFind, onDismiss)
+                OptionActionRow(stringResource(R.string.st_WebViewScreen_7e8f), Icons.Rounded.Download, onShowDownloads, onDismiss)
+                OptionActionRow(stringResource(R.string.st_WebViewScreen_9f0a), Icons.Rounded.Share, onShare, onDismiss)
+                OptionActionRow(stringResource(R.string.st_WebViewScreen_a1b2), Icons.Rounded.ContentCopy, onCopy, onDismiss)
+                OptionActionRow(stringResource(R.string.st_WebViewScreen_c3d4), Icons.Rounded.OpenInBrowser, onOpenExternal, onDismiss)
             }
         }
     }

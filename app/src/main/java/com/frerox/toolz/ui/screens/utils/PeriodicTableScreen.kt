@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -126,14 +128,14 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
         topBar = {
             Column(modifier = Modifier.background(Color.Transparent).statusBarsPadding()) {
                 ExpressiveTopAppBar(
-                    title = "PERIODIC TABLE",
-                    subtitle = if (isLoading) "Synthesizing atomic database..." else if (compareMode) "Select 2 elements to compare" else "${allElements.size} elements indexed",
+                    title = stringResource(R.string.st_PeriodicTableScreen_a1b2),
+                    subtitle = if (isLoading) "Synthesizing atomic database..." else if (compareMode) stringResource(R.string.st_PeriodicTableScreen_c3d4) else "${allElements.size} elements indexed",
                     navigationIcon = {
                         ToolzExpressiveIconButton(
                             onClick = onBack,
                             modifier = Modifier.padding(8.dp)
                         ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_WorldClockScreen_c3d4))
                         }
                     },
                     actions = {
@@ -144,7 +146,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                                 compareElements.clear()
                             }
                         ) {
-                            Icon(Icons.Rounded.Compare, contentDescription = "Compare Mode")
+                            Icon(Icons.Rounded.Compare, contentDescription = stringResource(R.string.st_PeriodicTableScreen_c3d4))
                         }
                     }
                 )
@@ -155,7 +157,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp, vertical = 8.dp),
-                    placeholder = { Text("Search by name, symbol or number...") }
+                    placeholder = { Text(stringResource(R.string.st_PeriodicTableScreen_e5f6)) }
                 )
 
                 LazyRow(
@@ -168,7 +170,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                         ExpressiveFilterChip(
                             selected = selectedCategory == null,
                             onClick = { selectedCategory = null },
-                            label = { Text("ALL") }
+                            label = { Text(stringResource(R.string.st_PeriodicTableScreen_g7h8)) }
                         )
                     }
                     items(categories) { category ->
@@ -200,7 +202,7 @@ fun PeriodicTableScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(32.dp))
                     Text(loadingStatus.uppercase(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     @Suppress("DEPRECATION")
-                    Text("OPTIMIZING ATOMIC DATABASE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_PeriodicTableScreen_i9j0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, fontWeight = FontWeight.Bold)
                 }
             } else {
                 LazyVerticalGrid(
@@ -423,16 +425,16 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
             val locale = androidx.compose.ui.text.intl.Locale.current.platformLocale
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailCard(Modifier.weight(1f), "ATOMIC NUMBER", element.atomicNumber.toString(), Icons.Rounded.Numbers, element.color)
-                    DetailCard(Modifier.weight(1f), "ATOMIC WEIGHT", String.format(locale, "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_k1l2), element.atomicNumber.toString(), Icons.Rounded.Numbers, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_m3n4), String.format(locale, "%.4f u", element.weight), Icons.Rounded.MonitorWeight, element.color)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailCard(Modifier.weight(1f), "ELECTRON CONFIG", element.electronConfig, Icons.Rounded.Layers, element.color)
-                    DetailCard(Modifier.weight(1f), "DISCOVERY", element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_o5p6), element.electronConfig, Icons.Rounded.Layers, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_q7r8), element.discoveredBy, Icons.Rounded.PersonSearch, element.color)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DetailCard(Modifier.weight(1f), "DENSITY", if (element.density != null) String.format(locale, "%.4f g/cm³", element.density) else "Unknown", Icons.Rounded.Compress, element.color)
-                    DetailCard(Modifier.weight(1f), "ABUNDANCE", element.abundance, Icons.Rounded.Public, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_s9t0), if (element.density != null) String.format(locale, "%.4f g/cm³", element.density) else "Unknown", Icons.Rounded.Compress, element.color)
+                    DetailCard(Modifier.weight(1f), stringResource(R.string.st_PeriodicTableScreen_u1v2), element.abundance, Icons.Rounded.Public, element.color)
                 }
             }
 
@@ -449,7 +451,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     ) {
                         @Suppress("DEPRECATION")
                         Text(
-                            "SCIENTIFIC OVERVIEW", 
+                            stringResource(R.string.st_PeriodicTableScreen_w3x4), 
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelSmall, 
                             fontWeight = FontWeight.Black, 
@@ -467,8 +469,8 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     )
                     HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp).alpha(0.1f))
                     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        PropertyItem("MELTING POINT", if (element.meltPoint != null) "${element.meltPoint} °C" else "Unknown", Icons.Rounded.DeviceThermostat)
-                        PropertyItem("BOILING POINT", if (element.boilingPoint != null) "${element.boilingPoint} °C" else "Unknown", Icons.Rounded.Air)
+                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_y5z6), if (element.meltPoint != null) "${element.meltPoint} °C" else "Unknown", Icons.Rounded.DeviceThermostat)
+                        PropertyItem(stringResource(R.string.st_PeriodicTableScreen_a7b8), if (element.boilingPoint != null) "${element.boilingPoint} °C" else "Unknown", Icons.Rounded.Air)
                     }
                 }
             }
@@ -492,7 +494,7 @@ fun ElementDetailSheet(element: Element, onDismiss: () -> Unit) {
                     Spacer(Modifier.width(20.dp))
                     @Suppress("DEPRECATION")
                     Column {
-                        Text("ATOMIC INSIGHT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
+                        Text(stringResource(R.string.st_PeriodicTableScreen_c9d0), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = element.color, letterSpacing = 1.sp)
                         Text(element.funFact, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -517,7 +519,7 @@ fun ComparisonSheet(element1: Element, element2: Element, onDismiss: () -> Unit)
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text(
-                "ELEMENT COMPARISON",
+                stringResource(R.string.st_PeriodicTableScreen_e1f2),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
                 modifier = Modifier.fillMaxWidth(),
@@ -528,18 +530,18 @@ fun ComparisonSheet(element1: Element, element2: Element, onDismiss: () -> Unit)
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     ModernElementCard(element1, false) {}
                     Spacer(Modifier.height(16.dp))
-                    ComparisonProperty("WEIGHT", "${element1.weight}")
-                    ComparisonProperty("DENSITY", "${element1.density ?: "N/A"}")
-                    ComparisonProperty("MELT", "${element1.meltPoint ?: "N/A"}")
-                    ComparisonProperty("BOIL", "${element1.boilingPoint ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_BatteryInfoScreen_y5z6), "${element1.weight}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_s9t0), "${element1.density ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_g3h4), "${element1.meltPoint ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_i5j6), "${element1.boilingPoint ?: "N/A"}")
                 }
                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     ModernElementCard(element2, false) {}
                     Spacer(Modifier.height(16.dp))
-                    ComparisonProperty("WEIGHT", "${element2.weight}")
-                    ComparisonProperty("DENSITY", "${element2.density ?: "N/A"}")
-                    ComparisonProperty("MELT", "${element2.meltPoint ?: "N/A"}")
-                    ComparisonProperty("BOIL", "${element2.boilingPoint ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_BatteryInfoScreen_y5z6), "${element2.weight}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_s9t0), "${element2.density ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_g3h4), "${element2.meltPoint ?: "N/A"}")
+                    ComparisonProperty(stringResource(R.string.st_PeriodicTableScreen_i5j6), "${element2.boilingPoint ?: "N/A"}")
                 }
             }
             
@@ -547,7 +549,7 @@ fun ComparisonSheet(element1: Element, element2: Element, onDismiss: () -> Unit)
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("CLOSE COMPARISON")
+                Text(stringResource(R.string.st_PeriodicTableScreen_k7l8))
             }
         }
     }

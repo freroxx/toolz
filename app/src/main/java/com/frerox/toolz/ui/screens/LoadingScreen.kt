@@ -96,7 +96,7 @@ fun LoadingOverlay(
                 Spacer(Modifier.height(32.dp))
 
                 Text(
-                    text = "TOOLZ",
+                    text = stringResource(R.string.st_LoadingScreen_5c50),
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 8.sp,

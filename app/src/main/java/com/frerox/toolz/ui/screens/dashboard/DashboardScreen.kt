@@ -59,6 +59,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -850,7 +851,7 @@ fun SmartSearchBar(
                 },
                 placeholder = {
                     Text(
-                        text = if (offlineState == OfflineState.OFFLINE) "Search tools…" else "Search or ask AI…",
+                        text = if (offlineState == OfflineState.OFFLINE) stringResource(R.string.st_DashboardScreen_a1b2) else stringResource(R.string.st_DashboardScreen_c3d4),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
                         fontWeight = FontWeight.Medium,
@@ -959,7 +960,7 @@ private fun UrlSuggestionRow(query: String, onNavigate: (String) -> Unit) {
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Open Website", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.st_DashboardScreen_e5f6), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                 Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.Rounded.ArrowOutward, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
@@ -1012,7 +1013,7 @@ fun AiSearchResponseDropdown(
                         tint     = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp))
                     Text(
-                        "AI ASSISTANT",
+                        stringResource(R.string.st_DashboardScreen_g7h8),
                         style         = MaterialTheme.typography.labelSmall,
                         fontWeight    = FontWeight.Black,
                         color         = MaterialTheme.colorScheme.primary,
@@ -1064,7 +1065,7 @@ fun AiSearchResponseDropdown(
                     contentColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Text("CONTINUE CONVERSATION", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_DashboardScreen_i9j0), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(16.dp))
             }
@@ -1100,7 +1101,7 @@ private fun SearchDropdown(
                         tint     = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(13.dp))
                     Text(
-                        "AI SUGGESTIONS",
+                        stringResource(R.string.st_DashboardScreen_k1l2),
                         style         = MaterialTheme.typography.labelSmall,
                         fontWeight    = FontWeight.Black,
                         color         = MaterialTheme.colorScheme.primary,
@@ -1167,10 +1168,10 @@ fun DashboardHeader(
     val greeting = remember {
         val calendar = java.util.Calendar.getInstance()
         when (calendar.get(java.util.Calendar.HOUR_OF_DAY)) {
-            in 0..5   -> "Good Night"
-            in 6..11  -> "Good Morning"
-            in 12..16 -> "Good Afternoon"
-            else      -> "Good Evening"
+            in 0..5   -> context.getString(R.string.st_DashboardScreen_m3n4)
+            in 6..11  -> context.getString(R.string.st_DashboardScreen_o5p6)
+            in 12..16 -> context.getString(R.string.st_DashboardScreen_q7r8)
+            else      -> context.getString(R.string.st_DashboardScreen_s9t0)
         }
     }
 
@@ -1258,9 +1259,9 @@ fun StatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
         }
         StatCard(
             modifier = Modifier.weight(1f),
-            label    = "POWER",
+            label    = stringResource(R.string.st_DashboardScreen_u1v2),
             value    = "${stats.batteryLevel}%",
-            sub      = if (stats.isBatteryCharging) "CHARGING" else "BATTERY",
+            sub      = if (stats.isBatteryCharging) stringResource(R.string.st_DashboardScreen_a7b8) else stringResource(R.string.st_DashboardScreen_c9d0),
             icon     = if (stats.isBatteryCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd,
             color    = battColor,
             progress = stats.batteryLevel / 100f,
@@ -1268,9 +1269,9 @@ fun StatsRow(stats: DashboardStats, onNavigate: (String) -> Unit) {
         )
         StatCard(
             modifier = Modifier.weight(1f),
-            label    = "STORAGE",
+            label    = stringResource(R.string.st_DashboardScreen_w3x4),
             value    = "${stats.storageAvailableGb.toInt()}GB",
-            sub      = "REMAINING",
+            sub      = stringResource(R.string.st_DashboardScreen_y5z6),
             icon     = Icons.Rounded.Storage,
             color    = MaterialTheme.colorScheme.tertiary,
             progress = 1f - stats.storageUsedPercentage,
@@ -1358,7 +1359,7 @@ fun RecentSection(
 ) {
     val all = remember(categories) { categories.flatMap { it.items } }
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
-        SectionHeader("RECENTLY USED")
+        SectionHeader(stringResource(R.string.st_DashboardScreen_e1f2))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding        = PaddingValues(horizontal = 2.dp),
@@ -1415,7 +1416,7 @@ fun PinnedSection(
 ) {
     val all = remember(categories) { categories.flatMap { it.items } }
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
-        SectionHeader("QUICK ACCESS")
+        SectionHeader(stringResource(R.string.st_DashboardScreen_g3h4))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding        = PaddingValues(horizontal = 2.dp),
@@ -1487,7 +1488,7 @@ fun NotesSection(
     pdfViewModel: PdfViewModel
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
-        SectionHeader("SMART NOTES")
+        SectionHeader(stringResource(R.string.st_DashboardScreen_k7l8))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding        = PaddingValues(horizontal = 2.dp),
@@ -1520,7 +1521,7 @@ fun NotesSection(
                                         modifier = Modifier.size(22.dp))
                                 }
                             }
-                            Text("VIEW ALL",
+                            Text(stringResource(R.string.st_DashboardScreen_i5j6),
                                 style         = MaterialTheme.typography.labelMedium,
                                 fontWeight    = FontWeight.Black,
                                 color         = MaterialTheme.colorScheme.primary,
@@ -1723,7 +1724,7 @@ private fun PdfAttachmentPill(
         ) {
             Icon(Icons.Rounded.PictureAsPdf, null, tint = color, modifier = Modifier.size(20.dp))
             Text(
-                text = "VIEW PDF",
+                text = stringResource(R.string.st_DashboardScreen_m9n0),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Black,
                 color = color
@@ -1749,7 +1750,7 @@ fun AllToolsHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column {
-                Text("ALL TOOLS",
+                Text(stringResource(R.string.st_DashboardScreen_o1p2),
                     style         = MaterialTheme.typography.titleLarge,
                     fontWeight    = FontWeight.Black,
                     letterSpacing = 1.5.sp)
@@ -1967,7 +1968,7 @@ fun UpdateBanner(version: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
                     }
                 }
                 Column {
-                    Text("NEW VERSION READY",
+                    Text(stringResource(R.string.st_DashboardScreen_q3r4),
                         style         = MaterialTheme.typography.labelSmall,
                         fontWeight    = FontWeight.Black,
                         color         = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -2313,7 +2314,7 @@ fun FlashlightPillContent(
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text("Flashlight Active",
+            Text(stringResource(R.string.st_DashboardScreen_s5t6),
                 style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val modeLabel = remember(mode) {
@@ -2410,7 +2411,7 @@ fun FocusPillContent(score: Int, onNavigate: (String) -> Unit) {
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text("Productivity",
+            Text(stringResource(R.string.st_DashboardScreen_u7v8),
                 style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black)
             Text("Flow Score: $score%",
                 style = MaterialTheme.typography.labelMedium,
@@ -3039,13 +3040,13 @@ fun OfflineSheet(onDismiss: () -> Unit, onGoOnline: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(22.dp))
-            Text("Offline Mode Active",
+            Text(stringResource(R.string.st_DashboardScreen_w9x0),
                 style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
                 textAlign  = TextAlign.Center)
             Spacer(Modifier.height(10.dp))
             Text(
-                "AI Assistant and Web Search are hidden to ensure 100% privacy, save battery, and reduce data usage.",
+                stringResource(R.string.st_DashboardScreen_a7b9),
                 style     = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color     = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3058,11 +3059,11 @@ fun OfflineSheet(onDismiss: () -> Unit, onGoOnline: () -> Unit) {
             ) {
                 Icon(Icons.Rounded.Cloud, null)
                 Spacer(Modifier.width(10.dp))
-                Text("GO ONLINE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text(stringResource(R.string.st_DashboardScreen_y1z2), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             }
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("STAY OFFLINE", fontWeight = FontWeight.Black,
+                Text(stringResource(R.string.st_DashboardScreen_a3b4), fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
         }

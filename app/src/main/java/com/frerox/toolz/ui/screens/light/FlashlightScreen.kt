@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.light
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import android.Manifest
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -82,8 +84,8 @@ fun FlashlightScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "FLASHLIGHT",
-                subtitle = "Optical beam control",
+                title = stringResource(R.string.st_FlashlightScreen_f1a2),
+                subtitle = stringResource(R.string.st_FlashlightScreen_3d5b),
                 navigationIcon = {
                     ToolzExpressiveIconButton(
                         onClick  = onBack,
@@ -93,7 +95,7 @@ fun FlashlightScreen(
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.st_FlashlightScreen_9e2c))
                     }
                 },
                 actions = {
@@ -106,7 +108,7 @@ fun FlashlightScreen(
                         ),
                         shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.Rounded.Monitor, "Screen Light")
+                        Icon(Icons.Rounded.Monitor, stringResource(R.string.st_FlashlightScreen_1a2b))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -263,7 +265,7 @@ private fun FlashlightContent(
                     Icon(
                         imageVector        = if (state.isOn) Icons.Rounded.FlashlightOn
                         else Icons.Rounded.FlashlightOff,
-                        contentDescription = if (state.isOn) "Turn off" else "Turn on",
+                        contentDescription = if (state.isOn) stringResource(R.string.st_FlashlightScreen_7c4d) else stringResource(R.string.st_FlashlightScreen_5f6e),
                         modifier           = Modifier.size(68.dp),
                         tint               = if (state.isOn) Color.Black
                         else MaterialTheme.colorScheme.onSurface,
@@ -314,11 +316,11 @@ private fun FlashlightContent(
                         )
                         Text(
                             text = when {
-                                !isOn                            -> "STANDBY"
-                                state.mode == FlashlightMode.SOS    -> "SOS SIGNAL"
-                                state.mode == FlashlightMode.STROBE -> "STROBE ACTIVE"
-                                state.mode == FlashlightMode.DISCO  -> "DISCO MODE"
-                                else                             -> "BEAM ACTIVE"
+                                !isOn                            -> stringResource(R.string.st_FlashlightScreen_2b8a)
+                                state.mode == FlashlightMode.SOS    -> stringResource(R.string.st_FlashlightScreen_4d9c)
+                                state.mode == FlashlightMode.STROBE -> stringResource(R.string.st_FlashlightScreen_6a1b)
+                                state.mode == FlashlightMode.DISCO  -> stringResource(R.string.st_FlashlightScreen_1b2c)
+                                else                             -> stringResource(R.string.st_FlashlightScreen_3c4d)
                             },
                             style         = MaterialTheme.typography.labelSmall,
                             fontWeight    = FontWeight.Black,
@@ -389,7 +391,7 @@ private fun FlashlightContent(
                 }
                 
                 Text(
-                    text = "Tap to cancel",
+                    text = stringResource(R.string.st_FlashlightScreen_5d6e),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp),
@@ -446,7 +448,7 @@ internal fun ControlsPanel(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ControlLabel(
                     icon  = Icons.Rounded.SettingsSuggest,
-                    label = "SIGNAL MODE",
+                    label = stringResource(R.string.st_FlashlightScreen_7e8f),
                 )
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     FlashlightMode.entries.forEachIndexed { i, mode ->
@@ -478,11 +480,11 @@ internal fun ControlsPanel(
                 ) {
                     ControlLabel(
                         icon  = Icons.Rounded.Tune,
-                        label = "INTENSITY",
+                        label = stringResource(R.string.st_FlashlightScreen_9f0a),
                     )
                     if (!state.isBrightnessSupported) {
                         Text(
-                            "HW LIMITED",
+                            stringResource(R.string.st_FlashlightScreen_a1b2),
                             style      = MaterialTheme.typography.labelSmall,
                             color      = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold,
@@ -521,9 +523,9 @@ internal fun ControlsPanel(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment     = Alignment.CenterVertically,
                     ) {
-                        ControlLabel(
+                    ControlLabel(
                             icon  = Icons.Rounded.FlashOn,
-                            label = "STROBE SPEED",
+                            label = stringResource(R.string.st_FlashlightScreen_c3d4),
                         )
                         Text(
                             freqHz,
@@ -556,9 +558,9 @@ internal fun ControlsPanel(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment     = Alignment.CenterVertically,
                     ) {
-                        ControlLabel(
+                    ControlLabel(
                             icon  = Icons.Rounded.MusicNote,
-                            label = "PACE RANGE",
+                            label = stringResource(R.string.st_FlashlightScreen_e5f6),
                         )
                         Text(
                             "${state.discoIntervalRange.first}ms - ${state.discoIntervalRange.second}ms",
@@ -587,7 +589,7 @@ internal fun ControlsPanel(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ControlLabel(
                     icon  = Icons.Rounded.Timer,
-                    label = "AUTO-OFF TIMER",
+                    label = stringResource(R.string.st_FlashlightScreen_g7h8),
                 )
                 val timerOptions = listOf(0, 1, 5, 10, 30)
                 LazyRow(
@@ -599,7 +601,7 @@ internal fun ControlsPanel(
                             selected = state.timerMinutes == mins,
                             onClick = { onSetTimer(mins) },
                             label = { 
-                                Text(if (mins == 0) "OFF" else "${mins}m")
+                                Text(if (mins == 0) stringResource(R.string.st_FlashlightScreen_i9j0) else "${mins}m")
                             }
                         )
                     }
@@ -624,7 +626,7 @@ internal fun ControlsPanel(
                             tint     = MaterialTheme.colorScheme.error,
                         )
                         Text(
-                            "International SOS · · ·  — — —  · · ·",
+                            stringResource(R.string.st_FlashlightScreen_k1l2),
                             style      = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color      = MaterialTheme.colorScheme.error,
@@ -720,13 +722,13 @@ private fun PermissionContent(
             }
             Spacer(Modifier.height(32.dp))
             Text(
-                "Camera Permission",
+                stringResource(R.string.st_FlashlightScreen_m3n4),
                 style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Black,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "Camera access is required to control the device flashlight. Your photos and videos are not accessed.",
+                stringResource(R.string.st_FlashlightScreen_o5p6),
                 textAlign = TextAlign.Center,
                 style     = MaterialTheme.typography.bodyMedium,
                 color     = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -738,7 +740,7 @@ private fun PermissionContent(
                 shape    = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
             ) {
-                Text("Grant Permission", fontWeight = FontWeight.Black, fontSize = 15.sp)
+                Text(stringResource(R.string.st_FlashlightScreen_q7r8), fontWeight = FontWeight.Black, fontSize = 15.sp)
             }
         }
     }

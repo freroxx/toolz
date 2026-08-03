@@ -19,6 +19,8 @@
 
 package com.frerox.toolz.ui.screens.calendar
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.theme.toolzBackground
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -638,7 +640,7 @@ private fun CalendarTopBar(
                 modifier = Modifier.padding(start = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                ExpressiveNavIconButton(icon = Icons.Rounded.ChevronLeft, desc = "Previous month", onClick = onPrevious)
+                ExpressiveNavIconButton(icon = Icons.Rounded.ChevronLeft, desc = stringResource(R.string.st_CalendarScreen_8f1a), onClick = onPrevious)
                 // Today button — bounces in when off-today
                 AnimatedVisibility(
                     visible = !isTodaySelected,
@@ -653,7 +655,7 @@ private fun CalendarTopBar(
                             contentColor   = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     ) {
-                        Icon(Icons.Rounded.Today, "Today", modifier = Modifier.size(17.dp))
+                        Icon(Icons.Rounded.Today, stringResource(R.string.st_CalendarScreen_3d5b), modifier = Modifier.size(17.dp))
                     }
                 }
             }
@@ -664,7 +666,7 @@ private fun CalendarTopBar(
                 modifier = Modifier.padding(end = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                ExpressiveNavIconButton(icon = Icons.Rounded.ChevronRight, desc = "Next month", onClick = onNext)
+                ExpressiveNavIconButton(icon = Icons.Rounded.ChevronRight, desc = stringResource(R.string.st_CalendarScreen_9e2c), onClick = onNext)
                 // View toggle
                 val toggleScale = remember { Animatable(1f) }
                 val toggleScope = rememberCoroutineScope()
@@ -686,7 +688,7 @@ private fun CalendarTopBar(
                         Crossfade(targetState = isMonthView, label = "view_icon") { month ->
                             Icon(
                                 if (month) Icons.Rounded.ViewAgenda else Icons.Rounded.CalendarMonth,
-                                "Toggle view",
+                                stringResource(R.string.st_CalendarScreen_1a2b),
                                 modifier = Modifier.size(17.dp)
                             )
                         }
@@ -768,7 +770,7 @@ private fun CalendarFabMenu(
                 }
                 Icon(
                     painter     = rememberVectorPainter(imageVector),
-                    contentDescription = "Calendar actions",
+                    contentDescription = stringResource(R.string.st_CalendarScreen_7c4d),
                     modifier    = Modifier.animateIcon(
                         { checkedProgress }
                     )
@@ -785,7 +787,7 @@ private fun CalendarFabMenu(
             icon = { Icon(Icons.Rounded.AutoAwesome, null) },
             text = { 
                 Text(
-                    "AI Scheduler", 
+                    stringResource(R.string.st_CalendarScreen_5f6e), 
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 ) 
@@ -800,7 +802,7 @@ private fun CalendarFabMenu(
             icon = { Icon(Icons.Rounded.CalendarMonth, null) },
             text = { 
                 Text(
-                    "New Event", 
+                    stringResource(R.string.st_CalendarScreen_2b8a), 
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 ) 
@@ -861,13 +863,13 @@ fun LoadingOverlay() {
                 }
                 Spacer(Modifier.height(20.dp))
                 Text(
-                    "Processing…",
+                    stringResource(R.string.st_CalendarScreen_4d9c),
                     style      = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "AI is reading your schedule",
+                    stringResource(R.string.st_CalendarScreen_6a1b),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1253,7 +1255,7 @@ private fun DayPreviewPanel(
                                 shape  = SmallExpressiveShape
                             ) {
                                 Text(
-                                    "$total ${if (total == 1) "item" else "items"}",
+                                    "$total ${if (total == 1) stringResource(R.string.st_CalendarScreen_5d6e) else stringResource(R.string.st_CalendarScreen_7e8f)}",
                                     style    = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.ExtraBold,
                                     color    = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1325,13 +1327,13 @@ private fun PanelEmptyState() {
         ) {
             Text("📅", style = MaterialTheme.typography.displaySmall)
             Text(
-                "Nothing planned",
+                stringResource(R.string.st_CalendarScreen_1b2c),
                 style      = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
                 color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f)
             )
             Text(
-                "Tap + to add an event",
+                stringResource(R.string.st_CalendarScreen_3c4d),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline.copy(0.55f)
             )
@@ -1512,13 +1514,13 @@ private fun CompactEventItem(
                             shape = SmallExpressiveShape
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Edit") },
+                                text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
                                 onClick = { onTap(); showMenu = false },
                                 leadingIcon = { Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp)) }
                             )
                             HorizontalDivider()
                             DropdownMenuItem(
-                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
                                 onClick = { onDelete(); showMenu = false },
                                 leadingIcon = {
                                     Icon(Icons.Rounded.Delete, null,
@@ -1571,7 +1573,7 @@ private fun CompactTaskItem(task: TaskEntry) {
                         overflow   = TextOverflow.Ellipsis
                     )
                     Text(
-                        "Task",
+                        stringResource(R.string.st_CalendarScreen_c3d4),
                         style    = MaterialTheme.typography.labelSmall,
                         color    = TaskGreen.copy(0.75f),
                         fontWeight = FontWeight.SemiBold
@@ -1668,13 +1670,13 @@ private fun AgendaEmptyState(offlineMode: Boolean) {
         ) {
             Text("🗓️", style = MaterialTheme.typography.displayMedium)
             Text(
-                "No scheduled events",
+                stringResource(R.string.st_CalendarScreen_e5f6),
                 style      = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color      = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                if (offlineMode) "Tap + to add one" else "Tap + to add one, or use AI Scan",
+                if (offlineMode) stringResource(R.string.st_CalendarScreen_g7h8) else stringResource(R.string.st_CalendarScreen_i9j0),
                 style     = MaterialTheme.typography.bodySmall,
                 color     = MaterialTheme.colorScheme.outline,
                 textAlign = TextAlign.Center
@@ -1699,7 +1701,7 @@ private fun AgendaDayHeader(dayMs: Long, isToday: Boolean, count: Int) {
                 shape = SmallExpressiveShape
             ) {
                 Text(
-                    if (isToday) "TODAY" else "YESTERDAY",
+                    if (isToday) stringResource(R.string.st_CalendarScreen_k1l2) else stringResource(R.string.st_CalendarScreen_m3n4),
                     style         = MaterialTheme.typography.labelSmall,
                     fontWeight    = FontWeight.ExtraBold,
                     color         = if (isToday) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondary,
@@ -1856,7 +1858,7 @@ fun AgendaEventCard(
                         shape            = SmallExpressiveShape
                     ) {
                         DropdownMenuItem(
-                            text = { Text(if (event.isCompleted) "Mark Incomplete" else "Mark Complete") },
+                            text = { Text(if (event.isCompleted) stringResource(R.string.st_CalendarScreen_o5p6) else stringResource(R.string.st_CalendarScreen_q7r8)) },
                             onClick = {
                                 vibrationManager?.vibrateTick()
                                 onToggle(); showMenu = false
@@ -1870,13 +1872,13 @@ fun AgendaEventCard(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Edit") },
+                            text = { Text(stringResource(R.string.st_CalendarScreen_9f0a)) },
                             onClick = { onEdit(); showMenu = false },
                             leadingIcon = { Icon(Icons.Rounded.Edit, null) }
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            text = { Text(stringResource(R.string.st_CalendarScreen_a1b2), color = MaterialTheme.colorScheme.error) },
                             onClick = {
                                 vibrationManager?.vibrateTick()
                                 onDelete(); showMenu = false
@@ -1980,12 +1982,12 @@ fun SyncConfirmationOverlay(
                 }
                 Column {
                     Text(
-                        "Review Schedule",
+                        stringResource(R.string.st_CalendarScreen_s9t0),
                         style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold
                     )
                     Text(
-                        "${results.size} ${if (results.size == 1) "event" else "events"} extracted by AI",
+                        "${results.size} ${if (results.size == 1) stringResource(R.string.st_CalendarScreen_5d6e) else stringResource(R.string.st_CalendarScreen_7e8f)} extracted by AI",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2011,7 +2013,7 @@ fun SyncConfirmationOverlay(
                             tint     = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            "Auto-Reminders",
+                            stringResource(R.string.st_CalendarScreen_u1v2),
                             fontWeight = FontWeight.ExtraBold,
                             style      = MaterialTheme.typography.labelLarge
                         )
@@ -2019,7 +2021,7 @@ fun SyncConfirmationOverlay(
                     Spacer(Modifier.height(10.dp))
                     ToolzConnectedButtonGroup(
                         selectedIndex = listOf("ALWAYS", "YES", "NOPE").indexOf(aiPreference).coerceAtLeast(0),
-                        options       = listOf("Always", "Ask", "Never"),
+                        options       = listOf(stringResource(R.string.st_CalendarScreen_w3x4), stringResource(R.string.st_CalendarScreen_y5z6), stringResource(R.string.st_CalendarScreen_a7b8)),
                         onOptionSelected = { idx ->
                             onPreferenceChange(listOf("ALWAYS", "YES", "NOPE")[idx])
                         }
@@ -2064,7 +2066,7 @@ fun SyncConfirmationOverlay(
                 ToolzOutlinedExpressiveButton(
                     onClick  = onCancel,
                     modifier = Modifier.weight(1f).height(56.dp)
-                ) { Text("Discard", fontWeight = FontWeight.Bold) }
+                ) { Text(stringResource(R.string.st_CalendarScreen_e1f2), fontWeight = FontWeight.Bold) }
 
                 ToolzExpressiveButton(
                     onClick  = onConfirm,
@@ -2072,7 +2074,7 @@ fun SyncConfirmationOverlay(
                 ) {
                     Icon(Icons.Rounded.DoneAll, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Sync All", fontWeight = FontWeight.ExtraBold)
+                    Text(stringResource(R.string.st_CalendarScreen_g3h4), fontWeight = FontWeight.ExtraBold)
                 }
             }
         }
@@ -2126,7 +2128,7 @@ fun SyncResultCard(result: SyncResult, onClick: () -> Unit) {
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            "Rescheduled",
+                            stringResource(R.string.st_CalendarScreen_c9d0),
                             style    = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.ExtraBold,
                             color    = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -2225,7 +2227,7 @@ fun DayDetailSheet(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Rounded.Inbox, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outlineVariant)
-                        Text("Nothing scheduled", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.st_CalendarScreen_i5j6), color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                     }
                 }
             } else {
@@ -2358,7 +2360,7 @@ fun AiVisionSheetContent(
                 Column {
                     Text("AI Scheduler", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                     Text(
-                        "Snap a photo or describe your plan",
+                        stringResource(R.string.st_CalendarScreen_k7l8),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -2377,7 +2379,7 @@ fun AiVisionSheetContent(
                         horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
-                            uiState.currentConfig.ifBlank { "Model" },
+                            uiState.currentConfig.ifBlank { stringResource(R.string.st_CalendarScreen_m9n0) },
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.ExtraBold
                         )
@@ -2453,7 +2455,7 @@ fun AiVisionSheetContent(
                         shape = SmallExpressiveShape
                     ) {
                         Text(
-                            "Photo attached",
+                            stringResource(R.string.st_CalendarScreen_o1p2),
                             style    = MaterialTheme.typography.labelSmall,
                             color    = Color.White,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -2468,7 +2470,7 @@ fun AiVisionSheetContent(
             value         = aiPrompt,
             onValueChange = onPromptChange,
             modifier      = Modifier.fillMaxWidth(),
-            placeholder   = { Text("Describe your event or schedule…") },
+            placeholder   = { Text(stringResource(R.string.st_CalendarScreen_q3r4)) },
             shape         = SquircleShape,
             leadingIcon   = {
                 ToolzExpressiveIconButton(
@@ -2523,7 +2525,7 @@ fun AiVisionSheetContent(
         ) {
             Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
-            Text("Process Schedule", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+            Text(stringResource(R.string.st_CalendarScreen_s5t6), fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
         }
 
         Spacer(Modifier.height(4.dp))
@@ -2838,8 +2840,8 @@ private fun EventFormDialog(
                 OutlinedTextField(
                     value         = title,
                     onValueChange = onTitleChange,
-                    label         = { Text("Event title") },
-                    placeholder   = { Text("e.g. Math Exam") },
+                    label         = { Text(stringResource(R.string.st_CalendarScreen_u7v8)) },
+                    placeholder   = { Text(stringResource(R.string.st_CalendarScreen_w9x0)) },
                     shape         = SmallExpressiveShape,
                     modifier      = Modifier.fillMaxWidth(),
                     singleLine    = true,
@@ -2850,7 +2852,7 @@ private fun EventFormDialog(
                 OutlinedTextField(
                     value         = description,
                     onValueChange = onDescChange,
-                    label         = { Text("Notes (optional)") },
+                    label         = { Text(stringResource(R.string.st_CalendarScreen_a1b3)) },
                     shape         = SmallExpressiveShape,
                     modifier      = Modifier.fillMaxWidth(),
                     leadingIcon   = { Icon(Icons.AutoMirrored.Rounded.Notes, null) },
@@ -2875,7 +2877,7 @@ private fun EventFormDialog(
                         Column(Modifier.padding(12.dp)) {
                             Icon(Icons.Rounded.CalendarToday, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.height(4.dp))
-                            Text("Date", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.st_CalendarScreen_c3d5), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(dateLbl, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -2891,7 +2893,7 @@ private fun EventFormDialog(
                         Column(Modifier.padding(12.dp)) {
                             Icon(Icons.Rounded.Schedule, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.height(4.dp))
-                            Text("Time", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.st_CalendarScreen_e5f7), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(timeLbl, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -2914,8 +2916,8 @@ private fun EventFormDialog(
                         ) {
                             Icon(Icons.Rounded.NotificationsActive, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                             Column {
-                                Text("Reminders", fontWeight = FontWeight.SemiBold)
-                                Text("Smart notification before event", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.st_CalendarScreen_g7h9), fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.st_CalendarScreen_i9j1), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         // Expressive switch from ExpressiveInputs
@@ -2927,7 +2929,7 @@ private fun EventFormDialog(
                 }
 
                 // Category row
-                FormSectionLabel("Category")
+                FormSectionLabel(stringResource(R.string.st_CalendarScreen_k1l3))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(types) { type ->
                         ExpressiveFilterChip(
@@ -2942,7 +2944,7 @@ private fun EventFormDialog(
                 }
 
                 // Color picker
-                FormSectionLabel("Color")
+                FormSectionLabel(stringResource(R.string.st_CalendarScreen_m3n5))
                 ColorPicker(selectedColor = selectedColor, onColorSelect = onColorSelect)
 
                 // Actions
@@ -2961,7 +2963,7 @@ private fun EventFormDialog(
                     onClick  = onDismiss,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_CalendarScreen_o5p7), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -2995,10 +2997,10 @@ fun TimePickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.st_CalendarScreen_o5p7))
                     }
                     ToolzExpressiveButton(onClick = onConfirm, modifier = Modifier.weight(1f)) {
-                        Text("Apply", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_CalendarScreen_q7r9), fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -3037,7 +3039,7 @@ fun MonthPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    "Jump to Date",
+                    stringResource(R.string.st_CalendarScreen_s9t1),
                     style      = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.ExtraBold
                 )
@@ -3053,7 +3055,7 @@ fun MonthPickerDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment     = Alignment.CenterVertically
                     ) {
-                        ExpressiveNavIconButton(Icons.Rounded.ChevronLeft, "Previous year") {
+                        ExpressiveNavIconButton(Icons.Rounded.ChevronLeft, stringResource(R.string.st_CalendarScreen_u1v3)) {
                             vibrationManager?.vibrateTick()
                             year--
                         }
@@ -3077,13 +3079,13 @@ fun MonthPickerDialog(
                             }
                             if (year == now) {
                                 Text(
-                                    "This year",
+                                    stringResource(R.string.st_CalendarScreen_w3x5),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary.copy(0.65f)
                                 )
                             }
                         }
-                        ExpressiveNavIconButton(Icons.Rounded.ChevronRight, "Next year") {
+                        ExpressiveNavIconButton(Icons.Rounded.ChevronRight, stringResource(R.string.st_CalendarScreen_y5z7)) {
                             vibrationManager?.vibrateTick()
                             year++
                         }
@@ -3124,11 +3126,11 @@ fun MonthPickerDialog(
                     ToolzOutlinedExpressiveButton(
                         onClick  = onDismiss,
                         modifier = Modifier.weight(1f).height(50.dp)
-                    ) { Text("Cancel") }
+                    ) { Text(stringResource(R.string.st_CalendarScreen_o5p7)) }
                     ToolzExpressiveButton(
                         onClick  = { onDateSelected(year, month) },
                         modifier = Modifier.weight(1f).height(50.dp)
-                    ) { Text("Go", fontWeight = FontWeight.ExtraBold) }
+                    ) { Text(stringResource(R.string.st_CalendarScreen_a7b9), fontWeight = FontWeight.ExtraBold) }
                 }
             }
         }

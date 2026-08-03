@@ -123,6 +123,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -251,7 +252,7 @@ fun OnboardingScreen(
                         exit = scaleOut() + fadeOut()
                     ) {
                         IconButton(onClick = goPrev) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_OnboardingScreen_4f2d))
                         }
                     }
                     if (pagerState.currentPage == 0) Spacer(modifier = Modifier.width(48.dp))
@@ -386,14 +387,14 @@ fun OnboardingScreen(
                         )
                         Spacer(Modifier.height(28.dp))
                         Text(
-                            "Setting things up",
+                            stringResource(R.string.st_OnboardingScreen_a1b2),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Just a moment",
+                            stringResource(R.string.st_OnboardingScreen_c3d4),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
@@ -510,7 +511,7 @@ fun WelcomeStep(onNext: () -> Unit) {
 
         StaggeredEntrance(index = 1) {
             Text(
-                "Welcome to Toolz",
+                stringResource(R.string.st_OnboardingScreen_e5f6),
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
@@ -521,7 +522,7 @@ fun WelcomeStep(onNext: () -> Unit) {
 
         StaggeredEntrance(index = 2) {
             Text(
-                "A fast, private toolkit — built by frerox",
+                stringResource(R.string.st_OnboardingScreen_g7h8),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -532,7 +533,7 @@ fun WelcomeStep(onNext: () -> Unit) {
 
         StaggeredEntrance(index = 3) {
             Text(
-                "Let's spend a minute setting things up the way you like them. You can change any of this later.",
+                stringResource(R.string.st_OnboardingScreen_i9j0),
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
@@ -548,7 +549,7 @@ fun WelcomeStep(onNext: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(64.dp),
                 shape = ExtraLargeExpressiveShape
             ) {
-                Text("Get started", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Text(stringResource(R.string.st_OnboardingScreen_k1l2), fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                 Spacer(Modifier.width(10.dp))
                 Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(20.dp))
             }
@@ -577,7 +578,7 @@ fun UpdateStep(
     ) {
         StaggeredEntrance(index = 0) {
             Text(
-                "Checking for updates",
+                stringResource(R.string.st_OnboardingScreen_m3n4),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
@@ -636,16 +637,16 @@ fun UpdateStep(
         StaggeredEntrance(index = 1) {
             AnimatedContent(targetState = state, label = "text") { updateState ->
                 val title = when (updateState) {
-                    null -> "Looking for the latest version…"
-                    is UpdateCheckResult.NewUpdate -> "An update is ready"
-                    is UpdateCheckResult.UpToDate -> "You're up to date"
-                    else -> "Couldn't reach the update server"
+                    null -> stringResource(R.string.st_OnboardingScreen_o5p6)
+                    is UpdateCheckResult.NewUpdate -> stringResource(R.string.st_OnboardingScreen_q7r8)
+                    is UpdateCheckResult.UpToDate -> stringResource(R.string.st_OnboardingScreen_s9t0)
+                    else -> stringResource(R.string.st_OnboardingScreen_u1v2)
                 }
                 val desc = when (updateState) {
-                    null -> "This only takes a second."
+                    null -> stringResource(R.string.st_OnboardingScreen_w3x4)
                     is UpdateCheckResult.NewUpdate -> "Version ${updateState.version} is available whenever you're ready."
-                    is UpdateCheckResult.UpToDate -> "You're already running the newest release of Toolz."
-                    else -> "No worries — we'll check again later. You can continue for now."
+                    is UpdateCheckResult.UpToDate -> stringResource(R.string.st_OnboardingScreen_y5z6)
+                    else -> stringResource(R.string.st_OnboardingScreen_a7b8)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(

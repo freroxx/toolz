@@ -76,6 +76,8 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.ai.*
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.ui.components.*
@@ -205,7 +207,7 @@ fun AiAssistantScreen(
     )
 
     if (showQuotaDialog) ModernAiDialog(
-        title = "QUOTA EXCEEDED", icon = Icons.Rounded.LockClock,
+        title = stringResource(R.string.st_AiAssistantScreen_8f1a), icon = Icons.Rounded.LockClock,
         iconColor = MaterialTheme.colorScheme.error,
         description = "${settingsUiState.provider} has reached its limit.",
         supportingText = "Switch to ${uiState.suggestedProvider} or use your own API key.",
@@ -408,7 +410,7 @@ private fun AiTopBar(
                                     null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary,
                                 )
                                 Text(
-                                    "AI FITNESS COACH",
+                                    stringResource(R.string.st_AiAssistantScreen_3d5b),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black,
                                     color = MaterialTheme.colorScheme.primary,
@@ -442,7 +444,7 @@ private fun AiTopBar(
                         }
                     }
                     Text(
-                        text = uiState.chats.find { it.id == uiState.currentChatId }?.title ?: "AI Assistant",
+                        text = uiState.chats.find { it.id == uiState.currentChatId }?.title ?: stringResource(R.string.st_AiAssistantScreen_9e2c),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = AiDesign.textColor(),
@@ -810,9 +812,9 @@ fun EmptyChatState(
             }
         }
 
-        Text("How can I help you?", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = AiDesign.textColor(), textAlign = TextAlign.Center)
+        Text(stringResource(R.string.st_AiAssistantScreen_1a2b), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = AiDesign.textColor(), textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
-        Text("Ask anything, analyze images, search the web", style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.5f), textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
+        Text(stringResource(R.string.st_AiAssistantScreen_7c4d), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.5f), textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(40.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -820,7 +822,7 @@ fun EmptyChatState(
                 Surface(shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), modifier = Modifier.size(22.dp)) {
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Lightbulb, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary) }
                 }
-                Text("SUGGESTED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                Text(stringResource(R.string.st_AiAssistantScreen_5f6e), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
             }
             Row {
                 IconButton(onClick = onReset, modifier = Modifier.size(36.dp)) { Icon(Icons.Rounded.RestartAlt, null, Modifier.size(18.dp), tint = AiDesign.textColor(0.35f)) }
@@ -891,7 +893,7 @@ fun AiHistoryDrawer(
             Surface(modifier = Modifier.size(32.dp), shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primaryContainer) {
                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.History, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
             }
-            Text("HISTORY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+            Text(stringResource(R.string.st_AiAssistantScreen_2b8a), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
         }
 
         // New chat button
@@ -903,7 +905,7 @@ fun AiHistoryDrawer(
         ) {
             Icon(Icons.Rounded.Add, null, Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text("New Conversation", fontWeight = FontWeight.Black)
+            Text(stringResource(R.string.st_AiAssistantScreen_4d9c), fontWeight = FontWeight.Black)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -1015,7 +1017,7 @@ fun ChatSummarySheet(summary: String?, isSummarizing: Boolean, onDismiss: () -> 
                     Surface(modifier = Modifier.size(28.dp), shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoAwesome, null, Modifier.size(14.dp), MaterialTheme.colorScheme.primary) }
                     }
-                    Text("CHAT SUMMARY", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                    Text(stringResource(R.string.st_AiAssistantScreen_w9x1), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                 }
                 IconButton(onRefresh, enabled = !isSummarizing) {
                     if (isSummarizing) ToolzWavyCircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.primary, trackColor = Color.Transparent)
@@ -1033,12 +1035,12 @@ fun ChatSummarySheet(summary: String?, isSummarizing: Boolean, onDismiss: () -> 
                 when {
                     summarizing && !hasSummary -> Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         ToolzWavyCircularProgressIndicator(Modifier.size(44.dp), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest)
-                        Text("Analyzing conversation…", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.55f), fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.st_AiAssistantScreen_y1z2), Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.55f), fontWeight = FontWeight.Medium)
                     }
                     hasSummary -> Surface(Modifier.fillMaxWidth(), LargeExpressiveShape, MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                         Text(text ?: "", Modifier.padding(18.dp), style = MaterialTheme.typography.bodyLarge, color = AiDesign.textColor(), lineHeight = 26.sp, fontWeight = FontWeight.Medium)
                     }
-                    else -> Text("No summary available.", color = AiDesign.textColor(0.38f), style = MaterialTheme.typography.bodyMedium)
+                    else -> Text(stringResource(R.string.st_AiAssistantScreen_a3b4), color = AiDesign.textColor(0.38f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -1070,17 +1072,17 @@ fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate:
             Surface(Modifier.fillMaxWidth().padding(bottom = 18.dp), LargeExpressiveShape, MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                 Text(message.text.take(120) + if (message.text.length > 120) "…" else "", Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall, color = AiDesign.textColor(0.6f), lineHeight = 18.sp)
             }
-            Text("MESSAGE ACTIONS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
+            Text(stringResource(R.string.st_AiAssistantScreen_m3n4_v2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
             HorizontalDivider(Modifier.padding(bottom = 12.dp), color = AiDesign.glassBorder())
 
-            ActionRow(Icons.Rounded.ContentCopy, "Copy Text", MaterialTheme.colorScheme.onSurface) {
+            ActionRow(Icons.Rounded.ContentCopy, stringResource(R.string.st_AiAssistantScreen_6a1b), MaterialTheme.colorScheme.onSurface) {
                 clipboard.setText(AnnotatedString(message.text)); onDismiss()
             }
-            if (!message.isUser) ActionRow(Icons.Rounded.Refresh, "Regenerate", MaterialTheme.colorScheme.primary) {
+            if (!message.isUser) ActionRow(Icons.Rounded.Refresh, stringResource(R.string.st_AiAssistantScreen_1b2c), MaterialTheme.colorScheme.primary) {
                 onRegenerate(message.id); onDismiss()
             }
-            ActionRow(Icons.Rounded.Share, "Share", MaterialTheme.colorScheme.onSurface) {
-                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, message.text) }, "Share via"))
+            ActionRow(Icons.Rounded.Share, stringResource(R.string.st_AiAssistantScreen_3c4d), MaterialTheme.colorScheme.onSurface) {
+                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, message.text) }, context.getString(R.string.st_AiAssistantScreen_5d6e)))
                 onDismiss()
             }
         }
@@ -1120,7 +1122,7 @@ fun MessageSourcesSheet(message: AiMessage, onDismiss: () -> Unit, onLinkClick: 
                     Surface(modifier = Modifier.size(28.dp), shape = SmallExpressiveShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Language, null, Modifier.size(14.dp), MaterialTheme.colorScheme.primary) }
                     }
-                    Text("SOURCES", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_AiAssistantScreen_7e8f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }
                 if (message.canDeepDive && message.deepDiveState == DeepDiveState.PENDING) {
                     ToolzExpressiveButton(
@@ -1131,7 +1133,7 @@ fun MessageSourcesSheet(message: AiMessage, onDismiss: () -> Unit, onLinkClick: 
                     ) {
                         Icon(Icons.Rounded.Search, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Deep Dive", fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_AiAssistantScreen_9f0a), fontSize = 13.sp, fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -1160,7 +1162,7 @@ fun MessageSourcesSheet(message: AiMessage, onDismiss: () -> Unit, onLinkClick: 
                                 ) {
                                     Icon(Icons.Rounded.Public, null, Modifier.size(15.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Open", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
+                                    Text(stringResource(R.string.st_AiAssistantScreen_a1b2), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
                                 }
                                 ToolzOutlinedExpressiveButton(
                                     onClick = { clipboard.setText(AnnotatedString(source.url)) },
@@ -1169,7 +1171,7 @@ fun MessageSourcesSheet(message: AiMessage, onDismiss: () -> Unit, onLinkClick: 
                                 ) {
                                     Icon(Icons.Rounded.ContentCopy, null, Modifier.size(15.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Copy URL", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
+                                    Text(stringResource(R.string.st_AiAssistantScreen_c3d4), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
                                 }
                             }
                         }
@@ -1196,17 +1198,17 @@ fun PromptActionSheet(prompt: String, onDismiss: () -> Unit, onNeverShow: (Strin
         Column(Modifier.padding(bottom = 36.dp).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AnimatedContent(isEditing, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(200)) }, label = "promptEdit") { editing ->
                 if (editing) Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(editedText, { editedText = it }, Modifier.fillMaxWidth(), shape = MediumExpressiveShape, label = { Text("Edit prompt") }, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor()))
-                    ToolzExpressiveButton({ onEdit(prompt, editedText) }, Modifier.fillMaxWidth()) { Text("Save Changes", fontWeight = FontWeight.Black) }
+                    OutlinedTextField(editedText, { editedText = it }, Modifier.fillMaxWidth(), shape = MediumExpressiveShape, label = { Text(stringResource(R.string.st_AiAssistantScreen_e5f6)) }, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor()))
+                    ToolzExpressiveButton({ onEdit(prompt, editedText) }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.st_AiAssistantScreen_g7h8), fontWeight = FontWeight.Black) }
                 }
                 else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), LargeExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                         Text(prompt, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.8f), fontWeight = FontWeight.Medium)
                     }
-                    ActionRow(Icons.Rounded.ContentCopy, "Copy Prompt", MaterialTheme.colorScheme.primary) { clipboard.setText(AnnotatedString(prompt)); onDismiss() }
-                    ActionRow(Icons.Rounded.Edit, "Edit Prompt", MaterialTheme.colorScheme.secondary) { isEditing = true }
-                    ActionRow(Icons.Rounded.Refresh, "Get New Suggestions", MaterialTheme.colorScheme.tertiary) { onRefresh() }
-                    ActionRow(Icons.Rounded.VisibilityOff, "Never Show This", MaterialTheme.colorScheme.error) { onNeverShow(prompt) }
+                    ActionRow(Icons.Rounded.ContentCopy, stringResource(R.string.st_AiAssistantScreen_i9j0), MaterialTheme.colorScheme.primary) { clipboard.setText(AnnotatedString(prompt)); onDismiss() }
+                    ActionRow(Icons.Rounded.Edit, stringResource(R.string.st_AiAssistantScreen_k1l2), MaterialTheme.colorScheme.secondary) { isEditing = true }
+                    ActionRow(Icons.Rounded.Refresh, stringResource(R.string.st_AiAssistantScreen_m3n4), MaterialTheme.colorScheme.tertiary) { onRefresh() }
+                    ActionRow(Icons.Rounded.VisibilityOff, stringResource(R.string.st_AiAssistantScreen_o5p6), MaterialTheme.colorScheme.error) { onNeverShow(prompt) }
                 }
             }
         }
@@ -1238,7 +1240,7 @@ fun ModernAiDialog(title: String, icon: ImageVector, iconColor: Color, descripti
                     Spacer(Modifier.height(12.dp))
                     ToolzOutlinedExpressiveButton(onSecondaryClick, Modifier.fillMaxWidth().height(56.dp), shape = BouncyShape) { Text(secondaryButtonText, fontWeight = FontWeight.Bold) }
                 }
-                TextButton(onDismiss, Modifier.padding(top = 8.dp)) { Text("Dismiss", style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.35f)) }
+                TextButton(onDismiss, Modifier.padding(top = 8.dp)) { Text(stringResource(R.string.st_AiAssistantScreen_q7r8), style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.35f)) }
             }
         }
     }
@@ -1259,18 +1261,18 @@ fun GroqKeyRequiredDialog(onDismiss: () -> Unit, onSave: (String) -> Unit, onGet
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.VpnKey, null, Modifier.size(36.dp), MaterialTheme.colorScheme.primary) }
                 }
                 Spacer(Modifier.height(24.dp))
-                Text("GROQ KEY REQUIRED", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                Text(stringResource(R.string.st_AiAssistantScreen_s9t0), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
                 Spacer(Modifier.height(12.dp))
-                Text("Enable Web Search", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.st_AiAssistantScreen_u1v2), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(8.dp))
-                Text("Web search uses a high-speed Groq model to extract queries. Please provide your Groq API key.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = AiDesign.textColor(0.58f), lineHeight = 22.sp)
+                Text(stringResource(R.string.st_AiAssistantScreen_w3x4), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = AiDesign.textColor(0.58f), lineHeight = 22.sp)
                 Spacer(Modifier.height(20.dp))
-                OutlinedTextField(key, { key = it }, Modifier.fillMaxWidth(), label = { Text("Groq API Key") }, placeholder = { Text("gsk_…") }, singleLine = true, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor()))
+                OutlinedTextField(key, { key = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.st_AiAssistantScreen_y5z6)) }, placeholder = { Text(stringResource(R.string.st_AiAssistantScreen_a7b8)) }, singleLine = true, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor()))
                 Spacer(Modifier.height(28.dp))
-                ToolzExpressiveButton({ if (key.isNotBlank()) onSave(key) }, Modifier.fillMaxWidth().height(56.dp), shape = BouncyShape, enabled = key.isNotBlank()) { Text("Save Key", fontWeight = FontWeight.Black) }
+                ToolzExpressiveButton({ if (key.isNotBlank()) onSave(key) }, Modifier.fillMaxWidth().height(56.dp), shape = BouncyShape, enabled = key.isNotBlank()) { Text(stringResource(R.string.st_AiAssistantScreen_c9d0), fontWeight = FontWeight.Black) }
                 Spacer(Modifier.height(10.dp))
-                ToolzOutlinedExpressiveButton(onGetLink, Modifier.fillMaxWidth().height(56.dp), shape = BouncyShape) { Text("Get Key →", fontWeight = FontWeight.Bold) }
-                TextButton(onDismiss, Modifier.padding(top = 8.dp)) { Text("Cancel", style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.35f)) }
+                ToolzOutlinedExpressiveButton(onGetLink, Modifier.fillMaxWidth().height(56.dp), shape = BouncyShape) { Text(stringResource(R.string.st_AiAssistantScreen_e1f2), fontWeight = FontWeight.Bold) }
+                TextButton(onDismiss, Modifier.padding(top = 8.dp)) { Text(stringResource(R.string.st_AiAssistantScreen_g3h4), style = MaterialTheme.typography.labelLarge, color = AiDesign.textColor(0.35f)) }
             }
         }
     }
@@ -1306,12 +1308,12 @@ fun AiSettingsDialog(
         shape = SquircleShape,
         title = {
             Column {
-                Text("AI Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_AiAssistantScreen_i5j6), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(14.dp))
                 // M3 Expressive tab switch via ToolzConnectedButtonGroup
                 ToolzConnectedButtonGroup(
                     selectedIndex = activeTab,
-                    options = listOf("Setup", "Presets"),
+                    options = listOf(stringResource(R.string.st_AiAssistantScreen_k7l8), stringResource(R.string.st_AiAssistantScreen_m9n0)),
                     onOptionSelected = { activeTab = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1397,10 +1399,10 @@ fun AiSettingsDialog(
             }
         },
         confirmButton = {
-            ToolzExpressiveButton(onSave, shape = MediumExpressiveShape, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Apply", fontWeight = FontWeight.Black) }
+            ToolzExpressiveButton(onSave, shape = MediumExpressiveShape, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.st_AiAssistantScreen_o1p2), fontWeight = FontWeight.Black) }
         },
         dismissButton = {
-            TextButton(onDismiss, Modifier.fillMaxWidth()) { Text("Close", color = AiDesign.textColor(0.5f), fontWeight = FontWeight.Bold) }
+            TextButton(onDismiss, Modifier.fillMaxWidth()) { Text(stringResource(R.string.st_AiAssistantScreen_q3r4), color = AiDesign.textColor(0.5f), fontWeight = FontWeight.Bold) }
         },
     )
     if (showTutorial) GuideDialog { showTutorial = false }
@@ -1415,7 +1417,7 @@ private fun SettingsProviderRow(
     currentProvider: String,
     onProviderChange: (String) -> Unit
 ) {
-    SettingsSection("Provider") {
+    SettingsSection(stringResource(R.string.st_AiAssistantScreen_s5t6)) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(AiSettingsHelper.providers) { p ->
                 val isSelected = currentProvider == p
@@ -1446,7 +1448,7 @@ private fun SettingsModelSection(
     onModelChange: (String) -> Unit,
     onShowModelMenuChange: (Boolean) -> Unit
 ) {
-    SettingsSection("Model") {
+    SettingsSection(stringResource(R.string.st_AiAssistantScreen_u7v8)) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box {
                 Surface(
@@ -1481,7 +1483,7 @@ private fun SettingsModelSection(
                 value = selectedModel,
                 onValueChange = onModelChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Custom Model Name") },
+                label = { Text(stringResource(R.string.st_AiAssistantScreen_w9x0)) },
                 shape = MediumExpressiveShape,
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -1493,8 +1495,8 @@ private fun SettingsModelSection(
                 trailingIcon = {
                     AnimatedContent(targetState = modelAvailability, label = "modelAvailability") { availability ->
                         when (availability) {
-                            ModelAvailability.AVAILABLE -> Icon(Icons.Rounded.CheckCircle, "Available", tint = Color(0xFF4CAF50))
-                            ModelAvailability.UNAVAILABLE -> Icon(Icons.Rounded.Error, "Unavailable", tint = MaterialTheme.colorScheme.error)
+                            ModelAvailability.AVAILABLE -> Icon(Icons.Rounded.CheckCircle, stringResource(R.string.st_AiAssistantScreen_a1b3), tint = Color(0xFF4CAF50))
+                            ModelAvailability.UNAVAILABLE -> Icon(Icons.Rounded.Error, stringResource(R.string.st_AiAssistantScreen_c3d5), tint = MaterialTheme.colorScheme.error)
                             ModelAvailability.CHECKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             ModelAvailability.UNKNOWN -> null
                         }
@@ -1503,9 +1505,9 @@ private fun SettingsModelSection(
                 supportingText = {
                     Text(
                         when (modelAvailability) {
-                            ModelAvailability.AVAILABLE -> "Available"
-                            ModelAvailability.UNAVAILABLE -> "Unavailable"
-                            ModelAvailability.CHECKING -> "Checking..."
+                            ModelAvailability.AVAILABLE -> stringResource(R.string.st_AiAssistantScreen_a1b3)
+                            ModelAvailability.UNAVAILABLE -> stringResource(R.string.st_AiAssistantScreen_c3d5)
+                            ModelAvailability.CHECKING -> stringResource(R.string.st_AiAssistantScreen_e5f7)
                             ModelAvailability.UNKNOWN -> ""
                         },
                         color = when (modelAvailability) {
@@ -1528,7 +1530,7 @@ private fun SettingsApiKeySection(
     onShowTutorial: () -> Unit
 ) {
     val context = LocalContext.current
-    SettingsSection("API Key") {
+    SettingsSection(stringResource(R.string.st_AiAssistantScreen_g7h9)) {
         OutlinedTextField(
             apiKey, onApiKeyChange, Modifier.fillMaxWidth(), shape = MediumExpressiveShape,
             placeholder = { Text(AiSettingsHelper.getApiKeyPlaceholder(provider), color = AiDesign.textColor(0.3f)) },
@@ -1536,8 +1538,8 @@ private fun SettingsApiKeySection(
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder(), focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
         )
         Row(Modifier.fillMaxWidth(), Arrangement.End) {
-            TextButton(onShowTutorial) { Text("Guide", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
-            TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AiSettingsHelper.getApiKeyUrl(provider)))) }) { Text("Get Key →", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+            TextButton(onShowTutorial) { Text(stringResource(R.string.st_AiAssistantScreen_i9j1), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+            TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AiSettingsHelper.getApiKeyUrl(provider)))) }) { Text(stringResource(R.string.st_AiAssistantScreen_e1f2), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
         }
     }
 }
@@ -1549,22 +1551,22 @@ private fun SettingsPromptsSection(
     onToggleDynamicPrompts: (Boolean) -> Unit,
     onPromptFormatChange: (String) -> Unit
 ) {
-    SettingsSection("Suggested Prompts") {
+    SettingsSection(stringResource(R.string.st_AiAssistantScreen_k1l3)) {
         Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
             Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Dynamic Prompts", fontWeight = FontWeight.Bold)
-                    Text("Generate based on chat history", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                    Text(stringResource(R.string.st_AiAssistantScreen_m3n5), fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_AiAssistantScreen_o5p7), style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
                 }
                 ExpressiveSwitch(checked = dynamicPromptsEnabled, onCheckedChange = onToggleDynamicPrompts)
             }
         }
         AnimatedVisibility(visible = dynamicPromptsEnabled) {
             Column(Modifier.padding(top = 8.dp)) {
-                Text("Prompt Length", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text(stringResource(R.string.st_AiAssistantScreen_q7r9), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 8.dp))
                 ToolzConnectedButtonGroup(
                     selectedIndex = listOf("short", "medium", "long").indexOf(promptFormat).coerceAtLeast(0),
-                    options = listOf("Short", "Medium", "Long"),
+                    options = listOf(stringResource(R.string.st_AiAssistantScreen_s9t1), stringResource(R.string.st_AiAssistantScreen_u1v3), stringResource(R.string.st_AiAssistantScreen_w3x5)),
                     onOptionSelected = { onPromptFormatChange(listOf("short", "medium", "long")[it]) },
                 )
             }
@@ -1577,12 +1579,12 @@ private fun SettingsAdvancedSection(
     aiSearchIconVisible: Boolean,
     onSetAiSearchIconVisible: (Boolean) -> Unit
 ) {
-    SettingsSection("Advanced") {
+    SettingsSection(stringResource(R.string.st_AiAssistantScreen_y5z7)) {
         Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
             Row(Modifier.padding(16.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Search Toggle Icon", fontWeight = FontWeight.Bold)
-                    Text("Show web search toggle in input", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
+                    Text(stringResource(R.string.st_AiAssistantScreen_a7b9), fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_AiAssistantScreen_c9d1), style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
                 }
                 ExpressiveSwitch(checked = aiSearchIconVisible, onCheckedChange = onSetAiSearchIconVisible)
             }
@@ -1602,7 +1604,7 @@ private fun SettingsTestSaveSection(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ToolzExpressiveButton(onTest, Modifier.weight(1f).height(48.dp), enabled = !isTesting, shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
                 if (isTesting) ToolzWavyCircularProgressIndicator(Modifier.size(16.dp), MaterialTheme.colorScheme.secondary, Color.Transparent)
-                else Text("Test Connection", fontWeight = FontWeight.Bold)
+                else Text(stringResource(R.string.st_AiAssistantScreen_e1f3), fontWeight = FontWeight.Bold)
             }
         }
         if (testResult != null) {
@@ -1611,7 +1613,7 @@ private fun SettingsTestSaveSection(
             }
         }
         ToolzExpressiveButton(onShowConfigSave, Modifier.fillMaxWidth().height(48.dp), shape = MediumExpressiveShape, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)) {
-            Text(if (editingConfig != null) "Update Preset" else "Save as Preset", fontWeight = FontWeight.Black)
+            Text(if (editingConfig != null) stringResource(R.string.st_AiAssistantScreen_g3h5) else stringResource(R.string.st_AiAssistantScreen_i5j7), fontWeight = FontWeight.Black)
         }
     }
 }
@@ -1628,9 +1630,9 @@ private fun SettingsPresetEditSection(
     onSaveConfig: (String) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedTextField(configName, onConfigNameChange, Modifier.fillMaxWidth(), label = { Text("Preset Name") }, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder()))
+        OutlinedTextField(configName, onConfigNameChange, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.st_AiAssistantScreen_k7l9)) }, shape = MediumExpressiveShape, colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = AiDesign.glassColor(), unfocusedContainerColor = AiDesign.glassColor(), unfocusedBorderColor = AiDesign.glassBorder()))
         // Icon picker row
-        Text("Preset Icon", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+        Text(stringResource(R.string.st_AiAssistantScreen_m9n1), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 Surface(onClick = onCustomIconClick, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (selectedIcon == "CUSTOM") 2.dp else 1.dp, if (selectedIcon == "CUSTOM") MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
@@ -1647,7 +1649,7 @@ private fun SettingsPresetEditSection(
                 }
             }
         }
-        ToolzExpressiveButton({ onSaveConfig(configName) }, Modifier.fillMaxWidth().height(52.dp), enabled = configName.isNotBlank(), shape = MediumExpressiveShape) { Text("Save Preset", fontWeight = FontWeight.Black) }
+        ToolzExpressiveButton({ onSaveConfig(configName) }, Modifier.fillMaxWidth().height(52.dp), enabled = configName.isNotBlank(), shape = MediumExpressiveShape) { Text(stringResource(R.string.st_AiAssistantScreen_o1p3), fontWeight = FontWeight.Black) }
     }
 }
 
@@ -1665,7 +1667,7 @@ private fun SettingsPresetsList(
                     Surface(modifier = Modifier.size(64.dp), shape = SquircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bookmarks, null, Modifier.size(28.dp).alpha(0.3f), tint = AiDesign.textColor()) }
                     }
-                    Text("No presets saved", color = AiDesign.textColor(0.4f), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.st_AiAssistantScreen_q3r5), color = AiDesign.textColor(0.4f), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -1712,7 +1714,7 @@ fun GuideDialog(onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = SquircleShape, color = AiDesign.surfaceColor()) {
             Column(Modifier.padding(24.dp)) {
-                Text("Setup Guide", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_AiAssistantScreen_s5t7), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(16.dp))
                 HorizontalPager(state = pagerState, modifier = Modifier.height(260.dp)) { page ->
                     val provider = providers[page]
@@ -1736,7 +1738,7 @@ fun GuideDialog(onDismiss: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                ToolzExpressiveButton(onDismiss, Modifier.fillMaxWidth()) { Text("Got it", fontWeight = FontWeight.Black) }
+                ToolzExpressiveButton(onDismiss, Modifier.fillMaxWidth()) { Text(stringResource(R.string.st_AiAssistantScreen_u7v9), fontWeight = FontWeight.Black) }
             }
         }
     }

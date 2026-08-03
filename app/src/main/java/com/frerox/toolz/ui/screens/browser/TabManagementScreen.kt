@@ -41,6 +41,8 @@ import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.search.components.FaviconDisplay
@@ -101,7 +103,7 @@ fun TabManagementScreen(
                             ) { multiSelect ->
                                 if (multiSelect) {
                                     Text(
-                                        "${selectedIds.size} selected",
+                                        "${selectedIds.size} " + stringResource(R.string.st_TabManagementScreen_8f1a),
                                         fontWeight = FontWeight.Black,
                                         color      = ElectricViolet,
                                         style = MaterialTheme.typography.headlineMedium
@@ -112,7 +114,7 @@ fun TabManagementScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
                                         Text(
-                                            "Tabs",
+                                            stringResource(R.string.st_TabManagementScreen_3d5b),
                                             fontWeight = FontWeight.Black,
                                             style      = MaterialTheme.typography.headlineLarge,
                                             letterSpacing = (-1).sp
@@ -149,7 +151,7 @@ fun TabManagementScreen(
                                 ) { multiSelect ->
                                     Icon(
                                         if (multiSelect) Icons.Rounded.Close else Icons.Rounded.Close,
-                                        contentDescription = if (multiSelect) "Cancel selection" else "Close",
+                                        contentDescription = if (multiSelect) stringResource(R.string.st_TabManagementScreen_9e2c) else stringResource(R.string.st_TabManagementScreen_1a2b),
                                         modifier = Modifier.size(28.dp)
                                     )
                                 }
@@ -171,7 +173,7 @@ fun TabManagementScreen(
                                         }) {
                                             Icon(
                                                 Icons.Rounded.DoneAll,
-                                                contentDescription = "Select all",
+                                                contentDescription = stringResource(R.string.st_TabManagementScreen_7c4d),
                                                 tint = ElectricViolet,
                                                 modifier = Modifier.size(26.dp)
                                             )
@@ -182,14 +184,14 @@ fun TabManagementScreen(
                                         }) {
                                             Icon(
                                                 Icons.Rounded.DeleteSweep,
-                                                contentDescription = "Close selected",
+                                                contentDescription = stringResource(R.string.st_TabManagementScreen_5f6e),
                                                 tint = DangerRed,
                                                 modifier = Modifier.size(26.dp)
                                             )
                                         }
                                     } else {
                                         IconButton(onClick = onNewTab) {
-                                            Icon(Icons.Rounded.Add, contentDescription = "New tab", tint = ElectricViolet, modifier = Modifier.size(32.dp))
+                                            Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_TabManagementScreen_2b8a), tint = ElectricViolet, modifier = Modifier.size(32.dp))
                                         }
                                     }
                                 }
@@ -229,7 +231,7 @@ fun TabManagementScreen(
                 ExtendedFloatingActionButton(
                     onClick        = onNewTab,
                     icon           = { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp)) },
-                    text           = { Text("New tab", fontWeight = FontWeight.Black) },
+                    text           = { Text(stringResource(R.string.st_TabManagementScreen_2b8a), fontWeight = FontWeight.Black) },
                     shape          = ExtraLargeExpressiveShape,
                     containerColor = ElectricViolet,
                     contentColor   = Color.White,
@@ -594,13 +596,13 @@ private fun EmptyTabsView(
                     modifier            = Modifier.padding(top = 8.dp)
                 ) {
                     Text(
-                        "No open tabs",
+                        stringResource(R.string.st_TabManagementScreen_4d9c),
                         style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black,
                         color      = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        "Start a new tab to begin browsing",
+                        stringResource(R.string.st_TabManagementScreen_6a1b),
                         style    = MaterialTheme.typography.bodyLarge,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center,
@@ -619,7 +621,7 @@ private fun EmptyTabsView(
                 ) {
                     Icon(Icons.Rounded.Add, null, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(12.dp))
-                    Text("Open new tab", fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.st_TabManagementScreen_1b2c), fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

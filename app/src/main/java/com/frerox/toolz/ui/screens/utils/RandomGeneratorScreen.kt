@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.utils
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -68,13 +70,13 @@ fun RandomGeneratorScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("ENTROPY ENGINE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 3.sp) },
+                title = { Text(stringResource(R.string.st_RandomGeneratorScreen_a1b2), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge, letterSpacing = 3.sp) },
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_RandomGeneratorScreen_c3d4))
                     }
                 },
                 actions = {
@@ -82,7 +84,7 @@ fun RandomGeneratorScreen(
                         onClick = { viewModel.clearHistory() },
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        Icon(Icons.Rounded.History, contentDescription = "Clear History")
+                        Icon(Icons.Rounded.History, contentDescription = stringResource(R.string.st_RandomGeneratorScreen_e5f6))
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -108,10 +110,10 @@ fun RandomGeneratorScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    QuickActionChip("Flip Coin", Icons.Rounded.MonetizationOn) { viewModel.flipCoin() }
-                    QuickActionChip("Decision", Icons.Rounded.QuestionMark) { viewModel.makeDecision() }
-                    QuickActionChip("UUID", Icons.Rounded.Fingerprint) { viewModel.generateUuid() }
-                    QuickActionChip("Letter", Icons.Rounded.SortByAlpha) { viewModel.generateLetter() }
+                    QuickActionChip(stringResource(R.string.st_RandomGeneratorScreen_g7h8), Icons.Rounded.MonetizationOn) { viewModel.flipCoin() }
+                    QuickActionChip(stringResource(R.string.st_RandomGeneratorScreen_i9j0), Icons.Rounded.QuestionMark) { viewModel.makeDecision() }
+                    QuickActionChip(stringResource(R.string.st_RandomGeneratorScreen_k1l2), Icons.Rounded.Fingerprint) { viewModel.generateUuid() }
+                    QuickActionChip(stringResource(R.string.st_RandomGeneratorScreen_m3n4), Icons.Rounded.SortByAlpha) { viewModel.generateLetter() }
                 }
 
                 // Luck & Decisions Result
@@ -136,10 +138,10 @@ fun RandomGeneratorScreen(
                                     else -> ""
                                 }
                                 val resultLabel = when {
-                                    state.coinResult.isNotEmpty() -> "COIN FLIP"
-                                    state.decisionResult.isNotEmpty() -> "DECISION"
-                                    state.generatedUuid.isNotEmpty() -> "UUID"
-                                    state.generatedLetter.isNotEmpty() -> "LETTER"
+                                    state.coinResult.isNotEmpty() -> stringResource(R.string.st_RandomGeneratorScreen_o5p6)
+                                    state.decisionResult.isNotEmpty() -> stringResource(R.string.st_RandomGeneratorScreen_q7r8)
+                                    state.generatedUuid.isNotEmpty() -> stringResource(R.string.st_RandomGeneratorScreen_k1l2)
+                                    state.generatedLetter.isNotEmpty() -> stringResource(R.string.st_RandomGeneratorScreen_s9t0)
                                     else -> ""
                                 }
                                 
@@ -170,10 +172,10 @@ fun RandomGeneratorScreen(
                 }
 
                 // --- NUMERIC ENTROPY ---
-                RandomSection(title = "NUMERIC ENTROPY", icon = Icons.Rounded.Pin) {
+                RandomSection(title = stringResource(R.string.st_RandomGeneratorScreen_u1v2), icon = Icons.Rounded.Pin) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        EntropyTextField(value = state.min, onValueChange = { viewModel.onMinChange(it) }, label = "MIN", modifier = Modifier.weight(1f))
-                        EntropyTextField(value = state.max, onValueChange = { viewModel.onMaxChange(it) }, label = "MAX", modifier = Modifier.weight(1f))
+                        EntropyTextField(value = state.min, onValueChange = { viewModel.onMinChange(it) }, label = stringResource(R.string.st_RandomGeneratorScreen_w3x4), modifier = Modifier.weight(1f))
+                        EntropyTextField(value = state.max, onValueChange = { viewModel.onMaxChange(it) }, label = stringResource(R.string.st_RandomGeneratorScreen_y5z6), modifier = Modifier.weight(1f))
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
@@ -182,7 +184,7 @@ fun RandomGeneratorScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Numbers, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
-                            Text("QUANTITY", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_RandomGeneratorScreen_a7b8), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text(state.quantity.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
@@ -193,7 +195,7 @@ fun RandomGeneratorScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Architecture, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
                             Spacer(Modifier.width(8.dp))
-                            Text("DECIMALS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_RandomGeneratorScreen_c9d0), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text(state.decimalPlaces.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary)
                         }
@@ -201,14 +203,14 @@ fun RandomGeneratorScreen(
                     }
 
                     FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SmallToggle("Unique", !state.allowDuplicates) { viewModel.onToggleDuplicates(!it) }
-                        SmallToggle("Sort", state.sortResults) { viewModel.onToggleSort(it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_e1f2), !state.allowDuplicates) { viewModel.onToggleDuplicates(!it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_g3h4), state.sortResults) { viewModel.onToggleSort(it) }
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     EntropyButton(
-                        text = "GENERATE DIGITS",
+                        text = stringResource(R.string.st_RandomGeneratorScreen_i5j6),
                         icon = Icons.Rounded.Refresh,
                         isLoading = state.isGenerating,
                         onClick = { viewModel.generateNumber() }
@@ -233,10 +235,10 @@ fun RandomGeneratorScreen(
                 }
 
                 // --- SECURE KEYGEN ---
-                RandomSection(title = "SECURE KEYGEN", icon = Icons.Rounded.Lock) {
+                RandomSection(title = stringResource(R.string.st_RandomGeneratorScreen_k7l8), icon = Icons.Rounded.Lock) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("LENGTH", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_RandomGeneratorScreen_m9n0), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text(state.passwordLength.toInt().toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
@@ -244,16 +246,16 @@ fun RandomGeneratorScreen(
                     }
 
                     FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SmallToggle("Lower", state.includeLower) { viewModel.onToggleLower(it) }
-                        SmallToggle("Upper", state.includeUpper) { viewModel.onToggleUpper(it) }
-                        SmallToggle("Digits", state.includeNumbers) { viewModel.onToggleNumbers(it) }
-                        SmallToggle("Symbols", state.includeSymbols) { viewModel.onToggleSymbols(it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_o1p2), state.includeLower) { viewModel.onToggleLower(it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_q3r4), state.includeUpper) { viewModel.onToggleUpper(it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_s5t6), state.includeNumbers) { viewModel.onToggleNumbers(it) }
+                        SmallToggle(stringResource(R.string.st_RandomGeneratorScreen_u7v8), state.includeSymbols) { viewModel.onToggleSymbols(it) }
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     EntropyButton(
-                        text = "DEPLOY KEY",
+                        text = stringResource(R.string.st_RandomGeneratorScreen_w9x0),
                         icon = Icons.Rounded.Security,
                         onClick = { viewModel.generatePassword() }
                     )
@@ -287,11 +289,11 @@ fun RandomGeneratorScreen(
                 }
 
                 // --- LIST ANALYTICS ---
-                RandomSection(title = "LIST ANALYTICS", icon = Icons.AutoMirrored.Rounded.List) {
+                RandomSection(title = stringResource(R.string.st_RandomGeneratorScreen_i9j1), icon = Icons.AutoMirrored.Rounded.List) {
                     OutlinedTextField(
                         value = state.itemsToPick,
                         onValueChange = { viewModel.onItemsToPickChange(it) },
-                        label = { Text("ITEMS (ONE PER LINE)") },
+                        label = { Text(stringResource(R.string.st_RandomGeneratorScreen_k1l3)) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         minLines = 3,
@@ -316,7 +318,7 @@ fun RandomGeneratorScreen(
                             } else {
                                 Icon(Icons.Rounded.AdsClick, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("PICK")
+                                Text(stringResource(R.string.st_RandomGeneratorScreen_m3n5))
                             }
                         }
                         Button(
@@ -327,7 +329,7 @@ fun RandomGeneratorScreen(
                         ) {
                             Icon(Icons.Rounded.Shuffle, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("SHUFFLE")
+                            Text(stringResource(R.string.st_RandomGeneratorScreen_o5p7))
                         }
                     }
                     
@@ -335,7 +337,7 @@ fun RandomGeneratorScreen(
                     
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("TEAM COUNT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_RandomGeneratorScreen_q7r9), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text(state.teamCount.toInt().toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
                         }
@@ -343,7 +345,7 @@ fun RandomGeneratorScreen(
                     }
                     
                     EntropyButton(
-                        text = "SPLIT INTO TEAMS",
+                        text = stringResource(R.string.st_RandomGeneratorScreen_s9t1),
                         icon = Icons.Rounded.Groups,
                         onClick = { viewModel.generateTeams() },
                         containerColor = MaterialTheme.colorScheme.tertiary
@@ -387,7 +389,7 @@ fun RandomGeneratorScreen(
                 }
 
                 // --- CHROMA GENERATOR ---
-                RandomSection(title = "CHROMA GENERATOR", icon = Icons.Rounded.Palette) {
+                RandomSection(title = stringResource(R.string.st_RandomGeneratorScreen_u1v3), icon = Icons.Rounded.Palette) {
                     val animatedColor by animateColorAsState(Color(state.generatedColor), label = "color", animationSpec = tween(600))
                     
                     Box(
@@ -407,7 +409,7 @@ fun RandomGeneratorScreen(
                                 color = if (animatedColor.luminance() > 0.5f) Color.Black else Color.White
                             )
                             Text(
-                                "TAP TO COPY",
+                                stringResource(R.string.st_RandomGeneratorScreen_w3x5),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = (if (animatedColor.luminance() > 0.5f) Color.Black else Color.White).copy(alpha = 0.6f)
@@ -418,7 +420,7 @@ fun RandomGeneratorScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     EntropyButton(
-                        text = "GENERATE COLOR",
+                        text = stringResource(R.string.st_RandomGeneratorScreen_y5z7),
                         icon = Icons.Rounded.ColorLens,
                         onClick = { viewModel.generateColor() },
                         containerColor = animatedColor.copy(alpha = 0.9f).compositeOver(Color.Black)
@@ -437,7 +439,7 @@ fun RandomGeneratorScreen(
                             Icon(Icons.Rounded.Casino, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             Spacer(Modifier.height(12.dp))
                             Button(onClick = { viewModel.rollDice() }, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)) {
-                                Text("ROLL")
+                                Text(stringResource(R.string.st_RandomGeneratorScreen_a7b9))
                             }
                             Spacer(Modifier.height(8.dp))
                             AnimatedContent(targetState = state.totalDiceSum, label = "dice") { sum ->
@@ -463,7 +465,7 @@ fun RandomGeneratorScreen(
                             Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(24.dp))
                             Spacer(Modifier.height(12.dp))
                             Button(onClick = { viewModel.generateWords() }, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)) {
-                                Text("GEN")
+                                Text(stringResource(R.string.st_RandomGeneratorScreen_c9d1))
                             }
                             Spacer(Modifier.height(8.dp))
                             AnimatedContent(targetState = state.generatedWords, label = "words") { words ->
@@ -479,7 +481,7 @@ fun RandomGeneratorScreen(
 
                 // --- HISTORY ---
                 if (state.history.isNotEmpty()) {
-                    SectionHeader(title = "HISTORY LOG", icon = Icons.Rounded.History)
+                    SectionHeader(title = stringResource(R.string.st_RandomGeneratorScreen_e1f3), icon = Icons.Rounded.History)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         state.history.forEach { HistoryItem(it) }
                     }

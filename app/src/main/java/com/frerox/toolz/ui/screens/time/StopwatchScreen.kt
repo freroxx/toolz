@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.ui.screens.time
 
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -142,8 +144,8 @@ fun StopwatchScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Stopwatch",
-                subtitle = if (state.isRunning) "Recording time" else "Precision lap timing",
+                title = stringResource(R.string.st_StopwatchScreen_a1b2),
+                subtitle = if (state.isRunning) stringResource(R.string.st_StopwatchScreen_c3d4) else stringResource(R.string.st_StopwatchScreen_e5f6),
                 titleHorizontalAlignment = Alignment.Start,
                 navigationIcon = {
                     ToolzExpressiveIconButton(
@@ -155,7 +157,7 @@ fun StopwatchScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_StopwatchScreen_g7h8))
                     }
                 },
                 actions = {
@@ -168,7 +170,7 @@ fun StopwatchScreen(
                         ),
                         shape = SmallExpressiveShape,
                     ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        Icon(Icons.Rounded.Settings, contentDescription = stringResource(R.string.st_StopwatchScreen_i9j0))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -196,22 +198,22 @@ fun StopwatchScreen(
 
         if (showSettings) {
             TimeSettingsBottomSheet(
-                title = "Stopwatch Settings",
+                title = stringResource(R.string.st_StopwatchScreen_k1l2),
                 onDismiss = { showSettings = false },
                 accent = accent
             ) {
-                SettingsSection(title = "Display", icon = Icons.Rounded.DisplaySettings, accent = accent) {
+                SettingsSection(title = stringResource(R.string.st_StopwatchScreen_m3n4), icon = Icons.Rounded.DisplaySettings, accent = accent) {
                     PreferenceRow(
-                        title = "Show milliseconds",
-                        subtitle = "Use compact timing when disabled",
+                        title = stringResource(R.string.st_StopwatchScreen_o5p6),
+                        subtitle = stringResource(R.string.st_StopwatchScreen_q7r8),
                         checked = state.showMilliseconds,
                         onCheckedChange = viewModel::setShowMilliseconds,
                     )
                 }
-                SettingsSection(title = "Behavior", icon = Icons.Rounded.Settings, accent = accent) {
+                SettingsSection(title = stringResource(R.string.st_StopwatchScreen_s9t0), icon = Icons.Rounded.Settings, accent = accent) {
                     PreferenceRow(
-                        title = "Keep screen awake",
-                        subtitle = "Useful for long sessions and lap review",
+                        title = stringResource(R.string.st_StopwatchScreen_u1v2),
+                        subtitle = stringResource(R.string.st_StopwatchScreen_w3x4),
                         checked = state.keepScreenOn,
                         onCheckedChange = viewModel::setKeepScreenOn,
                     )
@@ -296,7 +298,7 @@ private fun StopwatchDial(state: StopwatchState, accent: Color, lapFlashAt: Long
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
-                        text = if (state.isRunning) "Recording" else if (state.elapsedTime > 0L) "Paused" else "Ready",
+                        text = if (state.isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (state.elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
                         icon = if (state.isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
                         color = accent,
                     )
@@ -321,14 +323,14 @@ private fun StopwatchStatsRow(state: StopwatchState, accent: Color) {
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-            label = "Laps",
+            label = stringResource(R.string.st_StopwatchScreen_e1f2),
             value = state.laps.size.toString(),
             accent = accent,
         )
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Speed, contentDescription = null) },
-            label = "Best",
+            label = stringResource(R.string.st_StopwatchScreen_g3h4),
             value = lapEntries.minByOrNull { it.duration }?.duration?.let { formatStopwatchTime(it, false, locale) } ?: "--:--",
             accent = MaterialTheme.colorScheme.secondary,
         )
@@ -375,7 +377,7 @@ private fun StopwatchLapsPanel(state: StopwatchState, accent: Color) {
     ) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Lap timeline", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_StopwatchScreen_i5j6), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 Text(lapEntries.size.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = accent)
             }
             if (lapEntries.isEmpty()) {
@@ -383,7 +385,7 @@ private fun StopwatchLapsPanel(state: StopwatchState, accent: Color) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Rounded.Flag, contentDescription = null, modifier = Modifier.size(42.dp), tint = accent.copy(alpha = 0.45f))
                         Spacer(Modifier.height(10.dp))
-                        Text("No laps yet", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.st_StopwatchScreen_k7l8), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
@@ -441,7 +443,7 @@ private fun StopwatchLapCard(
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Lap", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.st_StopwatchScreen_m9n0), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     formatStopwatchTime(lap.duration, showMilliseconds, locale),
                     style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
@@ -450,7 +452,7 @@ private fun StopwatchLapCard(
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(if (isBest) "Best" else if (isSlowest) "Slow" else "Total", style = MaterialTheme.typography.labelSmall, color = markerColor, fontWeight = FontWeight.Black)
+                Text(if (isBest) stringResource(R.string.st_StopwatchScreen_g3h4) else if (isSlowest) stringResource(R.string.st_StopwatchScreen_o1p2) else stringResource(R.string.st_StopwatchScreen_q3r4), style = MaterialTheme.typography.labelSmall, color = markerColor, fontWeight = FontWeight.Black)
                 Text(
                     formatStopwatchTime(lap.total, showMilliseconds, locale),
                     style = MaterialTheme.typography.labelLarge.copy(fontFamily = FontFamily.Monospace),
@@ -471,6 +473,11 @@ private fun StopwatchControlDock(
     onLap: () -> Unit,
     onReset: () -> Unit,
 ) {
+    val lapLabel = stringResource(R.string.st_StopwatchScreen_m9n0)
+    val resetLabel = stringResource(R.string.st_StopwatchScreen_s5t6)
+    val pauseLabel = stringResource(R.string.st_StopwatchScreen_w9x0)
+    val startLabel = stringResource(R.string.st_StopwatchScreen_u7v8)
+
     ToolzHorizontalFloatingToolbar(
         expanded = true,
         modifier = Modifier
@@ -481,13 +488,13 @@ private fun StopwatchControlDock(
             clickableItem(
                 onClick = onLap,
                 icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-                label = "Lap",
+                label = lapLabel,
                 enabled = state.elapsedTime > 0L,
             )
             clickableItem(
                 onClick = onReset,
                 icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
-                label = "Reset",
+                label = resetLabel,
             )
         },
     ) {
@@ -506,7 +513,7 @@ private fun StopwatchControlDock(
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(8.dp))
-            Text(if (state.isRunning) "Pause" else "Start", fontWeight = FontWeight.Black)
+            Text(if (state.isRunning) pauseLabel else startLabel, fontWeight = FontWeight.Black)
         }
     }
 }
