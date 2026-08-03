@@ -450,8 +450,10 @@ class MusicDownloadWorker @AssistedInject constructor(
 
             publishProgress(notificationId, "Downloading with yt-dlp...", 0.08f)
             val youtubeDl = youtubeDlClass.getMethod("getInstance").invoke(null)
-            runCatching {
+            try {
                 youtubeDl.javaClass.getMethod("init", Context::class.java).invoke(youtubeDl, applicationContext)
+            } catch (e: Exception) {
+                android.util.Log.e("MusicDownloadWorker", "yt-dlp init failed", e)
             }
 
             val callbackClass = Class.forName("com.yausername.youtubedl_android.DownloadProgressCallback")
