@@ -81,6 +81,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var previousMusicVolume: Int? = null
     private var mutedPackage: String? = null
 
+    private var lastDismissedTime: Long = 0
+    private var lastDismissedPackage: String? = null
+
     // Settings Cache
     private var isFocusSessionActive = false
     private var categoryMappings = emptyMap<String, String>()
@@ -89,6 +92,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "FocusFlowService"
+        private const val DISMISS_GRACE_PERIOD_MS = 3000L
         private val SYSTEM_UI_PACKAGES = setOf(
             "com.android.systemui", 
             "android", 
@@ -254,33 +258,39 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             return
         }
 
-        val limitMillis = appLimits[packageName]
-        val isSessionActive = isFocusSessionActive
-        
-        val isDistraction = categoryMappings[packageName] == "Distraction" || 
-                            aiCategoryMappings[packageName] == "DISTRACTION" ||
-                            (categoryMappings[packageName] == null && aiCategoryMappings[packageName] == null && isLikelyDistraction(packageName))
-
-        val usageTime = getTodayUsage(packageName)
-        
-        val shouldLock = if (isSessionActive && isDistraction) {
-            Log.d(TAG, "validateAndLock: Blocking $packageName due to focus session")
-            true 
-        } else if (limitMillis != null && limitMillis > 0) {
-            val locked = usageTime >= limitMillis
-            if (locked) Log.d(TAG, "validateAndLock: Blocking $packageName due to limit ($usageTime >= $limitMillis)")
-            locked
-        } else {
-            false
+        if (packageName == lastDismissedPackage && System.currentTimeMillis() - lastDismissedTime < DISMISS_GRACE_PERIOD_MS) {
+            return
         }
 
-        if (shouldLock) {
-            showOverlay(packageName, isSessionActive && isDistraction)
-            enforceLockedApp(packageName)
-        } else {
-            if (isOverlayShowing && overlayShowingForPackage == packageName) {
-                Log.d(TAG, "hiding overlay for $packageName because shouldLock is false (usage: $usageTime)")
-                hideOverlay()
+        serviceScope.launch(Dispatchers.Main) {
+            val limitMillis = appLimits[packageName]
+            val isSessionActive = isFocusSessionActive
+
+            val isDistraction = categoryMappings[packageName] == "Distraction" ||
+                    aiCategoryMappings[packageName] == "DISTRACTION" ||
+                    (categoryMappings[packageName] == null && aiCategoryMappings[packageName] == null && isLikelyDistraction(packageName))
+
+            val usageTime = withContext(Dispatchers.IO) { getTodayUsage(packageName) }
+
+            val shouldLock = if (isSessionActive && isDistraction) {
+                Log.d(TAG, "validateAndLock: Blocking $packageName due to focus session")
+                true
+            } else if (limitMillis != null && limitMillis > 0) {
+                val locked = usageTime >= limitMillis
+                if (locked) Log.d(TAG, "validateAndLock: Blocking $packageName due to limit ($usageTime >= $limitMillis)")
+                locked
+            } else {
+                false
+            }
+
+            if (shouldLock) {
+                showOverlay(packageName, isSessionActive && isDistraction)
+                enforceLockedApp(packageName)
+            } else {
+                if (isOverlayShowing && overlayShowingForPackage == packageName) {
+                    Log.d(TAG, "hiding overlay for $packageName because shouldLock is false (usage: $usageTime)")
+                    hideOverlay()
+                }
             }
         }
     }
@@ -410,6 +420,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
                 view.findViewById<Button>(R.id.btn_exit)?.setOnClickListener {
                     Log.d(TAG, "Overlay: Exit button clicked")
+                    lastDismissedTime = System.currentTimeMillis()
+                    lastDismissedPackage = packageName
+                    currentPackage = toolzPackage
                     hideOverlay()
                     val intent = Intent(this@FocusFlowAccessibilityService, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP

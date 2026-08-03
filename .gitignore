@@ -15,6 +15,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+keystore.properties
 .env
 .vscode/
 compose-library/
