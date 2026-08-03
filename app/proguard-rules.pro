@@ -1,160 +1,182 @@
 # ==============================================================================
-# TOOLZ COMPLETE STABILITY & CRASH-FREE PROGUARD / R8 RULES
+# TOOLZ ULTIMATE STABILITY R8 CONFIGURATION
+# Focus: 100% Reliability, Polymorphic Serialization Fix, Gemini & Media3 Safety
 # ==============================================================================
 
-# Preserve line numbers and source file attributes for stack traces & reflection
--keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,RuntimeVisibleTypeAnnotations
--renamesourcefileattribute SourceFile
+# ------------------------------------------------------------------------------
+# 1. CORE R8 SETTINGS & GENERAL STABILITY
+# ------------------------------------------------------------------------------
 
-# Ignore missing JVM-desktop classes not present on Android
+# Preserve essential attributes for reflection, stack traces, and generics
+-keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod,Exceptions,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,RuntimeVisibleTypeAnnotations
+-renamesourcefileattribute SourceFile
+-keepnames class * implements java.io.Serializable
+
+# Ignore missing JVM-only classes not present on Android
 -dontwarn java.beans.**
+-dontwarn javax.annotation.**
 -dontwarn javax.script.**
 -dontwarn org.codehaus.mojo.animal_sniffer.**
+-dontwarn org.checkerframework.**
+-dontwarn com.google.errorprone.annotations.**
 
 # ------------------------------------------------------------------------------
-# 1. TOOLZ APPLICATION CODE & DATA MODELS (PREVENTS ALL RUNTIME CRASHES)
+# 2. KOTLINX SERIALIZATION (CRITICAL FOR STABILITY)
 # ------------------------------------------------------------------------------
 
-# Keep all data models, DTOs, entities, and state classes in com.frerox.toolz
--keep class com.frerox.toolz.data.** { *; }
--keepclassmembers class com.frerox.toolz.data.** { *; }
-
-# Keep all ViewModels, Hilt Injected classes, and UI screens
--keep class com.frerox.toolz.ui.** { *; }
--keepclassmembers class com.frerox.toolz.ui.** { *; }
-
-# Keep all WorkManager Workers and Glance App Widgets
--keep class com.frerox.toolz.worker.** { *; }
--keepclassmembers class com.frerox.toolz.worker.** { *; }
--keep class com.frerox.toolz.widget.** { *; }
--keepclassmembers class com.frerox.toolz.widget.** { *; }
-
-# Keep Services, Receivers, Application, and MainActivity
--keep class com.frerox.toolz.service.** { *; }
--keepclassmembers class com.frerox.toolz.service.** { *; }
--keep class com.frerox.toolz.di.** { *; }
--keepclassmembers class com.frerox.toolz.di.** { *; }
--keep class com.frerox.toolz.ToolzApplication { *; }
--keep class com.frerox.toolz.MainActivity { *; }
-
-# Keep BuildConfig fields for reflection
--keepclassmembers class com.frerox.toolz.BuildConfig {
-    public static final java.lang.String *_DEFAULT;
-}
-
-# ------------------------------------------------------------------------------
-# 2. DAGGER & HILT DEPENDENCY INJECTION
-# ------------------------------------------------------------------------------
--keep class * extends javax.inject.Provider
--keep class dagger.hilt.** { *; }
--keepclassmembers class dagger.hilt.** { *; }
--keep class androidx.hilt.** { *; }
--keepclassmembers class androidx.hilt.** { *; }
+# Keep all serializable classes and their generated code
+-keep @kotlinx.serialization.Serializable class * { *; }
 -keepclassmembers class * {
-    @javax.inject.Inject <init>(...);
-    @dagger.Provides <methods>;
-    @dagger.Binds <methods>;
+    *** Companion;
+    *** $serializer;
 }
--keep @dagger.hilt.Migration class *
--keep @dagger.hilt.EntryPoint class *
--keep @dagger.hilt.GeneratesRootInput class *
--keep @dagger.hilt.internal.UnstableApi class *
 
-# ------------------------------------------------------------------------------
-# 3. ROOM DATABASE & SQLCIPHER
-# ------------------------------------------------------------------------------
--keep class * extends androidx.room.RoomDatabase
--keep class androidx.room.** { *; }
--dontwarn androidx.room.**
--keep class net.sqlcipher.** { *; }
--keepclassmembers class net.sqlcipher.** { *; }
--keep class net.sqlcipher.database.** { *; }
--keepclassmembers class net.sqlcipher.database.** { *; }
--dontwarn net.sqlcipher.**
-
-# ------------------------------------------------------------------------------
-# 4. MOSHI & KOTLINX SERIALIZATION (JSON PARSING)
-# ------------------------------------------------------------------------------
--keep class com.squareup.moshi.** { *; }
--keepclassmembers class com.squareup.moshi.** { *; }
--keepclassmembers class * {
-    @com.squareup.moshi.* <fields>;
-    @com.squareup.moshi.* <methods>;
-}
--keep @interface com.squareup.moshi.JsonQualifier
--keep @interface com.squareup.moshi.JsonClass
+# Keep the KSerializer implementations and common serialization classes
+-keep class * implements kotlinx.serialization.KSerializer { *; }
+-keep class * extends kotlinx.serialization.KSerializer { *; }
 -keep class kotlinx.serialization.** { *; }
--keepclassmembers class kotlinx.serialization.** { *; }
+-keep interface kotlinx.serialization.** { *; }
+-dontwarn kotlinx.serialization.**
+
+# Fix for "Cannot serialize abstract class" - Keep all polymorphic info
 -keepclassmembers class * {
-    @kotlinx.serialization.Serializable <fields>;
     @kotlinx.serialization.SerialName <fields>;
+    @kotlinx.serialization.Transient <fields>;
 }
 
 # ------------------------------------------------------------------------------
-# 5. RETROFIT, OKHTTP & DNS
+# 3. GOOGLE AI (GEMINI) SDK & MLKIT
 # ------------------------------------------------------------------------------
+
+# Google Generative AI SDK (Gemini) - Comprehensive Keep
+-keep class com.google.ai.client.generativeai.** { *; }
+-keep interface com.google.ai.client.generativeai.** { *; }
+-dontwarn com.google.ai.client.generativeai.**
+
+# Preserve Gemini's internal Part and Content serialization (fixes "Cannot serialize abstract class")
+-keep class com.google.ai.client.generativeai.type.Part { *; }
+-keep class com.google.ai.client.generativeai.type.TextPart { *; }
+-keep class com.google.ai.client.generativeai.type.BlobPart { *; }
+-keep class com.google.ai.client.generativeai.type.FileDataPart { *; }
+-keep class com.google.ai.client.generativeai.type.FunctionCallPart { *; }
+-keep class com.google.ai.client.generativeai.type.FunctionResponsePart { *; }
+
+# MLKit (Barcode, Text Recognition, Common)
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_common.** { *; }
+-dontwarn com.google.mlkit.**
+
+# ------------------------------------------------------------------------------
+# 4. DAGGER HILT & VIEWMODELS
+# ------------------------------------------------------------------------------
+
+# Keep Hilt EntryPoints, Modules, and InstallIn
+-keep @dagger.hilt.EntryPoint class *
+-keep @dagger.hilt.InstallIn class *
+-keep @dagger.Module class *
+
+# Keep all ViewModels and their constructors
+-keep @dagger.hilt.android.lifecycle.HiltViewModel class *
+-keep class * extends androidx.lifecycle.ViewModel {
+    <init>(...);
+    *;
+}
+
+# Keep all injected fields and constructors
+-keepclassmembers class * {
+    @javax.inject.Inject *;
+}
+
+# ------------------------------------------------------------------------------
+# 5. ROOM DATABASE, SQLCIPHER & RETROFIT
+# ------------------------------------------------------------------------------
+
+# Keep all Room components
+-keep @androidx.room.Entity class *
+-keep @androidx.room.Dao class *
+-keep @androidx.room.Database class *
+-keep class * extends androidx.room.RoomDatabase {
+    <init>(...);
+    *;
+}
+
+# SQLCipher
+-keep class net.sqlcipher.** { *; }
+-dontwarn net.sqlcipher.**
+-keep class androidx.sqlite.db.SupportSQLite* { *; }
+
+# Retrofit & OkHttp
+-keepclassmembers,allowobfuscation interface * {
+    @retrofit2.http.* <methods>;
+}
 -keep class retrofit2.** { *; }
--keepclassmembers class retrofit2.** { *; }
 -dontwarn retrofit2.**
 -keep class okhttp3.** { *; }
--keepclassmembers class okhttp3.** { *; }
 -dontwarn okhttp3.**
 
+# Moshi
+-keep class com.squareup.moshi.** { *; }
+-keep @com.squareup.moshi.JsonClass class *
+-keepclassmembers class * {
+    @com.squareup.moshi.Json *;
+}
+
 # ------------------------------------------------------------------------------
-# 6. MEDIA3 & EXOPLAYER (AUDIO / VIDEO PLAYER TOOLS)
+# 6. MEDIA3, CAMERA X & LOTTIE
 # ------------------------------------------------------------------------------
+
 -keep class androidx.media3.** { *; }
--keepclassmembers class androidx.media3.** { *; }
 -dontwarn androidx.media3.**
 
+-keep class androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+
+-keep class com.airbnb.lottie.** { *; }
+
 # ------------------------------------------------------------------------------
-# 7. NEWPIPE EXTRACTOR & YOUTUBE-DL & FFMPEG (DOWNLOADER & MEDIA CONVERTER)
+# 7. COIL 3 (USES KOTLINX SERIALIZATION)
 # ------------------------------------------------------------------------------
--keep class com.github.TeamNewPipe.** { *; }
--keepclassmembers class com.github.TeamNewPipe.** { *; }
--dontwarn com.github.TeamNewPipe.**
--keep class com.yaedd.youtubedl_android.** { *; }
--keepclassmembers class com.yaedd.youtubedl_android.** { *; }
--dontwarn com.yaedd.youtubedl_android.**
--keep class com.junkfood.youtubedl_android.** { *; }
--keepclassmembers class com.junkfood.youtubedl_android.** { *; }
--dontwarn com.junkfood.youtubedl_android.**
+
+-keep class coil3.** { *; }
+-dontwarn coil3.**
+
+# ------------------------------------------------------------------------------
+# 8. OTHER LIBRARIES (FFMPEG, SHIZUKU, NEWPIPE, ETC.)
+# ------------------------------------------------------------------------------
+
+# FFmpeg & YouTube-DL
 -keep class com.arthenica.ffmpegkit.** { *; }
--keepclassmembers class com.arthenica.ffmpegkit.** { *; }
--dontwarn com.arthenica.ffmpegkit.**
+-keep class com.yaedd.youtubedl_android.** { *; }
+-keep class com.junkfood.youtubedl_android.** { *; }
 
-# ------------------------------------------------------------------------------
-# 8. MLKIT VISION (OCR & BARCODE SCANNER TOOLS)
-# ------------------------------------------------------------------------------
--keep class com.google.mlkit.** { *; }
--keepclassmembers class com.google.mlkit.** { *; }
--dontwarn com.google.mlkit.**
--keep class com.google.android.gms.vision.** { *; }
--dontwarn com.google.android.gms.vision.**
-
-# ------------------------------------------------------------------------------
-# 9. SHIZUKU API (SYSTEM / ADB TOOLS)
-# ------------------------------------------------------------------------------
+# Shizuku API
 -keep class dev.rikka.shizuku.** { *; }
--keepclassmembers class dev.rikka.shizuku.** { *; }
--dontwarn dev.rikka.shizuku.**
 -keep class rikka.shizuku.** { *; }
--keepclassmembers class rikka.shizuku.** { *; }
+-dontwarn dev.rikka.shizuku.**
+-dontwarn rikka.shizuku.**
+
+# NewPipe Extractor
+-keep class com.github.TeamNewPipe.Extractor.** { *; }
+-dontwarn com.github.TeamNewPipe.Extractor.**
+
+# Exp4j, Jsoup, Commonmark, SVG, ZXing
+-keep class net.objecthunter.exp4j.** { *; }
+-keep class org.jsoup.** { *; }
+-keep class org.commonmark.** { *; }
+-keep class com.caverock.androidsvg.** { *; }
+-keep class com.google.zxing.** { *; }
 
 # ------------------------------------------------------------------------------
-# 10. OTHER SPECIFIC LIBRARIES (EXP4J, JSOUP, COMMONMARK, ANDROIDSVG, ZXING)
+# 9. PROJECT-SPECIFIC DATA & UI (SAFETY OVERRIDE)
 # ------------------------------------------------------------------------------
--keep class net.objecthunter.exp4j.** { *; }
--keepclassmembers class net.objecthunter.exp4j.** { *; }
--keep class org.jsoup.** { *; }
--keepclassmembers class org.jsoup.** { *; }
--keep class org.commonmark.** { *; }
--keepclassmembers class org.commonmark.** { *; }
--keep class com.caverock.androidsvg.** { *; }
--keepclassmembers class com.caverock.androidsvg.** { *; }
--keep class com.google.zxing.** { *; }
--keepclassmembers class com.google.zxing.** { *; }
--keep class androidx.biometric.** { *; }
--keepclassmembers class androidx.biometric.** { *; }
--keep class androidx.security.crypto.** { *; }
--keepclassmembers class androidx.security.crypto.** { *; }
+
+# Keep all project code to guarantee 100% runtime stability
+-keep class com.frerox.toolz.** { *; }
+
+# Keep Parcelable and BuildConfig
+-keep class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator *;
+}
+-keepclassmembers class com.frerox.toolz.BuildConfig {
+    public static final java.lang.String *;
+}
