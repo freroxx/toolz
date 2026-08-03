@@ -56,7 +56,10 @@ class CatalogRepository @Inject constructor(
 
     init {
         try {
-            NewPipe.init(OkHttpDownloader(okHttpClient))
+            // Localization setup for better regional trending/search results
+            val localization = Localization.DEFAULT
+            val country = ContentCountry.DEFAULT
+            NewPipe.init(OkHttpDownloader(okHttpClient), localization, country)
         } catch (_: Exception) {
             // Already initialized — safe to ignore
         }
@@ -142,11 +145,12 @@ class CatalogRepository @Inject constructor(
                 .filter { stream ->
                     val format = stream.getFormat()
                     if (format == null) return@filter true // If unknown format, allow it as fallback
-                    format.name.contains("m4a", ignoreCase = true) ||
-                    format.name.contains("mp4a", ignoreCase = true) ||
-                    format.name.contains("webma", ignoreCase = true) ||
-                    format.name.contains("opus", ignoreCase = true) ||
-                    format.name.contains("webm", ignoreCase = true)
+                    val name = format.name.lowercase()
+                    name.contains("m4a") ||
+                    name.contains("mp4a") ||
+                    name.contains("webma") ||
+                    name.contains("opus") ||
+                    name.contains("webm")
                 }
                 .sortedByDescending { it.averageBitrate }
                 .ifEmpty { audioStreams.sortedByDescending { it.averageBitrate } }
@@ -154,7 +158,7 @@ class CatalogRepository @Inject constructor(
             val preferred = when (quality.uppercase()) {
                 "LOW" -> filtered.lastOrNull() ?: filtered.firstOrNull()
                 "MEDIUM" -> {
-                    if (filtered.size <= 1) filtered.firstOrNull()
+                    if (filtered.size <= 2) filtered.firstOrNull()
                     else filtered[filtered.size / 2]
                 }
                 else -> filtered.firstOrNull() // AUTO or HIGH → highest bitrate
@@ -163,11 +167,15 @@ class CatalogRepository @Inject constructor(
             var streamUrl = preferred?.content
 
             if (streamUrl == null) {
-                // Fallback to multiplexed video stream
+                // Fallback 1: Try any audio stream regardless of format
+                streamUrl = audioStreams.sortedByDescending { it.averageBitrate }.firstOrNull()?.content
+            }
+
+            if (streamUrl == null) {
+                // Fallback 2: Try multiplexed video stream (lowest resolution to save bandwidth)
                 val videoStreams = streamInfo.videoStreams
                 if (!videoStreams.isNullOrEmpty()) {
                     android.util.Log.w("CatalogRepo", "No audio streams found! Falling back to lowest resolution multiplexed video stream.")
-                    // Sort by lowest resolution to save bandwidth since we only need audio
                     streamUrl = videoStreams.sortedBy { it.resolution.replace("p", "").toIntOrNull() ?: Int.MAX_VALUE }.firstOrNull()?.content
                 }
             }
@@ -343,9 +351,16 @@ class CatalogRepository @Inject constructor(
                     } else null
                 )
 
-            builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+            // Modern Chrome User-Agent to prevent bot detection/403s
+            builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+            builder.header("Accept", "*/*")
+            builder.header("Accept-Language", "en-US,en;q=0.9")
+            builder.header("Origin", "https://www.youtube.com")
+            builder.header("Referer", "https://www.youtube.com/")
+            builder.header("X-YouTube-Client-Name", "1")
+            builder.header("X-YouTube-Client-Version", "2.20231110.00.00")
 
-            // Add headers
+            // Add headers from NewPipe
             request.headers().forEach { (key, values) ->
                 values.forEach { value ->
                     if (key.equals("User-Agent", ignoreCase = true)) return@forEach
@@ -354,7 +369,8 @@ class CatalogRepository @Inject constructor(
             }
 
             val response = client.newCall(builder.build()).execute()
-            val body = response.body?.string()
+            val responseBody = response.body
+            val bodyString = responseBody?.string()
 
             // Convert OkHttp headers to Map<String, List<String>>
             val responseHeaders = mutableMapOf<String, MutableList<String>>()
@@ -362,12 +378,18 @@ class CatalogRepository @Inject constructor(
                 responseHeaders[name] = response.headers.values(name).toMutableList()
             }
 
+            val finalUrl = response.request.url.toString()
+            val code = response.code
+            val message = response.message
+            
+            response.close()
+
             return Response(
-                response.code,
-                response.message,
+                code,
+                message,
                 responseHeaders,
-                body,
-                response.request.url.toString()
+                bodyString,
+                finalUrl
             )
         }
     }
