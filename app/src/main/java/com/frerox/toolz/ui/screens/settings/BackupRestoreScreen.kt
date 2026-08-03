@@ -36,6 +36,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.state.ToggleableState
@@ -43,7 +44,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
+import com.frerox.toolz.R
 import com.frerox.toolz.data.backup.BackupCategory
 import com.frerox.toolz.data.backup.BackupItem
 import com.frerox.toolz.ui.components.*
@@ -104,8 +108,8 @@ fun BackupRestoreScreen(
                 shadowElevation = 8.dp
             ) {
                 ExpressiveTopAppBar(
-                    title = "Backup & restore",
-                    subtitle = "Keep a copy of your data, or bring it back",
+                    title = stringResource(R.string.st_Backup_Title),
+                    subtitle = stringResource(R.string.st_Backup_Subtitle),
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
@@ -143,7 +147,7 @@ fun BackupRestoreScreen(
 
             StaggeredEntrance(index = 1) {
                 SectionHeader(
-                    title = "What to include",
+                    title = stringResource(R.string.st_Backup_Section_Include_Title),
                     onSelectAll = { viewModel.selectAll() },
                     onSelectNone = { viewModel.selectNone() }
                 )
@@ -206,8 +210,8 @@ private fun SectionHeader(
             color = MaterialTheme.colorScheme.onSurface
         )
         Row {
-            TextButton(onClick = onSelectAll) { Text("Select all", style = MaterialTheme.typography.labelLarge) }
-            TextButton(onClick = onSelectNone) { Text("None", style = MaterialTheme.typography.labelLarge) }
+            TextButton(onClick = onSelectAll) { Text(stringResource(R.string.st_Backup_Section_Include_SelectAll), style = MaterialTheme.typography.labelLarge) }
+            TextButton(onClick = onSelectNone) { Text(stringResource(R.string.st_Backup_Section_Include_None), style = MaterialTheme.typography.labelLarge) }
         }
     }
 }
@@ -256,13 +260,18 @@ private fun CategorySelectionCard(
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        category.displayName,
+                        stringResource(when(category) {
+                            BackupCategory.PRODUCTIVITY -> R.string.st_Backup_Cat_Productivity
+                            BackupCategory.SECURITY -> R.string.st_Backup_Cat_Security
+                            BackupCategory.PERSONAL -> R.string.st_Backup_Cat_Personal
+                            BackupCategory.SYSTEM -> R.string.st_Backup_Cat_System
+                        }),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        if (selectedInCategory.isEmpty()) "Not included"
-                        else "${selectedInCategory.size} of ${itemsInCategory.size} included",
+                        if (selectedInCategory.isEmpty()) stringResource(R.string.st_Backup_Category_NotIncluded)
+                        else stringResource(R.string.st_Backup_Category_Count_Other, selectedInCategory.size, itemsInCategory.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -289,10 +298,26 @@ private fun CategorySelectionCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsInCategory.forEach { item ->
+                    val itemLabelRes = when(item) {
+                        BackupItem.NOTES -> R.string.st_Backup_Item_Notes
+                        BackupItem.TASKS -> R.string.st_Backup_Item_Tasks
+                        BackupItem.CALENDAR -> R.string.st_Backup_Item_Calendar
+                        BackupItem.AI_KEYS -> R.string.st_Backup_Item_AiKeys
+                        BackupItem.PASSWORDS -> R.string.st_Backup_Item_Passwords
+                        BackupItem.AI_HISTORY -> R.string.st_Backup_Item_AiHistory
+                        BackupItem.SEARCH_HISTORY -> R.string.st_Backup_Item_SearchHistory
+                        BackupItem.NOTIFICATIONS -> R.string.st_Backup_Item_Notifications
+                        BackupItem.CLIPBOARD -> R.string.st_Backup_Item_Clipboard
+                        BackupItem.SETTINGS -> R.string.st_Backup_Item_Settings
+                        BackupItem.STEPS -> R.string.st_Backup_Item_Steps
+                        BackupItem.MATH_HISTORY -> R.string.st_Backup_Item_MathHistory
+                        BackupItem.PDF_METADATA -> R.string.st_Backup_Item_PdfMetadata
+                        BackupItem.OTHERS -> R.string.st_Backup_Item_Others
+                    }
                     ExpressiveFilterChip(
                         selected = selectedItems.contains(item),
                         onClick = { onToggleItem(item) },
-                        label = { Text(item.displayName, style = MaterialTheme.typography.labelMedium) }
+                        label = { Text(stringResource(itemLabelRes), style = MaterialTheme.typography.labelMedium) }
                     )
                 }
             }
@@ -309,6 +334,7 @@ private fun ActionSection(
     onRestoreFile: () -> Unit
 ) {
     val isBusy = isExporting || isImporting
+    val context = LocalContext.current
 
     // Tracks what just finished so we can show real confirmation after the fact,
     // without depending on backend state we can't see the shape of. Purely local UI
@@ -317,7 +343,8 @@ private fun ActionSection(
     var wasBusy by remember { mutableStateOf(false) }
     LaunchedEffect(isBusy) {
         if (wasBusy && !isBusy) {
-            justCompleted = if (isExporting) "Backup created just now" else "Restore completed just now"
+            justCompleted = if (isExporting) context.getString(R.string.st_Backup_Section_Action_Completed_Export) 
+                            else context.getString(R.string.st_Backup_Section_Action_Completed_Import)
         }
         wasBusy = isBusy
     }
@@ -338,14 +365,14 @@ private fun ActionSection(
                         )
                         Spacer(Modifier.height(20.dp))
                         Text(
-                            progress ?: if (isExporting) "Creating your backup" else "Restoring your data",
+                            progress ?: if (isExporting) stringResource(R.string.st_Backup_Section_Action_Exporting) else stringResource(R.string.st_Backup_Section_Action_Importing),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "This only takes a moment — keep the app open until it finishes.",
+                            stringResource(R.string.st_Backup_Section_Action_BusyDesc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -362,7 +389,7 @@ private fun ActionSection(
                             ) {
                                 Icon(Icons.Rounded.CloudUpload, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("New backup", fontWeight = FontWeight.SemiBold, softWrap = false)
+                                Text(stringResource(R.string.st_Backup_Section_Action_NewBackup), fontWeight = FontWeight.SemiBold, softWrap = false)
                             }
 
                             ToolzOutlinedExpressiveButton(
@@ -373,7 +400,7 @@ private fun ActionSection(
                             ) {
                                 Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Restore", softWrap = false)
+                                Text(stringResource(R.string.st_Backup_Section_Action_Restore), softWrap = false)
                             }
                         }
 
@@ -398,7 +425,7 @@ private fun ActionSection(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    justCompleted ?: "Saved to Documents/Toolz_Backups",
+                                    justCompleted ?: stringResource(R.string.st_Backup_Section_Action_DefaultPath),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -433,7 +460,7 @@ private fun AutoBackupSection(
     onShowCustomInterval: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeaderSimple(title = "Automation")
+        SectionHeaderSimple(title = stringResource(R.string.st_Backup_Automation_Title))
 
         ExpressiveCard(
             onClick = {},
@@ -458,13 +485,13 @@ private fun AutoBackupSection(
                     Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Scheduled backups",
+                            stringResource(R.string.st_Backup_Automation_Scheduled),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            if (currentFrequency == "Never") "Off — back up manually anytime"
-                            else if (currentFrequency == "Custom") "Every $customDays days"
+                            if (currentFrequency == "Never") stringResource(R.string.st_Backup_Automation_Off)
+                            else if (currentFrequency == "Custom") stringResource(R.string.st_Backup_Automation_Custom_Other, customDays)
                             else currentFrequency,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -481,7 +508,7 @@ private fun AutoBackupSection(
                         Spacer(Modifier.height(24.dp))
                         
                         Text(
-                            "Backup frequency",
+                            stringResource(R.string.st_Backup_Automation_Freq),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
@@ -526,12 +553,12 @@ private fun AutoBackupSection(
                             Spacer(Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Notifications",
+                                    stringResource(R.string.st_Backup_Automation_Notifications),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    "Get notified about backup results",
+                                    stringResource(R.string.st_Backup_Automation_NotificationsDesc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -579,13 +606,13 @@ private fun CustomIntervalDialog(
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Custom interval",
+                    stringResource(R.string.st_Backup_CustomInterval_Title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Back up automatically every",
+                    stringResource(R.string.st_Backup_CustomInterval_Desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -598,7 +625,7 @@ private fun CustomIntervalDialog(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (days == 1) " day" else " days",
+                        stringResource(if (days == 1) R.string.st_Backup_CustomInterval_Days_One else R.string.st_Backup_CustomInterval_Days_Other, days).substringAfter("$days"),
                         modifier = Modifier.padding(bottom = 8.dp, start = 4.dp),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -620,13 +647,13 @@ private fun CustomIntervalDialog(
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.st_Backup_CustomInterval_Cancel))
                     }
                     ToolzExpressiveButton(
                         onClick = { onConfirm(days) },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Set interval")
+                        Text(stringResource(R.string.st_Backup_CustomInterval_Set))
                     }
                 }
             }

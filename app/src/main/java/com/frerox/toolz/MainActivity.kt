@@ -541,7 +541,7 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
                     )
 
                     Text(
-                        "v$availableVersion",
+                        stringResource(R.string.st_Version_Text, availableVersion ?: ""),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary

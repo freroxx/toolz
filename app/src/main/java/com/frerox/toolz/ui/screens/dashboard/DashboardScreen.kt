@@ -18,6 +18,7 @@
 package com.frerox.toolz.ui.screens.dashboard
 
 import android.content.Intent
+import androidx.annotation.StringRes
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -132,8 +133,8 @@ sealed class PillPage {
 }
 
 data class AppTip(
-    val title: String,
-    val description: String,
+    @StringRes val titleRes: Int,
+    @StringRes val descriptionRes: Int,
     val icon: ImageVector,
     val route: String,
     val color: Color,
@@ -531,10 +532,10 @@ fun HomeTabContent(
 
         // Smart Flow tools in Home
         tabCategories.forEachIndexed { ci, cat ->
-            item(key = "cat_header_${cat.title}_home") {
+            item(key = "cat_header_${cat.titleRes}_home") {
                 SectionHeader("ESSENTIALS")
             }
-            item(key = "cat_body_${cat.title}_home") {
+            item(key = "cat_body_${cat.titleRes}_home") {
                 ToolGridSection(cat.items, onNavigate)
                 Spacer(Modifier.height(4.dp))
             }
@@ -567,10 +568,10 @@ fun TabGridContent(
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         ) {
             categories.forEachIndexed { ci, cat ->
-                item(key = "cat_header_${cat.title}") {
-                    SectionHeader(cat.title)
+                item(key = "cat_header_${cat.titleRes}") {
+                    SectionHeader(stringResource(cat.titleRes))
                 }
-                item(key = "cat_body_${cat.title}") {
+                item(key = "cat_body_${cat.titleRes}") {
                     if (currentView == "LIST") {
                         ToolListSection(cat.items, onNavigate, onLongClick)
                     } else {
@@ -620,7 +621,7 @@ fun PinnedCarouselItem(
                 }
             }
             Text(
-                tool.title,
+                stringResource(tool.titleRes),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
@@ -638,7 +639,7 @@ fun PinnedCarouselItem(
 fun SpotlightSection(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-        SectionHeader("FOR YOU")
+        SectionHeader(stringResource(R.string.st_Dashboard_ForYou))
         ExpressiveCard(
             onClick = { 
                 vibrationManager?.vibrateClick()
@@ -670,12 +671,12 @@ fun SpotlightSection(tool: ToolItem, onNavigate: (String) -> Unit) {
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Spotlight: ${tool.title}",
+                        stringResource(R.string.st_Dashboard_Spotlight, stringResource(tool.titleRes)),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black
                     )
                     Text(
-                        tool.description,
+                        stringResource(tool.descriptionRes),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
@@ -774,12 +775,13 @@ fun SmartSearchBar(
     modifier: Modifier = Modifier,
 ) {
     val performanceMode = LocalPerformanceMode.current
+    val context = LocalContext.current
     val allTools  = remember(categories) { categories.flatMap { it.items } }
     val localHits = remember(query, allTools) {
         if (query.isBlank()) emptyList()
         else allTools.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                    it.description.contains(query, ignoreCase = true)
+            context.getString(it.titleRes).contains(query, ignoreCase = true) ||
+                    context.getString(it.descriptionRes).contains(query, ignoreCase = true)
         }.take(5)
     }
 
@@ -1140,10 +1142,10 @@ private fun SearchRow(tool: ToolItem, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(tool.title,
+            Text(stringResource(tool.titleRes),
                 style      = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Black)
-            Text(tool.description,
+            Text(stringResource(tool.descriptionRes),
                 style    = MaterialTheme.typography.labelSmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1398,7 +1400,7 @@ private fun RecentItem(tool: ToolItem, onNavigate: (String) -> Unit) {
             }
         }
         Text(
-            tool.title,
+            stringResource(tool.titleRes),
             style      = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Black,
             maxLines   = 1,
@@ -1472,7 +1474,7 @@ private fun PinnedItem(
                         modifier = Modifier.size(11.dp),
                         tint     = tool.color.copy(alpha = 0.4f))
                 }
-                Text(tool.title,
+                Text(stringResource(tool.titleRes),
                     style      = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
                     maxLines   = 1,
@@ -1760,7 +1762,7 @@ fun AllToolsHeader(
                     style         = MaterialTheme.typography.titleLarge,
                     fontWeight    = FontWeight.Black,
                     letterSpacing = 1.5.sp)
-                Text("$totalTools utilities",
+                Text(stringResource(R.string.st_Dashboard_Utilities_Count, totalTools),
                     style      = MaterialTheme.typography.labelSmall,
                     color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                     fontWeight = FontWeight.Bold)
@@ -1869,7 +1871,7 @@ fun ToolGridCard(
                         Icon(item.icon, null, tint = item.color, modifier = Modifier.size(20.dp))
                     }
                 }
-                Text(item.title,
+                Text(stringResource(item.titleRes),
                     style         = MaterialTheme.typography.labelLarge,
                     fontWeight    = FontWeight.Black,
                     letterSpacing = 0.5.sp,
@@ -1924,8 +1926,8 @@ fun ToolListCard(
             }
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(item.description,
+                Text(stringResource(item.titleRes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                Text(stringResource(item.descriptionRes),
                     style      = MaterialTheme.typography.bodySmall,
                     color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f),
                     maxLines   = 1,
@@ -2057,16 +2059,16 @@ fun UniversalPill(
     val appTips = remember(offlineState) {
         listOfNotNull(
             if (offlineState == OfflineState.ONLINE)
-                AppTip("Talk to AI agents", "AI Assistant", Icons.Rounded.AutoAwesome,
+                AppTip(R.string.st_Pill_Tip_Ai_Title, R.string.st_Pill_Tip_Ai_Desc, Icons.Rounded.AutoAwesome,
                     Screen.AiAssistant.route, Color(0xFF9C27B0))
             else null,
-            AppTip("Express yourself",  "Notepad",       Icons.Rounded.EditNote,           Screen.Notepad.route,        Color(0xFFFF9800)),
-            AppTip("Convert any file",  "File Converter",Icons.Rounded.Transform,           Screen.FileConverter.route,  Color(0xFF2196F3)),
-            AppTip("Manage your time",  "Focus Flow",    Icons.Rounded.CenterFocusStrong,   Screen.FocusFlow.route,      Color(0xFF4CAF50)),
-            AppTip("Stay on track",     "To-Do List",    Icons.AutoMirrored.Rounded.PlaylistAddCheck, Screen.Todo.route, Color(0xFF673AB7)),
-            AppTip("Deep work session", "Pomodoro",      Icons.Rounded.AvTimer,             Screen.Pomodoro.route,       Color(0xFFF44336)),
-            AppTip("Free up space",     "File Cleaner",  Icons.Rounded.CleaningServices,    Screen.FileCleaner.route,    Color(0xFF00BCD4)),
-            AppTip("Screen stays on",   "Caffeinate",    Icons.Rounded.Coffee,              Screen.Caffeinate.route,     Color(0xFF795548)),
+            AppTip(R.string.st_Pill_Tip_Notepad_Title,  R.string.st_Pill_Tip_Notepad_Desc,       Icons.Rounded.EditNote,           Screen.Notepad.route,        Color(0xFFFF9800)),
+            AppTip(R.string.st_Pill_Tip_Converter_Title,  R.string.st_Pill_Tip_Converter_Desc,Icons.Rounded.Transform,           Screen.FileConverter.route,  Color(0xFF2196F3)),
+            AppTip(R.string.st_Pill_Tip_Focus_Title,  R.string.st_Pill_Tip_Focus_Desc,    Icons.Rounded.CenterFocusStrong,   Screen.FocusFlow.route,      Color(0xFF4CAF50)),
+            AppTip(R.string.st_Pill_Tip_Todo_Title,     R.string.st_Pill_Tip_Todo_Desc,    Icons.AutoMirrored.Rounded.PlaylistAddCheck, Screen.Todo.route, Color(0xFF673AB7)),
+            AppTip(R.string.st_Pill_Tip_Pomodoro_Title, R.string.st_Pill_Tip_Pomodoro_Desc,      Icons.Rounded.AvTimer,             Screen.Pomodoro.route,       Color(0xFFF44336)),
+            AppTip(R.string.st_Pill_Tip_Cleaner_Title,     R.string.st_Pill_Tip_Cleaner_Desc,  Icons.Rounded.CleaningServices,    Screen.FileCleaner.route,    Color(0xFF00BCD4)),
+            AppTip(R.string.st_Pill_Tip_Caffeinate_Title,   R.string.st_Pill_Tip_Caffeinate_Desc,    Icons.Rounded.Coffee,              Screen.Caffeinate.route,     Color(0xFF795548)),
         )
     }
 
@@ -2457,12 +2459,14 @@ fun TipPillContent(tip: AppTip, onNavigate: (String) -> Unit) {
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(tip.title,
+            @Suppress("DEPRECATION")
+            Text(stringResource(tip.titleRes),
                 style      = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Black,
                 maxLines   = 1,
                 overflow   = TextOverflow.Ellipsis)
-            Text(tip.description,
+            @Suppress("DEPRECATION")
+            Text(stringResource(tip.descriptionRes),
                 style      = MaterialTheme.typography.labelMedium,
                 color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines   = 1,
@@ -2507,10 +2511,10 @@ fun MusicPillContent(state: MusicUiState, vm: MusicPlayerViewModel, onNavigate: 
         }
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(state.currentTrack?.title ?: "Not Playing",
+            Text(state.currentTrack?.title ?: stringResource(R.string.st_Music_NotPlaying),
                 style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Black,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(state.currentTrack?.artist ?: "Unknown Artist",
+            Text(state.currentTrack?.artist ?: stringResource(R.string.st_Music_UnknownArtist),
                 style = MaterialTheme.typography.labelMedium,
                 color = c.onSurface.copy(alpha = 0.62f),
                 maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
@@ -2813,7 +2817,7 @@ fun TodoPillContent(task: com.frerox.toolz.data.todo.TaskEntry?, onNavigate: (St
         Column(modifier = Modifier.weight(1f)) {
             Text("Next Priority", style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Black, color = c.primary)
-            Text(task?.title ?: "Nothing planned", style = MaterialTheme.typography.bodyLarge,
+            Text(task?.title ?: stringResource(R.string.st_Todo_NothingPlanned), style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         FilledTonalIconButton(onClick = { onNavigate(Screen.Todo.route) }, modifier = Modifier.size(46.dp),
@@ -2931,10 +2935,10 @@ fun ToolDetailSheet(
                     }
                 }
                 Column {
-                    Text(tool.title,
+                    Text(stringResource(tool.titleRes),
                         style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black)
-                    Text(tool.description,
+                    Text(stringResource(tool.descriptionRes),
                         style      = MaterialTheme.typography.bodyMedium,
                         color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                         fontWeight = FontWeight.Medium)
@@ -3092,17 +3096,17 @@ fun OfflineSheet(onDismiss: () -> Unit, onGoOnline: () -> Unit) {
 @Composable
 private fun _PreviewScaffold() {
     val cats = listOf(
-        ToolCategory("SMART FLOW & AI", listOf(
-            ToolItem("AI Assistant",  Icons.Rounded.AutoAwesome, "ai",    "Gemini Flash AI",  Color(0xFF8E24AA)),
-            ToolItem("Focus Flow",    Icons.Rounded.Toll,        "focus", "Flow insights",    Color(0xFF1976D2)),
-            ToolItem("Todo List",     Icons.Rounded.TaskAlt,     "todo",  "Bouncy tasks",     Color(0xFF43A047)),
-            ToolItem("Notepad",       Icons.Rounded.Description, "note",  "Quick notes",      Color(0xFFFDD835)),
+        ToolCategory(R.string.st_Dashboard_Cat_SmartFlow, listOf(
+            ToolItem(R.string.st_Tool_AiAssistant,  Icons.Rounded.AutoAwesome, "ai",    R.string.st_Tool_AiAssistant_Desc,  Color(0xFF8E24AA)),
+            ToolItem(R.string.st_Tool_FocusFlow,    Icons.Rounded.Toll,        "focus", R.string.st_Tool_FocusFlow_Desc,    Color(0xFF1976D2)),
+            ToolItem(R.string.st_Tool_TodoList,     Icons.Rounded.TaskAlt,     "todo",  R.string.st_Tool_TodoList_Desc,     Color(0xFF43A047)),
+            ToolItem(R.string.st_Tool_Notepad,       Icons.Rounded.Description, "note",  R.string.st_Tool_Notepad_Desc,      Color(0xFFFDD835)),
         )),
-        ToolCategory("SENSORS & VISION", listOf(
-            ToolItem("Compass",       Icons.Rounded.Explore,     "compass","Navigation",      Color(0xFF00897B)),
-            ToolItem("Speedometer",   Icons.Rounded.Speed,       "speed", "GPS Speed",        Color(0xFF1976D2)),
-            ToolItem("Bubble Level",  Icons.Rounded.Architecture,"level", "Leveling",         Color(0xFF7CB342)),
-            ToolItem("Altimeter",     Icons.Rounded.Terrain,     "alt",   "Altitude",         Color(0xFF795548)),
+        ToolCategory(R.string.st_Dashboard_Cat_Sensors, listOf(
+            ToolItem(R.string.st_Tool_Compass,       Icons.Rounded.Explore,     "compass", R.string.st_Tool_Compass_Desc,      Color(0xFF00897B)),
+            ToolItem(R.string.st_Tool_Speedometer,   Icons.Rounded.Speed,       "speed", R.string.st_Tool_Speedometer_Desc,   Color(0xFF1976D2)),
+            ToolItem(R.string.st_Tool_BubbleLevel,  Icons.Rounded.Architecture, "level", R.string.st_Tool_BubbleLevel_Desc,  Color(0xFF7CB342)),
+            ToolItem(R.string.st_Tool_Altimeter,     Icons.Rounded.Terrain,     "alt",   R.string.st_Tool_Altimeter_Desc,    Color(0xFF795548)),
         )),
     )
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -3137,7 +3141,7 @@ private fun _PreviewScaffold() {
                 }
                 item { AllToolsHeader(cats.sumOf { it.items.size }, "DEFAULT", {}) }
                 cats.forEach { cat ->
-                    item { SectionHeader(cat.title) }
+                    item { SectionHeader(stringResource(cat.titleRes)) }
                     item { ToolGridSection(cat.items, {}); Spacer(Modifier.height(4.dp)) }
                 }
                 item { Spacer(Modifier.height(120.dp)) }

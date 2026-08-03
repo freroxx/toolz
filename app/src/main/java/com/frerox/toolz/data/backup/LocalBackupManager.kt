@@ -48,6 +48,7 @@ import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.security.KeyManager
 import com.squareup.moshi.JsonAdapter
+import com.frerox.toolz.R
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -90,7 +91,7 @@ class LocalBackupManager @Inject constructor(
         reason: String = "manual",
         items: Set<BackupItem> = BackupItem.entries.toSet()
     ): BackupExportResult = withContext(Dispatchers.IO) {
-        _progress.value = "Preparing backup..."
+        _progress.value = context.getString(R.string.st_Backup_Progress_Preparing)
         checkpointDatabase()
 
         val stagingDir = File(context.cacheDir, "toolz_backup_staging").apply { mkdirs() }
@@ -178,11 +179,14 @@ class LocalBackupManager @Inject constructor(
         val destination = publishToDocuments(tempZip, fileName)
         tempZip.delete()
 
+        val pfd = context.contentResolver.openFileDescriptor(destination, "r")
+        val size = pfd?.use { it.statSize } ?: 0L
+
         BackupExportResult(
             uri = destination,
             fileName = fileName,
             sha256 = payloadHash,
-            byteCount = context.contentResolver.openFileDescriptor(destination, "r")?.use { it.statSize } ?: 0L,
+            byteCount = size,
             entryCount = entryHashes.size
         )
     }
@@ -193,69 +197,69 @@ class LocalBackupManager @Inject constructor(
         entryHashes: MutableMap<String, String>
     ) {
         if (items.contains(BackupItem.NOTES)) {
-            _progress.value = "Backing up Notes..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Notes)
             addTextEntry(zip, "data/notes.json", listAdapter<Note>().toJson(database.noteDao().getAllNotesSync()), entryHashes)
         }
         if (items.contains(BackupItem.TASKS)) {
-            _progress.value = "Backing up Tasks..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Tasks)
             addTextEntry(zip, "data/tasks.json", listAdapter<TaskEntry>().toJson(database.taskDao().getAllTasksSync()), entryHashes)
         }
         if (items.contains(BackupItem.AI_HISTORY)) {
-            _progress.value = "Backing up AI History..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_AiHistory)
             addTextEntry(zip, "data/ai_chats.json", listAdapter<AiChat>().toJson(database.aiDao().getAllChatsSync()), entryHashes)
             addTextEntry(zip, "data/ai_messages.json", listAdapter<AiMessage>().toJson(database.aiDao().getAllMessagesSync()), entryHashes)
         }
         if (items.contains(BackupItem.PASSWORDS)) {
-            _progress.value = "Backing up Passwords..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Passwords)
             addTextEntry(zip, "data/passwords.json", listAdapter<PasswordEntity>().toJson(database.passwordDao().getAllPasswordsSync()), entryHashes)
         }
         if (items.contains(BackupItem.SEARCH_HISTORY)) {
-            _progress.value = "Backing up Search History..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_SearchHistory)
             addTextEntry(zip, "data/search_history.json", listAdapter<SearchHistoryEntry>().toJson(database.searchDao().getAllHistorySync()), entryHashes)
             addTextEntry(zip, "data/bookmarks.json", listAdapter<BookmarkEntry>().toJson(database.searchDao().getAllBookmarksSync()), entryHashes)
             addTextEntry(zip, "data/quick_links.json", listAdapter<QuickLinkEntry>().toJson(database.searchDao().getAllQuickLinksSync()), entryHashes)
         }
         if (items.contains(BackupItem.NOTIFICATIONS)) {
-            _progress.value = "Backing up Notifications..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Notifications)
             addTextEntry(zip, "data/notifications.json", listAdapter<NotificationEntry>().toJson(database.notificationDao().getAllNotificationsSync()), entryHashes)
         }
         if (items.contains(BackupItem.CALENDAR)) {
-            _progress.value = "Backing up Calendar..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Calendar)
             addTextEntry(zip, "data/events.json", listAdapter<EventEntry>().toJson(database.eventDao().getAllEventsSync()), entryHashes)
         }
         if (items.contains(BackupItem.CLIPBOARD)) {
-            _progress.value = "Backing up Clipboard..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Clipboard)
             addTextEntry(zip, "data/clipboard.json", listAdapter<ClipboardEntry>().toJson(database.clipboardDao().getAllEntriesSync()), entryHashes)
         }
         if (items.contains(BackupItem.STEPS)) {
-            _progress.value = "Backing up Step Data..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Steps)
             addTextEntry(zip, "data/steps.json", listAdapter<StepEntry>().toJson(database.stepDao().getAllStepsSync()), entryHashes)
         }
         if (items.contains(BackupItem.MATH_HISTORY)) {
-            _progress.value = "Backing up Math History..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Math)
             addTextEntry(zip, "data/math_history.json", listAdapter<MathHistory>().toJson(database.mathHistoryDao().getAllHistorySync()), entryHashes)
         }
         if (items.contains(BackupItem.PDF_METADATA)) {
-            _progress.value = "Backing up PDF Metadata..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Pdf)
             addTextEntry(zip, "data/pdf_metadata.json", listAdapter<PdfMetadata>().toJson(database.pdfMetadataDao().getAllMetadataSync()), entryHashes)
             addTextEntry(zip, "data/pdf_annotations.json", listAdapter<PdfAnnotation>().toJson(database.pdfAnnotationDao().getAllAnnotationsSync()), entryHashes)
         }
         if (items.contains(BackupItem.OTHERS)) {
-            _progress.value = "Backing up Other Data..."
+            _progress.value = context.getString(R.string.st_Backup_Progress_Others)
             addTextEntry(zip, "data/app_limits.json", listAdapter<AppLimit>().toJson(database.appLimitDao().getAllLimitsSync()), entryHashes)
             addTextEntry(zip, "data/caffeinate.json", listAdapter<CaffeinateApp>().toJson(database.caffeinateDao().getAllAppsSync()), entryHashes)
             addTextEntry(zip, "data/crypto_history.json", listAdapter<CryptoHistoryEntry>().toJson(database.cryptoDao().getAllHistorySync()), entryHashes)
             addTextEntry(zip, "data/music_tracks.json", listAdapter<MusicTrack>().toJson(database.musicDao().getAllTracksSync()), entryHashes)
             addTextEntry(zip, "data/playlists.json", listAdapter<Playlist>().toJson(database.musicDao().getAllPlaylistsSync()), entryHashes)
         }
-        _progress.value = "Finalizing..."
+        _progress.value = context.getString(R.string.st_Backup_Progress_Finalizing)
     }
 
     suspend fun importReusableBackup(
         uri: Uri,
         itemsToRestore: Set<BackupItem> = BackupItem.entries.toSet()
     ): BackupImportResult = withContext(Dispatchers.IO) {
-        _progress.value = "Opening backup..."
+        _progress.value = context.getString(R.string.st_Backup_Progress_Opening)
         val stagingFile = File(context.cacheDir, "toolz_restore_${System.currentTimeMillis()}.tzbk")
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(stagingFile).use { output -> input.copyTo(output) }
@@ -327,7 +331,7 @@ class LocalBackupManager @Inject constructor(
         itemsToRestore: Set<BackupItem>
     ): Boolean {
         val json = zipFile.getInputStream(entry).bufferedReader().use { it.readText() }
-        _progress.value = "Restoring ${entry.name.substringAfterLast("/").substringBefore(".")}"
+        _progress.value = context.getString(R.string.st_Backup_Progress_Restoring, entry.name.substringAfterLast("/").substringBefore("."))
         return when (entry.name) {
             "data/notes.json" -> if (itemsToRestore.contains(BackupItem.NOTES)) {
                 database.noteDao().insertNotes(listAdapter<Note>().fromJson(json).orEmpty())

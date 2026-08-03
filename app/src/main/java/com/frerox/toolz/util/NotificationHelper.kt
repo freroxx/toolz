@@ -66,93 +66,93 @@ object NotificationHelper {
         val channels = listOf(
             NotificationChannel(
                 CHANNEL_TOOL_ACTIVE,
-                "Active Tools",
+                context.getString(R.string.st_Channel_ActiveTools),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Status of active stopwatch, timers, and sessions"
+                description = context.getString(R.string.st_Channel_ActiveTools_Desc)
                 setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_TOOL_ALARM,
-                "Alarms & Timers",
+                context.getString(R.string.st_Channel_Alarms),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifications when timers or focus sessions finish"
+                description = context.getString(R.string.st_Channel_Alarms_Desc)
                 enableVibration(true)
             },
             NotificationChannel(
                 CHANNEL_CLIPBOARD,
-                "Clipboard Intelligence",
+                context.getString(R.string.st_Channel_Clipboard),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Background AI processing for clipboard content"
+                description = context.getString(R.string.st_Channel_Clipboard_Desc)
                 setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_STEP_COUNTER,
-                "Step Counter",
+                context.getString(R.string.st_Channel_Steps),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Daily step progress updates"
+                description = context.getString(R.string.st_Channel_Steps_Desc)
                 setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_VOICE_RECORDER,
-                "Voice Recorder",
+                context.getString(R.string.st_Channel_Recorder),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active voice recording status"
+                description = context.getString(R.string.st_Channel_Recorder_Desc)
                 setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_FILE_CONVERSION,
-                "File Conversion",
+                context.getString(R.string.st_Channel_Conversion),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Progress and status of file format conversions"
+                description = context.getString(R.string.st_Channel_Conversion_Desc)
             },
             NotificationChannel(
                 CHANNEL_CAFFEINATE,
-                "Caffeinate",
+                context.getString(R.string.st_Channel_Caffeinate),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Background status for keeping the screen awake"
+                description = context.getString(R.string.st_Channel_Caffeinate_Desc)
                 setShowBadge(false)
             },
             NotificationChannel(
                 CHANNEL_APP_UPDATES,
-                "App Updates",
+                context.getString(R.string.st_Channel_Updates),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifications about new versions and installation readiness"
+                description = context.getString(R.string.st_Channel_Updates_Desc)
             },
             NotificationChannel(
                 CHANNEL_TASK_REMINDERS,
-                "Task Reminders",
+                context.getString(R.string.st_Channel_Tasks),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Deadlines and reminders for your tasks"
+                description = context.getString(R.string.st_Channel_Tasks_Desc)
             },
             NotificationChannel(
                 CHANNEL_EVENT_REMINDERS,
-                "Event Reminders",
+                context.getString(R.string.st_Channel_Events),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Upcoming calendar events"
+                description = context.getString(R.string.st_Channel_Events_Desc)
             },
             NotificationChannel(
                 CHANNEL_MUSIC_DOWNLOADS,
-                "Music Downloads",
+                context.getString(R.string.st_Channel_MusicDownloads),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Status of track downloads"
+                description = context.getString(R.string.st_Channel_MusicDownloads_Desc)
             },
             NotificationChannel(
                 CHANNEL_BACKUPS,
-                "Backup & Restore",
+                context.getString(R.string.st_Channel_Backups),
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Status of backup and restore operations"
+                description = context.getString(R.string.st_Channel_Backups_Desc)
             }
         )
 
@@ -168,10 +168,11 @@ object NotificationHelper {
 
     fun showBackupSuccess(context: Context, fileName: String, isScheduled: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val title = if (isScheduled) "Scheduled Backup Success" else "Backup Created Successfully"
+        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Success_Scheduled) 
+                    else context.getString(R.string.st_Notification_Backup_Success_Manual)
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
             .setContentTitle(title)
-            .setContentText("File saved: $fileName")
+            .setContentText(context.getString(R.string.st_Notification_Backup_Success_File, fileName))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
         manager.notify(ID_BACKUP_OPERATION, notification)
@@ -179,10 +180,11 @@ object NotificationHelper {
 
     fun showBackupFailure(context: Context, error: String?, isScheduled: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val title = if (isScheduled) "Scheduled Backup Failed" else "Backup Failed"
+        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Failure_Scheduled) 
+                    else context.getString(R.string.st_Notification_Backup_Failure_Manual)
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
             .setContentTitle(title)
-            .setContentText(error ?: "An unknown error occurred")
+            .setContentText(error ?: context.getString(R.string.st_OnboardingScreen_u1v2)) // Reusing error string if null
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
         manager.notify(ID_BACKUP_OPERATION, notification)
@@ -191,8 +193,8 @@ object NotificationHelper {
     fun showRestoreSuccess(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
-            .setContentTitle("Restore Complete")
-            .setContentText("Your data has been restored successfully.")
+            .setContentTitle(context.getString(R.string.st_Notification_Restore_Success_Title))
+            .setContentText(context.getString(R.string.st_Notification_Restore_Success_Desc))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
         manager.notify(ID_BACKUP_OPERATION, notification)
@@ -201,8 +203,8 @@ object NotificationHelper {
     fun showRestoreFailure(context: Context, error: String?) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
-            .setContentTitle("Restore Failed")
-            .setContentText(error ?: "An unknown error occurred")
+            .setContentTitle(context.getString(R.string.st_Notification_Restore_Failure_Title))
+            .setContentText(error ?: context.getString(R.string.st_OnboardingScreen_u1v2))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
         manager.notify(ID_BACKUP_OPERATION, notification)

@@ -22,6 +22,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.backup.BackupCategory
 import com.frerox.toolz.data.backup.BackupExportResult
 import com.frerox.toolz.data.backup.BackupImportResult
@@ -129,7 +130,7 @@ class BackupRestoreViewModel @Inject constructor(
     fun createBackup() = viewModelScope.launch {
         if (_uiState.value.selectedItems.isEmpty()) {
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Please select at least one item to backup", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.st_Backup_Select_AtLeastOne), Toast.LENGTH_SHORT).show()
             }
             return@launch
         }
@@ -144,7 +145,7 @@ class BackupRestoreViewModel @Inject constructor(
             vibrationManager.vibrateSuccess()
             NotificationHelper.showBackupSuccess(context, result.fileName)
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Backup created: ${result.fileName}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.st_Backup_Created, result.fileName), Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -157,7 +158,7 @@ class BackupRestoreViewModel @Inject constructor(
     fun restoreBackup(uri: Uri) = viewModelScope.launch {
         if (_uiState.value.selectedItems.isEmpty()) {
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Please select at least one item to restore", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.st_Backup_Restore_AtLeastOne), Toast.LENGTH_SHORT).show()
             }
             return@launch
         }
@@ -172,7 +173,7 @@ class BackupRestoreViewModel @Inject constructor(
             vibrationManager.vibrateSuccess()
             NotificationHelper.showRestoreSuccess(context)
             withContext(Dispatchers.Main) {
-                Toast.makeText(context, "Backup restored successfully!", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, context.getString(R.string.st_Backup_Restored), Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
             e.printStackTrace()

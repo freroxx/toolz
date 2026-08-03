@@ -39,6 +39,7 @@
     <string name="st_DashboardScreen_g3h4">ACCESO RÁPIDO</string>
     <string name="st_DashboardScreen_k7l8">NOTAS INTELIGENTES</string>
     <string name="st_DashboardScreen_i5j6">VER TODO</string>
+    <string name="st_Dashboard_Utilities_Count">%d utilidades</string>
     <string name="st_DashboardScreen_m9n0">VER PDF</string>
     <string name="st_DashboardScreen_o1p2">TODAS LAS HERRAMIENTAS</string>
     <string name="st_DashboardScreen_q3r4">NUEVA VERSIÓN LISTA</string>
@@ -48,6 +49,113 @@
     <string name="st_DashboardScreen_a7b9">El Asistente de IA y la Búsqueda Web están ocultos para garantizar una privacidad del 100%, ahorrar batería y reducir el uso de datos.</string>
     <string name="st_DashboardScreen_y1z2">CONECTARSE</string>
     <string name="st_DashboardScreen_a3b4">SEGUIR FUERA DE LÍNEA</string>
+
+    <!-- Dashboard Tabs -->
+    <string name="st_Dashboard_Tab_Home">Inicio</string>
+    <string name="st_Dashboard_Tab_Time">Tiempo</string>
+    <string name="st_Dashboard_Tab_Media">Media</string>
+    <string name="st_Dashboard_Tab_Utilities">Herramientas</string>
+    <string name="st_Dashboard_Tab_System">Sistema</string>
+
+    <!-- Dashboard Categories -->
+    <string name="st_Dashboard_Cat_SmartFlow">SMART FLOW E IA</string>
+    <string name="st_Dashboard_Cat_Time">TIEMPO Y AGENDA</string>
+    <string name="st_Dashboard_Cat_Media">MULTIMEDIA Y AUDIO</string>
+    <string name="st_Dashboard_Cat_Utilities">UTILIDADES Y MATEMÁTICAS</string>
+    <string name="st_Dashboard_Cat_Sensors">SENSORES Y VISIÓN</string>
+    <string name="st_Dashboard_Cat_System">SISTEMA Y SALUD</string>
+
+    <!-- Dashboard Tools -->
+    <string name="st_Tool_AiAssistant">Asistente IA</string>
+    <string name="st_Tool_AiAssistant_Desc">Gemini Flash IA</string>
+    <string name="st_Tool_Search">Búsqueda</string>
+    <string name="st_Tool_Search_Desc">Buscar en la web</string>
+    <string name="st_Tool_FocusFlow">Focus Flow</string>
+    <string name="st_Tool_FocusFlow_Desc">Análisis de flujo</string>
+    <string name="st_Tool_TodoList">Lista de tareas</string>
+    <string name="st_Tool_TodoList_Desc">Tareas de física</string>
+    <string name="st_Tool_Notepad">Bloc de notas</string>
+    <string name="st_Tool_Notepad_Desc">Notas rápidas</string>
+    <string name="st_Tool_Calendar">Calendario</string>
+    <string name="st_Tool_Calendar_Desc">Agenda</string>
+    <string name="st_Tool_Timer">Temporizador</string>
+    <string name="st_Tool_Timer_Desc">Cuenta atrás</string>
+    <string name="st_Tool_Stopwatch">Cronómetro</string>
+    <string name="st_Tool_Stopwatch_Desc">Vueltas</string>
+    <string name="st_Tool_Pomodoro">Pomodoro</string>
+    <string name="st_Tool_Pomodoro_Desc">Enfoque profundo</string>
+    <string name="st_Tool_WorldClock">Reloj mundial</string>
+    <string name="st_Tool_WorldClock_Desc">Hora global</string>
+    <string name="st_Tool_MusicPlayer">Reproductor de música</string>
+    <string name="st_Tool_MusicPlayer_Desc">Biblioteca de audio</string>
+    <string name="st_Tool_VoiceRecorder">Grabadora de voz</string>
+    <string name="st_Tool_VoiceRecorder_Desc">Notas de voz</string>
+    <string name="st_Tool_FileConverter">Convertidor de archivos</string>
+    <string name="st_Tool_FileConverter_Desc">Transformar medios</string>
+    <string name="st_Tool_SoundMeter">Sonómetro</string>
+    <string name="st_Tool_SoundMeter_Desc">Decibelios</string>
+    <string name="st_Tool_Calculator">Calculadora</string>
+    <string name="st_Tool_Calculator_Desc">Matemáticas estándar</string>
+    <string name="st_Tool_UnitConverter">Convertidor de unidades</string>
+    <string name="st_Tool_UnitConverter_Desc">Cambio instantáneo</string>
+    <string name="st_Tool_Encrypter">Cifrador</string>
+    <string name="st_Tool_Encrypter_Desc">Datos seguros</string>
+    <string name="st_Tool_EquationSolver">Resolutor de ecuaciones</string>
+    <string name="st_Tool_EquationSolver_Desc">Resolver matemáticas</string>
+    <string name="st_Tool_PdfReader">Lector PDF</string>
+    <string name="st_Tool_PdfReader_Desc">Ver documentos</string>
+    <string name="st_Tool_TipCalc">Calc. de propinas</string>
+    <string name="st_Tool_TipCalc_Desc">Dividir cuentas</string>
+    <string name="st_Tool_Clipboard">Portapapeles</string>
+    <string name="st_Tool_Clipboard_Desc">Historial</string>
+    <string name="st_Tool_Ruler">Regla</string>
+    <string name="st_Tool_Ruler_Desc">Medir</string>
+    <string name="st_Tool_Scanner">Escáner</string>
+    <string name="st_Tool_Scanner_Desc">QR / Código de barras</string>
+    <string name="st_Tool_QrGenerator">Generador QR</string>
+    <string name="st_Tool_QrGenerator_Desc">Crear códigos</string>
+    <string name="st_Tool_Flashlight">Linterna</string>
+    <string name="st_Tool_Flashlight_Desc">Herramientas de luz</string>
+    <string name="st_Tool_ScreenLight">Luz de pantalla</string>
+    <string name="st_Tool_ScreenLight_Desc">Pantalla brillante</string>
+    <string name="st_Tool_Magnifier">Lupa</string>
+    <string name="st_Tool_Magnifier_Desc">Zoom de cámara</string>
+    <string name="st_Tool_Compass">Brújula</string>
+    <string name="st_Tool_Compass_Desc">Navegación</string>
+    <string name="st_Tool_BubbleLevel">Nivel de burbuja</string>
+    <string name="st_Tool_BubbleLevel_Desc">Nivelación</string>
+    <string name="st_Tool_LightMeter">Fotómetro</string>
+    <string name="st_Tool_LightMeter_Desc">Medida de lux</string>
+    <string name="st_Tool_Speedometer">Velocímetro</string>
+    <string name="st_Tool_Speedometer_Desc">Velocidad GPS</string>
+    <string name="st_Tool_Altimeter">Altímetro</string>
+    <string name="st_Tool_Altimeter_Desc">Altitud</string>
+    <string name="st_Tool_ColorPicker">Selector de color</string>
+    <string name="st_Tool_ColorPicker_Desc">Identificar color</string>
+    <string name="st_Tool_PasswordVault">Caja fuerte</string>
+    <string name="st_Tool_PasswordVault_Desc">Cifrado</string>
+    <string name="st_Tool_NetworkTweaks">Ajustes de red</string>
+    <string name="st_Tool_NetworkTweaks_Desc">Herramientas potentes</string>
+    <string name="st_Tool_RandomGen">Generador aleatorio</string>
+    <string name="st_Tool_RandomGen_Desc">Llaves seguras</string>
+    <string name="st_Tool_DeviceInfo">Info. del dispositivo</string>
+    <string name="st_Tool_DeviceInfo_Desc">Hardware</string>
+    <string name="st_Tool_BatteryInfo">Info. batería</string>
+    <string name="st_Tool_BatteryInfo_Desc">Estado</string>
+    <string name="st_Tool_FileCleaner">Limpiador de archivos</string>
+    <string name="st_Tool_FileCleaner_Desc">Almacenamiento</string>
+    <string name="st_Tool_StepCounter">Podómetro</string>
+    <string name="st_Tool_StepCounter_Desc">Fitness</string>
+    <string name="st_Tool_NotificationVault">Archivo de notif.</string>
+    <string name="st_Tool_NotificationVault_Desc">Registros</string>
+    <string name="st_Tool_BmiCalc">Calc. IMC</string>
+    <string name="st_Tool_BmiCalc_Desc">Salud</string>
+    <string name="st_Tool_PeriodicTable">Tabla periódica</string>
+    <string name="st_Tool_PeriodicTable_Desc">Elementos</string>
+    <string name="st_Tool_Caffeinate">Cafeína</string>
+    <string name="st_Tool_Caffeinate_Desc">Modo activo</string>
+    <string name="st_Tool_FlipCoin">Cara o cruz</string>
+    <string name="st_Tool_FlipCoin_Desc">Decidir</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Sugerencia de Gris Perfecto</string>
@@ -1073,6 +1181,122 @@
     <string name="st_NowPlayingAiScreen_pn33">Reproducir ahora</string>
     <string name="st_NowPlayingAiScreen_voyt34">Ver en YouTube</string>
 
+    <!-- Backup & Restore -->
+    <string name="st_Backup_Title">Copia de seguridad y restauración</string>
+    <string name="st_Backup_Subtitle">Mantén una copia de tus datos o recupéralos</string>
+    <string name="st_Backup_Section_Action_Exporting">Creando tu copia de seguridad</string>
+    <string name="st_Backup_Section_Action_Importing">Restaurando tus datos</string>
+    <string name="st_Backup_Section_Action_BusyDesc">Esto solo toma un momento — mantén la app abierta hasta que termine.</string>
+    <string name="st_Backup_Section_Action_NewBackup">Nueva copia</string>
+    <string name="st_Backup_Section_Action_Restore">Restaurar</string>
+    <string name="st_Backup_Section_Action_Completed_Export">Copia creada justo ahora</string>
+    <string name="st_Backup_Section_Action_Completed_Import">Restauración completada justo ahora</string>
+    <string name="st_Backup_Section_Action_DefaultPath">Guardado en Documents/Toolz_Backups</string>
+
+    <string name="st_Backup_Section_Include_Title">Qué incluir</string>
+    <string name="st_Backup_Section_Include_SelectAll">Sel. todo</string>
+    <string name="st_Backup_Section_Include_None">Nada</string>
+
+    <string name="st_Backup_Category_NotIncluded">No incluido</string>
+    <string name="st_Backup_Category_Count_One">%1$d de %2$d incluido</string>
+    <string name="st_Backup_Category_Count_Other">%1$d de %2$d incluidos</string>
+
+    <string name="st_Backup_Automation_Title">Automatización</string>
+    <string name="st_Backup_Automation_Scheduled">Copias programadas</string>
+    <string name="st_Backup_Automation_Off">Desactivado — haz copias manuales</string>
+    <string name="st_Backup_Automation_Custom_One">Cada %d día</string>
+    <string name="st_Backup_Automation_Custom_Other">Cada %d días</string>
+    <string name="st_Backup_Automation_Freq">Frecuencia de copia</string>
+    <string name="st_Backup_Automation_Notifications">Notificaciones</string>
+    <string name="st_Backup_Automation_NotificationsDesc">Recibe avisos sobre los resultados</string>
+
+    <string name="st_Backup_CustomInterval_Title">Intervalo personalizado</string>
+    <string name="st_Backup_CustomInterval_Desc">Copia automática cada</string>
+    <string name="st_Backup_CustomInterval_Days_One">%d día</string>
+    <string name="st_Backup_CustomInterval_Days_Other">%d días</string>
+    <string name="st_Backup_CustomInterval_Set">Establecer intervalo</string>
+    <string name="st_Backup_CustomInterval_Cancel">Cancelar</string>
+
+    <!-- Backup Categories & Items -->
+    <string name="st_Backup_Cat_Productivity">Productividad</string>
+    <string name="st_Backup_Cat_Security">Seguridad y Privacidad</string>
+    <string name="st_Backup_Cat_Personal">Datos personales</string>
+    <string name="st_Backup_Cat_System">Sistema y Ajustes</string>
+
+    <string name="st_Backup_Item_Notes">Notas y Adjuntos</string>
+    <string name="st_Backup_Item_Tasks">Tareas y Pendientes</string>
+    <string name="st_Backup_Item_Calendar">Eventos de calendario</string>
+    <string name="st_Backup_Item_AiKeys">Claves de proveedores IA</string>
+    <string name="st_Backup_Item_Passwords">Caja fuerte de contraseñas</string>
+    <string name="st_Backup_Item_AiHistory">Historial de chat IA</string>
+    <string name="st_Backup_Item_SearchHistory">Búsqueda y Marcadores</string>
+    <string name="st_Backup_Item_Notifications">Archivo de notif.</string>
+    <string name="st_Backup_Item_Clipboard">Historial portapapeles</string>
+    <string name="st_Backup_Item_Settings">Preferencias de la app</string>
+    <string name="st_Backup_Item_Steps">Datos del podómetro</string>
+    <string name="st_Backup_Item_MathHistory">Cálculos matemáticos</string>
+    <string name="st_Backup_Item_PdfMetadata">Datos de herramientas PDF</string>
+    <string name="st_Backup_Item_Others">Datos misceláneos</string>
+
+    <string name="st_Backup_Select_AtLeastOne">Por favor, selecciona al menos un ítem para copiar</string>
+    <string name="st_Backup_Restore_AtLeastOne">Por favor, selecciona al menos un ítem para restaurar</string>
+    <string name="st_Backup_Created">Copia creada: %s</string>
+    <string name="st_Backup_Restored">¡Copia restaurada con éxito!</string>
+
+    <!-- Backup Progress -->
+    <string name="st_Backup_Progress_Preparing">Preparando copia de seguridad…</string>
+    <string name="st_Backup_Progress_Notes">Copiando notas…</string>
+    <string name="st_Backup_Progress_Tasks">Copiando tareas…</string>
+    <string name="st_Backup_Progress_AiHistory">Copiando historial de IA…</string>
+    <string name="st_Backup_Progress_Passwords">Copiando contraseñas…</string>
+    <string name="st_Backup_Progress_SearchHistory">Copiando historial de búsqueda…</string>
+    <string name="st_Backup_Progress_Notifications">Copiando notificaciones…</string>
+    <string name="st_Backup_Progress_Calendar">Copiando calendario…</string>
+    <string name="st_Backup_Progress_Clipboard">Copiando portapapeles…</string>
+    <string name="st_Backup_Progress_Steps">Copiando datos de pasos…</string>
+    <string name="st_Backup_Progress_Math">Copiando historial matemático…</string>
+    <string name="st_Backup_Progress_Pdf">Copiando metadatos PDF…</string>
+    <string name="st_Backup_Progress_Others">Copiando otros datos…</string>
+    <string name="st_Backup_Progress_Finalizing">Finalizando…</string>
+    <string name="st_Backup_Progress_Opening">Abriendo copia de seguridad…</string>
+    <string name="st_Backup_Progress_Restoring">Restaurando %s</string>
+
+    <!-- Notification Channels -->
+    <string name="st_Channel_ActiveTools">Herramientas activas</string>
+    <string name="st_Channel_ActiveTools_Desc">Estado de cronómetros, temporizadores y sesiones activas</string>
+    <string name="st_Channel_Alarms">Alarmas y Temporizadores</string>
+    <string name="st_Channel_Alarms_Desc">Notificaciones cuando terminan temporizadores o sesiones</string>
+    <string name="st_Channel_Clipboard">Inteligencia del portapapeles</string>
+    <string name="st_Channel_Clipboard_Desc">Procesamiento IA en segundo plano del portapapeles</string>
+    <string name="st_Channel_Steps">Podómetro</string>
+    <string name="st_Channel_Steps_Desc">Actualizaciones diarias del progreso de pasos</string>
+    <string name="st_Channel_Recorder">Grabadora de voz</string>
+    <string name="st_Channel_Recorder_Desc">Estado de grabación de voz activa</string>
+    <string name="st_Channel_Conversion">Conversión de archivos</string>
+    <string name="st_Channel_Conversion_Desc">Progreso y estado de conversiones de formato</string>
+    <string name="st_Channel_Caffeinate">Cafeína</string>
+    <string name="st_Channel_Caffeinate_Desc">Estado en segundo plano para mantener la pantalla encendida</string>
+    <string name="st_Channel_Updates">Actualizaciones de la app</string>
+    <string name="st_Channel_Updates_Desc">Notificaciones sobre nuevas versiones y disponibilidad</string>
+    <string name="st_Channel_Tasks">Recordatorios de tareas</string>
+    <string name="st_Channel_Tasks_Desc">Plazos y recordatorios para tus tareas</string>
+    <string name="st_Channel_Events">Recordatorios de eventos</string>
+    <string name="st_Channel_Events_Desc">Próximos eventos del calendario</string>
+    <string name="st_Channel_MusicDownloads">Descargas de música</string>
+    <string name="st_Channel_MusicDownloads_Desc">Estado de las descargas de pistas</string>
+    <string name="st_Channel_Backups">Copia y restauración</string>
+    <string name="st_Channel_Backups_Desc">Estado de las operaciones de copia y restauración</string>
+
+    <!-- Notification Titles/Content -->
+    <string name="st_Notification_Backup_Success_Scheduled">Copia programada con éxito</string>
+    <string name="st_Notification_Backup_Success_Manual">Copia creada con éxito</string>
+    <string name="st_Notification_Backup_Success_File">Archivo guardado: %s</string>
+    <string name="st_Notification_Backup_Failure_Scheduled">Fallo en copia programada</string>
+    <string name="st_Notification_Backup_Failure_Manual">Fallo en la copia</string>
+    <string name="st_Notification_Restore_Success_Title">Restauración completa</string>
+    <string name="st_Notification_Restore_Success_Desc">Tus datos se han restaurado con éxito.</string>
+    <string name="st_Notification_Restore_Failure_Title">Fallo en la restauración</string>
+
     <!-- CatalogScreen -->
     <string name="st_CatalogScreen_atp1">Añadir a lista</string>
     <string name="st_CatalogScreen_capilf2">Crea primero una lista en la biblioteca, luego podrás guardar pistas del catálogo aquí.</string>
@@ -2035,4 +2259,92 @@
     <string name="st_SoundMeterScreen_u1v2">ACCESO A AUDIO REQUERIDO</string>
     <string name="st_SoundMeterScreen_w3x4">El sonómetro necesita acceso al micrófono para medir niveles de decibelios en tiempo real. Tu audio nunca se graba ni se almacena.</string>
     <string name="st_SoundMeterScreen_y5z6">CONCEDER PERMISO</string>
+
+    <!-- Universal Pill Tips -->
+    <string name="st_Pill_Tip_Ai_Title">Asistente IA</string>
+    <string name="st_Pill_Tip_Ai_Desc">Habla con agentes IA</string>
+    <string name="st_Pill_Tip_Notepad_Title">Bloc de notas</string>
+    <string name="st_Pill_Tip_Notepad_Desc">Exprésate</string>
+    <string name="st_Pill_Tip_Converter_Title">Convertidor de archivos</string>
+    <string name="st_Pill_Tip_Converter_Desc">Convierte cualquier archivo</string>
+    <string name="st_Pill_Tip_Focus_Title">Focus Flow</string>
+    <string name="st_Pill_Tip_Focus_Desc">Gestiona tu tiempo</string>
+    <string name="st_Pill_Tip_Todo_Title">Lista de tareas</string>
+    <string name="st_Pill_Tip_Todo_Desc">Mantente al día</string>
+    <string name="st_Pill_Tip_Pomodoro_Title">Pomodoro</string>
+    <string name="st_Pill_Tip_Pomodoro_Desc">Sesión de enfoque profundo</string>
+    <string name="st_Pill_Tip_Cleaner_Title">Limpiador de archivos</string>
+    <string name="st_Pill_Tip_Cleaner_Desc">Libera espacio</string>
+    <string name="st_Pill_Tip_Caffeinate_Title">Cafeína</string>
+    <string name="st_Pill_Tip_Caffeinate_Desc">La pantalla se mantiene encendida</string>
+
+    <!-- Music Pill -->
+    <string name="st_Music_NotPlaying">No se está reproduciendo</string>
+    <string name="st_Music_UnknownArtist">Artista desconocido</string>
+
+    <!-- Todo Pill -->
+    <string name="st_Todo_NothingPlanned">Nada planeado</string>
+
+    <string name="st_Dashboard_ForYou">PARA TI</string>
+    <string name="st_Dashboard_Spotlight">Destacado: %s</string>
+    <string name="st_Version_Text">v%s</string>
+
+    <!-- Settings Items -->
+    <string name="st_Settings_OutputFolder">Carpeta de salida</string>
+    <string name="st_Settings_OutputFolder_Default">Predeterminado: Downloads/Toolz</string>
+    <string name="st_Settings_OutputFolder_Custom">Carpeta personalizada activa</string>
+    <string name="st_Settings_OutputFolder_CustomPath">Ruta personalizada activa</string>
+    <string name="st_Settings_ResetDeviceInfo">Restablecer caché de info del dispositivo</string>
+    <string name="st_Settings_ResetDeviceInfo_Desc">Borrar especificaciones de mercado guardadas</string>
+    <string name="st_Settings_DeviceInfo_Cleared">Caché de info del dispositivo borrada</string>
+    <string name="st_Settings_Language_Active">Activa</string>
+    <string name="st_Settings_Language_Switch">Cambiar a %s</string>
+
+    <!-- Settings Sections -->
+    <string name="st_Settings_Section_Visuals">VISUALES Y TEMA</string>
+    <string name="st_Settings_Section_Intelligence">INTELIGENCIA E IA</string>
+    <string name="st_Settings_Section_Interaction">INTERACCIÓN Y HUD</string>
+    <string name="st_Settings_Section_Media">MULTIMEDIA Y AUDIO</string>
+    <string name="st_Settings_Section_Health">SALUD Y ACTIVIDAD</string>
+    <string name="st_Settings_Section_Notifications">NOTIFICACIONES</string>
+    <string name="st_Settings_Section_System">SISTEMA Y DATOS</string>
+
+    <!-- About Section -->
+    <string name="st_About_Toolz">TOOLZ</string>
+    <string name="st_About_Credits">Un kit de herramientas pulido diseñado para el uso diario. Creado por frerox. ¡Únete al servidor de Discord!</string>
+    <string name="st_About_Updates">ACTUALIZACIONES</string>
+    <string name="st_About_Discord">DISCORD</string>
+
+    <!-- Haptic Tuner -->
+    <string name="st_Haptic_Intensity">INTENSIDAD</string>
+    <string name="st_Haptic_Soft">SUAVE</string>
+    <string name="st_Haptic_Crisp">NÍTIDO</string>
+    <string name="st_Haptic_Strong">FUERTE</string>
+
+    <!-- Pill Tweaks -->
+    <string name="st_PillTweaks_Title">AJUSTES DE LA PILL</string>
+    <string name="st_PillTweaks_Subtitle">Extensiones de superposición</string>
+    <string name="st_PillTweaks_Music">Reproductor de música</string>
+    <string name="st_PillTweaks_Music_Desc">Estado y controles de reproducción</string>
+    <string name="st_PillTweaks_Timer">Temporizador</string>
+    <string name="st_PillTweaks_Timer_Desc">Cuentas atrás activas</string>
+    <string name="st_PillTweaks_Stopwatch">Cronómetro</string>
+    <string name="st_PillTweaks_Stopwatch_Desc">Seguimiento de tiempo transcurrido</string>
+    <string name="st_PillTweaks_Pomodoro">Pomodoro</string>
+    <string name="st_PillTweaks_Pomodoro_Desc">Progreso de la sesión de enfoque</string>
+    <string name="st_PillTweaks_Steps">Podómetro</string>
+    <string name="st_PillTweaks_Steps_Desc">Actividad y objetivo diarios</string>
+    <string name="st_PillTweaks_Recorder">Grabadora de voz</string>
+    <string name="st_PillTweaks_Recorder_Desc">Estado de grabación activa</string>
+    <string name="st_PillTweaks_Todo">Progreso de tareas</string>
+    <string name="st_PillTweaks_Todo_Desc">Recordatorios de tareas próximas</string>
+    <string name="st_PillTweaks_Focus">Puntuación de enfoque</string>
+    <string name="st_PillTweaks_Focus_Desc">Medidor de productividad</string>
+    <string name="st_PillTweaks_Caffeinate">Cafeína</string>
+    <string name="st_PillTweaks_Caffeinate_Desc">Estado de pantalla encendida</string>
+    <string name="st_PillTweaks_Flashlight">Linterna</string>
+    <string name="st_PillTweaks_Flashlight_Desc">Estado de linterna y estroboscópica</string>
+    <string name="st_PillTweaks_Downloads">Descargas</string>
+    <string name="st_PillTweaks_Downloads_Desc">Progreso de descarga de pistas</string>
+    <string name="st_PillTweaks_Done">LISTO</string>
 </resources>

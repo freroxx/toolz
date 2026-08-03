@@ -1004,15 +1004,15 @@ fun SettingsScreen(
                     // 8. Section: SYSTEM & DATA
                     StaggeredEntrance(index = 7) {
                         SettingsExpandableSection(
-                            title = "SYSTEM & DATA",
+                            title = stringResource(R.string.st_Settings_Section_System),
                             icon = Icons.Rounded.SettingsInputComponent,
                             isExpanded = expandedSection == "SYSTEM" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "SYSTEM") null else "SYSTEM" }
                         ) {
                             if (matches(searchQuery, "backup", "restore", "data", "save", "export", "import")) {
                                 SettingsItem(
-                                    title = "Backup & Restore",
-                                    subtitle = "Export, import and automate data backups",
+                                    title = stringResource(R.string.st_Backup_Title),
+                                    subtitle = stringResource(R.string.st_Backup_Subtitle),
                                     icon = Icons.Rounded.Backup,
                                     onClick = {
                                         vibrationManager?.vibrateClick()
@@ -1023,8 +1023,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "converter", "output", "path", "folder", "save", "storage")) {
                                 SettingsItem(
-                                    title = "Output Folder",
-                                    subtitle = if (converterCustomPath == null) "Default: Downloads/Toolz" else "Custom folder active",
+                                    title = stringResource(R.string.st_Settings_OutputFolder),
+                                    subtitle = if (converterCustomPath == null) stringResource(R.string.st_Settings_OutputFolder_Default) else stringResource(R.string.st_Settings_OutputFolder_Custom),
                                     icon = Icons.Rounded.FolderSpecial,
                                     onClick = { folderLauncher.launch(null) }
                                 ) {
@@ -1036,7 +1036,7 @@ fun SettingsScreen(
                                         ) {
                                             @Suppress("DEPRECATION")
                                             Text(
-                                                "Custom path active",
+                                                stringResource(R.string.st_Settings_OutputFolder_CustomPath),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.primary
                                             )
@@ -1055,13 +1055,13 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "device", "info", "cache", "reset", "specs", "market")) {
                                 SettingsItem(
-                                    title = "Reset Device Info Cache",
-                                    subtitle = "Clear saved market specifications",
+                                    title = stringResource(R.string.st_Settings_ResetDeviceInfo),
+                                    subtitle = stringResource(R.string.st_Settings_ResetDeviceInfo_Desc),
                                     icon = Icons.Rounded.RestartAlt,
                                     onClick = {
                                         vibrationManager?.vibrateSuccess()
                                         viewModel.clearDeviceInfoCache()
-                                        android.widget.Toast.makeText(context, "Device info cache cleared", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.st_Settings_DeviceInfo_Cleared), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 )
                             }
@@ -1466,21 +1466,21 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                 Box(contentAlignment = Alignment.Center) {
                     Image(
                         painter = painterResource(id = R.drawable.app_logo),
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.app_name),
                         modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
                         contentScale = ContentScale.Crop
                     )
                 }
             }
             Spacer(modifier = Modifier.height(20.dp))
-            Text("TOOLZ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+            Text(stringResource(R.string.st_About_Toolz), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
             @Suppress("DEPRECATION")
             Text("V${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 3.sp)
 
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "A polished toolkit designed for daily use. Made by frerox. Join the Discord server!",
+                stringResource(R.string.st_About_Credits),
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 lineHeight = 22.sp,
@@ -1501,7 +1501,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                     Icon(Icons.Rounded.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
                     @Suppress("DEPRECATION")
-                    Text("UPDATES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.st_About_Updates), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
                 }
 
                 Button(
@@ -1517,7 +1517,7 @@ fun AboutSection(onCheckUpdate: () -> Unit) {
                     Icon(Icons.Rounded.Forum, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(10.dp))
                     @Suppress("DEPRECATION")
-                    Text("DISCORD", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.st_About_Discord), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -1543,7 +1543,7 @@ fun HapticTuner(
         ) {
             @Suppress("DEPRECATION")
             Text(
-                "INTENSITY",
+                stringResource(R.string.st_Haptic_Intensity),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Black,
                 color = MaterialTheme.colorScheme.primary,
@@ -1576,12 +1576,11 @@ fun HapticTuner(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("SOFT", "CRISP", "STRONG").forEachIndexed { i, label ->
-                val target = when(i) {
-                    0 -> 0.1f
-                    1 -> 0.5f
-                    else -> 1.0f
-                }
+            listOf(
+                R.string.st_Haptic_Soft to 0.1f,
+                R.string.st_Haptic_Crisp to 0.5f,
+                R.string.st_Haptic_Strong to 1.0f
+            ).forEach { (labelRes, target) ->
                 val isSelected = (intensity - target).let { if (it < 0) -it else it } < 0.2f
                 
                 Surface(
@@ -1597,7 +1596,7 @@ fun HapticTuner(
                     Box(contentAlignment = Alignment.Center) {
                         @Suppress("DEPRECATION")
                         Text(
-                            label,
+                            stringResource(labelRes),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Black,
                             color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1826,14 +1825,14 @@ fun PillTweaksPopup(
                 ) {
                     Column {
                         Text(
-                            "PILL TWEAKS",
+                            stringResource(R.string.st_PillTweaks_Title),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 1.sp
                         )
                         @Suppress("DEPRECATION")
                         Text(
-                            "Overlay Extensions",
+                            stringResource(R.string.st_PillTweaks_Subtitle),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
@@ -1859,78 +1858,78 @@ fun PillTweaksPopup(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     SettingsToggleItem(
-                        title = "Music Player",
-                        subtitle = "Playback status and controls",
+                        title = stringResource(R.string.st_Tool_MusicPlayer),
+                        subtitle = stringResource(R.string.st_PillTweaks_Music_Desc),
                         icon = Icons.Rounded.MusicNote,
                         checked = pillMusicEnabled,
                         onCheckedChange = { viewModel.setPillMusicEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Timer",
-                        subtitle = "Active countdowns",
+                        title = stringResource(R.string.st_Tool_Timer),
+                        subtitle = stringResource(R.string.st_PillTweaks_Timer_Desc),
                         icon = Icons.Rounded.Timer,
                         checked = pillTimerEnabled,
                         onCheckedChange = { viewModel.setPillTimerEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Stopwatch",
-                        subtitle = "Elapsed time tracking",
+                        title = stringResource(R.string.st_Tool_Stopwatch),
+                        subtitle = stringResource(R.string.st_PillTweaks_Stopwatch_Desc),
                         icon = Icons.Rounded.AvTimer,
                         checked = pillStopwatchEnabled,
                         onCheckedChange = { viewModel.setPillStopwatchEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Pomodoro",
-                        subtitle = "Focus session progress",
+                        title = stringResource(R.string.st_Tool_Pomodoro),
+                        subtitle = stringResource(R.string.st_PillTweaks_Pomodoro_Desc),
                         icon = Icons.Rounded.AvTimer,
                         checked = pillPomodoroEnabled,
                         onCheckedChange = { viewModel.setPillPomodoroEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Step Tracker",
-                        subtitle = "Daily activity and goal",
+                        title = stringResource(R.string.st_Tool_StepCounter),
+                        subtitle = stringResource(R.string.st_PillTweaks_Steps_Desc),
                         icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                         checked = pillStepsEnabled,
                         onCheckedChange = { viewModel.setPillStepsEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Voice Recorder",
-                        subtitle = "Active recording status",
+                        title = stringResource(R.string.st_Tool_VoiceRecorder),
+                        subtitle = stringResource(R.string.st_PillTweaks_Recorder_Desc),
                         icon = Icons.Rounded.Mic,
                         checked = pillRecorderEnabled,
                         onCheckedChange = { viewModel.setPillRecorderEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Task Progress",
-                        subtitle = "Upcoming task reminders",
+                        title = stringResource(R.string.st_PillTweaks_Todo),
+                        subtitle = stringResource(R.string.st_PillTweaks_Todo_Desc),
                         icon = Icons.Rounded.TaskAlt,
                         checked = pillTodoEnabled,
                         onCheckedChange = { viewModel.setPillTodoEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Focus Score",
-                        subtitle = "Productivity meter",
+                        title = stringResource(R.string.st_PillTweaks_Focus),
+                        subtitle = stringResource(R.string.st_PillTweaks_Focus_Desc),
                         icon = Icons.Rounded.Toll,
                         checked = pillFocusEnabled,
                         onCheckedChange = { viewModel.setPillFocusEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Caffeinate",
-                        subtitle = "Screen awake status",
+                        title = stringResource(R.string.st_Tool_Caffeinate),
+                        subtitle = stringResource(R.string.st_PillTweaks_Caffeinate_Desc),
                         icon = Icons.Rounded.Coffee,
                         checked = pillCaffeinateEnabled,
                         onCheckedChange = { viewModel.setPillCaffeinateEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Flashlight",
-                        subtitle = "Torch and strobe status",
+                        title = stringResource(R.string.st_Tool_Flashlight),
+                        subtitle = stringResource(R.string.st_PillTweaks_Flashlight_Desc),
                         icon = Icons.Rounded.FlashlightOn,
                         checked = pillFlashlightEnabled,
                         onCheckedChange = { viewModel.setPillFlashlightEnabled(it) }
                     )
                     SettingsToggleItem(
-                        title = "Downloads",
-                        subtitle = "Catalog track download progress",
+                        title = stringResource(R.string.st_PillTweaks_Downloads),
+                        subtitle = stringResource(R.string.st_PillTweaks_Downloads_Desc),
                         icon = Icons.Rounded.Download,
                         checked = pillCatalogDownloadEnabled,
                         onCheckedChange = { viewModel.setPillCatalogDownloadEnabled(it) }
@@ -1945,7 +1944,7 @@ fun PillTweaksPopup(
                     shape = ExtraLargeExpressiveShape
                 ) {
                     @Suppress("DEPRECATION")
-                    Text("DONE", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.st_PillTweaks_Done), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
