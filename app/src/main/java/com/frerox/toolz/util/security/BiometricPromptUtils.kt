@@ -23,6 +23,7 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.fragment.app.FragmentActivity
 import androidx.core.content.ContextCompat
+import com.frerox.toolz.R
 
 object BiometricPromptUtils {
     fun showBiometricPrompt(

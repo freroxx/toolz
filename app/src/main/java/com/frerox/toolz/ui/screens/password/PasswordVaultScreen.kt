@@ -1387,7 +1387,7 @@ fun WavyStrengthIndicator(strength: Int, modifier: Modifier = Modifier) {
                 label = "strength_label",
             ) { label ->
                 Text(
-                    label,
+                    stringResource(label),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = animatedColor,

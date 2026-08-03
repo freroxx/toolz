@@ -55,10 +55,10 @@
     @dagger.Provides <methods>;
     @dagger.Binds <methods>;
 }
--keep @dagger.hilt.Migration *
--keep @dagger.hilt.EntryPoint *
--keep @dagger.hilt.GeneratesRootInput *
--keep @dagger.hilt.internal.UnstableApi *
+-keep @dagger.hilt.Migration class *
+-keep @dagger.hilt.EntryPoint class *
+-keep @dagger.hilt.GeneratesRootInput class *
+-keep @dagger.hilt.internal.UnstableApi class *
 
 # ------------------------------------------------------------------------------
 # 3. ROOM DATABASE & SQLCIPHER

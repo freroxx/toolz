@@ -200,7 +200,6 @@ private val PriorityColors = listOf(
 @StringRes
 private val PriorityLabels: List<Int> = listOf(R.string.st_TodoScreen_priority_none, R.string.st_TodoScreen_priority_low, R.string.st_TodoScreen_priority_medium, R.string.st_TodoScreen_priority_high, R.string.st_TodoScreen_priority_critical)
 
-@Composable
 private fun formatDueDate(ts: Long): String {
     val diff = ts - System.currentTimeMillis()
     val days = TimeUnit.MILLISECONDS.toDays(diff)

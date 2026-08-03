@@ -2623,4 +2623,25 @@
     <string name="st_RandomGeneratorScreen_type_decision">Decision</string>
     <string name="st_RandomGeneratorScreen_type_uuid">UUID</string>
     <string name="st_RandomGeneratorScreen_type_letter">Letter</string>
+
+    <!-- TodoScreen Filters & Priorities -->
+    <string name="st_TodoScreen_filter_all">All</string>
+    <string name="st_TodoScreen_filter_today">Today</string>
+    <string name="st_TodoScreen_filter_next">Upcoming</string>
+    <string name="st_TodoScreen_priority_none">None</string>
+    <string name="st_TodoScreen_priority_low">Low</string>
+    <string name="st_TodoScreen_priority_medium">Medium</string>
+    <string name="st_TodoScreen_priority_high">High</string>
+    <string name="st_TodoScreen_priority_critical">Critical</string>
+
+    <!-- PasswordVaultScreen Strength Labels -->
+    <string name="st_PasswordVaultScreen_strength_critical">CRITICAL</string>
+    <string name="st_PasswordVaultScreen_strength_weak">WEAK</string>
+    <string name="st_PasswordVaultScreen_strength_medium">MEDIUM</string>
+    <string name="st_PasswordVaultScreen_strength_strong">STRONG</string>
+    <string name="st_PasswordVaultScreen_strength_elite">ELITE</string>
+
+    <!-- BiometricPromptUtils -->
+    <string name="st_BiometricPromptUtils_title">Biometric Authentication</string>
+    <string name="st_BiometricPromptUtils_subtitle">Please authenticate to continue</string>
 </resources>
