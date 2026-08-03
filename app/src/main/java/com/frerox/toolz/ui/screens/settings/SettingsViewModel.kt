@@ -106,6 +106,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { repository.setCaffeinateAutoSummaryNotification(enabled) }
     }
     val backupFrequency = repository.backupFrequency
+    val appLanguage = repository.appLanguage
     val userName = repository.userName
     val autoUpdateEnabled = repository.autoUpdateEnabled
     val offlineModeEnabled = repository.offlineModeEnabled
@@ -184,6 +185,7 @@ class SettingsViewModel @Inject constructor(
         scheduleBackup(freq)
     }
     fun setUserName(name: String) = viewModelScope.launch { repository.setUserName(name) }
+    fun setAppLanguage(lang: String) = viewModelScope.launch { repository.setAppLanguage(lang) }
     fun setAutoUpdateEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
     fun setOfflineModeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setOfflineModeEnabled(enabled) }
 

@@ -343,6 +343,7 @@ class SettingsRepository @Inject constructor(
     // Onboarding
     private val USER_NAME = stringPreferencesKey("user_name")
     private val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
+    private val APP_LANGUAGE = stringPreferencesKey("app_language")
     private val CATALOG_ONBOARDING_COMPLETED = booleanPreferencesKey("catalog_onboarding_completed")
     private val SHOW_CATALOG_BETA_CARD = booleanPreferencesKey("show_catalog_beta_card")
 
@@ -712,6 +713,7 @@ class SettingsRepository @Inject constructor(
 
     val userName: Flow<String> = dataStore.data.map { it[USER_NAME] ?: "" }
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
+    val appLanguage: Flow<String> = dataStore.data.map { it[APP_LANGUAGE] ?: "en" }
     val catalogOnboardingCompleted: Flow<Boolean> = dataStore.data.map { it[CATALOG_ONBOARDING_COMPLETED] ?: false }
     val showCatalogBetaCard: Flow<Boolean> = dataStore.data.map { it[SHOW_CATALOG_BETA_CARD] ?: true }
 
@@ -1011,6 +1013,7 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setUserName(name: String) { dataStore.edit { it[USER_NAME] = name } }
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
+    suspend fun setAppLanguage(lang: String) { dataStore.edit { it[APP_LANGUAGE] = lang } }
     suspend fun setCatalogOnboardingCompleted(completed: Boolean) { dataStore.edit { it[CATALOG_ONBOARDING_COMPLETED] = completed } }
     suspend fun setShowCatalogBetaCard(show: Boolean) { dataStore.edit { it[SHOW_CATALOG_BETA_CARD] = show } }
 

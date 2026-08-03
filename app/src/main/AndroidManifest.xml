@@ -68,6 +68,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Toolz"
         android:extractNativeLibs="false"
+        android:localeConfig="@xml/locales_config"
         android:enableOnBackInvokedCallback="true">
 
         <activity

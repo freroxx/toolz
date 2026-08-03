@@ -53,10 +53,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
@@ -123,6 +126,7 @@ fun SettingsScreen(
     val pillCatalogDownloadEnabled by viewModel.pillCatalogDownloadEnabled.collectAsState(initial = true)
 
     val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = false)
+    val appLanguage by viewModel.appLanguage.collectAsState(initial = "en")
 
     var showPillTweaksPopup by remember { mutableStateOf(false) }
 
@@ -153,8 +157,8 @@ fun SettingsScreen(
     if (showGraySuggestion) {
         AlertDialog(
             onDismissRequest = { showGraySuggestion = false },
-            title = { Text("Perfect Gray Suggestion", fontWeight = FontWeight.Black) },
-            text = { Text("You've selected a dark primary color while in Dark Mode. Would you like to switch to a 'Perfect Gray' for a better visual experience?") },
+            title = { Text(stringResource(R.string.st_SettingsScreen_a1b2), fontWeight = FontWeight.Black) },
+            text = { Text(stringResource(R.string.st_SettingsScreen_c3d4)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -165,7 +169,7 @@ fun SettingsScreen(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     @Suppress("DEPRECATION")
-                    Text("ACCEPT CHANGES", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.st_SettingsScreen_e5f6), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
                 }
             },
             dismissButton = {
@@ -174,7 +178,7 @@ fun SettingsScreen(
                     showGraySuggestion = false
                 }) {
                     @Suppress("DEPRECATION")
-                    Text("DISMISS", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.st_SettingsScreen_g7h8), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
                 }
             },
             shape = RoundedCornerShape(32.dp),
@@ -235,8 +239,8 @@ fun SettingsScreen(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("RESET ALL DATA?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            text = { Text("This will reset your profile and all app settings to default.") },
+            title = { Text(stringResource(R.string.st_SettingsScreen_i9j0), fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
+            text = { Text(stringResource(R.string.st_SettingsScreen_k1l2)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -248,7 +252,7 @@ fun SettingsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text("RESET NOW", fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_SettingsScreen_m3n4), fontWeight = FontWeight.Black)
                 }
             },
             dismissButton = {
@@ -256,7 +260,7 @@ fun SettingsScreen(
                     vibrationManager?.vibrateClick()
                     showResetDialog = false
                 }) {
-                    Text("CANCEL", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_SettingsScreen_o5p6), fontWeight = FontWeight.Bold)
                 }
             },
             shape = RoundedCornerShape(40.dp),
@@ -287,8 +291,8 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "Settings",
-                subtitle = "Personalize Toolz",
+                title = stringResource(R.string.st_SettingsScreen_q7r8),
+                subtitle = stringResource(R.string.st_SettingsScreen_s9t0),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -297,7 +301,7 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_SettingsScreen_u1v2))
                     }
                 },
                 actions = {
@@ -308,7 +312,7 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f))
                     ) {
-                        Icon(Icons.Rounded.RestartAlt, contentDescription = "Reset", tint = MaterialTheme.colorScheme.error)
+                        Icon(Icons.Rounded.RestartAlt, contentDescription = stringResource(R.string.st_SettingsScreen_w3x4), tint = MaterialTheme.colorScheme.error)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -341,14 +345,14 @@ fun SettingsScreen(
                     // 1. Section: MY ACCOUNT
                     StaggeredEntrance(index = 0) {
                         SettingsExpandableSection(
-                            title = "MY ACCOUNT",
+                            title = stringResource(R.string.st_SettingsScreen_c9d0),
                             icon = Icons.Rounded.AccountCircle,
                             isExpanded = expandedSection == "ACCOUNT" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "ACCOUNT") null else "ACCOUNT" }
                         ) {
                             if (matches(searchQuery, "profile", "name", "explorer", "identity")) {
                                 SettingsItem(
-                                    title = "User Identity",
+                                    title = stringResource(R.string.st_SettingsScreen_e1f2),
                                     subtitle = "Name: ${userName.ifBlank { "Explorer" }}",
                                     icon = Icons.Rounded.Badge
                                 ) {
@@ -356,7 +360,7 @@ fun SettingsScreen(
                                         value = userNameInput,
                                         onValueChange = { userNameInput = it },
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        placeholder = { Text("Enter your identity") },
+                                        placeholder = { Text(stringResource(R.string.st_SettingsScreen_g3h4)) },
                                         shape = RoundedCornerShape(20.dp),
                                         singleLine = true,
                                         colors = OutlinedTextFieldDefaults.colors(
@@ -374,15 +378,15 @@ fun SettingsScreen(
                     // 2. Section: VISUALS & THEME
                     StaggeredEntrance(index = 1) {
                         SettingsExpandableSection(
-                            title = "VISUALS & THEME",
+                            title = stringResource(R.string.st_SettingsScreen_i5j6),
                             icon = Icons.Rounded.Palette,
                             isExpanded = expandedSection == "VISUALS" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "VISUALS") null else "VISUALS" }
                         ) {
                             if (matches(searchQuery, "performance", "lag", "animations", "blur", "speed", "optimization")) {
                                 SettingsToggleItem(
-                                    title = "Performance Mode",
-                                    subtitle = "Disable blur and high-frequency animations",
+                                    title = stringResource(R.string.st_SettingsScreen_k7l8),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_m9n0),
                                     icon = Icons.Rounded.Speed,
                                     checked = performanceMode,
                                     onCheckedChange = { viewModel.setPerformanceMode(it) }
@@ -391,7 +395,7 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "dark", "light", "mode", "appearance", "theme")) {
                                 SettingsItem(
-                                    title = "Appearance Mode",
+                                    title = stringResource(R.string.st_SettingsScreen_o1p2),
                                     subtitle = "Current: ${themeMode.lowercase()}",
                                     icon = Icons.Rounded.DarkMode
                                 ) {
@@ -423,8 +427,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "dynamic", "color", "material", "wallpaper", "advanced", "palette", "accent")) {
                                 SettingsToggleItem(
-                                    title = "Dynamic Colors",
-                                    subtitle = "Adapt to device wallpaper (Android 12+)",
+                                    title = stringResource(R.string.st_SettingsScreen_q3r4),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_s5t6),
                                     icon = Icons.Rounded.ColorLens,
                                     checked = dynamicColor,
                                     onCheckedChange = { viewModel.setDynamicColor(it) }
@@ -432,15 +436,15 @@ fun SettingsScreen(
 
                                 if (!dynamicColor) {
                                     SettingsItem(
-                                        title = "Custom Palette",
-                                        subtitle = "Define your unique color scheme",
+                                        title = stringResource(R.string.st_SettingsScreen_u7v8),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_w9x0),
                                         icon = Icons.Rounded.FormatColorFill
                                     ) {
                                         Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
                                             Column {
                                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                                     @Suppress("DEPRECATION")
-                                                    Text("PRIMARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
+                                                    Text(stringResource(R.string.st_SettingsScreen_y1z2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.5.sp)
                                                     IconButton(onClick = {
                                                         vibrationManager?.vibrateClick()
                                                         viewModel.setCustomPrimaryColor(null)
@@ -465,7 +469,7 @@ fun SettingsScreen(
                                             Column {
                                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                                     @Suppress("DEPRECATION")
-                                                    Text("SECONDARY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
+                                                    Text(stringResource(R.string.st_SettingsScreen_a3b5), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
                                                     IconButton(onClick = {
                                                         vibrationManager?.vibrateClick()
                                                         viewModel.setCustomSecondaryColor(null)
@@ -498,7 +502,7 @@ fun SettingsScreen(
                                                 Icon(Icons.Rounded.AutoFixHigh, null, modifier = Modifier.size(18.dp))
                                                 Spacer(Modifier.width(8.dp))
                                                 @Suppress("DEPRECATION")
-                                                Text("ADVANCED THEME", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                                                Text(stringResource(R.string.st_SettingsScreen_c5d7), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
                                     }
@@ -507,8 +511,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "gradient", "background", "effect", "visual")) {
                                 SettingsToggleItem(
-                                    title = "Background Gradient",
-                                    subtitle = "Subtle depth effect on main screens",
+                                    title = stringResource(R.string.st_SettingsScreen_e7f9),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_g9h1),
                                     icon = Icons.Rounded.Gradient,
                                     checked = backgroundGradientEnabled,
                                     onCheckedChange = { viewModel.setBackgroundGradientEnabled(it) }
@@ -517,7 +521,7 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "style")) {
                                 SettingsItem(
-                                    title = "Home Layout",
+                                    title = stringResource(R.string.st_SettingsScreen_i1j3),
                                     subtitle = "Current style: ${dashboardView.lowercase()}",
                                     icon = Icons.Rounded.Dashboard
                                 ) {
@@ -554,15 +558,15 @@ fun SettingsScreen(
                     // 3. Section: INTELLIGENCE & AI
                     StaggeredEntrance(index = 2) {
                         SettingsExpandableSection(
-                            title = "INTELLIGENCE & AI",
+                            title = stringResource(R.string.st_SettingsScreen_k3l5),
                             icon = Icons.Rounded.AutoAwesome,
                             isExpanded = expandedSection == "INTELLIGENCE" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "INTELLIGENCE") null else "INTELLIGENCE" }
                         ) {
                             if (matches(searchQuery, "offline", "local", "internet", "network", "privacy")) {
                                 SettingsToggleItem(
-                                    title = "Offline Mode",
-                                    subtitle = "Force local operation and hide AI features",
+                                    title = stringResource(R.string.st_SettingsScreen_m5n7),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_o7p9),
                                     icon = Icons.Rounded.CloudOff,
                                     checked = offlineModeEnabled,
                                     onCheckedChange = { viewModel.setOfflineModeEnabled(it) }
@@ -571,8 +575,8 @@ fun SettingsScreen(
                             if (!offlineModeEnabled) {
                                 if (matches(searchQuery, "ai", "search", "conversational", "smart", "chat")) {
                                     SettingsToggleItem(
-                                        title = "AI Conversational Search",
-                                        subtitle = "Answer questions directly in search bar",
+                                        title = stringResource(R.string.st_SettingsScreen_q9r1),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_s1t3),
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = aiSearchChatEnabled,
                                         onCheckedChange = { viewModel.setAiSearchChatEnabled(it) }
@@ -581,8 +585,8 @@ fun SettingsScreen(
                                 if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
                                     val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
                                     SettingsToggleItem(
-                                        title = "AI Clipboard Monitoring",
-                                        subtitle = "Smart classification and summaries",
+                                        title = stringResource(R.string.st_SettingsScreen_u3v5),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_w5x7),
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = aiMonitoring,
                                         onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
@@ -591,8 +595,8 @@ fun SettingsScreen(
                                 }
                                 if (matches(searchQuery, "pdf", "ocr", "enhance", "ai", "text", "scan")) {
                                     SettingsToggleItem(
-                                        title = "AI OCR Enhance",
-                                        subtitle = "Improve PDF text recognition with AI",
+                                        title = stringResource(R.string.st_SettingsScreen_y7z9),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_a9b1),
                                         icon = Icons.Rounded.DocumentScanner,
                                         checked = pdfAiOcrEnhance,
                                         onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) },
@@ -601,8 +605,8 @@ fun SettingsScreen(
                                 }
                                 if (matches(searchQuery, "now playing", "lyrics", "meaning", "smart", "ai")) {
                                     SettingsToggleItem(
-                                        title = "Now Playing AI",
-                                        subtitle = "Smart lyrics meanings and recommendations",
+                                        title = stringResource(R.string.st_SettingsScreen_c1d3),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_e3f5),
                                         icon = Icons.Rounded.MusicNote,
                                         checked = musicAiEnabled,
                                         onCheckedChange = { viewModel.setMusicAiEnabled(it) },
@@ -616,15 +620,15 @@ fun SettingsScreen(
                     // 4. Section: INTERACTION & HUD
                     StaggeredEntrance(index = 3) {
                         SettingsExpandableSection(
-                            title = "INTERACTION & HUD",
+                            title = stringResource(R.string.st_SettingsScreen_g5h7),
                             icon = Icons.Rounded.SmartButton,
                             isExpanded = expandedSection == "INTERACTION" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "INTERACTION") null else "INTERACTION" }
                         ) {
                             if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill", "hud")) {
                                 SettingsToggleItem(
-                                    title = "Smart Overlay (Pill)",
-                                    subtitle = "Floating tool for quick access",
+                                    title = stringResource(R.string.st_SettingsScreen_i7j9),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_k9l1),
                                     icon = Icons.Rounded.SmartButton,
                                     checked = showToolzPill,
                                     onCheckedChange = { viewModel.setShowToolzPill(it) }
@@ -632,16 +636,16 @@ fun SettingsScreen(
 
                                 if (showToolzPill) {
                                     SettingsToggleItem(
-                                        title = "Fill the Pill",
-                                        subtitle = "Show tips when inactive",
+                                        title = stringResource(R.string.st_SettingsScreen_m1n3),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_o3p5),
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = fillThePillEnabled,
                                         onCheckedChange = { viewModel.setFillThePillEnabled(it) }
                                     )
 
                                     SettingsItem(
-                                        title = "Pill Tweaks",
-                                        subtitle = "Configure overlay extensions",
+                                        title = stringResource(R.string.st_SettingsScreen_q5r7),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_s7t9),
                                         icon = Icons.Rounded.Tune,
                                         onClick = {
                                             vibrationManager?.vibrateClick()
@@ -653,8 +657,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "dashboard", "stats", "battery", "storage", "info")) {
                                 SettingsToggleItem(
-                                    title = "Show Dashboard Stats",
-                                    subtitle = "Battery and storage info cards",
+                                    title = stringResource(R.string.st_SettingsScreen_u9v1),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_w1x3),
                                     icon = Icons.Rounded.BarChart,
                                     checked = showDashboardStats,
                                     onCheckedChange = { viewModel.setShowDashboardStats(it) }
@@ -663,8 +667,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "vibration", "haptic", "intensity", "feedback", "tuner")) {
                                 SettingsToggleItem(
-                                    title = "Haptic Feedback",
-                                    subtitle = "Tactile response on interaction",
+                                    title = stringResource(R.string.st_SettingsScreen_y3z5),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_a5b7),
                                     icon = Icons.Rounded.Vibration,
                                     checked = hapticFeedback,
                                     onCheckedChange = { viewModel.setHapticFeedback(it) }
@@ -672,7 +676,7 @@ fun SettingsScreen(
 
                                 if (hapticFeedback) {
                                     SettingsItem(
-                                        title = "Haptic Tuner",
+                                        title = stringResource(R.string.st_SettingsScreen_c7d9),
                                         subtitle = "Intensity: ${(hapticIntensity * 100).toInt()}%",
                                         icon = Icons.Rounded.Tune
                                     ) {
@@ -695,15 +699,15 @@ fun SettingsScreen(
                     // 5. Section: MEDIA & AUDIO
                     StaggeredEntrance(index = 4) {
                         SettingsExpandableSection(
-                            title = "MEDIA & AUDIO",
+                            title = stringResource(R.string.st_SettingsScreen_m7n9),
                             icon = Icons.Rounded.MusicNote,
                             isExpanded = expandedSection == "MEDIA" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "MEDIA") null else "MEDIA" }
                         ) {
                             if (matches(searchQuery, "shake", "skip", "audio", "sensitivity", "gesture")) {
                                 SettingsToggleItem(
-                                    title = "Shake to Skip",
-                                    subtitle = "Shake phone for next track",
+                                    title = stringResource(R.string.st_SettingsScreen_o9p1),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_q1r3),
                                     icon = Icons.Rounded.PhonelinkRing,
                                     checked = musicShakeToSkip,
                                     onCheckedChange = { viewModel.setMusicShakeToSkip(it) }
@@ -711,7 +715,7 @@ fun SettingsScreen(
                                 
                                 if (musicShakeToSkip) {
                                     SettingsItem(
-                                        title = "Shake Sensitivity",
+                                        title = stringResource(R.string.st_SettingsScreen_s3t5),
                                         subtitle = "Intensity: ${(musicShakeSensitivity * 100).toInt()}%",
                                         icon = Icons.Rounded.GraphicEq
                                     ) {
@@ -728,8 +732,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "lyrics", "screen", "sleep", "awake", "visibility")) {
                                 SettingsToggleItem(
-                                    title = "Lyrics Keep Awake",
-                                    subtitle = "Prevent sleep in lyrics mode",
+                                    title = stringResource(R.string.st_SettingsScreen_u5v7),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_w7x9),
                                     icon = Icons.Rounded.Visibility,
                                     checked = musicKeepScreenOnLyrics,
                                     onCheckedChange = { viewModel.setMusicKeepScreenOnLyrics(it) }
@@ -739,16 +743,16 @@ fun SettingsScreen(
                             if (matches(searchQuery, "audio", "focus", "pause", "smart", "ducking")) {
                                 val audioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = true)
                                 SettingsToggleItem(
-                                    title = "Smart Audio Focus",
-                                    subtitle = "Auto-pause for other apps",
+                                    title = stringResource(R.string.st_SettingsScreen_y9z1),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_a1b4),
                                     icon = Icons.Rounded.Hearing,
                                     checked = musicAudioFocus,
                                     onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                                 )
                                 if (musicAudioFocus) {
                                     SettingsToggleItem(
-                                        title = "Allow Ducking",
-                                        subtitle = "Lower volume instead of pausing",
+                                        title = stringResource(R.string.st_SettingsScreen_c3d6),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_e5f8),
                                         icon = Icons.AutoMirrored.Rounded.VolumeDown,
                                         checked = audioFocusDucking,
                                         onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) }
@@ -758,8 +762,8 @@ fun SettingsScreen(
 
                             if (matches(searchQuery, "karaoke", "mic", "sing", "audio")) {
                                 SettingsToggleItem(
-                                    title = "Karaoke Mode",
-                                    subtitle = "Enable karaoke features and mic buttons",
+                                    title = stringResource(R.string.st_SettingsScreen_g7h1),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_i9j2),
                                     icon = Icons.Rounded.Mic,
                                     checked = karaokeEnabled,
                                     onCheckedChange = { viewModel.setKaraokeEnabled(it) }
@@ -771,8 +775,8 @@ fun SettingsScreen(
                                 val customRingtoneUri by viewModel.customRingtoneUri.collectAsState(initial = null)
                                 
                                 SettingsToggleItem(
-                                    title = "Custom Ringtone",
-                                    subtitle = "Choose a ringtone for timer and pomodoro tools",
+                                    title = stringResource(R.string.st_SettingsScreen_k1l3),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_m3n5),
                                     icon = Icons.Rounded.MusicNote,
                                     checked = customRingtoneEnabled,
                                     onCheckedChange = { viewModel.setCustomRingtoneEnabled(it) }
@@ -799,7 +803,7 @@ fun SettingsScreen(
                                             Icon(Icons.Rounded.AudioFile, null, modifier = Modifier.size(20.dp))
                                             Spacer(Modifier.width(12.dp))
                                             Text(
-                                                if (customRingtoneUri != null) "Change Ringtone" else "Choose Audio File",
+                                                if (customRingtoneUri != null) stringResource(R.string.st_SettingsScreen_o5p7) else stringResource(R.string.st_SettingsScreen_q7r9),
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
@@ -812,14 +816,14 @@ fun SettingsScreen(
                                             ) {
                                                 Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                                 Text(
-                                                    "Custom audio active",
+                                                    stringResource(R.string.st_SettingsScreen_s9t1),
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Spacer(Modifier.weight(1f))
                                                 TextButton(onClick = { viewModel.setCustomRingtoneUri(null) }) {
-                                                    Text("RESET", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
+                                                    Text(stringResource(R.string.st_SettingsScreen_u1v3), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
                                                 }
                                             }
                                         }
@@ -832,15 +836,15 @@ fun SettingsScreen(
                     // 6. Section: HEALTH & ACTIVITY
                     StaggeredEntrance(index = 5) {
                         SettingsExpandableSection(
-                            title = "HEALTH & ACTIVITY",
+                            title = stringResource(R.string.st_SettingsScreen_w3x5),
                             icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                             isExpanded = expandedSection == "HEALTH" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "HEALTH") null else "HEALTH" }
                         ) {
                             if (matches(searchQuery, "step", "goal", "health", "tracker", "walking")) {
                                 SettingsToggleItem(
-                                    title = "Step Tracker",
-                                    subtitle = "Monitor activity in background",
+                                    title = stringResource(R.string.st_SettingsScreen_y5z7),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_a7b9),
                                     icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                                     checked = stepCounterEnabled,
                                     onCheckedChange = { viewModel.setStepCounterEnabled(it) }
@@ -848,7 +852,7 @@ fun SettingsScreen(
 
                                 if (stepCounterEnabled) {
                                     SettingsItem(
-                                        title = "Daily Step Goal",
+                                        title = stringResource(R.string.st_SettingsScreen_c9d1),
                                         subtitle = "Target: $stepGoal steps",
                                         icon = Icons.Rounded.EmojiEvents
                                     ) {
@@ -869,23 +873,23 @@ fun SettingsScreen(
                     // 7. Section: NOTIFICATIONS
                     StaggeredEntrance(index = 6) {
                         SettingsExpandableSection(
-                            title = "NOTIFICATIONS",
+                            title = stringResource(R.string.st_SettingsScreen_e1f3),
                             icon = Icons.Rounded.Notifications,
                             isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
                         ) {
                             if (matches(searchQuery, "notification", "master", "switch", "alerts")) {
                                 SettingsToggleItem(
-                    title = "Master Switch",
-                    subtitle = "Enable all app alerts",
+                    title = stringResource(R.string.st_SettingsScreen_g3h5),
+                    subtitle = stringResource(R.string.st_SettingsScreen_i5j7),
                     icon = Icons.Rounded.NotificationsActive,
                     checked = notificationsEnabled,
                     onCheckedChange = { viewModel.setNotificationsEnabled(it) }
                 )
                 
                 SettingsToggleItem(
-                    title = "Step Tracker",
-                    subtitle = "Activity progress and goal alerts",
+                    title = stringResource(R.string.st_SettingsScreen_y5z7),
+                    subtitle = stringResource(R.string.st_SettingsScreen_k7l9),
                     icon = Icons.Rounded.DirectionsRun,
                     checked = stepNotifications,
                     onCheckedChange = { viewModel.setStepNotifications(it) }
@@ -894,8 +898,8 @@ fun SettingsScreen(
                                 if (notificationsEnabled) {
                                     if (matches(searchQuery, "vault", "history", "save")) {
                                         SettingsToggleItem(
-                                            title = "Notification History",
-                                            subtitle = "Save and view previous alerts",
+                                            title = stringResource(R.string.st_SettingsScreen_m9n1),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_o1p3),
                                             icon = Icons.Rounded.History,
                                             checked = notificationVaultEnabled,
                                             onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
@@ -903,8 +907,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "step", "goal", "alert")) {
                                         SettingsToggleItem(
-                                            title = "Step Goal Alerts",
-                                            subtitle = "Notify on daily progress",
+                                            title = stringResource(R.string.st_SettingsScreen_q3r5),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_s5t7),
                                             icon = Icons.AutoMirrored.Rounded.DirectionsRun,
                                             checked = stepNotifications,
                                             onCheckedChange = { viewModel.setStepNotifications(it) }
@@ -912,8 +916,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "timer", "alert", "task")) {
                                         SettingsToggleItem(
-                                            title = "Timer Alerts",
-                                            subtitle = "Alarms for timers and focus sessions",
+                                            title = stringResource(R.string.st_SettingsScreen_u7v9),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_w9x1),
                                             icon = Icons.Rounded.Timer,
                                             checked = timerNotifications,
                                             onCheckedChange = { viewModel.setTimerNotifications(it) }
@@ -921,8 +925,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "music", "playback", "media")) {
                                         SettingsToggleItem(
-                                            title = "Music Player",
-                                            subtitle = "Playback controls and track info",
+                                            title = stringResource(R.string.st_SettingsScreen_y1z3),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_a3b6),
                                             icon = Icons.Rounded.MusicNote,
                                             checked = musicNotifications,
                                             onCheckedChange = { viewModel.setMusicNotifications(it) }
@@ -930,8 +934,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "conversion", "file", "progress")) {
                                         SettingsToggleItem(
-                                            title = "File Conversion",
-                                            subtitle = "Progress of your file operations",
+                                            title = stringResource(R.string.st_SettingsScreen_c5d8),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_e7f1),
                                             icon = Icons.Rounded.Transform,
                                             checked = fileConversionNotifications,
                                             onCheckedChange = { viewModel.setFileConversionNotifications(it) }
@@ -939,8 +943,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "task", "reminder", "deadline")) {
                                         SettingsToggleItem(
-                                            title = "Task Reminders",
-                                            subtitle = "Deadlines and scheduled tasks",
+                                            title = stringResource(R.string.st_SettingsScreen_g9h2),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_i1j4),
                                             icon = Icons.Rounded.TaskAlt,
                                             checked = taskReminderNotifications,
                                             onCheckedChange = { viewModel.setTaskReminderNotifications(it) }
@@ -948,8 +952,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "event", "calendar", "reminder")) {
                                         SettingsToggleItem(
-                                            title = "Event Reminders",
-                                            subtitle = "Upcoming calendar events",
+                                            title = stringResource(R.string.st_SettingsScreen_k3l6),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_m5n8),
                                             icon = Icons.Rounded.Event,
                                             checked = eventReminderNotifications,
                                             onCheckedChange = { viewModel.setEventReminderNotifications(it) }
@@ -957,8 +961,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "pomodoro", "focus", "timer")) {
                                         SettingsToggleItem(
-                                            title = "Pomodoro Timer",
-                                            subtitle = "Session status and quick controls",
+                                            title = stringResource(R.string.st_SettingsScreen_o7p1),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_q9r2),
                                             icon = Icons.Rounded.AvTimer,
                                             checked = pomodoroNotifications,
                                             onCheckedChange = { viewModel.setPomodoroNotifications(it) }
@@ -966,8 +970,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "flashlight", "light", "notification")) {
                                         SettingsToggleItem(
-                                            title = "Flashlight Notification",
-                                            subtitle = "Toggle from notification bar",
+                                            title = stringResource(R.string.st_SettingsScreen_s1t4),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_u3v6),
                                             icon = Icons.Rounded.FlashlightOn,
                                             checked = flashlightNotificationsEnabled,
                                             onCheckedChange = { viewModel.setFlashlightNotificationsEnabled(it) }
@@ -975,8 +979,8 @@ fun SettingsScreen(
                                     }
                                     if (matches(searchQuery, "update", "app", "version")) {
                                         SettingsToggleItem(
-                                            title = "App Updates",
-                                            subtitle = "New versions and patches",
+                                            title = stringResource(R.string.st_SettingsScreen_w5x8),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_y7z1),
                                             icon = Icons.Rounded.SystemUpdate,
                                             checked = appUpdateNotifications,
                                             onCheckedChange = { viewModel.setAppUpdateNotifications(it) }
@@ -985,8 +989,8 @@ fun SettingsScreen(
 
                                     if (matches(searchQuery, "caffeinate", "auto", "summary", "awake")) {
                                         SettingsToggleItem(
-                                            title = "Auto-Caffeinate Summary",
-                                            subtitle = "Show active app count in notification",
+                                            title = stringResource(R.string.st_SettingsScreen_a9b2),
+                                            subtitle = stringResource(R.string.st_SettingsScreen_c1d4),
                                             icon = Icons.Rounded.Coffee,
                                             checked = caffeinateSummaryNotification,
                                             onCheckedChange = { viewModel.setCaffeinateAutoSummaryNotification(it) }
@@ -1064,9 +1068,70 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 9. Section: UPDATE
+                    // 9. Section: LANGUAGES
+                    StaggeredEntrance(index = 8) {
+                        SettingsExpandableSection(
+                            title = "LANGUAGES",
+                            icon = Icons.Rounded.Language,
+                            isExpanded = expandedSection == "LANGUAGES" || searchQuery.isNotEmpty(),
+                            onExpandToggle = { expandedSection = if (expandedSection == "LANGUAGES") null else "LANGUAGES" }
+                        ) {
+                            val languages = listOf(
+                                Triple("English", "en", "🇺🇸"),
+                                Triple("Português (Brasil)", "pt-BR", "🇧🇷"),
+                                Triple("Español", "es", "🇪🇸"),
+                                Triple("Français", "fr", "🇫🇷")
+                            )
+
+                            languages.forEach { (name, code, flag) ->
+                                if (matches(searchQuery, name, code)) {
+                                    val isSelected = appLanguage == code
+                                    SettingsItem(
+                                        title = name,
+                                        subtitle = if (isSelected) "Active" else "Switch to $name",
+                                        icon = Icons.Rounded.Language
+                                    ) {
+                                        Surface(
+                                            onClick = {
+                                                vibrationManager?.vibrateSuccess()
+                                                viewModel.setAppLanguage(code)
+                                                val appLocale: LocaleListCompat = LocaleListCompat.forLanguageTags(code)
+                                                AppCompatDelegate.setApplicationLocales(appLocale)
+                                            },
+                                            modifier = Modifier.fillMaxWidth().height(56.dp).padding(top = 8.dp).bouncyClick {},
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(flag, fontSize = 20.sp)
+                                                    Spacer(Modifier.width(12.dp))
+                                                    Text(
+                                                        name,
+                                                        fontWeight = FontWeight.Black,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                if (isSelected) {
+                                                    Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 10. Section: UPDATE
                     if (!offlineModeEnabled) {
-                        StaggeredEntrance(index = 8) {
+                        StaggeredEntrance(index = 9) {
                             SettingsExpandableSection(
                                 title = "UPDATE",
                                 icon = Icons.Rounded.SystemUpdate,
@@ -1096,8 +1161,8 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 10. Section: ABOUT
-                    StaggeredEntrance(index = 9) {
+                    // 11. Section: ABOUT
+                    StaggeredEntrance(index = 10) {
                         AboutSection(onCheckUpdate = onNavigateToUpdate)
                     }
 
@@ -1344,7 +1409,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         onQueryChange = onQueryChange,
         placeholder = {
             Text(
-                "Search settings...",
+                stringResource(R.string.st_SettingsScreen_y5z6),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
@@ -1368,7 +1433,7 @@ fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Clear", modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.st_SettingsScreen_a7b8), modifier = Modifier.size(20.dp))
                 }
             }
         }
