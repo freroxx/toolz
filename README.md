@@ -131,10 +131,6 @@ Toolz includes a built-in updater that checks GitHub releases and update manifes
 - **JDK 17**
 - **Device/Emulator** — Android 12+ (minSdk 31)
 
-### Optional: AI Provider Keys
-
-Toolz runs core utilities without AI API keys, but AI features work best with your own provider keys.
-
 ### Build Steps
 
 **macOS/Linux:**
