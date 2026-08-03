@@ -64,7 +64,20 @@ class DeviceInfoViewModel @Inject constructor(
 
     // 1. Unified Query Key Generator matching Vercel's global CDN lookup template
     private val defaultModelQuery: String by lazy {
-        Build.MODEL.trim().ifBlank { Build.DEVICE.trim() }.ifBlank { "Unknown" }
+        val manufacturer = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+        val device = Build.DEVICE.trim()
+        
+        // Strategy: Use Manufacturer + Model if Model looks like a code (short/alphanumeric)
+        // or just Manufacturer + Model for clarity if not already present.
+        if (model.contains(manufacturer, ignoreCase = true)) {
+            model
+        } else if (model.length <= 4 || (model.any { it.isDigit() } && model.any { it.isLetter() } && model.length < 8)) {
+            // Likely a code like NX769J or SM-G991U
+            "$manufacturer $model".trim()
+        } else {
+            "$manufacturer $model".trim()
+        }.ifBlank { device }.ifBlank { "Unknown" }
     }
 
     // 2. State Initialization Pipeline
