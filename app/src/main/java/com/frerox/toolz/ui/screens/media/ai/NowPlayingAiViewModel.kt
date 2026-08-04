@@ -101,7 +101,7 @@ private const val ROUTINE_GAP_RESTART_DELAY_MS = 150L
 // a real failure. We retry a handful of times on a short fixed delay before
 // treating it as something that needs a full rebuild.
 private const val BUSY_RETRY_DELAY_MS = 250L
-private const val MAX_BUSY_RETRIES = 5
+private const val MAX_BUSY_RETRIES = 8
 
 // Base restart delay per SpeechRecognizer error code, used ONLY for genuine
 // failures (network/server/too-many-requests/unknown). These get real
@@ -1557,7 +1557,7 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     fun resumeKaraokeListening() {
-        if (!_uiState.value.isKaraokeRecording) return
+        if (!_uiState.value.isKaraokeRecording || sessionActive) return
         _uiState.update { it.copy(isListening = true) }
         viewModelScope.launch(Dispatchers.Main) {
             if (speechRecognizer == null) buildRecognizer()
@@ -1595,6 +1595,7 @@ class NowPlayingAiViewModel @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             // No EXTRA_AUDIO_SOURCE, no silence timeouts — let the recognizer use its own defaults.
             // These extras cause ERROR_CLIENT on many OEM ROMs (Samsung, Xiaomi, etc.).
         }
@@ -1649,8 +1650,8 @@ class NowPlayingAiViewModel @Inject constructor(
             runCatching { recognizer.cancel() }
             sessionActive = false
             // Give the service time to release the previous session.
-            // Increased to 300ms to prevent ERROR_RECOGNIZER_BUSY on slower devices
-            delay(300L)
+            // Increased to 500ms to prevent ERROR_RECOGNIZER_BUSY on slower devices
+            delay(500L)
         }
 
         if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return

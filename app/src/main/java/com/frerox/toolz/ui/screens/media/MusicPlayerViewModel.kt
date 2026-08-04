@@ -24,7 +24,6 @@ import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.media.audiofx.Equalizer
-import android.media.audiofx.Visualizer
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -54,8 +53,10 @@ import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
+
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.MusicPlayerService
+import com.frerox.toolz.util.MusicVisualizerManager
 import com.frerox.toolz.util.OfflineManager
 import com.frerox.toolz.util.OfflineState
 import com.frerox.toolz.util.VibrationManager
@@ -116,13 +117,7 @@ data class MusicUiState(
     val customEqualizerGains    : List<Float>               = List(5) { 0f },
     val visualizerSensitivity   : Float                     = 1.0f,
     val visualizerAutoSensitivity: Boolean                  = false,
-    // True once we've actually tried to attach and found we don't hold
-    // RECORD_AUDIO. Distinct from "not yet attached" so the UI can show a
-    // real "needs microphone access" prompt instead of the ring just
-    // silently sitting in its idle animation forever, which is what made
-    // this look like a bug ("bars are there but never react") rather than
-    // a permission gate.
-    val visualizerNeedsPermission: Boolean                  = false,
+
     val showMusicSettings       : Boolean                   = false,
     val karaokeEnabled          : Boolean                   = true,
     val isKaraokeActive         : Boolean                   = false,
@@ -145,6 +140,7 @@ class MusicPlayerViewModel @Inject constructor(
     private val offlineManager    : OfflineManager,
     val vibrationManager          : VibrationManager,
     val player                    : ExoPlayer,
+    private val visualizerManager : MusicVisualizerManager,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -169,8 +165,6 @@ class MusicPlayerViewModel @Inject constructor(
     private var controller        : MediaController? = null
     private var pendingAction     : (() -> Unit)? = null
     private var equalizer         : Equalizer?  = null
-    private var visualizer        : Visualizer? = null
-    private var attachedSessionId : Int = C.AUDIO_SESSION_ID_UNSET
 
     // Reused across every onFftDataCapture callback (fires up to ~60x/sec)
     // to avoid allocating fresh FloatArrays on the audio capture thread.
@@ -178,10 +172,7 @@ class MusicPlayerViewModel @Inject constructor(
     // are alternated as the published result so the buffer currently held
     // by `_visualizerData.value` (being read on the UI thread) is never the
     // same object this thread is about to write into next.
-    private var spectrumScratch = FloatArray(64)
-    private val spectrumBufA = FloatArray(64)
-    private val spectrumBufB = FloatArray(64)
-    private var useSpectrumBufA = true
+
     private var shakeDetector     : ShakeDetector? = null
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -237,7 +228,7 @@ class MusicPlayerViewModel @Inject constructor(
 
             // Invalidate the session ID on track change to force a re-attach
             // when the player becomes ready, and clear current data.
-            attachedSessionId = C.AUDIO_SESSION_ID_UNSET
+
             _visualizerData.value = FloatArray(0)
 
             val uri       = mediaItem?.mediaId ?: mediaItem?.requestMetadata?.mediaUri?.toString()
@@ -818,65 +809,36 @@ class MusicPlayerViewModel @Inject constructor(
     private var visualizerAttachJob: kotlinx.coroutines.Job? = null
 
     private fun startVisualizer() {
-        if (!_uiState.value.showVisualizer) {
-            if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, showVisualizer is off")
+        if (!_uiState.value.showVisualizer || _uiState.value.isKaraokeActive) {
+            if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, showVisualizer=${_uiState.value.showVisualizer} isKaraokeActive=${_uiState.value.isKaraokeActive}")
             return
         }
-
-        val currentSessionId = player.audioSessionId
-        if (visualizer != null) {
-            if (attachedSessionId == currentSessionId && currentSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: skipped, already attached to session $currentSessionId")
-                return
-            } else {
-                if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "startVisualizer: session mismatch ($attachedSessionId -> $currentSessionId), detaching...")
-                detachVisualizer()
-            }
-        }
-
-        // android.media.audiofx.Visualizer throws SecurityException without
-        // RECORD_AUDIO, even when only reading the app's own playback
-        // session. That throw was being swallowed by attachVisualizer's
-        // runCatching and treated identically to "session id not ready
-        // yet", so this loop retried every 30ms *forever* — it could never
-        // succeed, it just silently burned battery while the ring sat in
-        // its idle animation with no indication anything was wrong. Bail
-        // out immediately and let the UI ask for the permission instead of
-        // masquerading a permission gate as "still attaching".
-        val hasMicPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.RECORD_AUDIO
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!hasMicPermission) {
-            android.util.Log.w("MusicVisualizer", "startVisualizer: blocked, RECORD_AUDIO not granted")
-            _uiState.update { it.copy(visualizerNeedsPermission = true) }
-            return
-        }
-        _uiState.update { it.copy(visualizerNeedsPermission = false) }
 
         visualizerAttachJob?.cancel()
-        visualizerAttachJob = viewModelScope.launch {
-            while (currentCoroutineContext().isActive &&
-                _uiState.value.showVisualizer &&
-                !_uiState.value.visualizerNeedsPermission &&
-                (visualizer == null || attachedSessionId == C.AUDIO_SESSION_ID_UNSET)
-            ) {
-                val sessionId = player.audioSessionId
-                if (sessionId > 0) {
-                    if (attachVisualizer(sessionId)) {
-                        if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attach loop: attached OK on session $sessionId")
-                        return@launch
+        visualizerAttachJob = viewModelScope.launch(Dispatchers.Default) {
+            val emptySpectrum = FloatArray(64)
+            while (currentCoroutineContext().isActive && _uiState.value.showVisualizer) {
+                if (player.isPlaying) {
+                    val spectrum = visualizerManager.getSpectrum()
+                    if (spectrum != null) {
+                        _visualizerData.value = spectrum
+                    }
+                } else {
+                    // Decay to zero when paused
+                    val current = _visualizerData.value
+                    if (current.isNotEmpty() && current.any { it > 0.01f }) {
+                        val decayed = current.map { it * 0.8f }.toFloatArray()
+                        _visualizerData.value = decayed
+                    } else if (current.isNotEmpty()) {
+                        _visualizerData.value = emptySpectrum
                     }
                 }
-                delay(100L) // Slower poll, we now also trigger on STATE_READY
+                delay(33L) // ~30fps
             }
         }
     }
 
-    /** Called by the UI right after the user grants (or re-grants) RECORD_AUDIO. */
-    fun retryVisualizerAfterPermissionGranted() {
-        _uiState.update { it.copy(visualizerNeedsPermission = false) }
-        if (_uiState.value.showVisualizer && player.isPlaying) startVisualizer()
-    }
+
 
     /** Tears down and re-creates the Visualizer against whatever session id is current. */
     private fun restartVisualizer() {
@@ -884,118 +846,13 @@ class MusicPlayerViewModel @Inject constructor(
         startVisualizer()
     }
 
-    private var fftCaptureCount = 0
 
-    private fun attachVisualizer(sessionId: Int): Boolean {
-        val maxRate = Visualizer.getMaxCaptureRate()
-        if (BuildConfig.DEBUG) android.util.Log.d("MusicVisualizer", "attachVisualizer: sessionId=$sessionId maxCaptureRate=$maxRate")
-        fftCaptureCount = 0
-        attachedSessionId = sessionId
-        return runCatching {
-            visualizer = Visualizer(sessionId).apply {
-                // 1024 is plenty of resolution for 64 log-spaced output
-                // bins — some devices expose a much larger max (2048-4096+),
-                // which only means more bytes to walk through per callback
-                // (up to the capture rate, i.e. potentially 60x/sec) with no
-                // visible gain, since the extra resolution gets binned away
-                // in computeSpectrum() anyway.
-                val range = Visualizer.getCaptureSizeRange()
-                captureSize = range[1].coerceAtMost(1024).coerceAtLeast(range[0])
-                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, rate: Int) {}
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, rate: Int) {
-                        fft ?: return
-                        if (BuildConfig.DEBUG) {
-                            fftCaptureCount++
-                            if (fftCaptureCount == 1 || fftCaptureCount % 120 == 0) {
-                                android.util.Log.d("MusicVisualizer", "onFftDataCapture: frame #$fftCaptureCount, size=${fft.size}")
-                            }
-                        }
-                        _visualizerData.value = computeSpectrum(fft)
-                    }
-                }, maxRate, false, true)
-                enabled = true
-            }
-        }.onFailure { e ->
-            android.util.Log.e("MusicVisualizer", "attachVisualizer: FAILED (${e.javaClass.simpleName}): ${e.message}")
-            visualizer = null
-            if (e is SecurityException) {
-                // Permission was revoked (or the check above raced with a
-                // change) — stop the retry loop, it will never succeed
-                // without RECORD_AUDIO, and surface it to the UI instead of
-                // spinning forever.
-                _uiState.update { it.copy(visualizerNeedsPermission = true) }
-            }
-            // Anything else (bad/racy session id) is treated as "not
-            // attached yet" and the retry loop keeps going.
-        }.isSuccess
-    }
 
-    /**
-     * Converts a raw FFT capture into 64 perceptually log-spaced magnitude
-     * bins. Pulled out of the capture callback (which fires up to ~60x/sec on
-     * the audio thread) so it stays a pure, allocation-light function instead
-     * of inline logic.
-     */
-    private fun computeSpectrum(fft: ByteArray): FloatArray {
-        val n = fft.size / 2
-        for (i in 0 until 64) {
-            val start = (Math.pow(2.0, i / 10.6) - 1).toInt().coerceIn(0, n - 1)
-            val end = (Math.pow(2.0, (i + 1) / 10.6) - 1).toInt().coerceIn(start + 1, n)
-            // RMS across the bin instead of a plain average. A plain average
-            // lets a handful of quiet partials dilute one loud one, which is
-            // exactly why sharp transients (kicks, snares, plucks) sitting
-            // next to quieter harmonics used to get smeared into the
-            // surrounding wash instead of standing out — RMS matches how the
-            // ear actually weighs energy across a band.
-            var sumSq = 0f
-            for (j in start until end) {
-                val r = fft[j * 2].toInt()
-                val im = fft[j * 2 + 1].toInt()
-                val m = Math.hypot(r.toDouble(), im.toDouble()).toFloat()
-                sumSq += m * m
-            }
-            val rms = if (end > start) kotlin.math.sqrt(sumSq / (end - start)) else 0f
-            // High-shelf compensation, now a soft sqrt curve instead of a
-            // straight linear ramp: high FFT bins are naturally quieter for
-            // most music, so without this the ring dies off toward the
-            // treble side — but the old linear ramp over-boosted the very
-            // top bins (up to ~4x) and made bright, cymbal-heavy songs clip
-            // out. The curved shelf still lifts the treble enough to stay
-            // visible without blowing past the ceiling.
-            val shelf = 1f + kotlin.math.sqrt(i / 63f) * 1.6f
-            spectrumScratch[i] = (rms * shelf * 2.2f).coerceIn(0f, 100f)
-        }
-        // One pass of light neighbor blending, clamped (not wrapped) at the
-        // array edges so sub-bass never bleeds into treble. This softens
-        // single-bin flicker — adjacent bins catching the same transient at
-        // slightly different strengths — into a more cohesive spectral
-        // shape, while each bin still keeps most of its own value so
-        // distinct bass/mid/treble regions don't smear together.
-        //
-        // Written into whichever ping-pong buffer isn't currently published
-        // (held by _visualizerData.value and possibly being read on the UI
-        // thread right now) so there's zero allocation here and zero risk of
-        // mutating an array out from under a concurrent reader.
-        val out = if (useSpectrumBufA) spectrumBufA else spectrumBufB
-        useSpectrumBufA = !useSpectrumBufA
-        for (i in 0 until 64) {
-            val prev = spectrumScratch[(i - 1).coerceAtLeast(0)]
-            val next = spectrumScratch[(i + 1).coerceAtMost(63)]
-            out[i] = spectrumScratch[i] * 0.7f + (prev + next) * 0.15f
-        }
-        return out
-    }
+
 
     private fun detachVisualizer() {
         visualizerAttachJob?.cancel()
         visualizerAttachJob = null
-        runCatching {
-            visualizer?.enabled = false
-            visualizer?.release()
-        }
-        visualizer = null
-        attachedSessionId = C.AUDIO_SESSION_ID_UNSET
     }
 
     private fun stopVisualizer() {
@@ -1611,7 +1468,11 @@ class MusicPlayerViewModel @Inject constructor(
     fun toggleKaraokeMode() {
         _uiState.update {
             val newActive = !it.isKaraokeActive
-            if (newActive) { val p: Player = controller ?: player; if (p.isPlaying) p.pause() }
+            if (newActive) { 
+                val p: Player = controller ?: player
+                if (p.isPlaying) p.pause()
+                stopVisualizer()
+            }
             it.copy(isKaraokeActive = newActive)
         }
         hapticClick()

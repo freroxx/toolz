@@ -146,9 +146,8 @@ fun KaraokeView(
     var isRecorderStarting  by remember { mutableStateOf(false) }
     var hasStartedOnce      by remember { mutableStateOf(false) }
     
-    // Track if the user wants to save their audio. Defaults to true so recording
-    // starts automatically as soon as the countdown ends.
-    var isAudioSavingEnabled by remember { mutableStateOf(true) }
+    // Track if the user wants to save their audio. Disabled if Speech Correction is enabled.
+    var isAudioSavingEnabled by remember { mutableStateOf(!aiState.karaokeSpeechCorrectionEnabled) }
     // Track whether the MediaRecorder was fully started so stopMediaRecording
     // never calls stop() on a recorder that was never started.
     var isMediaRecorderStarted by remember { mutableStateOf(false) }
@@ -395,7 +394,18 @@ fun KaraokeView(
             // while the media player is still buffering or transitioning.
             delay(400)
             if (aiState.karaokeSpeechCorrectionEnabled) {
-                aiViewModel.startKaraokeRecording()
+                // EXCLUSIVE: Speech Correction owns the mic.
+                if (isAudioSavingEnabled || mediaRecorder != null) {
+                    isAudioSavingEnabled = false
+                    stopMediaRecording(scope, mediaRecorder, isMediaRecorderStarted) {
+                        mediaRecorder = null
+                        isMediaRecorderStarted = false
+                        // Only start recognition AFTER recorder is fully released
+                        aiViewModel.startKaraokeRecording()
+                    }
+                } else {
+                    aiViewModel.startKaraokeRecording()
+                }
             } else if (isAudioSavingEnabled && mediaRecorder == null && !isRecorderStarting) {
                 startAudioRecording()
             } else if (aiState.autoRecordEnabled && !isAudioSavingEnabled && !isManualRecordingMode && mediaRecorder == null && !isRecorderStarting) {

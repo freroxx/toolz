@@ -24,6 +24,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+
+import com.frerox.toolz.util.MusicVisualizerManager
+import com.frerox.toolz.util.VisualizerAudioProcessor
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import dagger.Module
 import dagger.Provides
@@ -39,7 +45,10 @@ object PlayerModule {
     @Provides
     @Singleton
     @androidx.annotation.OptIn(UnstableApi::class)
-    fun provideExoPlayer(@ApplicationContext context: Context): ExoPlayer {
+    fun provideExoPlayer(
+        @ApplicationContext context: Context,
+        visualizerManager: MusicVisualizerManager
+    ): ExoPlayer {
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
@@ -60,7 +69,19 @@ object PlayerModule {
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
 
-        return ExoPlayer.Builder(context)
+        val renderersFactory = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf(VisualizerAudioProcessor(visualizerManager)))
+                    .build()
+            }
+        }
+
+        return ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, false)
             .setHandleAudioBecomingNoisy(true)

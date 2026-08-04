@@ -170,7 +170,7 @@ import java.util.*
 // ─────────────────────────────────────────────────────────────────────────────
 
 @AnnotationOptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MusicPlayerScreen(
     viewModel: MusicPlayerViewModel,
@@ -531,19 +531,6 @@ fun MusicPlayerScreen(
 
         if (showFullPlayer && state.currentTrack != null) {
             val visualizerData by viewModel.visualizerData.collectAsStateWithLifecycle()
-            val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
-
-            // Getting the permission is only half the fix — without this,
-            // a grant that happens while the visualizer is already turned
-            // on (e.g. from the settings toggle below) had nothing telling
-            // the ViewModel to actually retry attaching, so the ring kept
-            // sitting in its idle animation until the next play/pause even
-            // though the permission was now granted.
-            LaunchedEffect(micPermission.status.isGranted) {
-                if (micPermission.status.isGranted && state.showVisualizer) {
-                    viewModel.retryVisualizerAfterPermissionGranted()
-                }
-            }
 
             FullPlayerView(
                 state = state,
@@ -3320,7 +3307,7 @@ fun PlaylistDetailView(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @AnnotationOptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun FullPlayerView(
     state: MusicUiState,
@@ -3871,28 +3858,7 @@ fun FullPlayerView(
                                             autoSensitivity = state.visualizerAutoSensitivity
                                         )
 
-                                        if (state.visualizerNeedsPermission) {
-                                            val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
-                                            Surface(
-                                                onClick = { micPermission.launchPermissionRequest() },
-                                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
-                                                shape = RoundedCornerShape(16.dp),
-                                                modifier = Modifier.padding(horizontal = 32.dp).zIndex(10f)
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                                ) {
-                                                    Icon(Icons.Rounded.MicOff, null, modifier = Modifier.size(18.dp))
-                                                    Text(
-                                                        stringResource(R.string.st_MusicPlayerScreen_ttgmafv78),
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                        }
+
                                     }
                                 } else if (!state.performanceMode) {
                                     val haloAlpha by animateFloatAsState(if (state.isPlaying) 0.32f else 0.08f, tween(900), label = "haloAlpha")
@@ -4424,7 +4390,7 @@ private fun SegmentToggle(
     onToggleVisualizer: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -4527,9 +4493,6 @@ private fun SegmentToggle(
                     ExpressiveSwitch(
                         checked = state.showVisualizer,
                         onCheckedChange = {
-                            if (!state.showVisualizer && !micPermission.status.isGranted) {
-                                micPermission.launchPermissionRequest()
-                            }
                             onToggleVisualizer()
                         }
                     )
@@ -4541,29 +4504,7 @@ private fun SegmentToggle(
                     exit = fadeOut(tween(150)) + shrinkVertically(animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh))
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (state.visualizerNeedsPermission) {
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
-                                modifier = Modifier.padding(horizontal = 32.dp).zIndex(10f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        stringResource(R.string.st_MusicPlayerScreen_nmatrta79),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    TextButton(onClick = { micPermission.launchPermissionRequest() }) {
-                                        Text(stringResource(R.string.st_MusicPlayerScreen_g80))
-                                    }
-                                }
-                            }
-                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
