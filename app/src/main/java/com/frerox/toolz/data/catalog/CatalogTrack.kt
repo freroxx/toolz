@@ -35,3 +35,17 @@ data class CatalogTrack(
     val duration: Long,         // Duration in millis
     val sourceUrl: String       // Original YouTube URL for re-extraction
 )
+
+/**
+ * Normalizes a YouTube URL by extracting the video ID and returning a standard watch URL.
+ * Ensures consistent matching regardless of tracking parameters or feature flags.
+ */
+fun String.normalizeYoutubeUrl(): String {
+    val videoId = this.substringAfter("v=", "")
+        .substringBefore("&")
+        .ifBlank { this.substringAfterLast("/", "") }
+    
+    return if (videoId.length == 11) {
+        "https://www.youtube.com/watch?v=$videoId"
+    } else this
+}
