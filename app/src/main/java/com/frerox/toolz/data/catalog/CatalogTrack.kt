@@ -18,12 +18,14 @@
 package com.frerox.toolz.data.catalog
 
 import androidx.compose.runtime.Immutable
+import kotlinx.serialization.Serializable
 
 /**
  * Lightweight model for catalog (cloud) tracks fetched via NewPipeExtractor.
  * Not persisted in Room — purely in-memory for streaming.
  */
 @Immutable
+@Serializable
 data class CatalogTrack(
     val id: String,             // YouTube video ID
     val title: String,
