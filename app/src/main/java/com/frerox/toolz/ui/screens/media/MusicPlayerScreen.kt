@@ -6422,41 +6422,21 @@ fun MiniPlayer(
                         }
 
                         if (downloadCount > 0 && !isResolving) {
-                            val infiniteTransitionDownload = rememberInfiniteTransition(label = "download")
-                            val pulseScale by if (performanceMode) {
-                                remember { mutableFloatStateOf(1f) }
-                            } else {
-                                infiniteTransitionDownload.animateFloat(
-                                    initialValue = 0.95f,
-                                    targetValue = 1.05f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(1200, easing = FastOutSlowInEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "pulse"
-                                )
-                            }
-
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.Center)
                                     .size(48.dp)
-                                    // graphicsLayer instead of Modifier.scale(): same fix as the
-                                    // art pulse above — this one runs continuously for the whole
-                                    // download, and previously forced the background/border
-                                    // brushes below it to redraw every tick instead of just being
-                                    // transformed as a composited layer.
-                                    .graphicsLayer { scaleX = pulseScale; scaleY = pulseScale }
-                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f), CircleShape)
-                                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape),
+                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f), CircleShape)
+                                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(
-                                    progress = { avgDownloadProgress / 100f },
+                                    progress = { avgDownloadProgress },
                                     modifier = Modifier.size(42.dp),
                                     color = MaterialTheme.colorScheme.primary,
                                     strokeWidth = 3.dp,
-                                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    strokeCap = StrokeCap.Round
                                 )
                                 Icon(
                                     imageVector = Icons.Rounded.CloudDownload,
