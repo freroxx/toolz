@@ -40,6 +40,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    private val database: com.frerox.toolz.data.AppDatabase,
     private val deviceSpecsRepository: DeviceSpecsRepository,
     val vibrationManager: VibrationManager,
     @ApplicationContext private val context: Context
@@ -239,8 +240,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun resetOnboarding() = viewModelScope.launch {
-        repository.setOnboardingCompleted(false)
+        repository.resetOnboarding()
         repository.setUserName("")
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            database.clearAllTables()
+        }
     }
 
 }
