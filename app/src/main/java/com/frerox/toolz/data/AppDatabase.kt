@@ -21,6 +21,8 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.frerox.toolz.data.CommonConverters
+import com.frerox.toolz.data.catalog.CatalogSearchEntry
+import com.frerox.toolz.data.catalog.CatalogSearchDao
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicTrack
@@ -84,9 +86,10 @@ import com.frerox.toolz.data.device.cache.DeviceSpecConverters
         BookmarkEntry::class,
         QuickLinkEntry::class,
         CryptoHistoryEntry::class,
-        DeviceSpecCacheEntity::class
+        DeviceSpecCacheEntity::class,
+        CatalogSearchEntry::class
     ], 
-    version = 43,
+    version = 44,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
@@ -108,4 +111,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun searchDao(): SearchDao
     abstract fun cryptoDao(): CryptoDao
     abstract fun deviceSpecsDao(): DeviceSpecsDao
+    abstract fun catalogSearchDao(): CatalogSearchDao
 }
