@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.data.catalog
 
+import com.frerox.toolz.data.catalog.innertube.InnerTubeClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -49,7 +50,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class CatalogRepository @Inject constructor(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    val innerTubeClient: InnerTubeClient
 ) {
     private var isInitialized = false
 
@@ -62,10 +64,11 @@ class CatalogRepository @Inject constructor(
     private fun initNewPipe() {
         if (isInitialized) return
         try {
+            // Localization can affect redirects. Standardizing on US/English.
             NewPipe.init(OkHttpDownloader(okHttpClient), Localization.DEFAULT, ContentCountry.DEFAULT)
             isInitialized = true
         } catch (_: Exception) { 
-            isInitialized = true // Already initialized or failed irrecoverably
+            isInitialized = true
         }
     }
 
@@ -82,53 +85,77 @@ class CatalogRepository @Inject constructor(
         page: Page? = null
     ): Pair<List<CatalogTrack>, Page?> = withContext(Dispatchers.IO) {
         try {
-            val contentFilters = listOf("music_songs")
-            val sortFilter = ""
-
-            if (page == null) {
-                val searchInfo = SearchInfo.getInfo(
-                    youtubeService,
-                    youtubeService.searchQHFactory.fromQuery(
-                        query,
-                        contentFilters,
-                        sortFilter
-                    )
-                )
-                var tracks = searchInfo.relatedItems
-                    .filterIsInstance<StreamInfoItem>()
-                    .map { it.toCatalogTrack() }
-                
-                if (tracks.isEmpty()) {
-                    // Fallback to broad search if music filter yielded nothing
-                    val broadInfo = SearchInfo.getInfo(
-                        youtubeService,
-                        youtubeService.searchQHFactory.fromQuery(query, emptyList(), sortFilter)
-                    )
-                    tracks = broadInfo.relatedItems.filterIsInstance<StreamInfoItem>().map { it.toCatalogTrack() }
-                    return@withContext Pair(tracks, broadInfo.nextPage)
-                }
-                
-                Pair(tracks, searchInfo.nextPage)
-            } else {
-                val moreItems = SearchInfo.getMoreItems(
-                    youtubeService,
-                    youtubeService.searchQHFactory.fromQuery(
-                        query,
-                        contentFilters,
-                        sortFilter
-                    ),
-                    page
-                )
-                val tracks = moreItems.items
-                    .filterIsInstance<StreamInfoItem>()
-                    .map { it.toCatalogTrack() }
-                Pair(tracks, moreItems.nextPage)
+            // High-speed InnerTube search first
+            val continuation = if (page is InnerTubePage) page.continuation else null
+            val (tracks, nextToken) = innerTubeClient.search(query, continuation)
+            
+            if (tracks.isNotEmpty()) {
+                val nextP = nextToken?.let { InnerTubePage(it) }
+                return@withContext tracks to nextP
             }
-        } catch (e: CancellationException) {
-            throw e
+
+            // Fallback to NewPipe if InnerTube is empty (rare)
+            performInternalSearch(query, page, useMusicFilter = true)
         } catch (e: Exception) {
-            android.util.Log.e("CatalogRepo", "Search failed for query \"$query\": ${e.message}")
-            throw e
+            val isParsingError = e.message?.contains("HTML") == true || 
+                                e.message?.contains("JSON") == true ||
+                                e.message?.contains("regex", ignoreCase = true) == true ||
+                                e.message?.contains("group", ignoreCase = true) == true
+
+            if (isParsingError) {
+                android.util.Log.w("CatalogRepo", "Filtered search failed, falling back to broad search: $query")
+                try {
+                    // Fallback to broad search (which uses main YouTube instead of YouTube Music)
+                    performInternalSearch(query, null, useMusicFilter = false)
+                } catch (e2: Exception) {
+                    android.util.Log.e("CatalogRepo", "Search failed completely for query \"$query\": ${e2.message}")
+                    throw e2
+                }
+            } else {
+                android.util.Log.e("CatalogRepo", "Network error during search for \"$query\": ${e.message}")
+                throw e
+            }
+        }
+    }
+
+    private class InnerTubePage(val continuation: String) : Page(continuation)
+
+    private fun performInternalSearch(
+        query: String,
+        page: Page?,
+        useMusicFilter: Boolean
+    ): Pair<List<CatalogTrack>, Page?> {
+        val contentFilters = if (useMusicFilter) listOf("music_songs") else emptyList()
+        val sortFilter = ""
+
+        return if (page == null) {
+            val searchInfo = SearchInfo.getInfo(
+                youtubeService,
+                youtubeService.searchQHFactory.fromQuery(
+                    query,
+                    contentFilters,
+                    sortFilter
+                )
+            )
+            val tracks = searchInfo.relatedItems
+                .filterIsInstance<StreamInfoItem>()
+                .map { it.toCatalogTrack() }
+            
+            Pair(tracks, searchInfo.nextPage)
+        } else {
+            val moreItems = SearchInfo.getMoreItems(
+                youtubeService,
+                youtubeService.searchQHFactory.fromQuery(
+                    query,
+                    contentFilters,
+                    sortFilter
+                ),
+                page
+            )
+            val tracks = moreItems.items
+                .filterIsInstance<StreamInfoItem>()
+                .map { it.toCatalogTrack() }
+            Pair(tracks, moreItems.nextPage)
         }
     }
 
@@ -205,7 +232,6 @@ class CatalogRepository @Inject constructor(
             throw e
         } catch (e: Exception) {
             android.util.Log.e("CatalogRepo", "resolveAudioStream failed: ${e.message}")
-            e.printStackTrace()
             null
         }
     }
@@ -239,7 +265,6 @@ class CatalogRepository @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -318,7 +343,6 @@ class CatalogRepository @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            e.printStackTrace()
             if (outputFile.exists()) outputFile.delete()
             false
         }
@@ -362,8 +386,9 @@ class CatalogRepository @Inject constructor(
     ) : Downloader() {
 
         override fun execute(request: org.schabi.newpipe.extractor.downloader.Request): Response {
+            val url = request.url()
             val builder = Request.Builder()
-                .url(request.url())
+                .url(url)
                 .method(
                     request.httpMethod(),
                     if (request.dataToSend() != null) {
@@ -371,26 +396,26 @@ class CatalogRepository @Inject constructor(
                     } else null
                 )
 
-            // Modern Chrome User-Agent to prevent bot detection/403s
+            // Use a standard browser User-Agent for better compatibility with extractor 0.26.4
             builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
-            builder.header("Accept", "*/*")
             builder.header("Accept-Language", "en-US,en;q=0.9")
             builder.header("Origin", "https://www.youtube.com")
             builder.header("Referer", "https://www.youtube.com/")
-            builder.header("X-YouTube-Client-Name", "1")
-            builder.header("X-YouTube-Client-Version", "2.20240730.01.00")
+            
+            // Minimal essential cookies
+            builder.header("Cookie", "SOCS=CAI+ish")
 
-            // Add headers from NewPipe
+            // Add headers from NewPipe, but avoid duplicates with our safety headers
             request.headers().forEach { (key, values) ->
                 values.forEach { value ->
-                    if (key.equals("User-Agent", ignoreCase = true)) return@forEach
+                    val k = key.lowercase()
+                    if (k == "user-agent" || k == "cookie" || k == "origin" || k == "referer") return@forEach
                     builder.addHeader(key, value)
                 }
             }
 
             val response = client.newCall(builder.build()).execute()
-            val responseBody = response.body
-            val bodyString = responseBody?.string()
+            val bodyString = response.body?.string()
 
             // Convert OkHttp headers to Map<String, List<String>>
             val responseHeaders = mutableMapOf<String, MutableList<String>>()
