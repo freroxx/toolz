@@ -110,7 +110,7 @@ fun SettingsScreen(
 
     val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
     val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
-    val showTopAppBarDescriptions by viewModel.showTopAppBarDescriptions.collectAsState(initial = true)
+    val showTopAppBarDescriptions by viewModel.showTopAppBarDescriptions.collectAsState(initial = false)
     val stepCounterEnabled by viewModel.stepCounterEnabled.collectAsState(initial = true)
     val showToolzPill by viewModel.showToolzPill.collectAsState(initial = true)
     val fillThePillEnabled by viewModel.fillThePillEnabled.collectAsState(initial = true)
@@ -372,16 +372,6 @@ fun SettingsScreen(
                                         )
                                     )
                                 }
-                            }
-
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
                             }
                         }
                     }
@@ -851,15 +841,6 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
                         }
                     }
 
@@ -898,15 +879,6 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
                         }
                     }
 
@@ -1039,15 +1011,6 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
                         }
                     }
 
@@ -1177,15 +1140,6 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
                         }
                     }
 
@@ -1217,16 +1171,6 @@ fun SettingsScreen(
                                         onClick = onNavigateToUpdate
                                     )
                                 }
-                            }
-
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
                             }
                         }
                     }

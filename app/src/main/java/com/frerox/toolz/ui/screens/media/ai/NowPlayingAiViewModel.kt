@@ -1417,12 +1417,6 @@ class NowPlayingAiViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setKaraokeSpeechCorrectionEnabled(enabled) }
         if (!enabled) {
             stopKaraokeRecording()
-        } else {
-            // Always try to start recording when speech correction is enabled,
-            // regardless of whether Sing Confidently is active. The guard in
-            // startRecordingForKaraokeIfNeeded / startKaraokeRecording prevents
-            // double-starts if already recording.
-            startRecordingForKaraokeIfNeeded()
         }
     }
 
@@ -1553,7 +1547,7 @@ class NowPlayingAiViewModel @Inject constructor(
 
     fun pauseKaraokeListening() {
         if (!_uiState.value.isKaraokeRecording) return
-        _uiState.update { it.copy(isListening = false) }
+        _uiState.update { it.copy(isListening = false, isReconnecting = false, micRms = 0f) }
         restartJob?.cancel()
         watchdogJob?.cancel()
         sessionActive = false
@@ -1658,7 +1652,7 @@ class NowPlayingAiViewModel @Inject constructor(
             delay(150L)
         }
 
-        if (!_uiState.value.isKaraokeRecording) return
+        if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return
 
         Log.d(TAG, "beginListening: calling startListening")
         runCatching {
@@ -1685,7 +1679,7 @@ class NowPlayingAiViewModel @Inject constructor(
         restartJob?.cancel()
         restartJob = viewModelScope.launch(Dispatchers.Main) {
             if (delayMs > 0) delay(delayMs)
-            if (!_uiState.value.isKaraokeRecording) return@launch
+            if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return@launch
             beginListening()
         }
     }
@@ -1703,7 +1697,7 @@ class NowPlayingAiViewModel @Inject constructor(
             // Wait at least 500ms after destroying to let the speech service
             // fully release its resources. Shorter delays cause ERROR_CLIENT.
             delay(preDelayMs.coerceAtLeast(500L))
-            if (!_uiState.value.isKaraokeRecording) return@launch
+            if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return@launch
             buildRecognizer()
             beginListening()
         }
@@ -1727,7 +1721,7 @@ class NowPlayingAiViewModel @Inject constructor(
         restartJob = viewModelScope.launch(Dispatchers.Main) {
             _uiState.update { it.copy(isReconnecting = true) }
             delay(delayMs)
-            if (!_uiState.value.isKaraokeRecording) return@launch
+            if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return@launch
 
             if (forceRebuild) {
                 Log.d(TAG, "Rebuilding recognizer from scratch after $consecutiveFailures consecutive failures")
@@ -1747,10 +1741,10 @@ class NowPlayingAiViewModel @Inject constructor(
     private fun startWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = viewModelScope.launch(Dispatchers.Main) {
-            while (_uiState.value.isKaraokeRecording) {
+            while (_uiState.value.isKaraokeRecording && _uiState.value.isListening) {
                 delay(2_000L)
                 val silentFor = System.currentTimeMillis() - lastCallbackAtMs
-                if (_uiState.value.isKaraokeRecording && silentFor > WATCHDOG_SILENCE_TIMEOUT_MS) {
+                if (_uiState.value.isKaraokeRecording && _uiState.value.isListening && silentFor > WATCHDOG_SILENCE_TIMEOUT_MS) {
                     Log.w(TAG, "Watchdog: recognizer silent for ${silentFor}ms, forcing rebuild")
                     sessionActive = false
                     rebuildAndRestart(preDelayMs = 100L)

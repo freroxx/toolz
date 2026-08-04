@@ -282,6 +282,15 @@ fun MusicPlayerScreen(
         }
     }
 
+    val isLogicalPlaying = state.isPlaying || aiState.isInstrumentalPlaying
+
+    LaunchedEffect(isLogicalPlaying, aiState.karaokeSpeechCorrectionEnabled) {
+        if (aiState.karaokeSpeechCorrectionEnabled) {
+            if (!isLogicalPlaying) aiViewModel.pauseKaraokeListening()
+            else aiViewModel.resumeKaraokeListening()
+        }
+    }
+
     Scaffold(
         topBar = {
             ScreenTopBar(
