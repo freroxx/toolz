@@ -2,20 +2,16 @@
 .gradle
 /local.properties
 .env
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+.idea/
 .DS_Store
 /build
 /captures
 .artifacts/
 .externalNativeBuild
 .cxx
-local.properties
 keystore.properties
-.env
 .vscode/
-compose-library/
+
+# Mobile tools for developers
+google-services.json
+secrets.properties

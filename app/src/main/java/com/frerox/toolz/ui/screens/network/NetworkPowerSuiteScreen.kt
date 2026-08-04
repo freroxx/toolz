@@ -66,6 +66,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -310,6 +311,23 @@ fun NetworkPowerSuiteScreen(
                     largeFlexible = true,
                     modifier = Modifier.statusBarsPadding()
                 )
+            },
+            bottomBar = {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = Color.Transparent
+                ) {
+                    TabStrip(
+                        selectedTab = selectedTab,
+                        onSelected = { index ->
+                            vibrationManager?.vibrateTick()
+                            selectedTab = index
+                        }
+                    )
+                }
             }
         ) { padding ->
             Column(
@@ -320,22 +338,13 @@ fun NetworkPowerSuiteScreen(
             ) {
                 Spacer(Modifier.height(8.dp))
 
-                TabStrip(
-                    selectedTab = selectedTab,
-                    onSelected = { index ->
-                        vibrationManager?.vibrateTick()
-                        selectedTab = index
-                    }
-                )
-
-                Spacer(Modifier.height(12.dp))
-
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
                         fadeIn(tween(240)) togetherWith fadeOut(tween(200))
                     },
-                    label = "network_suite_tab"
+                    label = "network_suite_tab",
+                    modifier = Modifier.weight(1f)
                 ) { tabIndex ->
                     Crossfade(targetState = tabIndex, label = "network_crossfade") { page ->
                         when (SuiteTab.entries[page]) {
@@ -1584,6 +1593,7 @@ private fun GlassCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -1596,12 +1606,15 @@ private fun GlassCard(
                             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         }
                     }
-                    Column {
-                        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                trailing?.invoke()
+                if (trailing != null) {
+                    Spacer(Modifier.width(8.dp))
+                    trailing.invoke()
+                }
             }
             content()
         }

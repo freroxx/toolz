@@ -64,6 +64,7 @@ data class AiAssistantUiState(
     val aiSearchIconVisible: Boolean         = true,
     val loadingPhaseText  : String           = "",
     val isCoachMode       : Boolean          = false,
+    val hasApiKey         : Boolean          = true,
 )
 
 data class AiSettingsUiState(
@@ -164,7 +165,8 @@ class AiAssistantViewModel @Inject constructor(
                 promptFormat         = settingsManager.getPromptFormat()
             )
         }
-        _uiState.update { it.copy(isConfigured = settingsManager.isConfigured()) }
+        val hasKey = settingsManager.resolveApiKey(provider).source != com.frerox.toolz.data.ai.ApiKeySource.NONE
+        _uiState.update { it.copy(isConfigured = settingsManager.isConfigured(), hasApiKey = hasKey) }
         checkModelAvailability()
     }
 

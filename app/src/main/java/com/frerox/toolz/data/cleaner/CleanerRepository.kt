@@ -123,7 +123,7 @@ class CleanerRepository @Inject constructor(
                             if ((junkExtensions.contains(ext) || isJunkPath) && !isMedia && !isDocument) {
                                 systemJunk.add(file.toEntry(isSelected = true))
                             } else if (isDocument) {
-                                documentFiles.add(file.toEntry(isSelected = false))
+                                documentFiles.add(file.toEntry(isSelected = true))
                             }
 
                             if (size > largeFileSizeThreshold) {

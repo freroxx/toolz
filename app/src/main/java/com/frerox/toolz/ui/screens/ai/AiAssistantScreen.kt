@@ -290,7 +290,10 @@ fun AiAssistantScreen(
                     performanceMode = performanceMode,
                     onInputChange  = { inputText = it },
                     onSend = {
-                        if (inputText.isNotBlank() || uiState.selectedImage != null) {
+                        if (!uiState.hasApiKey && settingsUiState.apiKey.isBlank()) {
+                            vibration?.vibrateError()
+                            showSettings = true
+                        } else if (inputText.isNotBlank() || uiState.selectedImage != null) {
                             vibration?.vibrateClick(); viewModel.sendMessage(inputText); inputText = ""
                         }
                     },
@@ -306,42 +309,50 @@ fun AiAssistantScreen(
         ) { padding ->
             Box(Modifier.fillMaxSize()) {
                 ExpressiveBackground(performanceMode)
-                Box(Modifier.fillMaxSize().padding(padding)) {
-                    AnimatedContent(
-                        targetState = isStarted,
-                        transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(400)) },
-                        label = "chat_root",
-                    ) { started ->
-                        if (started) {
-                            ChatMessageList(
-                                messages        = uiState.messages,
-                                streamingText   = uiState.streamingText,
-                                isLoading       = uiState.isLoading,
-                                error           = uiState.error,
-                                listState       = listState,
-                                currentConfig   = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
-                                performanceMode = performanceMode,
-                                onRegenerate    = { viewModel.regenerateMessage(it) },
-                                onLinkClick     = onNavigateToBrowser,
-                                onLongPress     = { selectedMessageForActions = it },
-                                onShowSources   = { selectedMessageForSources = it },
-                                onScrollBottom  = { scope.launch { listState.animateScrollToItem((uiState.messages.size - 1).coerceAtLeast(0)) } },
-                                loadingPhaseText = uiState.loadingPhaseText,
-                                onDeepDive      = { viewModel.performDeepDive(it) },
-                                onDismissDeepDive = { viewModel.dismissDeepDive(it) },
-                                isCoachMode     = uiState.isCoachMode
-                            )
-                        } else {
-                            EmptyChatState(
-                                performanceMode  = performanceMode,
-                                onSuggestionClick = { inputText = it },
-                                suggestedPrompts  = uiState.suggestedPrompts,
-                                isGeneratingPrompts = uiState.isGeneratingPrompts,
-                                onRefresh   = viewModel::refreshPrompts,
-                                onNeverShow = viewModel::neverShowPrompt,
-                                onEdit      = viewModel::editPrompt,
-                                onReset     = viewModel::resetPrompts,
-                            )
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    if (!uiState.hasApiKey && settingsUiState.apiKey.isBlank()) {
+                        ApiKeyWarningBanner(
+                            provider = settingsUiState.provider,
+                            onConfigureClick = { showSettings = true }
+                        )
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        AnimatedContent(
+                            targetState = isStarted,
+                            transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(400)) },
+                            label = "chat_root",
+                        ) { started ->
+                            if (started) {
+                                ChatMessageList(
+                                    messages        = uiState.messages,
+                                    streamingText   = uiState.streamingText,
+                                    isLoading       = uiState.isLoading,
+                                    error           = uiState.error,
+                                    listState       = listState,
+                                    currentConfig   = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
+                                    performanceMode = performanceMode,
+                                    onRegenerate    = { viewModel.regenerateMessage(it) },
+                                    onLinkClick     = onNavigateToBrowser,
+                                    onLongPress     = { selectedMessageForActions = it },
+                                    onShowSources   = { selectedMessageForSources = it },
+                                    onScrollBottom  = { scope.launch { listState.animateScrollToItem((uiState.messages.size - 1).coerceAtLeast(0)) } },
+                                    loadingPhaseText = uiState.loadingPhaseText,
+                                    onDeepDive      = { viewModel.performDeepDive(it) },
+                                    onDismissDeepDive = { viewModel.dismissDeepDive(it) },
+                                    isCoachMode     = uiState.isCoachMode
+                                )
+                            } else {
+                                EmptyChatState(
+                                    performanceMode  = performanceMode,
+                                    onSuggestionClick = { inputText = it },
+                                    suggestedPrompts  = uiState.suggestedPrompts,
+                                    isGeneratingPrompts = uiState.isGeneratingPrompts,
+                                    onRefresh   = viewModel::refreshPrompts,
+                                    onNeverShow = viewModel::neverShowPrompt,
+                                    onEdit      = viewModel::editPrompt,
+                                    onReset     = viewModel::resetPrompts,
+                                )
+                            }
                         }
                     }
                 }
@@ -1762,5 +1773,57 @@ fun getIconForConfig(selected: String, provider: String): ImageVector = when (se
         "Claude"   -> Icons.Rounded.HistoryEdu
         "DeepSeek" -> Icons.Rounded.Troubleshoot
         else       -> Icons.Rounded.Chat
+    }
+}
+
+@Composable
+private fun ApiKeyWarningBanner(
+    provider: String,
+    onConfigureClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onConfigureClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MediumExpressiveShape,
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Rounded.VpnKeyOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "API Key Required",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "An API key is required to use $provider. Tap here to set up your API key.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            FilledTonalButton(
+                onClick = onConfigureClick,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = Color.White
+                )
+            ) {
+                Text("Add Key", fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }

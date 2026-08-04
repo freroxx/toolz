@@ -148,6 +148,27 @@ fun CleanerScreen(
         )
     }
 
+    var videoPreviewPath by remember { mutableStateOf<String?>(null) }
+
+    if (videoPreviewPath != null) {
+        VideoPlayerDialog(
+            filePath = videoPreviewPath!!,
+            onDismiss = { videoPreviewPath = null }
+        )
+    }
+
+    val handleOpenFile: (String, Boolean) -> Unit = { path, isApp ->
+        vibrationManager?.vibrateClick()
+        val ext = path.substringAfterLast('.', "").lowercase()
+        if (isApp) {
+            openAppSettings(context, path)
+        } else if (ext in listOf("mp4", "mkv", "avi", "mov", "webm", "flv")) {
+            videoPreviewPath = path
+        } else {
+            openFile(context, path, onNavigateToPdf, onNavigateToMusic)
+        }
+    }
+
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(
         snapAnimationSpec = spring(stiffness = Spring.StiffnessMediumLow)
     )
@@ -249,11 +270,7 @@ fun CleanerScreen(
                                     vibrationManager?.vibrateClick()
                                     viewModel.startScan()
                                 },
-                                onOpenFile         = { path, isApp ->
-                                    vibrationManager?.vibrateClick()
-                                    if (isApp) openAppSettings(context, path)
-                                    else openFile(context, path, onNavigateToPdf, onNavigateToMusic)
-                                },
+                                onOpenFile         = { path, isApp -> handleOpenFile(path, isApp) },
                                 onLongPressCategory = { category ->
                                     vibrationManager?.vibrateLongClick()
                                     viewModel.openGridView(category)
@@ -273,10 +290,7 @@ fun CleanerScreen(
                                         category         = category,
                                         onToggleItem     = { id -> viewModel.toggleCategoryItem(category.id, id) },
                                         onToggleDuplicate= { hash, path -> viewModel.toggleDuplicateFile(category.id, hash, path) },
-                                        onOpenFile       = { path ->
-                                            if (category.id == "unused_apps") openAppSettings(context, path)
-                                            else openFile(context, path, onNavigateToPdf, onNavigateToMusic)
-                                        },
+                                        onOpenFile       = { path -> handleOpenFile(path, category.id == "unused_apps") },
                                         onClose          = { viewModel.closeGridView() },
                                     )
                                 }
@@ -735,6 +749,19 @@ private fun ResultsView(
     val performanceMode = LocalPerformanceMode.current
     val listState = rememberLazyListState()
 
+    val allSelected = remember(state.categories) {
+        state.categories.isNotEmpty() && state.categories.all { cat ->
+            cat.items.all { item ->
+                when (item) {
+                    is CleanItem.GenericFile -> item.file.isSelected
+                    is CleanItem.Corpse      -> item.entry.isSelected
+                    is CleanItem.Duplicate   -> item.group.files.any { it.isSelected }
+                    is CleanItem.UnusedApp   -> item.entry.isSelected
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state           = listState,
@@ -744,7 +771,29 @@ private fun ResultsView(
                 if (!performanceMode) fadingEdges(top = 16.dp, bottom = 24.dp) else this
             },
         ) {
-            item { ResultsHeader(state.totalCleanableBytes, state.filesScanned, onRescan) }
+            item {
+                ResultsHeader(
+                    totalSize = state.totalCleanableBytes,
+                    filesScanned = state.filesScanned,
+                    allSelected = allSelected,
+                    onToggleSelectAll = {
+                        val targetState = !allSelected
+                        state.categories.forEach { cat ->
+                            cat.items.forEach { item ->
+                                when (item) {
+                                    is CleanItem.GenericFile -> if (item.file.isSelected != targetState) onToggleItem(cat.id, item.file.path)
+                                    is CleanItem.Corpse      -> if (item.entry.isSelected != targetState) onToggleItem(cat.id, item.entry.path)
+                                    is CleanItem.UnusedApp   -> if (item.entry.isSelected != targetState) onToggleItem(cat.id, item.entry.packageName)
+                                    is CleanItem.Duplicate   -> item.group.files.drop(1).forEach { f ->
+                                        if (f.isSelected != targetState) onToggleDuplicate(cat.id, item.group.hash, f.path)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onRescan = onRescan
+                )
+            }
 
             // Category breakdown chips
             item {
@@ -823,7 +872,13 @@ private fun CategoryBreakdownRow(categories: List<CleanCategory>) {
 }
 
 @Composable
-private fun ResultsHeader(totalSize: Long, filesScanned: Int, onRescan: () -> Unit) {
+private fun ResultsHeader(
+    totalSize: Long,
+    filesScanned: Int,
+    allSelected: Boolean,
+    onToggleSelectAll: () -> Unit,
+    onRescan: () -> Unit
+) {
     val context = LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -860,11 +915,23 @@ private fun ResultsHeader(totalSize: Long, filesScanned: Int, onRescan: () -> Un
                     fontWeight = FontWeight.Medium,
                 )
             }
-            ToolzExpressiveIconButton(
-                onClick = onRescan,
-                modifier = Modifier.size(52.dp),
-            ) {
-                Icon(Icons.Rounded.Refresh, null, Modifier.size(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolzExpressiveIconButton(
+                    onClick = onToggleSelectAll,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Icon(
+                        if (allSelected) Icons.Rounded.DoneAll else Icons.Rounded.SelectAll,
+                        contentDescription = "Select All",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                ToolzExpressiveIconButton(
+                    onClick = onRescan,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Icon(Icons.Rounded.Refresh, null, Modifier.size(24.dp))
+                }
             }
         }
     }
@@ -1932,15 +1999,18 @@ private fun openFile(
         "mp3", "wav", "m4a", "ogg", "flac" -> onNavigateToMusic(uri)
         else -> runCatching {
             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-            context.startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, mime)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    },
-                    context.getString(R.string.st_CleanerScreen_k7l8),
+            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(viewIntent)
+            }.getOrElse {
+                context.startActivity(
+                    Intent.createChooser(viewIntent, context.getString(R.string.st_CleanerScreen_k7l8))
                 )
-            )
+            }
         }
     }
 }
@@ -1966,4 +2036,86 @@ private fun getMediaStoreUri(context: Context, path: String, ext: String): Uri? 
             else null
         }
     }.getOrNull()
+}
+
+@Composable
+private fun VideoPlayerDialog(
+    filePath: String,
+    onDismiss: () -> Unit
+) {
+    val file = remember(filePath) { File(filePath) }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = SquircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().wrapContentHeight()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = file.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close")
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { ctx ->
+                            android.widget.VideoView(ctx).apply {
+                                val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                    FileProvider.getUriForFile(ctx, "com.frerox.toolz.fileprovider", file)
+                                } else {
+                                    Uri.fromFile(file)
+                                }
+                                setVideoURI(uri)
+                                val mc = android.widget.MediaController(ctx)
+                                mc.setAnchorView(this)
+                                setMediaController(mc)
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = true
+                                    start()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    ToolzOutlinedExpressiveButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+            }
+        }
+    }
 }
