@@ -97,6 +97,7 @@ import androidx.compose.material.icons.rounded.MicExternalOn
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Search
@@ -136,6 +137,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -171,15 +173,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
-import com.frerox.toolz.ui.components.ExpressiveCarousel
-import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.ExpressiveSearchField
-import com.frerox.toolz.ui.components.fadingEdges
-import com.frerox.toolz.ui.components.bouncyClick
-import com.frerox.toolz.ui.components.AlbumArtImage
-import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.round
@@ -189,11 +182,16 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
 import com.frerox.toolz.ui.components.ExpressiveCarousel
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ExpressiveSearchField
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.bouncyClick
+import com.frerox.toolz.ui.components.AlbumArtImage
+import com.frerox.toolz.ui.screens.media.rememberDynamicColors
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.theme.LocalHapticEnabled
@@ -240,6 +238,45 @@ fun CatalogContent(
     var trackForAction by remember { mutableStateOf<CatalogTrack?>(null) }
     var playlistTargetTrack by remember { mutableStateOf<CatalogTrack?>(null) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
+
+    state.offlineSongToPlay?.let { track ->
+        AlertDialog(
+            onDismissRequest = { catalogViewModel.hideOfflineNotice() },
+            icon = { Icon(Icons.Rounded.FileDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)) },
+            title = { Text("We noticed...", fontWeight = FontWeight.Black) },
+            text = {
+                Text(
+                    "You already have \"${track.title}\" in your offline collection. Would you like to play the local version to save data and battery?",
+                    textAlign = TextAlign.Center
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Play Offline")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        catalogViewModel.resolveAndPlay(track, forceOnline = true) { uri, title, artist, thumbUrl, sourceUrl ->
+                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Stream Online")
+                }
+            },
+            shape = RoundedCornerShape(28.dp)
+        )
+    }
 
     var focusedTrack by remember { mutableStateOf<CatalogTrack?>(null) }
     var focusedTrackSize by remember { mutableStateOf(Size.Zero) }
@@ -418,7 +455,8 @@ fun CatalogContent(
                 !state.isLoading &&
                 !state.isLoadingMore &&
                 !state.isLoadingRecommendations &&
-                !state.isLoadingMoreRecommendations
+                !state.isLoadingMoreRecommendations &&
+                state.canLoadMore
         }
     }
 
@@ -471,7 +509,11 @@ fun CatalogContent(
                                 if (state.layoutMode == LayoutMode.GRID) LayoutMode.LIST else LayoutMode.GRID
                             )
                         },
-                        onRefresh = { catalogViewModel.loadStorefront(currentTrack) },
+                        onRefresh = { 
+                            if (!state.isRefreshing) {
+                                catalogViewModel.loadStorefront(currentTrack, isRefresh = true) 
+                            }
+                        },
                         layoutMode = state.layoutMode
                     )
                 }
@@ -508,9 +550,9 @@ fun CatalogContent(
                 }
 
                 if (state.query.isBlank()) {
-                    if (state.isLoading) {
-                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = stringResource(R.string.st_CatalogScreen_cat4), listMode = true) }
-                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = stringResource(R.string.st_CatalogScreen_rec8), listMode = true) }
+                    if (state.isLoading || state.isRefreshing) {
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(listMode = true) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(listMode = true) }
                     } else {
                         if (state.quickPicks.isNotEmpty()) {
                             item(span = StaggeredGridItemSpan.FullLine) {
@@ -575,7 +617,7 @@ fun CatalogContent(
                                 icon = Icons.Rounded.Star
                             )
                         }
-                        if (state.isLoadingRecommendations && state.justForYou.isEmpty()) {
+                        if ((state.isLoadingRecommendations || state.isRefreshing) && state.justForYou.isEmpty()) {
                             item(span = StaggeredGridItemSpan.FullLine) { RecommendationSkeleton() }
                         } else {
                             catalogTrackRows(
@@ -611,7 +653,7 @@ fun CatalogContent(
                     }
 
                     if (state.isLoading) {
-                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(title = "Loading", listMode = state.layoutMode == LayoutMode.LIST) }
+                        item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(listMode = state.layoutMode == LayoutMode.LIST) }
                     } else if (state.tracks.isEmpty()) {
                         item(span = StaggeredGridItemSpan.FullLine) {
                             Surface(
@@ -795,10 +837,10 @@ private fun CatalogTopActions(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalIconButton(
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ToolzTonalExpressiveIconButton(
                     onClick = onRefresh,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size(44.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -806,9 +848,9 @@ private fun CatalogTopActions(
                 ) {
                     Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(20.dp))
                 }
-                FilledTonalIconButton(
+                ToolzTonalExpressiveIconButton(
                     onClick = onToggleLayout,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size(44.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         contentColor = MaterialTheme.colorScheme.onSurface
@@ -926,7 +968,6 @@ private fun FocusedTrackOverlay(
                     isDownloaded = false,
                     progress = null,
                     isFocused = true,
-                    staticScale = true,
                     onClick = {},
                     onDownload = {},
                     onLongPress = {},
@@ -938,7 +979,6 @@ private fun FocusedTrackOverlay(
                     isDownloaded = false,
                     progress = null,
                     isFocused = true,
-                    staticScale = true,
                     onClick = {},
                     onDownload = {},
                     onLongPress = {},
@@ -1070,48 +1110,25 @@ private fun GenreFilterChips(
         "Pop", "Hip Hop", "R&B", "Afrobeats", "Amapiano", "Electronic", "Rock", "Jazz", "K-Pop", "Lo-fi"
     )
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
     ) {
         item {
-            CatalogFilterChip(
+            ExpressiveFilterChip(
                 selected = selectedGenre == null,
                 onClick = { onGenreSelected(null) },
-                label = "All",
-                icon = Icons.Rounded.LibraryMusic
+                label = { Text("All") },
+                leadingIcon = { Icon(Icons.Rounded.LibraryMusic, null, modifier = Modifier.size(18.dp)) }
             )
         }
         items(genres) { genre ->
-            CatalogFilterChip(
+            ExpressiveFilterChip(
                 selected = selectedGenre == genre,
                 onClick = { onGenreSelected(if (selectedGenre == genre) null else genre) },
-                label = genre
+                label = { Text(genre) }
             )
         }
     }
-}
-
-@Composable
-private fun CatalogFilterChip(
-    selected: Boolean,
-    onClick: () -> Unit,
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label, maxLines = 1) },
-        leadingIcon = icon?.let {
-            { Icon(it, null, modifier = Modifier.size(16.dp)) }
-        },
-        shape = RoundedCornerShape(12.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer
-        )
-    )
 }
 
 @Composable
@@ -1120,13 +1137,12 @@ private fun CatalogSearchBar(
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit
 ) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
+    ExpressiveSearchField(
+        query = query,
+        onQueryChange = onQueryChange,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp)
-            .heightIn(min = 56.dp),
+            .padding(horizontal = 4.dp),
         placeholder = {
             Text(
                 text = "Search artists, songs...",
@@ -1138,30 +1154,30 @@ private fun CatalogSearchBar(
             Icon(
                 imageVector = Icons.Rounded.Search,
                 contentDescription = null,
-                modifier = Modifier.size(22.dp).padding(start = 4.dp)
+                modifier = Modifier.size(24.dp)
             )
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(
                     onClick = onClear,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "Clear",
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
         },
-        singleLine = true,
-        shape = RoundedCornerShape(18.dp),
-        colors = OutlinedTextFieldDefaults.colors(
+        colors = TextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent
         )
     )
 }
@@ -1173,64 +1189,77 @@ private fun CatalogGridCard(
     isDownloaded: Boolean,
     progress: Float?,
     isFocused: Boolean = false,
-    staticScale: Boolean = false,
     onClick: () -> Unit,
     onDownload: () -> Unit,
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.03f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "gridScale")
     val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "gridAlpha")
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(16.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(bottom = 8.dp)
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = onLongPress,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
     ) {
-        Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))) {
-            AlbumArtImage(
-                url = track.thumbnailUrl,
-                seed = track.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-            if (isFocused) {
-                Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
-            }
-            Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
-                DownloadButton(
-                    isDownloaded = isDownloaded,
-                    progress = progress,
-                    onDownload = onDownload,
-                    compact = true
+        Column(modifier = Modifier.padding(10.dp)) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp))) {
+                AlbumArtImage(
+                    url = track.thumbnailUrl,
+                    seed = track.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
+                if (isDownloaded) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                        tonalElevation = 2.dp
+                    ) {
+                        Icon(
+                            Icons.Rounded.CloudDone,
+                            null,
+                            modifier = Modifier.padding(4.dp).size(14.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                if (isFocused) {
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
+                }
+                Row(modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
+                    DownloadButton(
+                        isDownloaded = isDownloaded,
+                        progress = progress,
+                        onDownload = onDownload,
+                        compact = true
+                    )
+                }
             }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = track.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+            )
+            Text(
+                text = track.artist,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
+            )
+            Spacer(Modifier.height(4.dp))
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = track.title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
-        )
-        Text(
-            text = track.artist,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.alpha(alpha).padding(horizontal = 4.dp)
-        )
     }
 }
 
@@ -1241,33 +1270,25 @@ private fun CatalogListCard(
     isDownloaded: Boolean,
     progress: Float?,
     isFocused: Boolean = false,
-    staticScale: Boolean = false,
     onClick: () -> Unit,
     onDownload: () -> Unit,
     onLongPress: () -> Unit,
     onMore: () -> Unit
 ) {
-    val scale by animateFloatAsState(if (isFocused && !staticScale) 1.02f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "listScale")
     val alpha by animateFloatAsState(if (isFocused) 1f else 0.85f, label = "listAlpha")
 
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(16.dp))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress
-            ),
-        color = Color.Transparent
+    ExpressiveCard(
+        onClick = onClick,
+        onLongClick = onLongPress,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color.Transparent,
+        border = if (isFocused) BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(contentAlignment = Alignment.BottomEnd) {
@@ -1275,10 +1296,25 @@ private fun CatalogListCard(
                     url = track.thumbnailUrl,
                     seed = track.title,
                     modifier = Modifier
-                        .size(56.dp)
+                        .size(60.dp)
                         .clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Crop
                 )
+                if (isDownloaded) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopStart).offset(x = (-4).dp, y = (-4).dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.surface)
+                    ) {
+                        Icon(
+                            Icons.Rounded.CloudDone,
+                            null,
+                            modifier = Modifier.padding(3.dp).size(10.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
                 if (isFocused) {
                     Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(14.dp)))
                 }
@@ -1297,7 +1333,7 @@ private fun CatalogListCard(
                 Text(
                     track.artist,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1313,9 +1349,9 @@ private fun CatalogListCard(
                 )
                 IconButton(
                     onClick = onMore,
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -1504,67 +1540,98 @@ private fun HeroSkeleton() {
 }
 
 @Composable
-private fun CatalogSectionSkeleton(title: String, listMode: Boolean) {
+private fun CatalogSectionSkeleton(listMode: Boolean) {
     val brush = shimmerBrush()
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (listMode) {
-            repeat(3) {
+            repeat(4) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.24f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f),
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(10.dp),
+                            .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(74.dp)
-                                .clip(RoundedCornerShape(18.dp))
+                                .size(60.dp)
+                                .clip(RoundedCornerShape(14.dp))
                                 .background(brush)
                         )
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(0.6f)
-                                    .height(20.dp)
-                                    .clip(RoundedCornerShape(4.dp))
+                                    .fillMaxWidth(0.55f)
+                                    .height(18.dp)
+                                    .clip(RoundedCornerShape(6.dp))
                                     .background(brush)
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(4.dp)) // Pixel-perfect match for list card
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(0.4f)
-                                    .height(16.dp)
+                                    .fillMaxWidth(0.3f)
+                                    .height(14.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(brush)
                             )
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(brush)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(brush)
+                        )
                     }
                 }
             }
         } else {
             repeat(2) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     repeat(2) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .aspectRatio(0.74f)
-                                .clip(RoundedCornerShape(26.dp))
-                                .background(brush)
-                        )
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(brush)
+                                )
+                                Spacer(Modifier.height(10.dp)) // Pixel-perfect match for grid card
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.75f)
+                                        .height(14.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(brush)
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.45f)
+                                        .height(12.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(brush)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1575,15 +1642,45 @@ private fun CatalogSectionSkeleton(title: String, listMode: Boolean) {
 @Composable
 private fun RecommendationSkeleton(compact: Boolean = false) {
     val brush = shimmerBrush()
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(if (compact) 2 else 4) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(88.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(brush)
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        repeat(if (compact) 2 else 5) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(brush)
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.7f)
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(brush)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.4f)
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(brush)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1592,10 +1689,10 @@ private fun RecommendationSkeleton(compact: Boolean = false) {
 private fun shimmerBrush(): Brush {
     val transition = rememberInfiniteTransition(label = "catalogShimmer")
     val shift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 2000f,
+        initialValue = -1000f,
+        targetValue = 2500f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            animation = tween(durationMillis = 1600, easing = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)),
             repeatMode = RepeatMode.Restart
         ),
         label = "catalogShimmerShift"
@@ -1603,14 +1700,14 @@ private fun shimmerBrush(): Brush {
 
     return Brush.linearGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            Color.Transparent,
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
+            Color.Transparent
         ),
-        start = Offset(shift - 600f, shift - 600f),
-        end = Offset(shift, shift)
+        start = Offset(shift, shift),
+        end = Offset(shift + 800f, shift + 800f)
     )
 }
 
