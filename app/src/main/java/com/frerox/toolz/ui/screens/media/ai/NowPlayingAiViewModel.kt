@@ -1552,7 +1552,7 @@ class NowPlayingAiViewModel @Inject constructor(
         watchdogJob?.cancel()
         sessionActive = false
         viewModelScope.launch(Dispatchers.Main) {
-            runCatching { speechRecognizer?.cancel() }
+            destroyRecognizer()
         }
     }
 
@@ -1649,7 +1649,8 @@ class NowPlayingAiViewModel @Inject constructor(
             runCatching { recognizer.cancel() }
             sessionActive = false
             // Give the service time to release the previous session.
-            delay(150L)
+            // Increased to 300ms to prevent ERROR_RECOGNIZER_BUSY on slower devices
+            delay(300L)
         }
 
         if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return
@@ -1757,6 +1758,8 @@ class NowPlayingAiViewModel @Inject constructor(
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             lastCallbackAtMs = System.currentTimeMillis()
+            consecutiveFailures = 0
+            busyRetryCount = 0
             Log.v(TAG, "Recognizer ready")
         }
         override fun onBeginningOfSpeech() {
