@@ -312,6 +312,7 @@ private fun CategorySelectionCard(
                         BackupItem.STEPS -> R.string.st_Backup_Item_Steps
                         BackupItem.MATH_HISTORY -> R.string.st_Backup_Item_MathHistory
                         BackupItem.PDF_METADATA -> R.string.st_Backup_Item_PdfMetadata
+                        BackupItem.CATALOG_DATA -> R.string.st_Backup_Item_CatalogData
                         BackupItem.OTHERS -> R.string.st_Backup_Item_Others
                     }
                     ExpressiveFilterChip(
