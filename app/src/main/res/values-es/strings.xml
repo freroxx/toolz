@@ -1252,6 +1252,7 @@
     <string name="st_Backup_Item_Steps">Datos del podómetro</string>
     <string name="st_Backup_Item_MathHistory">Cálculos matemáticos</string>
     <string name="st_Backup_Item_PdfMetadata">Datos de herramientas PDF</string>
+    <string name="st_Backup_Item_CatalogData">Perfil de gusto del catálogo</string>
     <string name="st_Backup_Item_Others">Datos misceláneos</string>
 
     <string name="st_Backup_Select_AtLeastOne">Por favor, selecciona al menos un ítem para copiar</string>
