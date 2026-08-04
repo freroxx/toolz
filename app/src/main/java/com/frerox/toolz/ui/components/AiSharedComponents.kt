@@ -293,6 +293,7 @@ fun SharedAiInputBar(
                     listOf(Color.Transparent, AiDesign.surfaceColor().copy(alpha = 0.95f), AiDesign.surfaceColor()),
                 )
             )
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp)
             .padding(top = 14.dp, bottom = 10.dp),
     ) {

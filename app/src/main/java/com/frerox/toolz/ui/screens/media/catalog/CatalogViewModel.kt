@@ -201,10 +201,13 @@ class CatalogViewModel @Inject constructor(
             searchQueryFlow
                 .debounce(350)
                 .collect { query ->
+                    currentSearchJob?.cancel()
                     if (query.isBlank()) {
                         loadStorefront(currentContextTrack)
                     } else {
-                        performSearch(query, isNewSearch = true)
+                        currentSearchJob = viewModelScope.launch {
+                            performSearch(query, isNewSearch = true)
+                        }
                     }
                 }
         }
@@ -487,7 +490,6 @@ class CatalogViewModel @Inject constructor(
     }
 
     private suspend fun performSearch(query: String, isNewSearch: Boolean) {
-        currentSearchJob?.cancel()
         if (isNewSearch) {
             _uiState.update {
                 it.copy(
@@ -497,6 +499,8 @@ class CatalogViewModel @Inject constructor(
                     tracks = emptyList()
                 )
             }
+        } else {
+            _uiState.update { it.copy(isLoadingMore = true) }
         }
 
         try {
@@ -515,11 +519,16 @@ class CatalogViewModel @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            val errorMessage = when {
+                e.message?.contains("403") == true -> "YouTube restricted access. Please try again later."
+                e.message?.contains("429") == true -> "Too many requests. YouTube is rate-limiting the app."
+                else -> e.localizedMessage ?: "Search failed. Check your connection."
+            }
             _uiState.update {
                 it.copy(
                     isLoading = false,
                     isLoadingMore = false,
-                    error = e.localizedMessage ?: "Search failed"
+                    error = errorMessage
                 )
             }
         }

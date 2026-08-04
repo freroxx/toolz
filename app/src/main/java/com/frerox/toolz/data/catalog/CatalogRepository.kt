@@ -51,6 +51,8 @@ import javax.inject.Singleton
 class CatalogRepository @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
+    private var isInitialized = false
+
     private val youtubeService: YoutubeService
         get() {
             initNewPipe()
@@ -58,9 +60,13 @@ class CatalogRepository @Inject constructor(
         }
 
     private fun initNewPipe() {
+        if (isInitialized) return
         try {
             NewPipe.init(OkHttpDownloader(okHttpClient), Localization.DEFAULT, ContentCountry.DEFAULT)
-        } catch (_: Exception) { }
+            isInitialized = true
+        } catch (_: Exception) { 
+            isInitialized = true // Already initialized or failed irrecoverably
+        }
     }
 
     init {
@@ -122,7 +128,7 @@ class CatalogRepository @Inject constructor(
             throw e
         } catch (e: Exception) {
             android.util.Log.e("CatalogRepo", "Search failed for query \"$query\": ${e.message}")
-            Pair(emptyList(), null)
+            throw e
         }
     }
 
@@ -249,7 +255,7 @@ class CatalogRepository @Inject constructor(
         try {
             val request = Request.Builder()
                 .url(streamUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
                 .header("Accept", "*/*")
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Origin", "https://www.youtube.com")
@@ -366,13 +372,13 @@ class CatalogRepository @Inject constructor(
                 )
 
             // Modern Chrome User-Agent to prevent bot detection/403s
-            builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
+            builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
             builder.header("Accept", "*/*")
             builder.header("Accept-Language", "en-US,en;q=0.9")
             builder.header("Origin", "https://www.youtube.com")
             builder.header("Referer", "https://www.youtube.com/")
             builder.header("X-YouTube-Client-Name", "1")
-            builder.header("X-YouTube-Client-Version", "2.20231110.00.00")
+            builder.header("X-YouTube-Client-Version", "2.20240730.01.00")
 
             // Add headers from NewPipe
             request.headers().forEach { (key, values) ->
