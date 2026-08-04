@@ -41,6 +41,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -180,6 +181,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.catalog.CatalogTrack
+import com.frerox.toolz.data.catalog.normalizeYoutubeUrl
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.ui.components.ExpressiveCarousel
@@ -230,7 +232,7 @@ fun CatalogContent(
     val downloadedSourceUrls = remember(localTracks) {
         localTracks
             .filter { it.sourceUrl != null && (it.path != null || it.album == "Toolz Downloads") }
-            .mapNotNull { it.sourceUrl }
+            .mapNotNull { it.sourceUrl?.normalizeYoutubeUrl() }
             .toSet()
     }
 
@@ -240,41 +242,19 @@ fun CatalogContent(
     var showPlaylistPicker by remember { mutableStateOf(false) }
 
     state.offlineSongToPlay?.let { track ->
-        AlertDialog(
-            onDismissRequest = { catalogViewModel.hideOfflineNotice() },
-            icon = { Icon(Icons.Rounded.FileDownload, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)) },
-            title = { Text("We noticed...", fontWeight = FontWeight.Black) },
-            text = {
-                Text(
-                    "You already have \"${track.title}\" in your offline collection. Would you like to play the local version to save data and battery?",
-                    textAlign = TextAlign.Center
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
-                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                        }
-                    },
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("Play Offline")
+        ExpressiveOfflineNotice(
+            track = track,
+            onDismiss = { catalogViewModel.hideOfflineNotice() },
+            onPlayOffline = {
+                catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
+                    onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
                 }
             },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        catalogViewModel.resolveAndPlay(track, forceOnline = true) { uri, title, artist, thumbUrl, sourceUrl ->
-                            onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
-                        }
-                    },
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text("Stream Online")
+            onStreamOnline = {
+                catalogViewModel.resolveAndPlay(track, forceOnline = true) { uri, title, artist, thumbUrl, sourceUrl ->
+                    onPlayTrack(uri, title, artist, thumbUrl, sourceUrl)
                 }
-            },
-            shape = RoundedCornerShape(28.dp)
+            }
         )
     }
 
@@ -359,7 +339,7 @@ fun CatalogContent(
     trackForAction?.let { track ->
         CatalogTrackActionsSheet(
             track = track,
-            isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+            isDownloaded = downloadedSourceUrls.contains(track.sourceUrl.normalizeYoutubeUrl()),
             onDismiss = { trackForAction = null },
             onPlayNow = {
                 catalogViewModel.resolveAndPlay(track) { uri, title, artist, thumbUrl, sourceUrl ->
@@ -654,7 +634,7 @@ fun CatalogContent(
 
                     if (state.isLoading) {
                         item(span = StaggeredGridItemSpan.FullLine) { CatalogSectionSkeleton(listMode = state.layoutMode == LayoutMode.LIST) }
-                    } else if (state.tracks.isEmpty()) {
+                    } else if (state.tracks.isEmpty() && state.error == null) {
                         item(span = StaggeredGridItemSpan.FullLine) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
@@ -747,7 +727,6 @@ fun CatalogContent(
         }
     }
 }
-
 private fun LazyStaggeredGridScope.catalogTrackRows(
     tracks: List<CatalogTrack>,
     layoutMode: LayoutMode,
@@ -768,7 +747,7 @@ private fun LazyStaggeredGridScope.catalogTrackRows(
 
             CatalogListCard(
                 track = track,
-                isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+                isDownloaded = downloadedSourceUrls.contains(track.sourceUrl.normalizeYoutubeUrl()),
                 progress = downloadingTracks[track.id] ?: downloadingTracks[track.sourceUrl],
                 isFocused = focusedTrackUrl == track.sourceUrl,
                 onClick = { itemCoords?.let { onTrackClick(track, it, 16.dp, LayoutMode.LIST) } },
@@ -793,7 +772,7 @@ private fun LazyStaggeredGridScope.catalogTrackRows(
 
             CatalogGridCard(
                 track = track,
-                isDownloaded = downloadedSourceUrls.contains(track.sourceUrl),
+                isDownloaded = downloadedSourceUrls.contains(track.sourceUrl.normalizeYoutubeUrl()),
                 progress = downloadingTracks[track.id] ?: downloadingTracks[track.sourceUrl],
                 isFocused = focusedTrackUrl == track.sourceUrl,
                 onClick = { itemCoords?.let { onTrackClick(track, it, 16.dp, LayoutMode.GRID) } },
@@ -807,7 +786,6 @@ private fun LazyStaggeredGridScope.catalogTrackRows(
         }
     }
 }
-
 @Composable
 private fun CatalogTopActions(
     layoutMode: LayoutMode,
@@ -866,7 +844,6 @@ private fun CatalogTopActions(
         }
     }
 }
-
 @Composable
 private fun SectionHeader(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(
@@ -902,7 +879,6 @@ private fun SectionHeader(title: String, subtitle: String, icon: androidx.compos
         }
     }
 }
-
 @Composable
 private fun FocusedTrackOverlay(
     track: CatalogTrack,
@@ -988,7 +964,6 @@ private fun FocusedTrackOverlay(
         }
     }
 }
-
 @Composable
 private fun FeaturedCarousel(
     tracks: List<CatalogTrack>,
@@ -1018,6 +993,7 @@ private fun FeaturedCarousel(
         )
     }
 }
+
 
 @Composable
 private fun FeaturedCarouselItem(
@@ -1100,7 +1076,6 @@ private fun FeaturedCarouselItem(
         }
     }
 }
-
 @Composable
 private fun GenreFilterChips(
     selectedGenre: String?,
@@ -1130,7 +1105,6 @@ private fun GenreFilterChips(
         }
     }
 }
-
 @Composable
 private fun CatalogSearchBar(
     query: String,
@@ -1212,12 +1186,16 @@ private fun CatalogGridCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                if (isDownloaded) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isDownloaded,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
+                ) {
                     Surface(
-                        modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                        tonalElevation = 2.dp
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        tonalElevation = 6.dp
                     ) {
                         Icon(
                             Icons.Rounded.CloudDone,
@@ -1262,7 +1240,6 @@ private fun CatalogGridCard(
         }
     }
 }
-
 @Composable
 private fun CatalogListCard(
     modifier: Modifier = Modifier,
@@ -1300,11 +1277,16 @@ private fun CatalogListCard(
                         .clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Crop
                 )
-                if (isDownloaded) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isDownloaded,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.8f),
+                    modifier = Modifier.align(Alignment.TopStart).offset(x = (-4).dp, y = (-4).dp)
+                ) {
                     Surface(
-                        modifier = Modifier.align(Alignment.TopStart).offset(x = (-4).dp, y = (-4).dp),
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
+                        tonalElevation = 6.dp,
                         border = BorderStroke(2.dp, MaterialTheme.colorScheme.surface)
                     ) {
                         Icon(
@@ -1357,7 +1339,6 @@ private fun CatalogListCard(
         }
     }
 }
-
 @Composable
 private fun CompactDurationBadge(duration: Long) {
     Surface(
@@ -1384,7 +1365,6 @@ private fun CompactDurationBadge(duration: Long) {
         }
     }
 }
-
 @Composable
 private fun DurationBadge(duration: Long) {
     Surface(
@@ -1401,6 +1381,7 @@ private fun DurationBadge(duration: Long) {
         )
     }
 }
+
 
 @Composable
 private fun DownloadButton(
@@ -1468,7 +1449,6 @@ private fun DownloadButton(
         }
     }
 }
-
 @Composable
 private fun ErrorCard(message: String, onRetry: () -> Unit) {
     Surface(
@@ -1493,7 +1473,6 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
         }
     }
 }
-
 @Composable
 private fun HeroSkeleton() {
     val brush = shimmerBrush()
@@ -1538,7 +1517,6 @@ private fun HeroSkeleton() {
         }
     }
 }
-
 @Composable
 private fun CatalogSectionSkeleton(listMode: Boolean) {
     val brush = shimmerBrush()
@@ -1638,7 +1616,6 @@ private fun CatalogSectionSkeleton(listMode: Boolean) {
         }
     }
 }
-
 @Composable
 private fun RecommendationSkeleton(compact: Boolean = false) {
     val brush = shimmerBrush()
@@ -1684,7 +1661,6 @@ private fun RecommendationSkeleton(compact: Boolean = false) {
         }
     }
 }
-
 @Composable
 private fun shimmerBrush(): Brush {
     val transition = rememberInfiniteTransition(label = "catalogShimmer")
@@ -1785,7 +1761,6 @@ private fun CatalogTrackActionsSheet(
         }
     }
 }
-
 @Composable
 private fun CatalogActionRow(
     title: String,
@@ -1818,7 +1793,6 @@ private fun CatalogActionRow(
         }
     }
 }
-
 @Composable
 fun CatalogOnboardingDialog(onDismiss: () -> Unit) {
     AlertDialog(
@@ -1969,7 +1943,6 @@ fun DownloadOptionsBottomSheet(
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpinningDownloadPopup(
@@ -2055,7 +2028,6 @@ private fun formatDuration(millis: Long): String {
         String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
     }
 }
-
 @Composable
 private fun ShockwaveOverlay(
     offset: Offset,
@@ -2108,3 +2080,73 @@ private fun ShockwaveOverlay(
         )
     }
 }
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ExpressiveOfflineNotice(
+    track: CatalogTrack,
+    onDismiss: () -> Unit,
+    onPlayOffline: () -> Unit,
+    onStreamOnline: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Rounded.CloudDone,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "We noticed...",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "You already have \"${track.title}\" in your offline collection. Would you like to play the local version to save data and battery?",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(24.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = onPlayOffline,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Play Offline", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = onStreamOnline,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Stream Online", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
