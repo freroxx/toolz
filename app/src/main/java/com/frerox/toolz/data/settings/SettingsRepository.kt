@@ -654,7 +654,7 @@ class SettingsRepository @Inject constructor(
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
-    val showTopAppBarDescriptions: Flow<Boolean> = dataStore.data.map { it[SHOW_TOP_APP_BAR_DESCRIPTIONS] ?: true }
+    val showTopAppBarDescriptions: Flow<Boolean> = dataStore.data.map { it[SHOW_TOP_APP_BAR_DESCRIPTIONS] ?: false }
 
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
     val stepHistoryRetention: Flow<String> = dataStore.data.map { it[STEP_HISTORY_RETENTION] ?: "Forever" }

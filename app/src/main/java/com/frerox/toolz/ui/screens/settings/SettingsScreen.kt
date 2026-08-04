@@ -625,16 +625,6 @@ fun SettingsScreen(
                                     )
                                 }
                             }
-
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
-                                SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
-                                )
-                            }
                         }
                     }
 
