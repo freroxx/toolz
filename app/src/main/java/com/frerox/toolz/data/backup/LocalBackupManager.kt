@@ -28,6 +28,7 @@ import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.ai.AiChat
 import com.frerox.toolz.data.ai.AiMessage
 import com.frerox.toolz.data.ai.AiSettingsManager
+import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.clipboard.ClipboardEntry
 import com.frerox.toolz.data.crypto.CryptoHistoryEntry
@@ -244,6 +245,10 @@ class LocalBackupManager @Inject constructor(
             addTextEntry(zip, "data/pdf_metadata.json", listAdapter<PdfMetadata>().toJson(database.pdfMetadataDao().getAllMetadataSync()), entryHashes)
             addTextEntry(zip, "data/pdf_annotations.json", listAdapter<PdfAnnotation>().toJson(database.pdfAnnotationDao().getAllAnnotationsSync()), entryHashes)
         }
+        if (items.contains(BackupItem.CATALOG_DATA)) {
+            _progress.value = "Music Catalog Data"
+            addTextEntry(zip, "data/catalog_search.json", listAdapter<CatalogSearchEntry>().toJson(database.catalogSearchDao().getAllSearchesSync()), entryHashes)
+        }
         if (items.contains(BackupItem.OTHERS)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Others)
             addTextEntry(zip, "data/app_limits.json", listAdapter<AppLimit>().toJson(database.appLimitDao().getAllLimitsSync()), entryHashes)
@@ -391,6 +396,10 @@ class LocalBackupManager @Inject constructor(
             } else false
             "data/pdf_annotations.json" -> if (itemsToRestore.contains(BackupItem.PDF_METADATA)) {
                 database.pdfAnnotationDao().insertAnnotations(listAdapter<PdfAnnotation>().fromJson(json).orEmpty())
+                true
+            } else false
+            "data/catalog_search.json" -> if (itemsToRestore.contains(BackupItem.CATALOG_DATA)) {
+                database.catalogSearchDao().insertSearches(listAdapter<CatalogSearchEntry>().fromJson(json).orEmpty())
                 true
             } else false
             "data/app_limits.json" -> if (itemsToRestore.contains(BackupItem.OTHERS)) {
