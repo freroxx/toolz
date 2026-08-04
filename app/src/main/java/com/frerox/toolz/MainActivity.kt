@@ -112,8 +112,11 @@ import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
 import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
 import com.frerox.toolz.util.NotificationHelper
+import com.frerox.toolz.ui.components.MarkdownContent
+import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.ToolzTheme
 import com.frerox.toolz.ui.theme.toolzBackground
+import androidx.compose.ui.tooling.preview.Preview
 import com.frerox.toolz.service.StepCounterService
 import android.graphics.RenderEffect
 import android.graphics.Shader
@@ -485,6 +488,8 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
     val apkUrl by settingsRepository.updateApkUrl.collectAsState(initial = null)
 
     var showDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(availableVersion) {
         if (availableVersion != null) {
@@ -493,123 +498,197 @@ fun UpdateOverlay(settingsRepository: SettingsRepository) {
     }
 
     if (showDialog && availableVersion != null) {
-        Dialog(
-            onDismissRequest = { showDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(120.dp)
-                            .clip(RoundedCornerShape(32.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.app_logo),
-                            contentDescription = null,
-                            modifier = Modifier.size(120.dp).clip(RoundedCornerShape(32.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-
-                    Spacer(Modifier.height(32.dp))
-
-                    Text(
-                        stringResource(R.string.st_MainActivity_8f1a),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 3.sp
-                    )
-
-                    Text(
-                        stringResource(R.string.st_MainActivity_3d5b),
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Black,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Text(
-                        stringResource(R.string.st_Version_Text, availableVersion ?: ""),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    Spacer(Modifier.height(40.dp))
-
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(24.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                    ) {
-                        Column(modifier = Modifier.padding(24.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.History, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.st_MainActivity_9e2c), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black)
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                changelog ?: stringResource(R.string.st_MainActivity_1a2b),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(48.dp))
-
-                    val context = LocalContext.current
-                    val scope = rememberCoroutineScope()
-
-                    Button(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            apkUrl?.let { url ->
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
-                            }
-                            showDialog = false
-                        },
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Rounded.Download, null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(stringResource(R.string.st_MainActivity_7c4d), fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    TextButton(
-                        onClick = {
-                            vibrationManager?.vibrateClick()
-                            showDialog = false
-                            scope.launch { settingsRepository.setAvailableUpdate(null, null, null) }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
-                    ) {
-                        Text(stringResource(R.string.st_MainActivity_5f6e), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
-                    }
+        UpdateOverlayContent(
+            availableVersion = availableVersion ?: "",
+            changelog = changelog ?: "",
+            apkUrl = apkUrl ?: "",
+            onDismiss = { showDialog = false },
+            onStartDownload = { url ->
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                context.startActivity(intent)
+            },
+            onIgnore = {
+                showDialog = false
+                scope.launch {
+                    settingsRepository.setAvailableUpdate(null, null, null)
                 }
             }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun UpdateOverlayContent(
+    availableVersion: String,
+    changelog: String,
+    apkUrl: String,
+    onDismiss: () -> Unit,
+    onStartDownload: (String) -> Unit,
+    onIgnore: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
+            
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .toolzBackground()
+                    .padding(horizontal = 32.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(Modifier.statusBarsPadding().height(48.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(140.dp)
+                        .clip(RoundedCornerShape(40.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.app_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(140.dp).clip(RoundedCornerShape(40.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                Spacer(Modifier.height(40.dp))
+
+                Text(
+                    text = "NEW VERSION READY",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 4.sp
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    text = "v$availableVersion",
+                    style = MaterialTheme.typography.displayMedium,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(32.dp))
+
+                Text(
+                    "WHAT'S NEW",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+                ) {
+                    MarkdownContent(
+                        markdown = if (changelog.isBlank()) "No changelog provided for this release." else changelog,
+                        modifier = Modifier.padding(24.dp),
+                        baseFontSize = 15.sp,
+                        textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(Modifier.height(48.dp))
+
+                ToolzExpressiveButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        if (apkUrl.isNotEmpty()) {
+                            onStartDownload(apkUrl)
+                        }
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(72.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Rounded.Download, null, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Text(
+                        "UPDATE NOW",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                TextButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        onIgnore()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    Text(
+                        "LATER",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+                
+                Spacer(Modifier.navigationBarsPadding().height(32.dp))
+            }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun UpdateOverlayPreview() {
+    ToolzTheme {
+        UpdateOverlayContent(
+            availableVersion = "1.1.0",
+            changelog = """
+                # Major Update: Expressive UI
+                
+                This update brings the new **Material 3 Expressive** design to Toolz!
+                
+                ### Key Improvements:
+                - [x] Redesigned update screen
+                - [x] Full **Markdown** support in changelogs
+                - [ ] AI-powered smart suggestions (Coming soon)
+                
+                ### Bug Fixes:
+                * Fixed karaoke mode synchronization
+                * Improved battery efficiency for step counter
+                * Resolved crash on older devices
+                
+                | Module | Status |
+                |---|---|
+                | Core | Stable |
+                | UI | Redesigned |
+                | AI | Beta |
+                
+                > "The best tools are the ones that disappear when you use them."
+                
+                Check out the full list on [GitHub](https://github.com/freroxx/toolz)!
+            """.trimIndent(),
+            apkUrl = "https://github.com",
+            onDismiss = {},
+            onStartDownload = {},
+            onIgnore = {}
+        )
     }
 }
 

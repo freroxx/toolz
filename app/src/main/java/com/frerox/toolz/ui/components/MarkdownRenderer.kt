@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.*
@@ -52,9 +53,10 @@ sealed class MdSegment {
     data class Paragraph(val content: AnnotatedString) : MdSegment()
     data class Header(val level: Int, val text: String) : MdSegment()
     data class Code(val language: String, val code: String) : MdSegment()
-    data class BulletItem(val content: AnnotatedString, val depth: Int = 0) : MdSegment()
+    data class BulletItem(val content: AnnotatedString, val depth: Int = 0, val isChecked: Boolean? = null) : MdSegment()
     data class NumberedItem(val index: Int, val content: AnnotatedString) : MdSegment()
     data class Table(val headers: List<String>, val rows: List<List<String>>) : MdSegment()
+    data class Blockquote(val content: AnnotatedString) : MdSegment()
     object Divider : MdSegment()
 }
 
@@ -95,11 +97,23 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
             continue
         }
 
-        // Bullet list
-        if (line.matches(Regex("^(\\s*)[\\-\\*\\+] .+"))) {
-            val depth   = line.indexOfFirst { !it.isWhitespace() } / 2
-            val content = line.trim().drop(2)
-            segments += MdSegment.BulletItem(inlineMarkdownNoCompose(content), depth)
+        // Bullet list (including checkboxes)
+        val bulletMatch = Regex("^(\\s*)[\\-\\*\\+] (.*)").find(line)
+        if (bulletMatch != null) {
+            val indent = bulletMatch.groupValues[1]
+            val depth = indent.length / 2
+            var content = bulletMatch.groupValues[2]
+            
+            var isChecked: Boolean? = null
+            if (content.startsWith("[ ] ")) {
+                isChecked = false
+                content = content.drop(4)
+            } else if (content.startsWith("[x] ") || content.startsWith("[X] ")) {
+                isChecked = true
+                content = content.drop(4)
+            }
+            
+            segments += MdSegment.BulletItem(inlineMarkdownNoCompose(content), depth, isChecked)
             i++
             continue
         }
@@ -110,6 +124,14 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
             val idx     = numberedMatch.groupValues[1].toIntOrNull() ?: 1
             val content = numberedMatch.groupValues[2]
             segments += MdSegment.NumberedItem(idx, inlineMarkdownNoCompose(content))
+            i++
+            continue
+        }
+
+        // Blockquote
+        if (line.trimStart().startsWith(">")) {
+            val content = line.trimStart().drop(1).trim()
+            segments += MdSegment.Blockquote(inlineMarkdownNoCompose(content))
             i++
             continue
         }
@@ -247,7 +269,16 @@ fun MarkdownSegment(
         }
         is MdSegment.BulletItem -> {
             Row(modifier = modifier.padding(start = (seg.depth * 12).dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(textColor.copy(alpha = 0.8f), CircleShape))
+                if (seg.isChecked != null) {
+                    Icon(
+                        imageVector = if (seg.isChecked) Icons.Rounded.Check else Icons.Rounded.CheckBoxOutlineBlank,
+                        contentDescription = null,
+                        modifier = Modifier.size((baseFontSize.value * 1.2f).dp).offset(y = 2.dp),
+                        tint = if (seg.isChecked) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.5f)
+                    )
+                } else {
+                    Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(textColor.copy(alpha = 0.8f), CircleShape))
+                }
                 ClickableText(
                     text = seg.content,
                     style = bodyStyle,
@@ -305,7 +336,53 @@ fun MarkdownSegment(
                 }
             }
         }
+        is MdSegment.Blockquote -> {
+            Row(modifier = modifier.padding(vertical = 8.dp).height(IntrinsicSize.Min)) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+                )
+                Spacer(Modifier.width(16.dp))
+                ClickableText(
+                    text = seg.content,
+                    style = bodyStyle.copy(fontStyle = FontStyle.Italic, color = textColor.copy(alpha = 0.8f)),
+                    onClick = { offset ->
+                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                            .firstOrNull()?.let { annotation ->
+                                onLinkClick(annotation.item)
+                            }
+                    }
+                )
+            }
+        }
         MdSegment.Divider -> HorizontalDivider(modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
+    }
+}
+
+@Composable
+fun MarkdownContent(
+    markdown: String,
+    modifier: Modifier = Modifier,
+    baseFontSize: TextUnit = 16.sp,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(8.dp),
+    onLinkClick: (String) -> Unit = {}
+) {
+    val segments = remember(markdown) { parseMarkdownToSegments(markdown) }
+    Column(
+        modifier = modifier,
+        verticalArrangement = verticalArrangement
+    ) {
+        segments.forEach { seg ->
+            MarkdownSegment(
+                seg = seg,
+                baseFontSize = baseFontSize,
+                textColor = textColor,
+                onLinkClick = onLinkClick
+            )
+        }
     }
 }
 

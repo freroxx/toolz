@@ -1,7 +1,7 @@
 {
   "versionName": "1.1.0",
   "versionCode": 11,
-  "changelog": "Bug fixes, language support and new features! ",
+  "changelog": "### Major Redesign & Improvements\n\n- [x] **New Update Experience**: Redesigned expressive interface for updates\n- [x] **Markdown Support**: Changelogs now support full GitHub-style markdown\n- [x] **Material 3 Expressive**: Modern typography and components throughout\n- [ ] **AI Features**: Coming soon in next beta!\n\n> \"Tools for the modern era, redesigned for you.\"\n\n#### Fixed:\n* Performance issues on older devices\n* Karaoke mode sync bugs",
   "releases": [
     {
       "abi": "arm64-v8a",

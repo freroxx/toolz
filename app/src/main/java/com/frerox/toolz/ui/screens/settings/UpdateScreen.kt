@@ -25,7 +25,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -439,22 +439,21 @@ fun UpdateScreenContent(
                         modifier = Modifier
                             .padding(vertical = 12.dp)
                             .fillMaxWidth()
-                            .heightIn(max = 240.dp),
+                            .heightIn(max = 300.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
                         shape = MaterialTheme.shapes.large,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
                     ) {
-                        LazyColumn(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .verticalScroll(rememberScrollState())
                         ) {
-                            item {
-                                Text(
-                                    changelog, 
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    lineHeight = 24.sp
-                                )
-                            }
+                            MarkdownContent(
+                                markdown = changelog,
+                                baseFontSize = 15.sp,
+                                textColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
