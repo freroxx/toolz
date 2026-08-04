@@ -59,6 +59,7 @@ enum class BackupItem(val displayName: String, val category: BackupCategory) {
     STEPS("Step Counter Data", BackupCategory.SYSTEM),
     MATH_HISTORY("Math & Calculations", BackupCategory.SYSTEM),
     PDF_METADATA("PDF Tools Data", BackupCategory.SYSTEM),
+    CATALOG_DATA("Music Catalog Taste Profile", BackupCategory.PERSONAL),
     OTHERS("Miscellaneous Data", BackupCategory.SYSTEM)
 }
 
