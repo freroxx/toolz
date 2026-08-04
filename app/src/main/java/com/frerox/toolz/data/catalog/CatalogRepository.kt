@@ -52,17 +52,19 @@ class CatalogRepository @Inject constructor(
     private val okHttpClient: OkHttpClient
 ) {
     private val youtubeService: YoutubeService
-        get() = ServiceList.YouTube as YoutubeService
+        get() {
+            initNewPipe()
+            return ServiceList.YouTube as YoutubeService
+        }
+
+    private fun initNewPipe() {
+        try {
+            NewPipe.init(OkHttpDownloader(okHttpClient), Localization.DEFAULT, ContentCountry.DEFAULT)
+        } catch (_: Exception) { }
+    }
 
     init {
-        try {
-            // Localization setup for better regional trending/search results
-            val localization = Localization.DEFAULT
-            val country = ContentCountry.DEFAULT
-            NewPipe.init(OkHttpDownloader(okHttpClient), localization, country)
-        } catch (_: Exception) {
-            // Already initialized — safe to ignore
-        }
+        initNewPipe()
     }
 
     /**
@@ -86,9 +88,20 @@ class CatalogRepository @Inject constructor(
                         sortFilter
                     )
                 )
-                val tracks = searchInfo.relatedItems
+                var tracks = searchInfo.relatedItems
                     .filterIsInstance<StreamInfoItem>()
                     .map { it.toCatalogTrack() }
+                
+                if (tracks.isEmpty()) {
+                    // Fallback to broad search if music filter yielded nothing
+                    val broadInfo = SearchInfo.getInfo(
+                        youtubeService,
+                        youtubeService.searchQHFactory.fromQuery(query, emptyList(), sortFilter)
+                    )
+                    tracks = broadInfo.relatedItems.filterIsInstance<StreamInfoItem>().map { it.toCatalogTrack() }
+                    return@withContext Pair(tracks, broadInfo.nextPage)
+                }
+                
                 Pair(tracks, searchInfo.nextPage)
             } else {
                 val moreItems = SearchInfo.getMoreItems(
@@ -108,7 +121,7 @@ class CatalogRepository @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("CatalogRepo", "Search failed for query \"$query\": ${e.message}")
             Pair(emptyList(), null)
         }
     }
@@ -309,6 +322,11 @@ class CatalogRepository @Inject constructor(
      * Map a NewPipe StreamInfoItem to our lightweight CatalogTrack model.
      */
     private fun StreamInfoItem.toCatalogTrack(): CatalogTrack {
+        val videoId = url.substringAfter("v=", "")
+            .substringBefore("&")
+            .ifBlank { url.substringAfterLast("/", "") }
+            .ifBlank { url.hashCode().toString() }
+
         val bestThumb = thumbnails.maxByOrNull { it.width * it.height }
         var thumbUrl = bestThumb?.url ?: ""
         
@@ -316,15 +334,11 @@ class CatalogRepository @Inject constructor(
         if (thumbUrl.contains("hqdefault.jpg")) {
             thumbUrl = thumbUrl.replace("hqdefault.jpg", "maxresdefault.jpg")
         } else if (thumbUrl.contains("vi/")) {
-            // If it's a standard YT thumb URL, ensure we try maxres
-            val videoId = url.substringAfter("watch?v=", "").substringBefore("&")
-            if (videoId.isNotEmpty()) {
-                thumbUrl = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
-            }
+            thumbUrl = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
         }
 
         return CatalogTrack(
-            id = url.substringAfter("watch?v=", "").substringBefore("&").ifEmpty { url.hashCode().toString() },
+            id = videoId,
             title = name ?: "Unknown",
             artist = uploaderName ?: "Unknown Artist",
             thumbnailUrl = thumbUrl,

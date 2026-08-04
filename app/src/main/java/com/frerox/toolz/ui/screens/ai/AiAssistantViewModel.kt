@@ -148,10 +148,9 @@ class AiAssistantViewModel @Inject constructor(
         if (initialChatId != null && initialChatId != -1) {
             loadChat(initialChatId)
         } else {
+            // createNewChat already calls refreshPrompts, so we don't need to call it again here
             createNewChat()
         }
-
-        refreshPrompts()
     }
 
     private fun loadSettings() {
@@ -185,10 +184,11 @@ class AiAssistantViewModel @Inject constructor(
 
     fun refreshPrompts() {
         viewModelScope.launch {
-            if (settingsManager.isDynamicPromptsEnabled()) {
+            val hasGroqKey = settingsManager.hasUserApiKey("Groq")
+            if (settingsManager.isDynamicPromptsEnabled() && hasGroqKey) {
                 generateDynamicPrompts()
             } else {
-                _uiState.update { it.copy(suggestedPrompts = getFilteredPremadePrompts()) }
+                _uiState.update { it.copy(isGeneratingPrompts = false, suggestedPrompts = getFilteredPremadePrompts()) }
             }
         }
     }

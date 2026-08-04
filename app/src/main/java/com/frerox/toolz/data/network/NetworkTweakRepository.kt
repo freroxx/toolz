@@ -139,14 +139,22 @@ class NetworkTweakRepository @Inject constructor(
     }
 
     private suspend fun runCommands(commands: List<String>): Pair<Boolean, String> {
-        commands.forEach { command ->
+        for (command in commands) {
             addLog("COMMAND", "Executing: $command", LogLevel.INFO)
             val result = try {
                 shizukuExecutor.executeForResult(command)
             } catch (e: Exception) {
                 return false to (e.message ?: "Command execution failed")
             }
-            if (!result.isSuccess) return false to (result.stderr.ifBlank { "Exit code ${result.exitCode}" })
+            
+            if (!result.isSuccess) {
+                val error = result.stderr.ifBlank { result.stdout }
+                if (error.contains("SecurityException", ignoreCase = true) || error.contains("does not have access", ignoreCase = true)) {
+                    addLog("TWEAK", "Command restricted by system: $command", LogLevel.WARNING)
+                    continue 
+                }
+                return false to (result.stderr.ifBlank { "Exit code ${result.exitCode}" })
+            }
         }
         return true to ""
     }

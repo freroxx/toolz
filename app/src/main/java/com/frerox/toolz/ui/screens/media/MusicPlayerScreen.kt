@@ -421,6 +421,7 @@ fun MusicPlayerScreen(
                                 gridState = catalogGridState,
                                 onPlayTrack = { uri, title, artist, thumbUrl, sourceUrl ->
                                     viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
+                                    showFullPlayer = true
                                 },
                                 onPlayInKaraoke = { uri, title, artist, thumbUrl, sourceUrl ->
                                     viewModel.playUri(uri, title, artist, thumbUrl, sourceUrl)
