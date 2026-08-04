@@ -211,6 +211,8 @@
     <string name="st_SettingsScreen_w1x3">Cartões de informações de bateria e armazenamento</string>
     <string name="st_SettingsScreen_y3z5">Feedback Háptico</string>
     <string name="st_SettingsScreen_a5b7">Resposta tátil na interação</string>
+    <string name="st_SettingsScreen_top_bar_desc_title">Descrições da barra superior</string>
+    <string name="st_SettingsScreen_top_bar_desc_subtitle">Mostrar legendas em barras superiores expressivas</string>
     <string name="st_SettingsScreen_c7d9">Ajuste Háptico</string>
     <string name="st_SettingsScreen_m7n9">MÍDIA E ÁUDIO</string>
     <string name="st_SettingsScreen_o9p1">Agite para Pular</string>

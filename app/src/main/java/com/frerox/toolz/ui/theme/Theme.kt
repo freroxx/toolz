@@ -46,6 +46,7 @@ val LocalHapticIntensity = staticCompositionLocalOf { 0.5f }
 val LocalBackgroundGradientEnabled = staticCompositionLocalOf { true }
 val LocalIsDarkTheme = staticCompositionLocalOf { false }
 val LocalVibrationManager = staticCompositionLocalOf<VibrationManager?> { null }
+val LocalShowTopAppBarDescriptions = staticCompositionLocalOf { true }
 
 private val ToolzExpressiveShapes = Shapes(
     extraSmall = RoundedCornerShape(14.dp),
@@ -221,6 +222,7 @@ fun ToolzTheme(
     performanceMode: Boolean = false,
     hapticEnabled: Boolean = true,
     hapticIntensity: Float = 0.5f,
+    showTopAppBarDescriptions: Boolean = true,
     vibrationManager: VibrationManager? = null,
     content: @Composable () -> Unit
 ) {
@@ -278,7 +280,8 @@ fun ToolzTheme(
         LocalHapticIntensity provides hapticIntensity,
         LocalBackgroundGradientEnabled provides backgroundGradientEnabled,
         LocalIsDarkTheme provides darkTheme,
-        LocalVibrationManager provides vibrationManager
+        LocalVibrationManager provides vibrationManager,
+        LocalShowTopAppBarDescriptions provides showTopAppBarDescriptions
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

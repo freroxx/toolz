@@ -211,6 +211,8 @@
     <string name="st_SettingsScreen_w1x3">Cartes d\'infos sur la batterie et le stockage</string>
     <string name="st_SettingsScreen_y3z5">Retour haptique</string>
     <string name="st_SettingsScreen_a5b7">Réponse tactile lors de l\'interaction</string>
+    <string name="st_SettingsScreen_top_bar_desc_title">Descriptions de la barre supérieure</string>
+    <string name="st_SettingsScreen_top_bar_desc_subtitle">Afficher les sous-titres dans les barres supérieures expressives</string>
     <string name="st_SettingsScreen_c7d9">Syntoniseur haptique</string>
     <string name="st_SettingsScreen_m7n9">MÉDIA &amp; AUDIO</string>
     <string name="st_SettingsScreen_o9p1">Secouer pour passer</string>

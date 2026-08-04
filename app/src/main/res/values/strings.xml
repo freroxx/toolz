@@ -212,6 +212,8 @@
     <string name="st_SettingsScreen_w1x3">Battery and storage info cards</string>
     <string name="st_SettingsScreen_y3z5">Haptic Feedback</string>
     <string name="st_SettingsScreen_a5b7">Tactile response on interaction</string>
+    <string name="st_SettingsScreen_top_bar_desc_title">Top Bar Descriptions</string>
+    <string name="st_SettingsScreen_top_bar_desc_subtitle">Show subtitles in expressive top bars</string>
     <string name="st_SettingsScreen_c7d9">Haptic Tuner</string>
     <string name="st_SettingsScreen_m7n9">MEDIA &amp; AUDIO</string>
     <string name="st_SettingsScreen_o9p1">Shake to Skip</string>

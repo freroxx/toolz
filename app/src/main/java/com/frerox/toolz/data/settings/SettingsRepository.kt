@@ -304,6 +304,7 @@ class SettingsRepository @Inject constructor(
 
     // Performance Mode
     private val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
+    private val SHOW_TOP_APP_BAR_DESCRIPTIONS = booleanPreferencesKey("show_top_app_bar_descriptions")
 
     // Step Counter Toggle
     private val STEP_COUNTER_ENABLED = booleanPreferencesKey("step_counter_enabled")
@@ -653,6 +654,7 @@ class SettingsRepository @Inject constructor(
     val musicCustomEqualizer: Flow<String> = dataStore.data.map { it[MUSIC_CUSTOM_EQUALIZER] ?: "" }
 
     val performanceMode: Flow<Boolean> = dataStore.data.map { it[PERFORMANCE_MODE] ?: false }
+    val showTopAppBarDescriptions: Flow<Boolean> = dataStore.data.map { it[SHOW_TOP_APP_BAR_DESCRIPTIONS] ?: true }
 
     val stepCounterEnabled: Flow<Boolean> = dataStore.data.map { it[STEP_COUNTER_ENABLED] ?: false }
     val stepHistoryRetention: Flow<String> = dataStore.data.map { it[STEP_HISTORY_RETENTION] ?: "Forever" }
@@ -979,6 +981,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicCustomEqualizer(data: String) { dataStore.edit { it[MUSIC_CUSTOM_EQUALIZER] = data } }
 
     suspend fun setPerformanceMode(enabled: Boolean) { dataStore.edit { it[PERFORMANCE_MODE] = enabled } }
+    suspend fun setShowTopAppBarDescriptions(enabled: Boolean) { dataStore.edit { it[SHOW_TOP_APP_BAR_DESCRIPTIONS] = enabled } }
 
     suspend fun setStepCounterEnabled(enabled: Boolean) { dataStore.edit { it[STEP_COUNTER_ENABLED] = enabled } }
     suspend fun setStepHistoryRetention(retention: String) { dataStore.edit { it[STEP_HISTORY_RETENTION] = retention } }

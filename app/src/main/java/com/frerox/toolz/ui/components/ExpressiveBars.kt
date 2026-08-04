@@ -43,6 +43,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
+import com.frerox.toolz.ui.theme.LocalShowTopAppBarDescriptions
 import com.frerox.toolz.ui.theme.ToolzTheme
 
 /**
@@ -68,7 +69,7 @@ fun ExpressiveTopAppBar(
         LargeFlexibleTopAppBar(
             title = title,
             modifier = modifier,
-            subtitle = subtitle,
+            subtitle = if (LocalShowTopAppBarDescriptions.current) subtitle else null,
             navigationIcon = navigationIcon,
             actions = actions,
             titleHorizontalAlignment = titleHorizontalAlignment,
@@ -97,8 +98,9 @@ fun ExpressiveTopAppBar(
     val titleContent = @Composable {
         Column(
             horizontalAlignment = titleHorizontalAlignment,
-            modifier = if (titleHorizontalAlignment == Alignment.CenterHorizontally)
-                Modifier.fillMaxWidth() else Modifier,
+            modifier = (if (titleHorizontalAlignment == Alignment.CenterHorizontally)
+                Modifier.fillMaxWidth() else Modifier)
+                .padding(horizontal = 16.dp), // Prevent scaling overlaps
         ) {
             Box(
                 modifier = Modifier
@@ -113,7 +115,9 @@ fun ExpressiveTopAppBar(
             ) {
                 title()
             }
-            subtitle?.invoke()
+            if (LocalShowTopAppBarDescriptions.current) {
+                subtitle?.invoke()
+            }
         }
     }
 
@@ -138,7 +142,7 @@ fun ExpressiveTopAppBar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ExpressiveTopAppBar(
     title: String,
@@ -158,8 +162,7 @@ fun ExpressiveTopAppBar(
         title = {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black,
+                style = LocalTextStyle.current.copy(fontWeight = FontWeight.Black),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -169,11 +172,12 @@ fun ExpressiveTopAppBar(
             {
                 Text(
                     text = it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    style = LocalTextStyle.current.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.Bold
                 )
             }
         },

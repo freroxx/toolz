@@ -127,6 +127,7 @@ class SettingsViewModel @Inject constructor(
     val aiSearchChatEnabled = repository.aiSearchChatEnabled
 
     val performanceMode = repository.performanceMode
+    val showTopAppBarDescriptions = repository.showTopAppBarDescriptions
 
     val customRingtoneEnabled = repository.customRingtoneEnabled
     val customRingtoneUri = repository.customRingtoneUri
@@ -201,6 +202,7 @@ class SettingsViewModel @Inject constructor(
     fun setKaraokeEnabled(enabled: Boolean) = viewModelScope.launch { repository.setKaraokeEnabled(enabled) }
 
     fun setPerformanceMode(enabled: Boolean) = viewModelScope.launch { repository.setPerformanceMode(enabled) }
+    fun setShowTopAppBarDescriptions(enabled: Boolean) = viewModelScope.launch { repository.setShowTopAppBarDescriptions(enabled) }
 
     fun setCustomRingtoneEnabled(enabled: Boolean) = viewModelScope.launch { repository.setCustomRingtoneEnabled(enabled) }
     fun setCustomRingtoneUri(uri: String?) = viewModelScope.launch { repository.setCustomRingtoneUri(uri) }

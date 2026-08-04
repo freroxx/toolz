@@ -190,6 +190,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             val performanceMode by settingsRepository.performanceMode.collectAsState(initial = false)
             val hapticEnabled by settingsRepository.hapticFeedback.collectAsState(initial = true)
             val hapticIntensity by settingsRepository.hapticIntensity.collectAsState(initial = 0.5f)
+            val showTopAppBarDescriptions by settingsRepository.showTopAppBarDescriptions.collectAsState(initial = true)
 
             val isDark = when (themeMode) {
                 "LIGHT" -> false
@@ -247,6 +248,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 performanceMode = performanceMode,
                 hapticEnabled = hapticEnabled,
                 hapticIntensity = hapticIntensity,
+                showTopAppBarDescriptions = showTopAppBarDescriptions,
                 vibrationManager = vibrationManager
             ) {
                 CompositionLocalProvider(
