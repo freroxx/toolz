@@ -1334,6 +1334,7 @@
     <string name="st_Backup_Item_Steps">Dados do Contador de Passos</string>
     <string name="st_Backup_Item_MathHistory">Matemática e Cálculos</string>
     <string name="st_Backup_Item_PdfMetadata">Dados de Ferramentas PDF</string>
+    <string name="st_Backup_Item_CatalogData">Perfil de gosto do catálogo</string>
     <string name="st_Backup_Item_Others">Dados Diversos</string>
 
     <string name="st_Backup_Select_AtLeastOne">Selecione pelo menos um item para backup</string>
