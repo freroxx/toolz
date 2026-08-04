@@ -45,6 +45,7 @@ import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.*
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
@@ -228,6 +229,8 @@ fun SecurityStatusRow(
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.ExtraBold,
                 color = if (isProtected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
 
             VerticalDivider(modifier = Modifier.height(14.dp).width(1.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -239,12 +242,18 @@ fun SecurityStatusRow(
                 tint = if (isProtected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically, 
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
                 Text(
                     dnsProvider.lowercase().replaceFirstChar(Char::uppercase),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 
                 if (latency != null) {
@@ -258,6 +267,8 @@ fun SecurityStatusRow(
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
                         fontWeight = FontWeight.Bold,
                         color = color.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 4.dp).background(color.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
                     )
                 }
@@ -269,6 +280,11 @@ fun SecurityStatusRow(
                     "Private",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .horizontalFadingEdges(fadeSize = 8.dp, start = false, end = true)
                 )
             }
             
@@ -1705,10 +1721,6 @@ fun SettingsToggleRow(
     }
 }
 
-// ══════════════════════════════════════════════════════════
-//  FADING EDGES
-// ══════════════════════════════════════════════════════════
-
 fun Modifier.fadingEdges(fadeSize: Dp = 24.dp): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
@@ -1723,6 +1735,28 @@ fun Modifier.fadingEdges(fadeSize: Dp = 24.dp): Modifier = this
             ),
             blendMode = BlendMode.DstIn,
         )
+    }
+
+fun Modifier.horizontalFadingEdges(
+    fadeSize: Dp = 16.dp,
+    start: Boolean = true,
+    end: Boolean = true,
+): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val fade = fadeSize.toPx()
+        if (size.width > 0f) {
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    0f to if (start) Color.Transparent else Color.Black,
+                    (fade / size.width).coerceAtMost(0.5f) to Color.Black,
+                    (1f - fade / size.width).coerceAtLeast(0.5f) to Color.Black,
+                    1f to if (end) Color.Transparent else Color.Black,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
     }
 
 // ══════════════════════════════════════════════════════════
