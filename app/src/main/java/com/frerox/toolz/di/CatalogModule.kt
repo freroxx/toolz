@@ -18,6 +18,7 @@
 package com.frerox.toolz.di
 
 import com.frerox.toolz.data.catalog.CatalogRepository
+import com.frerox.toolz.data.catalog.innertube.InnerTubeClient
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -51,8 +52,9 @@ object CatalogModule {
     @Provides
     @Singleton
     fun provideCatalogRepository(
-        @CatalogClient okHttpClient: OkHttpClient
+        @CatalogClient okHttpClient: OkHttpClient,
+        innerTubeClient: InnerTubeClient
     ): CatalogRepository {
-        return CatalogRepository(okHttpClient)
+        return CatalogRepository(okHttpClient, innerTubeClient)
     }
 }
