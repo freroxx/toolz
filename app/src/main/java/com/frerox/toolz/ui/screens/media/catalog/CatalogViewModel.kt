@@ -30,10 +30,12 @@ import androidx.work.workDataOf
 import com.frerox.toolz.data.catalog.CatalogRepository
 import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.catalog.CatalogTrack
+import com.frerox.toolz.data.catalog.normalizeYoutubeUrl
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.worker.MusicDownloadWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -153,12 +155,12 @@ class CatalogViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = false, error = "Extraction engine encountered an error. Please restart the tab.") }
         }
 
-        WorkManager.getInstance(context).getWorkInfosByTagFlow("music_download")
+        WorkManager.getInstance(context).getWorkInfosByTagFlow(MusicDownloadWorker.TAG_MUSIC_DOWNLOAD)
             .onEach { workInfos ->
                 val taggedInfos = workInfos.mapNotNull { info ->
                     val trackId = info.tags
-                        .firstOrNull { it.startsWith("download_") }
-                        ?.removePrefix("download_")
+                        .firstOrNull { it.startsWith(MusicDownloadWorker.TAG_DOWNLOAD_PREFIX) }
+                        ?.removePrefix(MusicDownloadWorker.TAG_DOWNLOAD_PREFIX)
                         ?.takeIf { it.isNotBlank() }
                     trackId?.let { it to info }
                 }
@@ -186,7 +188,7 @@ class CatalogViewModel @Inject constructor(
                             WorkInfo.State.BLOCKED -> {
                                 val previous = downloads[trackId] ?: 0.02f
                                 val next = info.progress
-                                    .getFloat("progress", previous)
+                                    .getFloat(MusicDownloadWorker.KEY_PROGRESS, previous)
                                     .coerceIn(0.02f, 0.99f)
                                 downloads = downloads + (trackId to maxOf(previous, next))
                             }
@@ -287,12 +289,12 @@ class CatalogViewModel @Inject constructor(
                     val quickPicks = quickPicksDeferred.await()
                     val trending = trendingDeferred.await()
 
-                    _uiState.update {
-                        it.copy(
+                    _uiState.update { state ->
+                        state.copy(
                             quickPicks = quickPicks,
                             trending = trending,
-                            isLoading = false,
-                            tracks = emptyList()
+                            isLoading = if (state.query.isBlank()) false else state.isLoading,
+                            tracks = if (state.query.isBlank()) emptyList() else state.tracks
                         )
                     }
 
@@ -302,9 +304,9 @@ class CatalogViewModel @Inject constructor(
                 // Ignore cancellation
             } catch (t: Throwable) {
                 android.util.Log.e("CatalogVM", "Storefront load failed: ${t.message}")
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = if (state.query.isBlank()) false else state.isLoading,
                         isLoadingRecommendations = false,
                         error = "Unable to reach extraction engine. Search might still work."
                     )
@@ -369,22 +371,22 @@ class CatalogViewModel @Inject constructor(
             }
             settingsRepository.setActiveDownloadJson(Json.encodeToString(track))
 
-            val workRequest = OneTimeWorkRequestBuilder<com.frerox.toolz.worker.MusicDownloadWorker>()
+            val workRequest = OneTimeWorkRequestBuilder<MusicDownloadWorker>()
                 .setInputData(
                     workDataOf(
-                        "track_id" to track.id,
-                        "title" to track.title,
-                        "artist" to track.artist,
-                        "source_url" to track.sourceUrl,
-                        "thumbnail_url" to track.thumbnailUrl,
-                        "duration" to track.duration,
-                        "format" to downloadFormat.value,
-                        "quality" to downloadQuality.value
+                        MusicDownloadWorker.KEY_TRACK_ID to track.id,
+                        MusicDownloadWorker.KEY_TRACK_TITLE to track.title,
+                        MusicDownloadWorker.KEY_TRACK_ARTIST to track.artist,
+                        MusicDownloadWorker.KEY_SOURCE_URL to track.sourceUrl,
+                        MusicDownloadWorker.KEY_THUMBNAIL_URL to track.thumbnailUrl,
+                        MusicDownloadWorker.KEY_DURATION to track.duration,
+                        MusicDownloadWorker.KEY_FORMAT to downloadFormat.value,
+                        MusicDownloadWorker.KEY_QUALITY to downloadQuality.value
                     )
                 )
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                .addTag("download_${track.id}")
-                .addTag("music_download")
+                .addTag("${MusicDownloadWorker.TAG_DOWNLOAD_PREFIX}${track.id}")
+                .addTag(MusicDownloadWorker.TAG_MUSIC_DOWNLOAD)
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
@@ -456,8 +458,9 @@ class CatalogViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             // 1. Check if the song has already been downloaded (offline playback)
+            val normalizedUrl = track.sourceUrl.normalizeYoutubeUrl()
             val localTrack = withContext(Dispatchers.IO) {
-                musicRepository.getTrackBySourceUrl(track.sourceUrl)
+                musicRepository.getTrackBySourceUrl(normalizedUrl) ?: musicRepository.getTrackBySourceUrl(track.sourceUrl)
             }
             
             if (localTrack != null && localTrack.uri.isNotBlank() && !forceOnline) {
