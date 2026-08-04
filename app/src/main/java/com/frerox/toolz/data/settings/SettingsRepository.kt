@@ -346,6 +346,7 @@ class SettingsRepository @Inject constructor(
     private val APP_LANGUAGE = stringPreferencesKey("app_language")
     private val CATALOG_ONBOARDING_COMPLETED = booleanPreferencesKey("catalog_onboarding_completed")
     private val SHOW_CATALOG_BETA_CARD = booleanPreferencesKey("show_catalog_beta_card")
+    private val ACTIVE_DOWNLOAD_JSON = stringPreferencesKey("active_download_json")
 
     private val LIVE_VPN_NOTIFICATIONS = booleanPreferencesKey("live_vpn_notifications")
     private val LIVE_DNS_NOTIFICATIONS = booleanPreferencesKey("live_dns_notifications")
@@ -620,8 +621,8 @@ class SettingsRepository @Inject constructor(
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }
     val musicEqualizerPreset: Flow<String> = dataStore.data.map { it[MUSIC_EQUALIZER_PRESET] ?: "Normal" }
     val showMusicVisualizer: Flow<Boolean> = dataStore.data.map { it[SHOW_MUSIC_VISUALIZER] ?: false }
-    val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "CIRCLE" }
-    val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: true }
+    val musicArtShape: Flow<String> = dataStore.data.map { it[MUSIC_ART_SHAPE] ?: "SQUARE" }
+    val musicRotationEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_ROTATION_ENABLED] ?: false }
     val musicPipEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_PIP_ENABLED] ?: false }
 
     val musicAiEnabled: Flow<Boolean> = combine(
@@ -716,6 +717,7 @@ class SettingsRepository @Inject constructor(
     val appLanguage: Flow<String> = dataStore.data.map { it[APP_LANGUAGE] ?: "en" }
     val catalogOnboardingCompleted: Flow<Boolean> = dataStore.data.map { it[CATALOG_ONBOARDING_COMPLETED] ?: false }
     val showCatalogBetaCard: Flow<Boolean> = dataStore.data.map { it[SHOW_CATALOG_BETA_CARD] ?: true }
+    val activeDownloadJson: Flow<String?> = dataStore.data.map { it[ACTIVE_DOWNLOAD_JSON] }
 
     val downloadFormat: Flow<String> = dataStore.data.map { it[DOWNLOAD_FORMAT] ?: "M4A" }
     val downloadQuality: Flow<String> = dataStore.data.map { it[DOWNLOAD_QUALITY] ?: "HIGH" }
@@ -1016,6 +1018,11 @@ class SettingsRepository @Inject constructor(
     suspend fun setAppLanguage(lang: String) { dataStore.edit { it[APP_LANGUAGE] = lang } }
     suspend fun setCatalogOnboardingCompleted(completed: Boolean) { dataStore.edit { it[CATALOG_ONBOARDING_COMPLETED] = completed } }
     suspend fun setShowCatalogBetaCard(show: Boolean) { dataStore.edit { it[SHOW_CATALOG_BETA_CARD] = show } }
+    suspend fun setActiveDownloadJson(json: String?) {
+        dataStore.edit {
+            if (json == null) it.remove(ACTIVE_DOWNLOAD_JSON) else it[ACTIVE_DOWNLOAD_JSON] = json
+        }
+    }
 
     suspend fun setDownloadFormat(format: String) { dataStore.edit { it[DOWNLOAD_FORMAT] = format } }
     suspend fun setDownloadQuality(quality: String) { dataStore.edit { it[DOWNLOAD_QUALITY] = quality } }
