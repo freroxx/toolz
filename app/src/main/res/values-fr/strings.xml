@@ -1323,6 +1323,7 @@
     <string name="st_Backup_Item_Steps">Données du podomètre</string>
     <string name="st_Backup_Item_MathHistory">Calculs mathématiques</string>
     <string name="st_Backup_Item_PdfMetadata">Données outils PDF</string>
+    <string name="st_Backup_Item_CatalogData">Profil de goût du catalogue</string>
     <string name="st_Backup_Item_Others">Données diverses</string>
 
     <string name="st_Backup_Select_AtLeastOne">Veuillez sélectionner au moins un élément à sauvegarder</string>
