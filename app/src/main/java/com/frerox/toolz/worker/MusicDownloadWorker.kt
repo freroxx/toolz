@@ -72,6 +72,12 @@ class MusicDownloadWorker @AssistedInject constructor(
         const val KEY_SOURCE_URL = "source_url"
         const val KEY_THUMBNAIL_URL = "thumbnail_url"
         const val KEY_DURATION = "duration"
+        const val KEY_FORMAT = "format"
+        const val KEY_QUALITY = "quality"
+        const val KEY_PROGRESS = "progress"
+        
+        const val TAG_MUSIC_DOWNLOAD = "music_download"
+        const val TAG_DOWNLOAD_PREFIX = "download_"
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -81,8 +87,8 @@ class MusicDownloadWorker @AssistedInject constructor(
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: return@withContext Result.failure()
         val thumbnailUrl = inputData.getString(KEY_THUMBNAIL_URL)
         val duration = inputData.getLong(KEY_DURATION, 0L)
-        val format = inputData.getString("format") ?: "M4A"
-        val quality = inputData.getString("quality") ?: "HIGH"
+        val format = inputData.getString(KEY_FORMAT) ?: "M4A"
+        val quality = inputData.getString(KEY_QUALITY) ?: "HIGH"
 
         val notificationId = NOTIFICATION_ID_BASE + trackId.hashCode()
         createNotificationChannel()
@@ -250,7 +256,7 @@ class MusicDownloadWorker @AssistedInject constructor(
     private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
         val clamped = progress.coerceIn(0f, 1f)
         // Always emit WorkData progress so the WorkInfo observer can read it
-        setProgress(workDataOf("progress" to clamped))
+        setProgress(workDataOf(KEY_PROGRESS to clamped))
         // Foreground info updates the notification; wrap so a transient failure doesn't
         // prevent future setProgress calls from reaching observers.
         try {
@@ -271,7 +277,7 @@ class MusicDownloadWorker @AssistedInject constructor(
         }
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
-                setProgress(workDataOf("progress" to clamped))
+                setProgress(workDataOf(KEY_PROGRESS to clamped))
             } catch (e: Exception) {
                 android.util.Log.w("MusicDownloadWorker", "setProgress failed (non-fatal): ${e.message}")
             }
