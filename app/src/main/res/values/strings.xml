@@ -1340,6 +1340,7 @@
     <string name="st_Backup_Item_Steps">Step Counter Data</string>
     <string name="st_Backup_Item_MathHistory">Math &amp; Calculations</string>
     <string name="st_Backup_Item_PdfMetadata">PDF Tools Data</string>
+    <string name="st_Backup_Item_CatalogData">Catalog Taste Profile</string>
     <string name="st_Backup_Item_Others">Miscellaneous Data</string>
 
     <string name="st_Backup_Select_AtLeastOne">Please select at least one item to backup</string>
