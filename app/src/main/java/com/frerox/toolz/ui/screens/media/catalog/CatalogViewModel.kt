@@ -28,21 +28,23 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.frerox.toolz.data.catalog.CatalogRepository
+import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
+import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.util.Calendar
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,10 +56,14 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import org.schabi.newpipe.extractor.Page
+import java.util.Calendar
+import javax.inject.Inject
 
 enum class CatalogMode { TRENDING, SEARCH }
 enum class LayoutMode { GRID, LIST, FEATURED }
@@ -69,6 +75,7 @@ data class CatalogUiState(
     val tracks: List<CatalogTrack> = emptyList(),
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
+    val isRefreshing: Boolean = false,
     val isLoadingRecommendations: Boolean = false,
     val isLoadingMoreRecommendations: Boolean = false,
     val isResolving: Boolean = false,
@@ -81,13 +88,16 @@ data class CatalogUiState(
     val showDownloadPopup: Boolean = false,
     val downloadError: String? = null,
     val selectedGenre: String? = null,
-    val recommendationTitle: String = "Just for you"
+    val recommendationTitle: String = "Just for you",
+    val canLoadMore: Boolean = true,
+    val offlineSongToPlay: CatalogTrack? = null
 )
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class CatalogViewModel @Inject constructor(
     private val repository: CatalogRepository,
+    private val appDatabase: com.frerox.toolz.data.AppDatabase,
     val musicRepository: MusicRepository,
     private val settingsRepository: SettingsRepository,
     @ApplicationContext private val context: Context
@@ -123,8 +133,26 @@ class CatalogViewModel @Inject constructor(
     private var currentContextTrack: MusicTrack? = null
     private var lastRefreshTime = 0L
     private val REFRESH_THRESHOLD = 30_000L // 30 seconds
+    private var storefrontJob: Job? = null
+    private val networkSemaphore = kotlinx.coroutines.sync.Semaphore(8)
 
     init {
+        // Restore active download track if any
+        viewModelScope.launch {
+            val json = settingsRepository.activeDownloadJson.first()
+            if (json != null) {
+                try {
+                    val track = Json.decodeFromString<CatalogTrack>(json)
+                    _uiState.update { it.copy(activeDownload = track) }
+                } catch (_: Exception) {}
+            }
+        }
+
+        val handler = CoroutineExceptionHandler { _, throwable ->
+            android.util.Log.e("CatalogVM", "Unhandled exception: ${throwable.message}")
+            _uiState.update { it.copy(isLoading = false, error = "Extraction engine encountered an error. Please restart the tab.") }
+        }
+
         WorkManager.getInstance(context).getWorkInfosByTagFlow("music_download")
             .onEach { workInfos ->
                 val taggedInfos = workInfos.mapNotNull { info ->
@@ -167,6 +195,7 @@ class CatalogViewModel @Inject constructor(
                                 if (activeDownload?.id == trackId) {
                                     activeDownload = null
                                     showDownloadPopup = false
+                                    viewModelScope.launch { settingsRepository.setActiveDownloadJson(null) }
                                 }
                             }
                             WorkInfo.State.FAILED -> {
@@ -175,6 +204,7 @@ class CatalogViewModel @Inject constructor(
                                     activeDownload = null
                                     showDownloadPopup = false
                                     downloadError = "Download failed. Check the format, storage access, or connection."
+                                    viewModelScope.launch { settingsRepository.setActiveDownloadJson(null) }
                                 }
                             }
                             WorkInfo.State.CANCELLED -> {
@@ -182,6 +212,7 @@ class CatalogViewModel @Inject constructor(
                                 if (activeDownload?.id == trackId) {
                                     activeDownload = null
                                     showDownloadPopup = false
+                                    viewModelScope.launch { settingsRepository.setActiveDownloadJson(null) }
                                 }
                             }
                         }
@@ -195,18 +226,22 @@ class CatalogViewModel @Inject constructor(
                     )
                 }
             }
-            .launchIn(viewModelScope)
+            .launchIn(viewModelScope + handler)
 
-        viewModelScope.launch {
+        viewModelScope.launch(handler) {
             searchQueryFlow
-                .debounce(350)
+                .debounce(500)
                 .collect { query ->
                     currentSearchJob?.cancel()
                     if (query.isBlank()) {
                         loadStorefront(currentContextTrack)
                     } else {
-                        currentSearchJob = viewModelScope.launch {
-                            performSearch(query, isNewSearch = true)
+                        currentSearchJob = (viewModelScope + handler).launch {
+                            try {
+                                performSearch(query, isNewSearch = true)
+                            } catch (t: Throwable) {
+                                android.util.Log.e("CatalogVM", "Inner search error: ${t.message}")
+                            }
                         }
                     }
                 }
@@ -223,22 +258,24 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    fun loadStorefront(currentTrack: MusicTrack? = currentContextTrack) {
+    fun loadStorefront(currentTrack: MusicTrack? = currentContextTrack, isRefresh: Boolean = false) {
         currentContextTrack = currentTrack
-        currentSearchJob?.cancel()
-        currentSearchJob = viewModelScope.launch {
+        storefrontJob?.cancel()
+        storefrontJob = viewModelScope.launch {
             val isInitialLoad = _uiState.value.quickPicks.isEmpty()
             lastRefreshTime = System.currentTimeMillis()
             storefrontRefreshCount++
             
             _uiState.update {
                 it.copy(
-                    isLoading = isInitialLoad,
+                    isLoading = isInitialLoad && !isRefresh,
+                    isRefreshing = isRefresh,
                     isLoadingRecommendations = true,
                     error = null,
                     mode = CatalogMode.TRENDING,
                     query = "",
-                    selectedGenre = null
+                    selectedGenre = null,
+                    canLoadMore = true
                 )
             }
 
@@ -255,28 +292,31 @@ class CatalogViewModel @Inject constructor(
                             quickPicks = quickPicks,
                             trending = trending,
                             isLoading = false,
-                            tracks = emptyList() // Clear search results when returning to trending
+                            tracks = emptyList()
                         )
                     }
 
                     loadJustForYou(reset = true, currentTrack = currentTrack)
                 }
             } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+                // Ignore cancellation
+            } catch (t: Throwable) {
+                android.util.Log.e("CatalogVM", "Storefront load failed: ${t.message}")
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isLoadingRecommendations = false,
-                        error = e.localizedMessage ?: "Failed to load catalog"
+                        error = "Unable to reach extraction engine. Search might still work."
                     )
                 }
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
             }
         }
     }
 
     fun loadTrending() {
-        loadStorefront(currentContextTrack)
+        loadStorefront(currentContextTrack, isRefresh = true)
     }
 
     fun onGenreSelected(genre: String?) {
@@ -289,7 +329,7 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun onSearchQueryChange(query: String) {
-        _uiState.update { it.copy(query = query) }
+        _uiState.update { it.copy(query = query, isLoading = query.isNotBlank()) }
         searchQueryFlow.tryEmit(query)
     }
 
@@ -298,13 +338,23 @@ class CatalogViewModel @Inject constructor(
             if (_uiState.value.isLoading || _uiState.value.isLoadingMore || nextPage == null) return
             viewModelScope.launch {
                 _uiState.update { it.copy(isLoadingMore = true) }
-                performSearch(_uiState.value.query, isNewSearch = false)
+                try {
+                    performSearch(_uiState.value.query, isNewSearch = false)
+                } catch (t: Throwable) {
+                    android.util.Log.e("CatalogVM", "Load more search error: ${t.message}")
+                }
             }
             return
         }
 
         if (_uiState.value.isLoadingRecommendations || _uiState.value.isLoadingMoreRecommendations) return
-        viewModelScope.launch { loadJustForYou(reset = false, currentTrack = currentContextTrack) }
+        viewModelScope.launch { 
+            try {
+                loadJustForYou(reset = false, currentTrack = currentContextTrack)
+            } catch (t: Throwable) {
+                android.util.Log.e("CatalogVM", "Load more recs error: ${t.message}")
+            }
+        }
     }
 
     fun downloadTrack(track: CatalogTrack) {
@@ -317,16 +367,17 @@ class CatalogViewModel @Inject constructor(
                     downloadError = null
                 )
             }
+            settingsRepository.setActiveDownloadJson(Json.encodeToString(track))
 
             val workRequest = OneTimeWorkRequestBuilder<com.frerox.toolz.worker.MusicDownloadWorker>()
                 .setInputData(
                     workDataOf(
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_TRACK_ID to track.id,
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_TRACK_TITLE to track.title,
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_TRACK_ARTIST to track.artist,
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_SOURCE_URL to track.sourceUrl,
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_THUMBNAIL_URL to track.thumbnailUrl,
-                        com.frerox.toolz.worker.MusicDownloadWorker.KEY_DURATION to track.duration,
+                        "track_id" to track.id,
+                        "title" to track.title,
+                        "artist" to track.artist,
+                        "source_url" to track.sourceUrl,
+                        "thumbnail_url" to track.thumbnailUrl,
+                        "duration" to track.duration,
                         "format" to downloadFormat.value,
                         "quality" to downloadQuality.value
                     )
@@ -380,6 +431,10 @@ class CatalogViewModel @Inject constructor(
         _uiState.update { it.copy(showDownloadPopup = true) }
     }
 
+    fun hideOfflineNotice() {
+        _uiState.update { it.copy(offlineSongToPlay = null) }
+    }
+
     fun cancelDownload(trackId: String) {
         WorkManager.getInstance(context).cancelAllWorkByTag("download_$trackId")
         _uiState.update {
@@ -389,31 +444,44 @@ class CatalogViewModel @Inject constructor(
                 downloadingTracks = it.downloadingTracks - trackId
             )
         }
+        if (trackId == _uiState.value.activeDownload?.id) {
+            viewModelScope.launch { settingsRepository.setActiveDownloadJson(null) }
+        }
     }
 
     fun resolveAndPlay(
         track: CatalogTrack,
+        forceOnline: Boolean = false,
         onStreamResolved: (Uri, String, String, String, String) -> Unit
     ) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isResolving = true) }
-            try {
-                // 1. Check if the song has already been downloaded (offline playback)
-                val localTrack = withContext(Dispatchers.IO) {
-                    musicRepository.getTrackBySourceUrl(track.sourceUrl)
-                }
-                if (localTrack != null && localTrack.uri.isNotBlank()) {
-                    val localUri = Uri.parse(localTrack.uri)
-                    onStreamResolved(
-                        localUri,
-                        localTrack.title,
-                        localTrack.artist ?: "Unknown Artist",
-                        localTrack.thumbnailUri ?: track.thumbnailUrl ?: "",
-                        track.sourceUrl
-                    )
+            // 1. Check if the song has already been downloaded (offline playback)
+            val localTrack = withContext(Dispatchers.IO) {
+                musicRepository.getTrackBySourceUrl(track.sourceUrl)
+            }
+            
+            if (localTrack != null && localTrack.uri.isNotBlank() && !forceOnline) {
+                // If user didn't explicitly ask for online, and it's their first time clicking this track today,
+                // show the smart notice popup.
+                if (_uiState.value.offlineSongToPlay == null) {
+                    _uiState.update { it.copy(offlineSongToPlay = track) }
                     return@launch
                 }
+                
+                val localUri = Uri.parse(localTrack.uri)
+                onStreamResolved(
+                    localUri,
+                    localTrack.title,
+                    localTrack.artist ?: "Unknown Artist",
+                    localTrack.thumbnailUri ?: track.thumbnailUrl ?: "",
+                    track.sourceUrl
+                )
+                _uiState.update { it.copy(offlineSongToPlay = null) }
+                return@launch
+            }
 
+            _uiState.update { it.copy(isResolving = true, offlineSongToPlay = null) }
+            try {
                 // 2. Resolve stream online
                 val quality = catalogStreamQuality.value
                 
@@ -467,9 +535,9 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    fun addToPlaylist(playlist: com.frerox.toolz.data.music.Playlist, track: CatalogTrack) {
+    fun addToPlaylist(playlist: Playlist, track: CatalogTrack) {
         viewModelScope.launch {
-            val musicTrack = com.frerox.toolz.data.music.MusicTrack(
+            val musicTrack = MusicTrack(
                 uri = track.sourceUrl,
                 title = track.title,
                 artist = track.artist,
@@ -496,7 +564,8 @@ class CatalogViewModel @Inject constructor(
                     isLoading = true,
                     error = null,
                     mode = CatalogMode.SEARCH,
-                    tracks = emptyList()
+                    tracks = emptyList(),
+                    canLoadMore = true
                 )
             }
         } else {
@@ -508,21 +577,30 @@ class CatalogViewModel @Inject constructor(
             nextPage = page
             val sanitized = sanitizeTracks(tracks)
 
+            if (isNewSearch && query.isNotBlank()) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    appDatabase.catalogSearchDao().insertSearch(CatalogSearchEntry(query = query))
+                }
+            }
+
             _uiState.update { state ->
                 state.copy(
                     tracks = if (isNewSearch) sanitized else (state.tracks + sanitized).distinctBy { it.sourceUrl },
                     isLoading = false,
                     isLoadingMore = false,
+                    canLoadMore = page != null,
                     error = if (isNewSearch && sanitized.isEmpty()) "No results for \"$query\"" else null
                 )
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
+            android.util.Log.e("CatalogVM", "Search failed: ${t.message}")
             val errorMessage = when {
-                e.message?.contains("403") == true -> "YouTube restricted access. Please try again later."
-                e.message?.contains("429") == true -> "Too many requests. YouTube is rate-limiting the app."
-                else -> e.localizedMessage ?: "Search failed. Check your connection."
+                t.message?.contains("403") == true -> "YouTube restricted access. Please try again later."
+                t.message?.contains("429") == true -> "Too many requests. YouTube is rate-limiting the app."
+                t.message?.contains("HTML") == true -> "YouTube returned an unexpected response. Retrying search might help."
+                else -> t.localizedMessage ?: "Search failed. Check your connection."
             }
             _uiState.update {
                 it.copy(
@@ -535,17 +613,28 @@ class CatalogViewModel @Inject constructor(
     }
 
     private suspend fun fetchQuickPicks(currentTrack: MusicTrack?): List<CatalogTrack> {
-        val year = Calendar.getInstance().get(Calendar.YEAR)
+        val calendar = Calendar.getInstance()
+        val year = calendar.get(Calendar.YEAR)
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        
+        val timeEnergy = when {
+            hour in 5..10 -> "acoustic morning chill"
+            hour in 11..14 -> "upbeat workday focus"
+            hour in 15..18 -> "high energy hits"
+            hour in 19..22 -> "evening lounge vibes"
+            else -> "midnight deep focus lo-fi"
+        }
+
         val queries = buildList {
             currentTrack?.artist?.takeIf { it.isNotBlank() }?.let { add("$it essentials official audio") }
             currentTrack?.let { add("${cleanSeedTitle(it.title)} ${it.artist.orEmpty()} official audio") }
-            add("fresh hits $year official audio")
+            add("fresh $timeEnergy $year")
             add("best songs $year official audio")
-            add("new music releases $year official audio")
+            add("trending $timeEnergy")
         }
 
         return rotateTracks(
-            candidates = collectDistinctTracks(queries, limit = 24),
+            candidates = collectDistinctTracks(queries, limit = 32),
             desired = 6,
             seedOffset = storefrontRefreshCount * 3
         )
@@ -575,12 +664,13 @@ class CatalogViewModel @Inject constructor(
             recommendationPage = null
             recommendationQueryIndex = 0
             recommendationQueries = buildRecommendationQueries(currentTrack, recommendationCycle)
+            val title = buildRecommendationTitle(currentTrack)
             _uiState.update {
                 it.copy(
                     justForYou = emptyList(),
                     isLoadingRecommendations = true,
                     isLoadingMoreRecommendations = false,
-                    recommendationTitle = buildRecommendationTitle(currentTrack)
+                    recommendationTitle = title
                 )
             }
         } else {
@@ -590,29 +680,36 @@ class CatalogViewModel @Inject constructor(
         val existingUrls = _uiState.value.justForYou.mapTo(mutableSetOf()) { it.sourceUrl }
         var attempts = 0
         var appended = emptyList<CatalogTrack>()
+        val maxAttempts = 3 // Don't loop forever if YouTube is blocking us
 
-        while (attempts < recommendationQueries.size.coerceAtLeast(1) && appended.isEmpty()) {
+        while (attempts < recommendationQueries.size.coerceAtMost(maxAttempts) && appended.isEmpty()) {
             if (recommendationQueries.isEmpty()) {
                 recommendationQueries = buildRecommendationQueries(currentTrack, recommendationCycle)
             }
 
             val query = recommendationQueries.getOrElse(recommendationQueryIndex) { "discover new music official audio" }
-            val (tracks, page) = repository.search(query, recommendationPage)
-            val fresh = sanitizeTracks(tracks).filterNot { existingUrls.contains(it.sourceUrl) }
+            try {
+                val (tracks, page) = repository.search(query, recommendationPage)
+                val fresh = sanitizeTracks(tracks).filterNot { existingUrls.contains(it.sourceUrl) }
 
-            if (fresh.isNotEmpty()) {
-                appended = fresh
-                recommendationPage = page
-            } else if (page != null) {
-                recommendationPage = page
-            } else {
+                if (fresh.isNotEmpty()) {
+                    appended = fresh
+                    recommendationPage = page
+                } else if (page != null) {
+                    recommendationPage = page
+                    // Increment attempts if we got no fresh tracks to eventually break the loop
+                    attempts++
+                } else {
+                    recommendationPage = null
+                    recommendationQueryIndex = (recommendationQueryIndex + 1) % recommendationQueries.size.coerceAtLeast(1)
+                    attempts++
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("CatalogVM", "Recommendation query failed: $query - ${t.message}")
                 recommendationPage = null
                 recommendationQueryIndex = (recommendationQueryIndex + 1) % recommendationQueries.size.coerceAtLeast(1)
                 attempts++
-            }
-
-            if (page == null && fresh.isNotEmpty()) {
-                recommendationQueryIndex = (recommendationQueryIndex + 1) % recommendationQueries.size.coerceAtLeast(1)
+                delay(500)
             }
         }
 
@@ -627,19 +724,23 @@ class CatalogViewModel @Inject constructor(
             state.copy(
                 justForYou = (state.justForYou + appended).distinctBy { it.sourceUrl },
                 isLoadingRecommendations = false,
-                isLoadingMoreRecommendations = false
+                isLoadingMoreRecommendations = false,
+                canLoadMore = appended.isNotEmpty() || (recommendationPage != null && attempts < maxAttempts)
             )
         }
     }
 
     private suspend fun collectDistinctTracks(queries: List<String>, limit: Int): List<CatalogTrack> = coroutineScope {
-        // Reduced parallelism to avoid network bottleneck and UI lag
-        val jobs = queries.distinct().take(6).map { query ->
+        // Controlled concurrency using a Semaphore to prevent crashes and bot detection
+        val jobs = queries.distinct().take(12).map { query ->
             async {
-                try {
-                    repository.search(query).first
-                } catch (e: Exception) {
-                    emptyList<CatalogTrack>()
+                networkSemaphore.withPermit {
+                    try {
+                        repository.search(query).first
+                    } catch (t: Throwable) {
+                        android.util.Log.e("CatalogVM", "Parallel search failed for $query: ${t.message}")
+                        emptyList<CatalogTrack>()
+                    }
                 }
             }
         }
@@ -673,124 +774,204 @@ class CatalogViewModel @Inject constructor(
     private suspend fun buildRecommendationQueries(currentTrack: MusicTrack?, cycle: Int): List<String> {
         val now = System.currentTimeMillis()
         val allTracks = musicRepository.allTracks.first()
+        val playlists = musicRepository.allPlaylists.first()
+        val userSearches = appDatabase.catalogSearchDao().getAllSearchesSync()
         
-        // --- 1. SEED SELECTION (Weighted Scoring) ---
+        val playlistTrackUris = playlists.filterNot { it.isSystemPlaylist }.flatMap { it.trackUris }.toSet()
+        
+        // Tier 0: User Search History (highest priority discovery)
+        val searchSeeds = userSearches.sortedByDescending { it.timestamp }.take(15).map { it.query }
+
+        // Folder Intelligence: Identify dominant folders
+        val folderKeywords = allTracks
+            .mapNotNull { track -> 
+                track.path?.let { p ->
+                    val file = java.io.File(p)
+                    file.parentFile?.name?.takeIf { it.length > 3 && it != "Music" && it != "Download" && it != "Toolz Downloads" }
+                }
+            }
+            .groupingBy { it }.eachCount()
+            .toList().sortedByDescending { it.second }.take(8).map { it.first }
+
         val scoredSeeds = allTracks
-            .filter { it.playCount > 0 || it.lastPlayed > 0L || it.isFavorite || it.uri == currentTrack?.uri || it.album == "Toolz Downloads" }
+            .filter { 
+                it.playCount > 0 || 
+                it.lastPlayed > 0L || 
+                it.isFavorite || 
+                it.uri == currentTrack?.uri || 
+                it.album == "Toolz Downloads" ||
+                playlistTrackUris.contains(it.uri)
+            }
             .sortedByDescending { track ->
                 val daysSinceLastPlay = if (track.lastPlayed > 0L) {
-                    ((now - track.lastPlayed).coerceAtLeast(0L) / 86_400_000L).coerceAtMost(400L)
-                } else 400L
+                    ((now - track.lastPlayed).coerceAtLeast(0L) / 86_400_000L).coerceAtMost(365L)
+                } else 365L
                 
-                // Recency: 30% weight
-                val recencyScore = (400L - daysSinceLastPlay) * 1.5f
+                val recencyScore = (365L - daysSinceLastPlay) * 6.0f // Heavy weighting for recency
                 
-                // Frequency/Love: 50% weight (includes downloads)
                 val isDownloaded = track.album == "Toolz Downloads" || track.path != null
-                val frequencyScore = (track.playCount * 250L) + (if (track.isFavorite) 2000L else 0L) + (if (isDownloaded) 3000L else 0L)
+                val isInPlaylist = playlistTrackUris.contains(track.uri)
+                val loyaltyScore = (track.playCount * 800L) + // Massive play count boost
+                                  (if (track.isFavorite) 12000L else 0L) + 
+                                  (if (isDownloaded) 8000L else 0L) +
+                                  (if (isInPlaylist) 5000L else 0L)
                 
-                // Context: 15% weight
-                val currentBoost = if (track.uri == currentTrack?.uri) 4000L else 0L
+                val currentBoost = if (track.uri == currentTrack?.uri) 20000L else 0L
                 
-                frequencyScore + recencyScore + currentBoost
+                loyaltyScore + recencyScore + currentBoost
             }
             .distinctBy { "${cleanSeedTitle(it.title)}|${it.artist.orEmpty().lowercase()}" }
 
-        val coreSeeds = scoredSeeds.take(20)
-        val recentSeeds = scoredSeeds.sortedByDescending { it.lastPlayed }.take(10)
-
-        // --- 2. GENRE EXTRACTION ---
+        val coreSeeds = scoredSeeds.take(60)
+        val highIntentSeeds = scoredSeeds.filter { it.isFavorite || it.playCount > 3 || it.album == "Toolz Downloads" }.take(30)
+        
+        val topArtists = coreSeeds.mapNotNull { it.artist }.filter { it != "Unknown Artist" && it.length > 2 }
+            .groupingBy { it }.eachCount().toList().sortedByDescending { it.second }.take(15).map { it.first }
+            
         val genres = coreSeeds.flatMap { track ->
-            listOfNotNull(track.album, track.artist).filter { it.length > 3 && it != "Unknown Artist" }
-        }.groupingBy { it }.eachCount().toList().sortedByDescending { it.second }.take(8).map { it.first }
+            val aiThemes = track.aiSongMeaning?.split(" ")?.filter { it.length > 6 }?.take(3) ?: emptyList()
+            listOfNotNull(track.album, track.artist).filter { it.length > 4 && it != "Unknown Artist" && it != "Toolz Downloads" } + aiThemes
+        }.groupingBy { it }.eachCount().toList().sortedByDescending { it.second }.take(20).map { it.first }
+
+        val playlistNames = playlists.filterNot { it.isSystemPlaylist || it.name.length < 4 }.map { it.name }
 
         val explorers = listOf(
-            "Indie discovery", "Experimental jazz", "Global underground hits",
-            "Neo soul discovery", "Ambient electronic exploration", "Synthwave essentials",
-            "Acoustic covers", "Lo-fi beats for focus", "Up-and-coming artists",
-            "Alternative rock gems", "Modern classical masterpieces",
-            "Chill lofi hip hop", "Energetic workout mix", "Phonk workout hits",
-            "Deep house underground", "Classical piano for studying",
-            "80s pop hits", "90s grunge essentials", "Reggaeton viral hits"
+            "Underground gems", "Alternative discovery", "Neo soul essentials",
+            "Indie electronic", "Synthwave 2024", "Deep house selections",
+            "Acoustic morning", "Lo-fi study beats", "Phonk gym mix",
+            "Afrobeats dance", "Amapiano viral", "K-pop new wave",
+            "Modern jazz fusion", "Ambient sleep", "Post-rock soundscapes"
         )
 
-        // --- 4. THE "MESSY MIX" (Time & Mood based) ---
         val calendar = Calendar.getInstance()
         val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        
-        val timeMoods = when {
-            hour in 5..11 -> listOf("Morning energy", "Coffee shop acoustic", "Productive focus", "Sunrise chill")
-            hour in 12..16 -> listOf("Midday boost", "Deep work", "Instrumental study", "Alternative afternoon")
-            hour in 17..21 -> listOf("Evening wind down", "Sunset vibes", "Chill electronic", "Dinner lounge")
-            else -> listOf("Midnight focus", "Sleepy piano", "Ambient night", "Late night lo-fi")
+        val timeContext = when {
+            hour in 5..10 -> listOf("Morning coffee acoustic", "Productive energy", "Sunrise vibes")
+            hour in 11..14 -> listOf("Lunchtime chill", "Workday focus", "Midday electronic")
+            hour in 15..18 -> listOf("Afternoon boost", "Commute radio", "Alternative drive")
+            hour in 19..22 -> listOf("Evening lounge", "Sunset chill", "Late night R&B")
+            else -> listOf("Midnight study", "Ambient night", "Sleepy piano", "Deep lo-fi")
         }
         
-        val queries = buildList {
-            // Priority: Favorites & Downloads
-            coreSeeds.take(10).forEach { track ->
+        // Tiered Seed System
+        val tier1Seeds = buildList {
+            // New Tier 0: Recent user searches (Highest discovery signal)
+            addAll(searchSeeds.map { "$it official audio" })
+            if (cycle % 2 == 0) addAll(searchSeeds.map { "songs similar to $it" })
+
+            currentTrack?.let { track ->
                 val title = cleanSeedTitle(track.title)
                 val artist = track.artist.orEmpty().trim()
                 if (title.isNotBlank() && artist.isNotBlank()) {
-                    add("$title $artist")
-                    add("songs like $title $artist")
-                    if (cycle % 2 == 0) add("$artist radio")
+                    add("$title $artist official")
+                    add("more from $artist")
                 }
             }
+            // Favorites boost
+            highIntentSeeds.filter { it.isFavorite }.take(10).forEach { track ->
+                add("${cleanSeedTitle(track.title)} ${track.artist.orEmpty()} studio")
+            }
+        }
 
-            // Recency: What they are listening to NOW
-            recentSeeds.take(8).forEach { track ->
-                val artist = track.artist.orEmpty().trim()
-                if (artist.isNotBlank() && artist != "Unknown Artist") {
-                    add("best of $artist")
-                    add("similar to $artist music")
-                    add("$artist essential hits")
-                }
+        // Tier 2: Related Artists (Asynchronous expansion)
+        val relatedArtists = if (currentTrack != null && currentTrack.sourceUrl != null) {
+            val videoId = currentTrack.sourceUrl.substringAfter("v=").substringBefore("&")
+            repository.innerTubeClient.getRelatedArtists(videoId)
+        } else emptyList<String>()
+
+        val tier2Seeds = buildList {
+            relatedArtists.forEach { artist ->
+                add("$artist essentials mix")
+                add("best of $artist studio")
+                if (cycle % 2 == 0) add("similar to $artist")
+            }
+        }
+
+        val queries = buildList {
+            addAll(tier1Seeds)
+            addAll(tier2Seeds)
+
+            // Tier 2.5: Top Artists discovery
+            topArtists.forEach { artist ->
+                add("$artist essential songs")
+                if (cycle % 3 == 0) add("new releases from $artist")
             }
 
-            // Genre-Based Discovery
-            genres.forEach { genre ->
-                add("best of $genre")
-                add("modern $genre sounds")
-                add("underground $genre gems")
-                if (cycle % 2 == 0) add("alternative $genre mix")
+            // Tier 3: Moods & Genres
+            genres.forEach { seed ->
+                add("best of $seed")
+                add("modern $seed mix")
+                if (cycle % 2 == 0) add("underrated $seed gems")
             }
 
-            // Time & Mood based discovery
-            timeMoods.forEach { add(it) }
+            // Tier 4: Folders
+            folderKeywords.forEach { folder ->
+                add("$folder music mix")
+                if (cycle % 2 == 0) add("songs like $folder")
+            }
 
-            repeat(6) { i ->
+            playlistNames.forEach { name ->
+                add("$name official audio")
+            }
+
+            timeContext.forEach { add(it) }
+
+            repeat(4) { i ->
                 add(explorers[(cycle + i) % explorers.size])
             }
             
-            add("fresh new music weekly")
-            add("global viral hits")
-            add("underrated music gems")
+            add("global viral music 2024")
         }
 
         return queries
             .map { it.replace(Regex("\\s+"), " ").trim() }
             .filter { it.isNotBlank() }
             .distinct()
-            .shuffled()
-            .take(48)
+            .let { list ->
+                // Strong weight to Tier 1 and 2
+                val prioritized = list.take(15) 
+                val others = list.drop(15).shuffled()
+                (prioritized + others).take(128)
+            }
     }
 
-    private fun buildRecommendationTitle(currentTrack: MusicTrack?): String {
-         val topArtist = currentTrack?.artist?.takeIf { it != "Unknown Artist" }
-        val topAlbum = currentTrack?.album?.takeIf { it != "Toolz Downloads" }
-        
-        return when {
-            topArtist != null && Math.random() > 0.5 -> "Inspired by $topArtist"
-            topAlbum != null -> "More from $topAlbum"
-            topArtist != null -> "Deep dive into $topArtist"
-            else -> listOf(
-                "Just for you",
-                "Your daily mix",
-                "Discover new sounds",
-                "Fresh picks for you",
-                "Explore more styles"
-            ).random()
+    private suspend fun buildRecommendationTitle(currentTrack: MusicTrack?): String {
+        val allTracks = musicRepository.allTracks.first()
+        val playlists = musicRepository.allPlaylists.first()
+
+        // High priority: Currently playing context
+        if (currentTrack != null) {
+            val topArtist = currentTrack.artist.takeIf { it != "Unknown Artist" }
+            if (topArtist != null && Math.random() > 0.3) return "Inspired by $topArtist"
         }
+
+        // Mid priority: Most played artist
+        val topArtist = allTracks.filter { it.artist != "Unknown Artist" }
+            .groupingBy { it.artist }.eachCount()
+            .maxByOrNull { it.value }?.key
+        if (topArtist != null && Math.random() > 0.5) return "Because you like $topArtist"
+
+        // Mid priority: Dominant Folder
+        val topFolder = allTracks.mapNotNull { track -> 
+            track.path?.let { p ->
+                val file = java.io.File(p)
+                file.parentFile?.name?.takeIf { it.length > 3 && it != "Music" && it != "Download" }
+            }
+        }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        if (topFolder != null && Math.random() > 0.6) return "From your $topFolder collection"
+
+        // Mid priority: Custom Playlist
+        val topPlaylist = playlists.filterNot { it.isSystemPlaylist }.maxByOrNull { it.trackUris.size }?.name
+        if (topPlaylist != null && Math.random() > 0.7) return "More like $topPlaylist"
+
+        return listOf(
+            "Just for you",
+            "Your daily mix",
+            "Discover new sounds",
+            "Fresh picks for you",
+            "Explore more styles",
+            "Trending for you"
+        ).random()
     }
 
     private fun cleanSeedTitle(title: String): String {
