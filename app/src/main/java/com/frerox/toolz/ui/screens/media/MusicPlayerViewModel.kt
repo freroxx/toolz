@@ -64,6 +64,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
@@ -85,6 +86,7 @@ data class MusicUiState(
     val mostPlayed              : List<MusicTrack>          = emptyList(),
     val currentTrack            : MusicTrack?               = null,
     val isPlaying               : Boolean                   = false,
+    val playWhenReady           : Boolean                   = false,
     val isShuffleOn             : Boolean                   = false,
     val repeatMode              : Int                       = Player.REPEAT_MODE_OFF,
     val sortOrder               : SortOrder                 = SortOrder.RECENT,
@@ -206,9 +208,15 @@ class MusicPlayerViewModel @Inject constructor(
                 hapticClick()
             } else {
                 stopProgressUpdate()
-                stopVisualizer()
+                // FIX: Only stop visualizer if we are NOT playWhenReady. 
+                // This keeps bars from freezing/clipping during a rebuffer blip.
+                if (!_uiState.value.playWhenReady) stopVisualizer()
                 hapticClick()
             }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            _uiState.update { it.copy(playWhenReady = playWhenReady) }
         }
 
         /**
@@ -337,12 +345,21 @@ class MusicPlayerViewModel @Inject constructor(
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
-            _uiState.update { it.copy(isResolvingCatalog = false) }
+            Log.e("MusicPlayerViewModel", "Playback error: ${error.errorCodeName}", error)
+            _uiState.update { it.copy(isResolvingCatalog = false, isPlaying = false, isLoading = false) }
+
             if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
                 || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
             ) {
                 player.prepare()
             } else {
+                viewModelScope.launch(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Playback error: ${error.localizedMessage ?: "Unknown error"}",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
                 player.stop()
             }
         }
@@ -441,7 +458,8 @@ class MusicPlayerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.showMusicVisualizer.collect { show ->
                 _uiState.update { it.copy(showVisualizer = show) }
-                if (show && player.isPlaying) startVisualizer() else if (!show) stopVisualizer()
+                // Use _uiState.value.isPlaying for thread safety
+                if (show && _uiState.value.isPlaying) startVisualizer() else if (!show) stopVisualizer()
             }
         }
         viewModelScope.launch {
@@ -594,6 +612,7 @@ class MusicPlayerViewModel @Inject constructor(
                             folders         = folders,
                             currentTrack    = newCurrentTrack,
                             isPlaying       = player.isPlaying,
+                            playWhenReady   = player.playWhenReady,
                             isShuffleOn     = player.shuffleModeEnabled,
                             repeatMode      = player.repeatMode,
                             duration        = player.duration.coerceAtLeast(0L)
@@ -684,7 +703,8 @@ class MusicPlayerViewModel @Inject constructor(
 
     private fun startShakeDetection() {
         if (shakeDetector == null) {
-            shakeDetector = ShakeDetector { if (player.isPlaying) skipNext() }
+            // Use _uiState.value.isPlaying for thread safety as sensor events can be on any thread
+            shakeDetector = ShakeDetector { if (_uiState.value.isPlaying) skipNext() }
         }
         val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
         sensorManager.registerListener(
@@ -817,23 +837,38 @@ class MusicPlayerViewModel @Inject constructor(
         visualizerAttachJob?.cancel()
         visualizerAttachJob = viewModelScope.launch(Dispatchers.Default) {
             val emptySpectrum = FloatArray(64)
+            var lastSpectrum = FloatArray(64)
+            
             while (currentCoroutineContext().isActive && _uiState.value.showVisualizer) {
-                if (player.isPlaying) {
+                // FIX: Use _uiState.value.isPlaying for thread-safe access from background coroutine.
+                if (_uiState.value.isPlaying) {
                     val spectrum = visualizerManager.getSpectrum()
-                    if (spectrum != null) {
-                        _visualizerData.value = spectrum
+                    
+                    // Implement "Gravity" for smoother decay and instant peaks.
+                    // We execute this EVERY frame while playing, even if spectrum is null,
+                    // to ensure bars don't "freeze" during tiny data gaps.
+                    val smoothed = FloatArray(64)
+                    for (i in 0 until 64) {
+                        val target = spectrum?.get(i) ?: 0f
+                        val prev = lastSpectrum[i]
+                        // Rise instantly to catch transients, fall with gravity (0.78f) for aggressive, rhythmic motion.
+                        smoothed[i] = if (target > prev) target else prev * 0.78f
                     }
+                    lastSpectrum = smoothed
+                    _visualizerData.value = smoothed
                 } else {
                     // Decay to zero when paused
                     val current = _visualizerData.value
                     if (current.isNotEmpty() && current.any { it > 0.01f }) {
                         val decayed = current.map { it * 0.8f }.toFloatArray()
                         _visualizerData.value = decayed
+                        lastSpectrum = decayed
                     } else if (current.isNotEmpty()) {
                         _visualizerData.value = emptySpectrum
+                        lastSpectrum = emptySpectrum
                     }
                 }
-                delay(33L) // ~30fps
+                delay(16L) // ~60fps for high-performance live reaction
             }
         }
     }

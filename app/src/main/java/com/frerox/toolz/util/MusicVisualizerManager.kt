@@ -26,62 +26,99 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.*
 
+/**
+ * Enhanced MusicVisualizerManager using a zero-latency circular buffer.
+ * Processes audio data in real-time to provide high-sensitivity spectrum analysis.
+ */
 @Singleton
 class MusicVisualizerManager @Inject constructor() {
 
     private val fftSize = 1024
-    private val pcmBuffer = ShortArray(fftSize)
+    // Circular buffer to hold PCM data. 16384 samples (~370ms at 44.1kHz)
+    private val circularBufferSize = 16384
+    private val circularBuffer = ShortArray(circularBufferSize)
+    private var writePos = 0
+    
+    // FFT buffers
     private val real = FloatArray(fftSize)
     private val imag = FloatArray(fftSize)
     private val spectrum = FloatArray(64)
+    private val prevSpectrum = FloatArray(64)
     
     private val lock = Any()
-    private var hasNewData = false
+    private var totalSamplesReceived = 0L
 
+    /**
+     * Called by the AudioProcessor to feed PCM data into the manager.
+     */
     fun onPcmData(buffer: ByteBuffer) {
         synchronized(lock) {
-            val remaining = buffer.remaining() / 2 // bytes to shorts
-            val toCopy = min(remaining, fftSize)
-            for (i in 0 until toCopy) {
-                pcmBuffer[i] = buffer.short
+            val shorts = buffer.remaining() / 2
+            repeat(shorts) {
+                circularBuffer[writePos] = buffer.short
+                writePos = (writePos + 1) % circularBufferSize
             }
-            hasNewData = true
+            totalSamplesReceived += shorts
         }
     }
 
+    /**
+     * Extracts a spectrum analysis from the most recent audio data.
+     * Guaranteed to return a valid spectrum as long as the first 1024 samples have been received.
+     */
     fun getSpectrum(): FloatArray? {
         synchronized(lock) {
-            if (!hasNewData) return null
-            hasNewData = false
+            // Wait for the first window to fill before starting
+            if (totalSamplesReceived < fftSize) return null
             
-            // Prepare for FFT
+            // Always read the ABSOLUTE LATEST window of data. 
+            // We sample the tail of the circular buffer.
+            var readPos = (writePos - fftSize + circularBufferSize) % circularBufferSize
             for (i in 0 until fftSize) {
-                // Apply Hanning window
-                val window = 0.5f * (1f - cos(2f * PI.toFloat() * i / (fftSize - 1)))
-                real[i] = pcmBuffer[i].toFloat() * window
+                // Apply Hamming window for better frequency isolation
+                val window = 0.54f - 0.46f * cos(2f * PI.toFloat() * i / (fftSize - 1))
+                real[i] = circularBuffer[readPos].toFloat() * window
                 imag[i] = 0f
+                readPos = (readPos + 1) % circularBufferSize
             }
         }
 
         // Perform FFT
         fft(real, imag)
 
-        // Compute magnitude and group into 64 bins
+        // Compute magnitude and group into 64 logarithmic bins
         val n = fftSize / 2
         for (i in 0 until 64) {
-            val start = (2.0.pow(i / 10.6) - 1).toInt().coerceIn(0, n - 1)
-            val end = (2.0.pow((i + 1) / 10.6) - 1).toInt().coerceIn(start + 1, n)
+            // Logarithmic mapping: 20Hz to 20kHz
+            val freqStart = 20.0 * (20000.0 / 20.0).pow(i / 64.0)
+            val freqEnd = 20.0 * (20000.0 / 20.0).pow((i + 1) / 64.0)
             
-            var sumSq = 0f
-            for (j in start until end) {
+            // Map frequency to FFT bin (assuming 44100Hz)
+            val binWidth = 44100.0 / fftSize
+            val startBin = (freqStart / binWidth).toInt().coerceIn(0, n - 1)
+            val endBin = (freqEnd / binWidth).toInt().coerceIn(startBin + 1, n)
+            
+            var maxMag = 0f
+            for (j in startBin until endBin) {
                 val mag = sqrt(real[j] * real[j] + imag[j] * imag[j])
-                sumSq += mag * mag
+                if (mag > maxMag) maxMag = mag
             }
-            val rms = if (end > start) sqrt(sumSq / (end - start)) else 0f
             
-            // Perceptual weighting and scaling
-            val shelf = 1f + sqrt(i / 63f) * 1.6f
-            spectrum[i] = (rms * shelf * 0.005f).coerceIn(0f, 100f)
+            // Extreme sensitivity weighting:
+            // High boost for mid/high ranges where energy is usually lower.
+            val weighting = when {
+                i < 8  -> 1.2f  // Bass
+                i < 24 -> 2.2f  // Low Mids
+                i < 48 -> 3.5f  // High Mids
+                else   -> 5.0f  // Treble
+            }
+            // Sensitivity coefficient: 0.010f (Balanced for compact, aggressive movement)
+            var value = (maxMag * weighting * 0.010f).coerceIn(0f, 100f)
+            
+            // Temporal smoothing (Less smoothing for faster reactions)
+            value = prevSpectrum[i] * 0.15f + value * 0.85f
+            spectrum[i] = value
+            prevSpectrum[i] = value
         }
         
         return spectrum.copyOf()
@@ -145,10 +182,24 @@ class VisualizerAudioProcessor(private val manager: MusicVisualizerManager) : Ba
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
-        if (inputBuffer.hasRemaining()) {
-            val duplicate = inputBuffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
-            manager.onPcmData(duplicate)
+        val remaining = inputBuffer.remaining()
+        if (remaining == 0) return
+
+        // Extract PCM data for visualization without consuming the main buffer
+        val duplicate = inputBuffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
+        manager.onPcmData(duplicate)
+
+        // Pass-through to output. We use duplicate() to avoid the "source buffer is this buffer"
+        // exception if Media3's buffer management ever reuses the same object for input and output.
+        val output = replaceOutputBuffer(remaining)
+        if (output !== inputBuffer) {
+            output.put(inputBuffer)
+        } else {
+            // If they are the same instance, replaceOutputBuffer just called buffer.clear().
+            // The data is technically already there, but clear() wiped it. 
+            // We advance position to signal consumption.
+            inputBuffer.position(inputBuffer.limit())
         }
-        replaceOutputBuffer(inputBuffer.remaining()).put(inputBuffer).flip()
+        output.flip()
     }
 }

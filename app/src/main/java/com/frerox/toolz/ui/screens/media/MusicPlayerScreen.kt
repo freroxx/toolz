@@ -170,7 +170,11 @@ import java.util.*
 // ─────────────────────────────────────────────────────────────────────────────
 
 @AnnotationOptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalPermissionsApi::class
+)
 @Composable
 fun MusicPlayerScreen(
     viewModel: MusicPlayerViewModel,
@@ -284,10 +288,14 @@ fun MusicPlayerScreen(
 
     val isLogicalPlaying = state.isPlaying || aiState.isInstrumentalPlaying
 
-    LaunchedEffect(isLogicalPlaying, aiState.karaokeSpeechCorrectionEnabled) {
-        if (aiState.karaokeSpeechCorrectionEnabled) {
-            if (!isLogicalPlaying) aiViewModel.pauseKaraokeListening()
-            else aiViewModel.resumeKaraokeListening()
+    // FIX: Decouple microphone listening from the player's buffering state.
+    // The previous version would pause/resume the recognizer on every 1s
+    // buffering gap, causing the "on/off" flickering reported by users.
+    // We now use playWhenReady for intent-based gating.
+    LaunchedEffect(state.isKaraokeActive, aiState.karaokeSpeechCorrectionEnabled, state.playWhenReady) {
+        if (state.isKaraokeActive && aiState.karaokeSpeechCorrectionEnabled) {
+            if (state.playWhenReady) aiViewModel.resumeKaraokeListening()
+            else aiViewModel.pauseKaraokeListening()
         }
     }
 
@@ -5070,9 +5078,9 @@ fun AudioVisualizerHalo(
         val center = Offset(size.width / 2f, size.height / 2f)
         val baseRadius = size.minDimension / 2.16f
         val minBarLen = 3.dp.toPx()
-        val maxBarLen = 26.dp.toPx()
+        val maxBarLen = 40.dp.toPx() // Compact but high relative movement
         val minBarWidth = 2.5.dp.toPx()
-        val maxBarWidth = 5.5.dp.toPx()
+        val maxBarWidth = 6.dp.toPx()
         val cornerR = CornerRadius(maxBarWidth / 2f, maxBarWidth / 2f)
 
         // Reused every frame instead of two fresh Path() allocations per

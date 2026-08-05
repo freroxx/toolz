@@ -17,6 +17,8 @@
 
 package com.frerox.toolz.service
 
+import android.util.Log
+
 import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -208,6 +210,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             // widget's Up Next list doesn't go stale.
             updateWidget()
             savePlaybackState()
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            super.onPlayerError(error)
+            Log.e("MusicPlayerService", "Playback error in background: ${error.errorCodeName}", error)
         }
     }
 

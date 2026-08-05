@@ -83,8 +83,8 @@ private const val GROQ_MODEL = "llama-3.3-70b-versatile"
 // are in the 1-2 second range.
 // ─────────────────────────────────────────────────────────────────────────
 private const val RECOGNIZER_MIN_SPEECH_LENGTH_MS = 1500L
-private const val RECOGNIZER_COMPLETE_SILENCE_MS = 1200L
-private const val RECOGNIZER_POSSIBLY_COMPLETE_SILENCE_MS = 800L
+private const val RECOGNIZER_COMPLETE_SILENCE_MS = 4000L
+private const val RECOGNIZER_POSSIBLY_COMPLETE_SILENCE_MS = 3000L
 
 // Delay before requeuing startListening() after a *successful* onResults —
 // kept tiny so there's effectively no audible/visible mic gap between
@@ -186,6 +186,7 @@ class NowPlayingAiViewModel @Inject constructor(
     private var recognitionIntent  : Intent?           = null
     private var restartJob         : Job?              = null
     private var watchdogJob        : Job?              = null
+    private var destroyJob         : Job?              = null
 
     // Internal "is a startListening() session currently open" flag. This is
     // deliberately separate from uiState.isListening: the UI flag reflects
@@ -207,6 +208,7 @@ class NowPlayingAiViewModel @Inject constructor(
     private var busyRetryCount     : Int                = 0
     private var lastCallbackAtMs   : Long                = 0L
     private var lastMissedCheckMs  : Long                = 0L  // throttle for checkMissedWords
+    private var pauseRequestedAtMs : Long                = 0L
 
     // Mutex that serializes all lyrics-state mutations (checkMissedWords AND
     // processRecognizedTexts both update the same list). Using a Mutex
@@ -1539,6 +1541,8 @@ class NowPlayingAiViewModel @Inject constructor(
         restartJob = null
         watchdogJob?.cancel()
         watchdogJob = null
+        destroyJob?.cancel()
+        destroyJob = null
         sessionActive = false
         viewModelScope.launch(Dispatchers.Main) {
             destroyRecognizer()
@@ -1551,13 +1555,36 @@ class NowPlayingAiViewModel @Inject constructor(
         restartJob?.cancel()
         watchdogJob?.cancel()
         sessionActive = false
+        
+        pauseRequestedAtMs = System.currentTimeMillis()
+
+        // Immediate hardware release
         viewModelScope.launch(Dispatchers.Main) {
-            destroyRecognizer()
+            runCatching { speechRecognizer?.cancel() }
+        }
+        
+        // Delayed full destruction (unbind service) to prevent flickering on fast resume
+        destroyJob?.cancel()
+        destroyJob = viewModelScope.launch {
+            delay(5_000)
+            withContext(Dispatchers.Main) {
+                destroyRecognizer()
+            }
         }
     }
 
     fun resumeKaraokeListening() {
         if (!_uiState.value.isKaraokeRecording || sessionActive) return
+        
+        // If we're resuming within the settle window of a just-issued pause,
+        // this is churn (buffering flapping / duplicate LaunchedEffect fire),
+        // not a genuine pause→resume. Debounce it rather than restarting the
+        // recognizer.
+        val sincePause = System.currentTimeMillis() - pauseRequestedAtMs
+        if (sincePause < 300L) return
+
+        destroyJob?.cancel()
+        destroyJob = null
         _uiState.update { it.copy(isListening = true) }
         viewModelScope.launch(Dispatchers.Main) {
             if (speechRecognizer == null) buildRecognizer()
@@ -1596,8 +1623,12 @@ class NowPlayingAiViewModel @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            // No EXTRA_AUDIO_SOURCE, no silence timeouts — let the recognizer use its own defaults.
-            // These extras cause ERROR_CLIENT on many OEM ROMs (Samsung, Xiaomi, etc.).
+
+            // Force longer silence windows so normal singing pauses (breathing/phrase gaps) 
+            // don't close the utterance. This prevents the hardware mic release/flicker.
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, RECOGNIZER_COMPLETE_SILENCE_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, RECOGNIZER_POSSIBLY_COMPLETE_SILENCE_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, RECOGNIZER_MIN_SPEECH_LENGTH_MS)
         }
         speechRecognizer?.setRecognitionListener(recognitionListener)
     }
@@ -1631,6 +1662,14 @@ class NowPlayingAiViewModel @Inject constructor(
      * Must be called on the MAIN thread (via Dispatchers.Main coroutine).
      */
     private suspend fun beginListening() {
+        if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return
+
+        if (speechRecognizer == null) {
+            Log.d(TAG, "beginListening: re-building destroyed recognizer")
+            buildRecognizer()
+            delay(100L)
+        }
+
         val recognizer = speechRecognizer ?: run {
             Log.w(TAG, "beginListening: speechRecognizer is null")
             return
@@ -1639,7 +1678,6 @@ class NowPlayingAiViewModel @Inject constructor(
             Log.w(TAG, "beginListening: recognitionIntent is null")
             return
         }
-        if (!_uiState.value.isKaraokeRecording) return
 
         // CRITICAL: Only call stopListening/cancel if a session was previously
         // active. Calling stopListening() on a FRESH recognizer that has never
@@ -1649,9 +1687,8 @@ class NowPlayingAiViewModel @Inject constructor(
             runCatching { recognizer.stopListening() }
             runCatching { recognizer.cancel() }
             sessionActive = false
-            // Give the service time to release the previous session.
-            // Increased to 500ms to prevent ERROR_RECOGNIZER_BUSY on slower devices
-            delay(500L)
+            // Reduced to 80ms to minimize silence gaps that cause flickering.
+            delay(80L)
         }
 
         if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return
@@ -1665,6 +1702,8 @@ class NowPlayingAiViewModel @Inject constructor(
         }.onFailure {
             Log.e(TAG, "beginListening: startListening threw", it)
             sessionActive = false
+            // If it failed immediately, try a full rebuild after a delay
+            rebuildAndRestart(1000L)
         }
     }
 
@@ -1680,6 +1719,8 @@ class NowPlayingAiViewModel @Inject constructor(
         if (!_uiState.value.isKaraokeRecording) return
         restartJob?.cancel()
         restartJob = viewModelScope.launch(Dispatchers.Main) {
+            // FIX: We no longer toggle `isListening = false` during routine
+            // phrase restarts. This keeps the UI mic indicator solid.
             if (delayMs > 0) delay(delayMs)
             if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return@launch
             beginListening()
@@ -1801,6 +1842,7 @@ class NowPlayingAiViewModel @Inject constructor(
                     // Just silently restart, no backoff, no UI change.
                     busyRetryCount = 0
                     consecutiveFailures = 0
+                    // DO NOT hard-reset micRms here; let it naturally decay in the UI.
                     requeueListening(ROUTINE_GAP_RESTART_DELAY_MS)
                 }
                 SpeechRecognizer.ERROR_AUDIO -> {

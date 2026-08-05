@@ -154,6 +154,8 @@ fun KaraokeView(
     
     // Logical playing state accounts for both the main player and the AI instrumental player
     val isLogicalPlaying = state.isPlaying || aiState.isInstrumentalPlaying
+    // Use playWhenReady for intent-based logic (survives buffering blips)
+    val isLogicalPlayIntent = state.playWhenReady || aiState.isInstrumentalPlaying
     
     var minSplashTimeElapsed by remember { mutableStateOf(false) }
     var isSkipRequested      by remember { mutableStateOf(false) }
@@ -388,8 +390,8 @@ fun KaraokeView(
 
     // Auto-start Speech Correct or Audio Saving when phase is ACTIVE.
     // We strictly enforce exclusive mic ownership.
-    LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlaying) {
-        if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && isLogicalPlaying) {
+    LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlayIntent) {
+        if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && isLogicalPlayIntent) {
             // Add a stability delay to prevent mic flickering at the very start of the session
             // while the media player is still buffering or transitioning.
             delay(400)
@@ -400,8 +402,11 @@ fun KaraokeView(
                     stopMediaRecording(scope, mediaRecorder, isMediaRecorderStarted) {
                         mediaRecorder = null
                         isMediaRecorderStarted = false
-                        // Only start recognition AFTER recorder is fully released
-                        aiViewModel.startKaraokeRecording()
+                        // Safety delay to ensure hardware release before claiming it again
+                        scope.launch {
+                            delay(200)
+                            aiViewModel.startKaraokeRecording()
+                        }
                     }
                 } else {
                     aiViewModel.startKaraokeRecording()
@@ -415,12 +420,18 @@ fun KaraokeView(
         }
     }
 
-    LaunchedEffect(isLogicalPlaying, mediaRecorder, aiState.karaokeSpeechCorrectionEnabled) {
-        if (aiState.karaokeSpeechCorrectionEnabled) {
-            if (!isLogicalPlaying) aiViewModel.pauseKaraokeListening()
-            else aiViewModel.resumeKaraokeListening()
+    // FIX: Decouple microphone listening from the player's buffering state.
+    // Toggling the SpeechRecognizer on/off during 1-second buffering gaps
+    // is what causes the persistent flickering. We now use isLogicalPlayIntent
+    // (based on playWhenReady) which survives buffering blips.
+    LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlayIntent) {
+        if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && aiState.karaokeSpeechCorrectionEnabled) {
+            if (isLogicalPlayIntent) aiViewModel.resumeKaraokeListening()
+            else aiViewModel.pauseKaraokeListening()
         }
-        
+    }
+
+    LaunchedEffect(isLogicalPlaying, mediaRecorder) {
         // Only pause/resume the MediaRecorder if it was fully started.
         val isAudioRecording = mediaRecorder != null && isMediaRecorderStarted
         if (!isLogicalPlaying && isAudioRecording) {
@@ -1619,7 +1630,7 @@ private fun KaraokeProgressBar(
 private fun MicToggleButton(
     isRecording            : Boolean,
     isListening            : Boolean = true,
-    isReconnecting         : Boolean = false,
+    @Suppress("UNUSED_PARAMETER") isReconnecting: Boolean = false,
     speechCorrectionEnabled: Boolean = false,
     micRms                 : Float,
     onClick                : () -> Unit
@@ -1629,34 +1640,46 @@ private fun MicToggleButton(
     // When Speech Correction owns the mic, pulse with the RMS level to give
     // live feedback. For normal recording, the same pulse applies.
     val isActiveAudio = (isRecording && isListening) || (speechCorrectionEnabled && isListening)
-    val targetScale = if (isActiveAudio) 1.15f + (micRms / 100f).coerceIn(0f, 0.15f) else 1f
-    val pulse by inf.animateFloat(
-        1f, targetScale,
-        infiniteRepeatable(tween(if (isActiveAudio) 600 else 1000), RepeatMode.Reverse),
+    
+    // Normalize RMS for the pulse effect. 
+    val rmsNorm = ((micRms + 10f) / 12f).coerceIn(0f, 1f)
+
+    // FIX: Stabilize pulse by separating the infinite base pulse from the dynamic RMS boost.
+    val rmsBoost by animateFloatAsState(
+        targetValue = if (isActiveAudio) rmsNorm * 0.18f else 0f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
+        label = "rmsBoost"
+    )
+    val basePulse by inf.animateFloat(
+        1f, if (isActiveAudio) 1.12f else 1f,
+        infiniteRepeatable(tween(if (isActiveAudio) 650 else 1000), RepeatMode.Reverse),
         label = "pulse"
     )
+    val pulse = basePulse + rmsBoost
 
+    // FIX: Decouple alpha from isReconnecting to stop background flicker.
+    // The mic icon should look "active" as long as it's logically listening.
     val iconAlpha by animateFloatAsState(
-        if (speechCorrectionEnabled || isListening || !isRecording || isReconnecting) 1f else 0.4f
+        if (speechCorrectionEnabled || isListening || !isRecording) 1f else 0.4f
     )
 
     // Speech Correction mode: display-only listening indicator using primary color.
     // Recording mode: interactive toggle using error (red) color.
     val containerColor = when {
         speechCorrectionEnabled -> MaterialTheme.colorScheme.primary.copy(
-            alpha = if (isListening && !isReconnecting) 0.18f else 0.08f
+            alpha = if (isListening) 0.18f else 0.08f
         )
         isRecording -> MaterialTheme.colorScheme.error.copy(
-            alpha = if (isListening && !isReconnecting) 0.18f else 0.08f
+            alpha = if (isListening) 0.18f else 0.08f
         )
         else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     }
     val borderColor = when {
         speechCorrectionEnabled -> MaterialTheme.colorScheme.primary.copy(
-            alpha = if (isListening && !isReconnecting) 0.6f else 0.2f
+            alpha = if (isListening) 0.6f else 0.2f
         )
         isRecording -> MaterialTheme.colorScheme.error.copy(
-            alpha = if (isListening && !isReconnecting) 0.6f else 0.2f
+            alpha = if (isListening) 0.6f else 0.2f
         )
         else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
     }
@@ -1677,16 +1700,10 @@ private fun MicToggleButton(
     ) {
         Box(contentAlignment = Alignment.Center) {
             when {
-                isReconnecting -> {
-                    CircularProgressIndicator(
-                        modifier    = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color       = iconTint
-                    )
-                }
                 speechCorrectionEnabled -> {
-                    // Show a speech-recognition icon to distinguish from plain
-                    // recording and make it obvious the mic is in AI-listen mode.
+                    // FIX: We removed the CircularProgressIndicator/isReconnecting check
+                    // here. The mic indicator should stay stable as a VoiceOver icon
+                    // during the entire session. Reconnections are silent and fast.
                     Icon(
                         imageVector        = Icons.Rounded.RecordVoiceOver,
                         contentDescription = stringResource(R.string.st_KaraokeScreen_sca40),
