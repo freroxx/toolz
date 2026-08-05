@@ -244,7 +244,7 @@ fun ResultCard(
         elevation = 0.dp
     ) {
         Column(
-            modifier            = Modifier.padding(24.dp),
+            modifier            = Modifier.fillMaxWidth().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
@@ -266,7 +266,9 @@ fun ResultCard(
                             fontSize      = 64.sp,
                             letterSpacing = (-2).sp,
                         ),
+                        textAlign = TextAlign.Center,
                         color     = if (bmi == null) MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f) else color,
+                        modifier  = Modifier.fillMaxWidth()
                     )
                     Text(
                         stringResource(R.string.st_BmiScreen_1a2b),
@@ -274,13 +276,17 @@ fun ResultCard(
                         fontWeight    = FontWeight.Black,
                         color         = color.copy(alpha = 0.6f),
                         letterSpacing = 2.sp,
+                        textAlign     = TextAlign.Center,
+                        modifier      = Modifier.fillMaxWidth()
                     )
                     if (bmi != null) {
                         Text(
                             "Profile: ${age.ifEmpty { "2" }}y ${gender.name.lowercase().replaceFirstChar { it.uppercase() }}",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = color.copy(alpha = 0.5f)
+                            color = color.copy(alpha = 0.5f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
@@ -1111,7 +1117,7 @@ fun CalorieGoalCard(
         elevation = 0.dp
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = color.copy(0.7f))
@@ -1163,7 +1169,7 @@ fun BmiCategoryItem(
         elevation = if (isSelected) 4.dp else 0.dp
     ) {
         Row(
-            modifier              = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
