@@ -6,7 +6,7 @@
 
 <p align="center">
   Toolz is a modern Android toolkit that brings productivity, media, PDF, sensor, privacy, and system utilities into one polished app. It is built for people who want one fast home for the tools they actually use, not a folder full of single-purpose apps.
-  Website : https://toolz-app.vercel.app
+  Check out Toolz Website here : https://toolz-app.vercel.app
 </p>
 
 <p align="center">
