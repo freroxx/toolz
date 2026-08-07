@@ -112,6 +112,11 @@ android {
         viewBinding = true
         aidl = true
     }
+    
+    androidResources {
+        noCompress += "tflite"
+    }
+
     compileSdkMinor = 1
 }
 
@@ -165,6 +170,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.accompanist.permissions)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.play.services.location)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
@@ -181,6 +187,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.barcode.scanning)
+    implementation(libs.mediapipe.tasks.vision)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.text.recognition.chinese)
     implementation(libs.mlkit.text.recognition.devanagari)

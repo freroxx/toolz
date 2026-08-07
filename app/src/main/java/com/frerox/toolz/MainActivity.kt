@@ -81,6 +81,7 @@ import com.frerox.toolz.ui.screens.OnboardingScreen
 import com.frerox.toolz.ui.screens.dashboard.DashboardScreen
 import com.frerox.toolz.ui.screens.light.*
 import com.frerox.toolz.ui.screens.math.*
+import com.frerox.toolz.ui.screens.media.BackgroundRemoverScreen
 import com.frerox.toolz.ui.screens.media.MusicPlayerScreen
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.screens.media.FileConverterScreen
@@ -986,6 +987,9 @@ fun ToolzNavHost(
                 initialUri = uri,
                 initialTitle = title
             )
+        }
+        composable(Screen.BackgroundRemover.route) {
+            BackgroundRemoverScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.Flashlight.route) {
             FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })

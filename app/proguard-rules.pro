@@ -48,11 +48,45 @@
 # 3. GOOGLE AI (GEMINI) SDK & MLKIT
 # ------------------------------------------------------------------------------
 
-# Google Generative AI SDK (Gemini) - Comprehensive Keep
+# Google AI (Gemini) SDK
 -keep class com.google.ai.client.generativeai.** { *; }
 -keep interface com.google.ai.client.generativeai.** { *; }
 -dontwarn com.google.ai.client.generativeai.**
 
+# MediaPipe & TFLite (Maximum Industrial Stability)
+# ------------------------------------------------------------------------------
+-keep class com.google.mediapipe.** { *; }
+-keep interface com.google.mediapipe.** { *; }
+-keepnames class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.proto.**
+-dontwarn com.google.mediapipe.framework.**
+
+# Explicitly ignore missing proto classes that MediaPipe references but doesn't always use
+-dontwarn com.google.mediapipe.proto.CalculatorProfileProto**
+-dontwarn com.google.mediapipe.proto.GraphTemplateProto**
+
+# Preserve all native methods and the annotations that mark them.
+-keep @interface com.google.mediapipe.framework.NativeMethod
+-keepclassmembers class * {
+    @com.google.mediapipe.framework.NativeMethod *;
+    native <methods>;
+}
+
+# Critical for stack walking and internal linkage
+-keep class com.google.mediapipe.framework.NativeLibraryLoader { *; }
+-keepclassmembers class com.google.mediapipe.framework.NativeLibraryLoader { *; }
+-keep class com.google.mediapipe.framework.Graph { *; }
+-keep class com.google.mediapipe.framework.Packet { *; }
+-keep class com.google.mediapipe.framework.AndroidPacketCreator { *; }
+-keep class com.google.mediapipe.framework.AndroidAssetUtil { *; }
+-keep class com.google.mediapipe.tasks.** { *; }
+
+# TFLite Runtime
+-keep class org.tensorflow.** { *; }
+-keep interface org.tensorflow.** { *; }
+-dontwarn org.tensorflow.**
+
+# ------------------------------------------------------------------------------
 # Preserve Gemini's internal Part and Content serialization (fixes "Cannot serialize abstract class")
 -keep class com.google.ai.client.generativeai.type.Part { *; }
 -keep class com.google.ai.client.generativeai.type.TextPart { *; }

@@ -93,6 +93,7 @@ sealed class Screen(val route: String) {
     }
     
     // Media
+    object BackgroundRemover : Screen("background_remover")
     object MusicPlayer : Screen("music_player?tab={tab}") {
         fun createRoute(tab: Int) = "music_player?tab=$tab"
     }

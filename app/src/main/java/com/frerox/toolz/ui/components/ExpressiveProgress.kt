@@ -543,13 +543,19 @@ fun ExpressiveStatePill(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     color: Color,
     modifier: Modifier = Modifier,
+    isFilled: Boolean = false,
 ) {
+    val backgroundColor = if (isFilled) color else color.copy(alpha = 0.12f)
+    val contentColor = if (isFilled) {
+        if (color.luminance() > 0.5f) Color.Black else Color.White
+    } else color
+
     Surface(
         modifier = modifier,
         shape = androidx.compose.foundation.shape.CircleShape,
-        color = color.copy(alpha = 0.12f),
-        contentColor = color,
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
+        color = backgroundColor,
+        contentColor = contentColor,
+        border = if (isFilled) null else androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
