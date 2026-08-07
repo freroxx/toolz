@@ -1105,10 +1105,8 @@ class NowPlayingAiViewModel @Inject constructor(
                     launch {
                         try {
                             val streamUrl = catalogRepository.resolveAudioStream(best.sourceUrl)
-                            if (streamUrl != null) {
-                                _uiState.update { it.copy(instrumentalStreamUrl = streamUrl) }
-                                Log.d(TAG, "Pre-resolved instrumental stream: $streamUrl")
-                            }
+                            _uiState.update { it.copy(instrumentalStreamUrl = streamUrl) }
+                            Log.d(TAG, "Pre-resolved instrumental stream: $streamUrl")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to pre-resolve instrumental stream", e)
                         }
