@@ -77,16 +77,41 @@
     native <methods>;
 }
 
+# CRITICAL: Prevent R8 from inlining call frames that MediaPipe's native JNI
+# stack-walker requires. The "no caller found on the stack for: gf2" error
+# occurs because R8 full-mode eliminates the Java frame that the native code
+# uses to verify its caller. This rule preserves the call-site descriptors.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+
 # Critical for stack walking and internal linkage
 -keep class com.google.mediapipe.framework.NativeLibraryLoader { *; }
 -keepclassmembers class com.google.mediapipe.framework.NativeLibraryLoader { *; }
+
+# Graph: keep ALL members AND specifically preserve static/native method names
+# so that the JNI stack-walker (which inspects method names) can find them.
 -keep class com.google.mediapipe.framework.Graph { *; }
 -keepclassmembers class com.google.mediapipe.framework.Graph { *; }
+-keepclassmembernames class com.google.mediapipe.framework.Graph {
+    static <methods>;
+    native <methods>;
+    <methods>;
+}
+
 -keep class com.google.mediapipe.framework.Packet { *; }
 -keep class com.google.mediapipe.framework.AndroidPacketCreator { *; }
 -keep class com.google.mediapipe.framework.AndroidAssetUtil { *; }
 -keep class com.google.mediapipe.tasks.** { *; }
 -keepclassmembers class com.google.mediapipe.tasks.** { *; }
+
+# TaskRunner: the other class involved in the "no caller found" stack check
+-keep class com.google.mediapipe.tasks.core.TaskRunner { *; }
+-keepclassmembernames class com.google.mediapipe.tasks.core.TaskRunner {
+    native <methods>;
+    static <methods>;
+    <methods>;
+}
 
 # TFLite Runtime
 -keep class org.tensorflow.** { *; }

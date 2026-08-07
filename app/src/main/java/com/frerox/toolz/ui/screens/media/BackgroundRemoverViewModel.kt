@@ -28,13 +28,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.util.BackgroundRemoverEngine
 import com.frerox.toolz.util.ImageUtils
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.framework.image.ByteBufferExtractor
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.core.Delegate
-import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
-import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter.ImageSegmenterOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -45,12 +38,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.gpu.CompatibilityList
+import org.tensorflow.lite.gpu.GpuDelegate
+import java.io.FileInputStream
+import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import javax.inject.Inject
 
 /**
- * Pro ViewModel for Background Remover using MediaPipe Selfie Multiclass.
+ * Pro ViewModel for Background Remover using direct TensorFlow Lite inference.
+ *
+ * Replaces MediaPipe framework to eliminate native crashes & cut APK size drastically.
+ * Runs `selfie_multiclass.tflite` directly with GPU acceleration & CPU fallback.
  */
 @HiltViewModel
 class BackgroundRemoverViewModel @Inject constructor(
@@ -60,33 +65,80 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
     val uiState: StateFlow<BackgroundRemoverUiState> = _uiState.asStateFlow()
 
-    private var imageSegmenter: ImageSegmenter? = null
+    private var tfliteInterpreter: Interpreter? = null
+    private var gpuDelegate: GpuDelegate? = null
+    private val initMutex = Mutex()
     private var activeJob: Job? = null
+
+    // Channel weights for multiclass segmentation:
+    // 0: Background (ignored/subtracted)
+    // 1: Hair (weight 1.0 - critical fine detail)
+    // 2: Body / Skin (weight 1.0)
+    // 3: Face (weight 1.0)
+    // 4: Clothes (weight 0.95)
+    // 5: Accessories (weight 0.90)
+    private val channelWeights = floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f, 0.95f, 0.90f)
 
     init {
         initializeEngine()
     }
 
     private fun initializeEngine() {
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch(Dispatchers.IO) {
+            ensureInterpreterReady()
+        }
+    }
+
+    private suspend fun ensureInterpreterReady(): Boolean = initMutex.withLock {
+        if (tfliteInterpreter != null) return@withLock true
+
+        return@withLock withContext(Dispatchers.IO) {
             try {
-                val baseOptions = BaseOptions.builder()
-                    .setModelAssetPath("selfie_multiclass.tflite")
-                    .setDelegate(Delegate.CPU)
-                    .build()
-                val options = ImageSegmenterOptions.builder()
-                    .setBaseOptions(baseOptions)
-                    .setRunningMode(RunningMode.IMAGE)
-                    .setOutputConfidenceMasks(true)
-                    .build()
-                imageSegmenter = ImageSegmenter.createFromOptions(context, options)
-            } catch (e: Throwable) {
+                val modelBuffer = loadModelFile("selfie_multiclass.tflite")
+                val options = Interpreter.Options().apply {
+                    setNumThreads(4)
+                    val compatList = CompatibilityList()
+                    if (compatList.isDelegateSupportedOnThisDevice) {
+                        try {
+                            val delegate = GpuDelegate()
+                            addDelegate(delegate)
+                            gpuDelegate = delegate
+                        } catch (_: Throwable) {
+                            // Fallback to CPU if GPU delegate init fails
+                        }
+                    }
+                }
+                tfliteInterpreter = Interpreter(modelBuffer, options)
+                true
+            } catch (e: Exception) {
                 e.printStackTrace()
-                val msg = e.localizedMessage ?: e.message ?: e::class.java.simpleName
-                val cause = e.cause?.let { " [Cause: ${it.localizedMessage ?: it::class.java.simpleName}]" } ?: ""
-                _uiState.update { it.copy(error = "MediaPipe init failed ($msg$cause). Ensure 'selfie_multiclass.tflite' is in your app/src/main/assets/ folder.") }
+                // Fallback attempt without GPU delegate
+                try {
+                    val modelBuffer = loadModelFile("selfie_multiclass.tflite")
+                    val options = Interpreter.Options().apply { setNumThreads(4) }
+                    tfliteInterpreter = Interpreter(modelBuffer, options)
+                    true
+                } catch (ex: Exception) {
+                    ex.printStackTrace()
+                    _uiState.update {
+                        it.copy(
+                            isProcessing = false,
+                            error = "TFLite Init Failed: ${ex.localizedMessage ?: "Model selfie_multiclass.tflite not readable"}"
+                        )
+                    }
+                    false
+                }
             }
         }
+    }
+
+    private fun loadModelFile(modelName: String): MappedByteBuffer {
+        val fileDescriptor = context.assets.openFd(modelName)
+        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        val startOffset = fileDescriptor.startOffset
+        val declaredLength = fileDescriptor.declaredLength
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
     }
 
     fun onImageSelected(uri: Uri) {
@@ -103,95 +155,179 @@ class BackgroundRemoverViewModel @Inject constructor(
 
                 _uiState.update { it.copy(originalBitmap = bitmap) }
                 processImage(bitmap)
-            } catch (ce: CancellationException) {
+            } catch (_: CancellationException) {
                 // Ignore cancellation
             } catch (e: Exception) {
-                _uiState.update { it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}") }
+                _uiState.update {
+                    it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}")
+                }
             }
         }
     }
 
     private suspend fun processImage(bitmap: Bitmap) {
-        if (imageSegmenter == null) {
-            withContext(Dispatchers.Default) {
-                try {
-                    val baseOptions = BaseOptions.builder()
-                        .setModelAssetPath("selfie_multiclass.tflite")
-                        .setDelegate(Delegate.CPU)
-                        .build()
-                    val options = ImageSegmenterOptions.builder()
-                        .setBaseOptions(baseOptions)
-                        .setRunningMode(RunningMode.IMAGE)
-                        .setOutputConfidenceMasks(true)
-                        .build()
-                    imageSegmenter = ImageSegmenter.createFromOptions(context, options)
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                    val msg = e.localizedMessage ?: e.message ?: e::class.java.simpleName
-                    val cause = e.cause?.let { " [Cause: ${it.localizedMessage ?: it::class.java.simpleName}]" } ?: ""
-                    _uiState.update { it.copy(isProcessing = false, error = "MediaPipe init failed ($msg$cause).") }
-                    return@withContext
-                }
-            }
-        }
-
-        val segmenter = imageSegmenter ?: return
+        if (!ensureInterpreterReady()) return
+        val interpreter = tfliteInterpreter ?: return
 
         try {
-            val mpImage = BitmapImageBuilder(bitmap).build()
-            val result = withContext(Dispatchers.Default) {
-                segmenter.segment(mpImage)
-            }
-            
-            val masks = result.confidenceMasks().get()
-            if (masks.isEmpty() || masks.size < 6) {
-                _uiState.update { it.copy(isProcessing = false, error = "No subject detected.") }
-                return
-            }
+            withContext(Dispatchers.Default) {
+                // 1. Inspect model input/output tensor dimensions dynamically
+                val inputTensor = interpreter.getInputTensor(0)
+                val inputShape = inputTensor.shape() // Typically [1, 256, 256, 3]
+                val modelH = if (inputShape.size >= 3) inputShape[1] else 256
+                val modelW = if (inputShape.size >= 3) inputShape[2] else 256
 
-            // High Fidelity Foreground Extraction: Sum categories 1-5 (Background is 0)
-            val maskW = masks[0].width
-            val maskH = masks[0].height
-            val combinedMask = FloatArray(maskW * maskH)
-            
-            // Extract Background (Index 0) and invert to get the person
-            val buf = ByteBufferExtractor.extract(masks[0])
-            buf.order(ByteOrder.nativeOrder())
-            val fb = buf.asFloatBuffer()
-            fb.rewind()
-            
-            var maxPersonConf = 0f
-            var personPixels = 0
-            
-            for (i in combinedMask.indices) {
-                val conf = (1.0f - fb.get()).coerceIn(0f, 1f)
-                combinedMask[i] = conf
-                if (conf > 0.45f) personPixels++
-                if (conf > maxPersonConf) maxPersonConf = conf
-            }
+                val outputTensor = interpreter.getOutputTensor(0)
+                val outputShape = outputTensor.shape() // Typically [1, 256, 256, 6] or [1, 6, 256, 256]
 
-            // PRO Compatibility Check
-            val totalPixels = maskW * maskH
-            val areaRatio = personPixels.toFloat() / totalPixels
-            
-            // Requires clear person (>45% confidence) and reasonable size (>0.2% frame)
-            if (maxPersonConf < 0.45f || areaRatio < 0.002f) {
-                _uiState.update { it.copy(isProcessing = false, error = "No person detected. Try a better portrait or selfie.") }
-                return
-            }
+                // 2. Preprocess bitmap to model input float buffer
+                val scaledBitmap = Bitmap.createScaledBitmap(bitmap, modelW, modelH, true)
+                val inputPixels = IntArray(modelW * modelH)
+                scaledBitmap.getPixels(inputPixels, 0, modelW, 0, 0, modelW, modelH)
+                if (scaledBitmap != bitmap) {
+                    scaledBitmap.recycle()
+                }
 
-            val resultBitmap = BackgroundRemoverEngine.removeBackground(
-                source = bitmap,
-                maskArray = combinedMask,
-                maskW = maskW,
-                maskH = maskH
-            )
-            
-            _uiState.update { it.copy(isProcessing = false, resultBitmap = resultBitmap) }
-        } catch (ce: CancellationException) {
+                val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * 4)
+                inputBuffer.order(ByteOrder.nativeOrder())
+                for (pixel in inputPixels) {
+                    val r = ((pixel shr 16) and 0xFF) / 255.0f
+                    val g = ((pixel shr 8) and 0xFF) / 255.0f
+                    val b = (pixel and 0xFF) / 255.0f
+                    inputBuffer.putFloat(r)
+                    inputBuffer.putFloat(g)
+                    inputBuffer.putFloat(b)
+                }
+                inputBuffer.rewind()
+
+                // 3. Prepare output buffer
+                val totalOutputElements = outputShape.reduce { acc, i -> acc * i }
+                val outputBuffer = ByteBuffer.allocateDirect(totalOutputElements * 4)
+                outputBuffer.order(ByteOrder.nativeOrder())
+
+                // 4. Run inference
+                interpreter.run(inputBuffer, outputBuffer)
+                outputBuffer.rewind()
+
+                // 5. Parse confidence masks from output tensor
+                val combinedMask = FloatArray(modelW * modelH)
+                var numChannels = 6
+                var isNHWC = true
+
+                if (outputShape.size == 4) {
+                    if (outputShape[3] == 6 || outputShape[3] < outputShape[1]) {
+                        // NHWC: [1, H, W, Channels]
+                        numChannels = outputShape[3]
+                        isNHWC = true
+                    } else {
+                        // NCHW: [1, Channels, H, W]
+                        numChannels = outputShape[1]
+                        isNHWC = false
+                    }
+                }
+
+                val outputFloatBuffer = outputBuffer.asFloatBuffer()
+                val activeChannels = numChannels.coerceAtMost(channelWeights.size)
+                val channelExps = FloatArray(numChannels)
+
+                if (isNHWC) {
+                    for (y in 0 until modelH) {
+                        for (x in 0 until modelW) {
+                            val pixelIdx = y * modelW + x
+                            val offset = pixelIdx * numChannels
+
+                            // Compute Softmax across all channels for this pixel
+                            var maxLogit = Float.NEGATIVE_INFINITY
+                            for (c in 0 until numChannels) {
+                                val logit = outputFloatBuffer.get(offset + c)
+                                if (logit > maxLogit) maxLogit = logit
+                            }
+
+                            var sumExp = 0.0f
+                            for (c in 0 until numChannels) {
+                                val logit = outputFloatBuffer.get(offset + c)
+                                val expVal = kotlin.math.exp(logit - maxLogit)
+                                channelExps[c] = expVal
+                                sumExp += expVal
+                            }
+
+                            if (sumExp > 0.00001f) {
+                                var fgProb = 0.0f
+                                for (c in 1 until activeChannels) {
+                                    val prob = channelExps[c] / sumExp
+                                    fgProb += prob * channelWeights[c]
+                                }
+                                combinedMask[pixelIdx] = fgProb.coerceIn(0f, 1f)
+                            } else {
+                                val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
+                                combinedMask[pixelIdx] = (1f - bgProb).coerceIn(0f, 1f)
+                            }
+                        }
+                    }
+                } else {
+                    // NCHW
+                    val channelSize = modelW * modelH
+                    val tempLogits = FloatArray(numChannels)
+                    for (i in 0 until channelSize) {
+                        var maxLogit = Float.NEGATIVE_INFINITY
+                        for (c in 0 until numChannels) {
+                            val logit = outputFloatBuffer.get(c * channelSize + i)
+                            tempLogits[c] = logit
+                            if (logit > maxLogit) maxLogit = logit
+                        }
+                        var sumExp = 0.0f
+                        for (c in 0 until numChannels) {
+                            val expVal = kotlin.math.exp(tempLogits[c] - maxLogit)
+                            channelExps[c] = expVal
+                            sumExp += expVal
+                        }
+                        if (sumExp > 0.00001f) {
+                            var fgProb = 0.0f
+                            for (c in 1 until activeChannels) {
+                                val prob = channelExps[c] / sumExp
+                                fgProb += prob * channelWeights[c]
+                            }
+                            combinedMask[i] = fgProb.coerceIn(0f, 1f)
+                        } else {
+                            val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
+                            combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
+                        }
+                    }
+                }
+
+                // 6. Verify mask quality with forgiving threshold
+                var maxConf = 0f
+                for (v in combinedMask) {
+                    if (v > maxConf) maxConf = v
+                }
+
+                if (maxConf < 0.10f) {
+                    _uiState.update {
+                        it.copy(
+                            isProcessing = false,
+                            error = "No clear subject detected. Try a photo with a visible person or object."
+                        )
+                    }
+                    return@withContext
+                }
+
+                // 7. Post-process using Studio-Grade Engine
+                val resultBitmap = BackgroundRemoverEngine.removeBackground(
+                    source = bitmap,
+                    maskArray = combinedMask,
+                    maskW = modelW,
+                    maskH = modelH
+                )
+
+                _uiState.update { it.copy(isProcessing = false, resultBitmap = resultBitmap) }
+            }
+        } catch (_: CancellationException) {
             // Ignore
         } catch (e: Exception) {
-            _uiState.update { it.copy(isProcessing = false, error = "Cutout error: ${e.localizedMessage}") }
+            e.printStackTrace()
+            _uiState.update {
+                it.copy(isProcessing = false, error = "Processing Error: ${e.localizedMessage}")
+            }
         }
     }
 
@@ -199,7 +335,13 @@ class BackgroundRemoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true) }
             val success = withContext(Dispatchers.IO) { saveImageToGallery(bitmap) }
-            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
+            _uiState.update {
+                it.copy(
+                    isProcessing = false,
+                    saveSuccess = success,
+                    error = if (!success) "Save failed." else null
+                )
+            }
         }
     }
 
@@ -213,7 +355,8 @@ class BackgroundRemoverViewModel @Inject constructor(
             }
         }
         val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return false
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            ?: return false
         return try {
             resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             true
@@ -235,7 +378,10 @@ class BackgroundRemoverViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         activeJob?.cancel()
-        imageSegmenter?.close()
+        tfliteInterpreter?.close()
+        tfliteInterpreter = null
+        gpuDelegate?.close()
+        gpuDelegate = null
     }
 }
 

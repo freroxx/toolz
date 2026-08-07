@@ -46,7 +46,7 @@ android {
             isEnable = true
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-            isUniversalApk = true
+            isUniversalApk = false
         }
     }
 
@@ -187,7 +187,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.barcode.scanning)
-    implementation(libs.mediapipe.tasks.vision)
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.gpu)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.text.recognition.chinese)
     implementation(libs.mlkit.text.recognition.devanagari)
