@@ -1052,16 +1052,12 @@ class MusicPlayerViewModel @Inject constructor(
                     val resolvedUrl = withContext(Dispatchers.IO) {
                         catalogRepository.resolveAudioStream(track.sourceUrl, quality)
                     }
-                    if (resolvedUrl != null) {
-                        val resolvedTrack = track.copy(uri = resolvedUrl)
-                        val resolvedTracks = tracks.map { if (it.uri == track.uri) resolvedTrack else it }
-                        executePlay(resolvedTrack, resolvedTracks)
-                    } else {
-                        _uiState.update { it.copy(isResolvingCatalog = false) }
-                        // Show error toast or similar
-                    }
+                    val resolvedTrack = track.copy(uri = resolvedUrl)
+                    val resolvedTracks = tracks.map { if (it.uri == track.uri) resolvedTrack else it }
+                    executePlay(resolvedTrack, resolvedTracks)
                 } catch (e: Exception) {
                     _uiState.update { it.copy(isResolvingCatalog = false) }
+                    // Show error toast or similar
                 } finally {
                     _uiState.update { it.copy(isResolvingCatalog = false) }
                 }
@@ -1687,7 +1683,9 @@ class MusicPlayerViewModel @Inject constructor(
 
     private suspend fun refreshCurrentCatalogStream(track: MusicTrack, quality: String) {
         val sourceUrl = track.sourceUrl ?: return
-        val streamUrl = catalogRepository.resolveAudioStream(sourceUrl, quality) ?: run {
+        val streamUrl = try {
+            catalogRepository.resolveAudioStream(sourceUrl, quality)
+        } catch (e: Exception) {
             hapticClick()
             return
         }
