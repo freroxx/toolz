@@ -25,6 +25,39 @@ data class InnerTubeSearchResponse(
 )
 
 @Serializable
+data class InnerTubePlayerResponse(
+    val playabilityStatus: PlayabilityStatus? = null,
+    val streamingData: StreamingData? = null
+)
+
+@Serializable
+data class PlayabilityStatus(
+    val status: String? = null,
+    val reason: String? = null
+)
+
+@Serializable
+data class StreamingData(
+    val adaptiveFormats: List<AdaptiveFormat>? = null
+)
+
+@Serializable
+data class AdaptiveFormat(
+    val itag: Int? = null,
+    val url: String? = null,
+    val signatureCipher: String? = null,
+    val mimeType: String? = null,
+    val bitrate: Long? = null,
+    val averageBitrate: Long? = null,
+    val contentLength: String? = null,
+    val audioQuality: String? = null,
+    val approxDurationMs: String? = null,
+    val audioSampleRate: String? = null,
+    val audioChannels: Int? = null,
+    val loudnessDb: Double? = null
+)
+
+@Serializable
 data class Contents(
     val tabbedSearchResultsRenderer: TabbedSearchResultsRenderer? = null
 )

@@ -486,24 +486,38 @@ class CatalogViewModel @Inject constructor(
             _uiState.update { it.copy(isResolving = true, offlineSongToPlay = null) }
             try {
                 // 2. Resolve stream online
-                val quality = catalogStreamQuality.value
-                
                 var streamUrl: String? = null
                 var retryCount = 0
-                val maxRetries = 2
+                val maxRetries = 3
+                var lastError: Throwable? = null
                 
-                while (streamUrl == null && retryCount <= maxRetries) {
-                    if (retryCount > 0) delay(1000 * retryCount.toLong())
-                    
-                    streamUrl = withContext(Dispatchers.IO) {
-                        repository.resolveAudioStream(track.sourceUrl, quality)
+                while (streamUrl == null && retryCount < maxRetries) {
+                    if (retryCount > 0) {
+                        // Exponential backoff: 1s, 2s, 4s...
+                        val delayMs = (1000L * Math.pow(2.0, (retryCount - 1).toDouble())).toLong()
+                        delay(delayMs)
+                        android.util.Log.d("CatalogVM", "Retrying resolution (attempt ${retryCount + 1}) after ${delayMs}ms")
                     }
                     
-                    if (streamUrl == null && quality != "AUTO") {
-                        // Try AUTO quality as fallback
-                        streamUrl = withContext(Dispatchers.IO) {
-                            repository.resolveAudioStream(track.sourceUrl, "AUTO")
+                    try {
+                        // Use requested quality for first attempt, then AUTO/MEDIUM as fallbacks
+                        val attemptQuality = when (retryCount) {
+                            0 -> catalogStreamQuality.value
+                            1 -> "AUTO"
+                            else -> "MEDIUM"
                         }
+                        
+                        streamUrl = withContext(Dispatchers.IO) {
+                            repository.resolveAudioStream(track.sourceUrl, attemptQuality)
+                        }
+                    } catch (e: Exception) {
+                        lastError = e
+                        if (e is CancellationException) throw e
+                        
+                        android.util.Log.w("CatalogVM", "Resolution attempt $retryCount failed: ${e.message}")
+                        
+                        // If it's a "Forbidden" error, retrying might not help immediately, 
+                        // but we try with different qualities just in case.
                     }
                     retryCount++
                 }
@@ -517,10 +531,21 @@ class CatalogViewModel @Inject constructor(
                         track.sourceUrl
                     )
                 } else {
-                    _uiState.update { it.copy(error = "Could not resolve audio stream. Check your connection.") }
+                    val errorMessage = when (val e = lastError) {
+                        is CatalogRepository.StreamResolutionException -> {
+                            when (e.causeType) {
+                                "REGION_RESTRICTED" -> "This content is not available in your region."
+                                "AGE_RESTRICTED" -> "This content is age-restricted and cannot be played."
+                                "FORBIDDEN" -> "Access denied by provider. Please try again later."
+                                "UNPLAYABLE" -> "This track cannot be played at the moment."
+                                else -> e.message ?: "Could not resolve audio stream."
+                            }
+                        }
+                        else -> "Could not resolve audio stream. Check your connection."
+                    }
+                    _uiState.update { it.copy(error = errorMessage) }
                 }
             } catch (e: CancellationException) {
-                // Normal cancellation, don't show error
                 throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.localizedMessage ?: "Stream resolution failed") }

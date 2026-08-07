@@ -91,6 +91,61 @@ class InnerTubeClient @Inject constructor(
         }
     }
 
+    suspend fun resolveStream(videoId: String): String? = withContext(Dispatchers.IO) {
+        val endpoint = "$baseUrl/player?key=$apiKey"
+        
+        val requestBody = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    put("clientName", "ANDROID_MUSIC")
+                    put("clientVersion", "7.19.52")
+                    put("androidSdkVersion", 34)
+                    put("hl", "en")
+                    put("gl", "US")
+                }
+            }
+            put("videoId", videoId)
+            put("playbackContext", buildJsonObject {
+                putJsonObject("contentPlaybackContext") {
+                    put("signatureTimestamp", 20000) // Generic timestamp
+                }
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody)
+            .header("User-Agent", "com.google.android.apps.youtube.music/7.19.52 (Linux; U; Android 14; en_US) gzip")
+            .header("X-Goog-Api-Format-Version", "2")
+            .build()
+
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val body = response.body?.string() ?: return@withContext null
+            val playerResponse = json.decodeFromString<InnerTubePlayerResponse>(body)
+
+            if (playerResponse.playabilityStatus?.status != "OK") {
+                android.util.Log.w("InnerTubeClient", "Stream not playable: ${playerResponse.playabilityStatus?.reason}")
+                return@withContext null
+            }
+
+            // Find best audio stream (M4A or Opus)
+            val audioStreams = playerResponse.streamingData?.adaptiveFormats?.filter { 
+                it.mimeType?.contains("audio/") == true
+            } ?: emptyList()
+
+            // Sort by bitrate descending
+            val bestStream = audioStreams
+                .filter { it.url != null } // We only handle direct URLs here
+                .maxByOrNull { it.bitrate ?: 0L }
+
+            bestStream?.url
+        } catch (e: Exception) {
+            android.util.Log.e("InnerTubeClient", "Stream resolution failed: ${e.message}")
+            null
+        }
+    }
+
     suspend fun getRelatedArtists(videoId: String): List<String> = withContext(Dispatchers.IO) {
         val endpoint = "$baseUrl/next?key=$apiKey"
         val requestBody = buildJsonObject {

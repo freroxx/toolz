@@ -97,10 +97,6 @@ class MusicDownloadWorker @AssistedInject constructor(
 
         try {
             val streamUrl = catalogRepository.resolveAudioStream(sourceUrl, quality)
-                ?: run {
-                    showErrorNotification(notificationId, title, "Could not resolve stream")
-                    return@withContext Result.failure()
-                }
             publishProgress(notificationId, "Downloading $title...", 0.05f)
 
             val safeTitle = title.replace(Regex("[^a-zA-Z0-9 \\-\\.]"), "_")

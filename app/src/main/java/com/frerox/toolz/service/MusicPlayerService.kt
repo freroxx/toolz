@@ -224,17 +224,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 val sourceUrl = item.mediaMetadata.extras?.getString("source_url") ?: return@launch
                 val streamUrl = catalogRepository.resolveAudioStream(sourceUrl)
 
-                if (streamUrl != null) {
-                    val updatedItem = item.buildUpon()
-                        .setUri(Uri.parse(streamUrl))
-                        .build()
+                val updatedItem = item.buildUpon()
+                    .setUri(Uri.parse(streamUrl))
+                    .build()
 
-                    // Replace the item in the player
-                    for (i in 0 until player.mediaItemCount) {
-                        if (player.getMediaItemAt(i).mediaId == item.mediaId) {
-                            player.replaceMediaItem(i, updatedItem)
-                            break
-                        }
+                // Replace the item in the player
+                for (i in 0 until player.mediaItemCount) {
+                    if (player.getMediaItemAt(i).mediaId == item.mediaId) {
+                        player.replaceMediaItem(i, updatedItem)
+                        break
                     }
                 }
             } catch (e: Exception) {

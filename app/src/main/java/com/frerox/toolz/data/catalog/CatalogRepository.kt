@@ -53,6 +53,7 @@ class CatalogRepository @Inject constructor(
     private val okHttpClient: OkHttpClient,
     val innerTubeClient: InnerTubeClient
 ) {
+    class StreamResolutionException(message: String, val causeType: String? = null) : Exception(message)
     private var isInitialized = false
 
     private val youtubeService: YoutubeService
@@ -173,24 +174,37 @@ class CatalogRepository @Inject constructor(
 
     /**
      * Resolve the audio-only stream URL for a given YouTube video URL.
-     * STRICT: Only audio streams (M4A / Opus) are considered.
-     * Never accesses video streams to save bandwidth and battery.
+     * STICKY: Tries InnerTube first, then falls back to NewPipeExtractor.
      *
      * @param quality "AUTO" (default, highest), "HIGH", "MEDIUM", or "LOW"
      */
-    suspend fun resolveAudioStream(sourceUrl: String, quality: String = "AUTO"): String? = withContext(Dispatchers.IO) {
+    suspend fun resolveAudioStream(sourceUrl: String, quality: String = "AUTO"): String = withContext(Dispatchers.IO) {
+        val videoId = sourceUrl.substringAfter("v=", "")
+            .substringBefore("&")
+            .ifBlank { sourceUrl.substringAfterLast("/", "") }
+
         try {
+            // Step 1: Try InnerTube resolution (fastest)
+            val innerTubeUrl = innerTubeClient.resolveStream(videoId)
+            if (innerTubeUrl != null) {
+                android.util.Log.i("CatalogRepo", "Resolved stream via InnerTube for $videoId")
+                return@withContext innerTubeUrl
+            }
+            
+            android.util.Log.d("CatalogRepo", "InnerTube resolution failed for $videoId, falling back to extractor")
+
+            // Step 2: Fallback to NewPipeExtractor
             val startTime = System.currentTimeMillis()
             val streamInfo = StreamInfo.getInfo(youtubeService, sourceUrl)
             val audioStreams = streamInfo.audioStreams
 
-            android.util.Log.d("CatalogRepo", "Found ${audioStreams.size} audio streams for $sourceUrl")
+            android.util.Log.d("CatalogRepo", "Extractor found ${audioStreams.size} audio streams for $sourceUrl")
 
-            // Prefer M4A (AAC), then Opus, then any audio — filter to audio-only formats
+            // Prefer M4A (AAC), then Opus, then any audio
             val filtered = audioStreams
                 .filter { stream ->
                     val format = stream.getFormat()
-                    if (format == null) return@filter true // If unknown format, allow it as fallback
+                    if (format == null) return@filter true
                     val name = format.name.lowercase()
                     name.contains("m4a") ||
                     name.contains("mp4a") ||
@@ -207,32 +221,44 @@ class CatalogRepository @Inject constructor(
                     if (filtered.size <= 2) filtered.firstOrNull()
                     else filtered[filtered.size / 2]
                 }
-                else -> filtered.firstOrNull() // AUTO or HIGH → highest bitrate
+                else -> filtered.firstOrNull() // AUTO or HIGH
             }
 
             var streamUrl = preferred?.content
 
             if (streamUrl == null) {
-                // Fallback 1: Try any audio stream regardless of format
                 streamUrl = audioStreams.sortedByDescending { it.averageBitrate }.firstOrNull()?.content
             }
 
             if (streamUrl == null) {
-                // Fallback 2: Try multiplexed video stream (lowest resolution to save bandwidth)
                 val videoStreams = streamInfo.videoStreams
                 if (!videoStreams.isNullOrEmpty()) {
-                    android.util.Log.w("CatalogRepo", "No audio streams found! Falling back to lowest resolution multiplexed video stream.")
                     streamUrl = videoStreams.sortedBy { it.resolution.replace("p", "").toIntOrNull() ?: Int.MAX_VALUE }.firstOrNull()?.content
                 }
             }
 
-            android.util.Log.d("CatalogRepo", "Resolved stream in ${System.currentTimeMillis() - startTime}ms: ${streamUrl != null}")
+            if (streamUrl == null) {
+                throw StreamResolutionException("No playable streams found for this content", "UNPLAYABLE")
+            }
+
+            android.util.Log.d("CatalogRepo", "Resolved stream via extractor in ${System.currentTimeMillis() - startTime}ms")
             streamUrl
         } catch (e: CancellationException) {
             throw e
+        } catch (e: StreamResolutionException) {
+            throw e
         } catch (e: Exception) {
-            android.util.Log.e("CatalogRepo", "resolveAudioStream failed: ${e.message}")
-            null
+            val msg = e.message ?: "Unknown resolution error"
+            android.util.Log.e("CatalogRepo", "resolveAudioStream failed: $msg")
+            
+            val errorType = when {
+                msg.contains("403") -> "FORBIDDEN"
+                msg.contains("429") -> "TOO_MANY_REQUESTS"
+                msg.contains("Age restricted") -> "AGE_RESTRICTED"
+                msg.contains("Region") -> "REGION_RESTRICTED"
+                else -> "NETWORK_ERROR"
+            }
+            throw StreamResolutionException(msg, errorType)
         }
     }
 
