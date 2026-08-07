@@ -57,9 +57,14 @@
 # ------------------------------------------------------------------------------
 -keep class com.google.mediapipe.** { *; }
 -keep interface com.google.mediapipe.** { *; }
--keepnames class com.google.mediapipe.** { *; }
--dontwarn com.google.mediapipe.proto.**
--dontwarn com.google.mediapipe.framework.**
+-keepclassmembers class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+
+# Explicitly keep all Task Vision classes and members
+-keep class com.google.mediapipe.tasks.vision.** { *; }
+-keepclassmembers class com.google.mediapipe.tasks.vision.** { *; }
+-keep class com.google.mediapipe.tasks.core.** { *; }
+-keepclassmembers class com.google.mediapipe.tasks.core.** { *; }
 
 # Explicitly ignore missing proto classes that MediaPipe references but doesn't always use
 -dontwarn com.google.mediapipe.proto.CalculatorProfileProto**
@@ -76,10 +81,12 @@
 -keep class com.google.mediapipe.framework.NativeLibraryLoader { *; }
 -keepclassmembers class com.google.mediapipe.framework.NativeLibraryLoader { *; }
 -keep class com.google.mediapipe.framework.Graph { *; }
+-keepclassmembers class com.google.mediapipe.framework.Graph { *; }
 -keep class com.google.mediapipe.framework.Packet { *; }
 -keep class com.google.mediapipe.framework.AndroidPacketCreator { *; }
 -keep class com.google.mediapipe.framework.AndroidAssetUtil { *; }
 -keep class com.google.mediapipe.tasks.** { *; }
+-keepclassmembers class com.google.mediapipe.tasks.** { *; }
 
 # TFLite Runtime
 -keep class org.tensorflow.** { *; }

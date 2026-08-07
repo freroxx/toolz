@@ -31,6 +31,7 @@ import com.frerox.toolz.util.ImageUtils
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.ByteBufferExtractor
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter.ImageSegmenterOptions
@@ -71,6 +72,7 @@ class BackgroundRemoverViewModel @Inject constructor(
             try {
                 val baseOptions = BaseOptions.builder()
                     .setModelAssetPath("selfie_multiclass.tflite")
+                    .setDelegate(Delegate.CPU)
                     .build()
                 val options = ImageSegmenterOptions.builder()
                     .setBaseOptions(baseOptions)
@@ -115,6 +117,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 try {
                     val baseOptions = BaseOptions.builder()
                         .setModelAssetPath("selfie_multiclass.tflite")
+                        .setDelegate(Delegate.CPU)
                         .build()
                     val options = ImageSegmenterOptions.builder()
                         .setBaseOptions(baseOptions)
