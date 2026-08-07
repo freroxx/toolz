@@ -156,6 +156,15 @@
     <string name="st_Tool_Caffeinate_Desc">Modo acordado</string>
     <string name="st_Tool_FlipCoin">Cara ou Coroa</string>
     <string name="st_Tool_FlipCoin_Desc">Decidir</string>
+    <string name="st_Tool_BackgroundRemover">Remover fundo</string>
+    <string name="st_Tool_BackgroundRemover_Desc">Remover fundo com IA</string>
+    <string name="st_BackgroundRemover_Pick">Escolher imagem</string>
+    <string name="st_BackgroundRemover_Save">Salvar imagem</string>
+    <string name="st_BackgroundRemover_Clear">Limpar</string>
+    <string name="st_BackgroundRemover_Processing">Processando</string>
+    <string name="st_BackgroundRemover_Hint">Selecione um retrato para começar</string>
+    <string name="st_BackgroundRemover_Error">Erro</string>
+    <string name="st_BackgroundRemover_Success">Salvo na galeria</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Sugestão de Cinza Perfeito</string>

@@ -157,6 +157,15 @@
     <string name="st_Tool_Caffeinate_Desc">Wake mode</string>
     <string name="st_Tool_FlipCoin">Flip Coin</string>
     <string name="st_Tool_FlipCoin_Desc">Decide</string>
+    <string name="st_Tool_BackgroundRemover">Background Remover</string>
+    <string name="st_Tool_BackgroundRemover_Desc">Remove BG with AI</string>
+    <string name="st_BackgroundRemover_Pick">Pick Image</string>
+    <string name="st_BackgroundRemover_Save">Save Image</string>
+    <string name="st_BackgroundRemover_Clear">Clear</string>
+    <string name="st_BackgroundRemover_Processing">Processing</string>
+    <string name="st_BackgroundRemover_Hint">Select a portrait or selfie to start</string>
+    <string name="st_BackgroundRemover_Error">Error</string>
+    <string name="st_BackgroundRemover_Success">Saved to gallery</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Perfect Gray Suggestion</string>

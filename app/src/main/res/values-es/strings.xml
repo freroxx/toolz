@@ -156,6 +156,15 @@
     <string name="st_Tool_Caffeinate_Desc">Modo activo</string>
     <string name="st_Tool_FlipCoin">Cara o cruz</string>
     <string name="st_Tool_FlipCoin_Desc">Decidir</string>
+    <string name="st_Tool_BackgroundRemover">Quitar fondo</string>
+    <string name="st_Tool_BackgroundRemover_Desc">Quitar fondo con IA</string>
+    <string name="st_BackgroundRemover_Pick">Elegir imagen</string>
+    <string name="st_BackgroundRemover_Save">Guardar imagen</string>
+    <string name="st_BackgroundRemover_Clear">Limpiar</string>
+    <string name="st_BackgroundRemover_Processing">Procesando</string>
+    <string name="st_BackgroundRemover_Hint">Selecciona un retrato para comenzar</string>
+    <string name="st_BackgroundRemover_Error">Error</string>
+    <string name="st_BackgroundRemover_Success">Guardado en la galería</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Sugerencia de Gris Perfecto</string>

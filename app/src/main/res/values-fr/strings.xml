@@ -156,6 +156,15 @@
     <string name="st_Tool_Caffeinate_Desc">Mode éveil</string>
     <string name="st_Tool_FlipCoin">Pile ou face</string>
     <string name="st_Tool_FlipCoin_Desc">Décider</string>
+    <string name="st_Tool_BackgroundRemover">Supprimer le fond</string>
+    <string name="st_Tool_BackgroundRemover_Desc">Supprimer le fond avec l\'IA</string>
+    <string name="st_BackgroundRemover_Pick">Choisir une image</string>
+    <string name="st_BackgroundRemover_Save">Enregistrer</string>
+    <string name="st_BackgroundRemover_Clear">Effacer</string>
+    <string name="st_BackgroundRemover_Processing">Traitement</string>
+    <string name="st_BackgroundRemover_Hint">Sélectionnez un portrait pour commencer</string>
+    <string name="st_BackgroundRemover_Error">Erreur</string>
+    <string name="st_BackgroundRemover_Success">Enregistré dans la galerie</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Suggestion Gris Parfait</string>
