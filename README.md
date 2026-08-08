@@ -108,7 +108,7 @@ Toolz includes **45+ precision instruments** organized across 8 categories:
 Toolz is distributed through **GitHub Releases**:
 
 - **Releases page:** [github.com/freroxx/toolz/releases](https://github.com/freroxx/toolz/releases)
-- **Current version:** `1.1.0`
+- **Current version:** `1.1.1`
 
 ### Choose your architecture:
 
