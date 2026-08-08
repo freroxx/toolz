@@ -26,6 +26,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.media.SegmentationModel
 import com.frerox.toolz.util.BackgroundRemoverEngine
 import com.frerox.toolz.util.ImageUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,13 +42,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.CompatibilityList
 import org.tensorflow.lite.gpu.GpuDelegate
+import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import javax.inject.Inject
 
@@ -60,6 +64,7 @@ import javax.inject.Inject
 @HiltViewModel
 class BackgroundRemoverViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val okHttpClient: OkHttpClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
@@ -80,78 +85,122 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val channelWeights = floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f, 0.95f, 0.90f)
 
     init {
-        initializeEngine()
+        // Models are now selected and downloaded by the user
     }
 
-    private fun initializeEngine() {
+    fun selectModel(model: SegmentationModel) {
+        val modelFile = File(context.filesDir, "models/${model.fileName}")
+        val isDownloaded = modelFile.exists() && modelFile.length() > 1024
+        
+        _uiState.update { 
+            it.copy(
+                selectedModel = model,
+                isModelDownloaded = isDownloaded,
+                error = null
+            )
+        }
+        
+        if (isDownloaded) {
+            viewModelScope.launch(Dispatchers.IO) {
+                ensureInterpreterReady()
+            }
+        }
+    }
+
+    fun downloadModel(model: SegmentationModel) {
         viewModelScope.launch(Dispatchers.IO) {
-            ensureInterpreterReady()
+            try {
+                _uiState.update { it.copy(isProcessing = true, downloadProgress = 0.01f) }
+                
+                val modelDir = File(context.filesDir, "models")
+                if (!modelDir.exists()) modelDir.mkdirs()
+                
+                val modelFile = File(modelDir, model.fileName)
+                val request = Request.Builder().url(model.downloadUrl).build()
+                
+                okHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
+                    val body = response.body ?: throw Exception("Empty response body")
+                    val totalSize = body.contentLength()
+                    
+                    FileOutputStream(modelFile).use { output ->
+                        val input = body.byteStream()
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        var totalRead = 0L
+                        
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                            totalRead += bytesRead
+                            if (totalSize > 0) {
+                                val progress = totalRead.toFloat() / totalSize
+                                _uiState.update { it.copy(downloadProgress = progress) }
+                            }
+                        }
+                    }
+                }
+                
+                _uiState.update { it.copy(isProcessing = false, isModelDownloaded = true, downloadProgress = 1f) }
+                ensureInterpreterReady()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update { it.copy(isProcessing = false, error = "Download failed: ${e.localizedMessage}") }
+            }
         }
     }
 
     private suspend fun ensureInterpreterReady(): Boolean = initMutex.withLock {
         if (tfliteInterpreter != null) return@withLock true
+        
+        val currentModel = _uiState.value.selectedModel ?: return@withLock false
+        val modelFile = File(context.filesDir, "models/${currentModel.fileName}")
+        if (!modelFile.exists()) return@withLock false
 
         return@withLock withContext(Dispatchers.IO) {
-            val modelNames = listOf("deeplab_v3.tflite", "selfie_segmentation.tflite")
-            var lastException: Throwable? = null
-
-            for (modelName in modelNames) {
-                try {
-                    val modelBuffer = loadModelFile(modelName)
-                    val gpuOptions = Interpreter.Options().apply {
-                        setNumThreads(4)
-                        val compatList = CompatibilityList()
-                        if (compatList.isDelegateSupportedOnThisDevice) {
-                            try {
-                                val delegate = GpuDelegate()
-                                addDelegate(delegate)
-                                gpuDelegate = delegate
-                            } catch (_: Throwable) {}
-                        }
+            try {
+                val modelBuffer = loadModelFile(modelFile)
+                val gpuOptions = Interpreter.Options().apply {
+                    setNumThreads(4)
+                    val compatList = CompatibilityList()
+                    if (compatList.isDelegateSupportedOnThisDevice) {
+                        try {
+                            val delegate = GpuDelegate()
+                            addDelegate(delegate)
+                            gpuDelegate = delegate
+                        } catch (_: Throwable) {}
                     }
-                    tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
-                    return@withContext true
-                } catch (_: Throwable) {
-                    gpuDelegate?.close()
-                    gpuDelegate = null
                 }
-
-                try {
-                    val modelBuffer = loadModelFile(modelName)
-                    val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
-                    tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
-                    return@withContext true
-                } catch (e: Throwable) {
-                    lastException = e
-                }
+                tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
+                return@withContext true
+            } catch (_: Throwable) {
+                gpuDelegate?.close()
+                gpuDelegate = null
             }
 
-            _uiState.update {
-                it.copy(
-                    isProcessing = false,
-                    error = "TFLite Init Failed: ${lastException?.localizedMessage ?: "Could not load segmentation model."}"
-                )
+            try {
+                val modelBuffer = loadModelFile(modelFile)
+                val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
+                tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
+                return@withContext true
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                _uiState.update {
+                    it.copy(
+                        isProcessing = false,
+                        error = "TFLite Init Failed: ${e.localizedMessage ?: "Could not load model."}"
+                    )
+                }
+                false
             }
-            false
         }
     }
 
-    private fun loadModelFile(modelName: String): ByteBuffer {
-        return try {
-            val fileDescriptor = context.assets.openFd(modelName)
-            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-            val fileChannel = inputStream.channel
-            val startOffset = fileDescriptor.startOffset
-            val declaredLength = fileDescriptor.declaredLength
-            fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-        } catch (_: Exception) {
-            val bytes = context.assets.open(modelName).use { it.readBytes() }
-            val buffer = ByteBuffer.allocateDirect(bytes.size)
-            buffer.order(ByteOrder.nativeOrder())
-            buffer.put(bytes)
-            buffer.rewind()
-            buffer
+    private fun loadModelFile(file: File): ByteBuffer {
+        val inputStream = FileInputStream(file)
+        val fileChannel = inputStream.channel
+        val length = fileChannel.size()
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, length).also {
+            inputStream.close()
         }
     }
 
@@ -443,6 +492,9 @@ class BackgroundRemoverViewModel @Inject constructor(
 }
 
 data class BackgroundRemoverUiState(
+    val selectedModel: SegmentationModel? = null,
+    val isModelDownloaded: Boolean = false,
+    val downloadProgress: Float = 0f,
     val originalBitmap: Bitmap? = null,
     val resultBitmap: Bitmap? = null,
     val isProcessing: Boolean = false,

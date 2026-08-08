@@ -78,6 +78,12 @@ object BackgroundRemoverEngine {
         val pixels = IntArray(w * h)
         source.getPixels(pixels, 0, w, 0, 0, w, h)
 
+        // Calculate resolution scaling factor for adaptive refinement
+        val resScale = max(maskW, maskH).toFloat() / 256f
+        val adaptiveGfRadius = (GF_RADIUS * resScale).toInt().coerceIn(4, 32)
+        val adaptiveGfRadius2 = (GF_RADIUS2 * resScale).toInt().coerceIn(2, 16)
+        val adaptiveDecontamRadius = (DECONTAM_RADIUS * resScale).toInt().coerceIn(4, 24)
+
         // 1. Bilinear upsample to native image resolution
         var alpha = bilinearUpsample(maskArray, maskW, maskH, w, h)
 
@@ -88,16 +94,16 @@ object BackgroundRemoverEngine {
         alpha = sampleBasedMatting(alpha, trimap, pixels, w, h)
 
         // 4a. First guided filter pass — wide radius for large-structure smoothing
-        alpha = guidedFilterPass(alpha, pixels, w, h, GF_RADIUS, GF_EPS)
+        alpha = guidedFilterPass(alpha, pixels, w, h, adaptiveGfRadius, GF_EPS)
 
         // 4b. Second guided filter pass — tight radius to snap hair strands
-        alpha = guidedFilterPass(alpha, pixels, w, h, GF_RADIUS2, GF_EPS2)
+        alpha = guidedFilterPass(alpha, pixels, w, h, adaptiveGfRadius2, GF_EPS2)
 
         // 5. Pure Kotlin Sobel Gradient Edge Sharpening — crisp boundaries without AI blur
         alpha = sobelEdgeSharpen(alpha, pixels, w, h)
 
         // 6. Foreground colour decontamination (eliminates background color bleed)
-        val finalPixels = decontaminateEdges(pixels, alpha, w, h, DECONTAM_RADIUS)
+        val finalPixels = decontaminateEdges(pixels, alpha, w, h, adaptiveDecontamRadius)
 
         // 7. Final alpha ramp: hard-clip background noise to 0, solid subject to 1
         for (i in finalPixels.indices) {
