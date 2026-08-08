@@ -26,7 +26,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.frerox.toolz.data.media.SegmentationModel
+import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.util.BackgroundRemoverEngine
 import com.frerox.toolz.util.ImageUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -88,7 +88,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         // Models are now selected and downloaded by the user
     }
 
-    fun selectModel(model: SegmentationModel) {
+    fun selectModel(model: BackgroundModel) {
         val modelFile = File(context.filesDir, "models/${model.fileName}")
         val isDownloaded = modelFile.exists() && modelFile.length() > 1024
         
@@ -107,7 +107,28 @@ class BackgroundRemoverViewModel @Inject constructor(
         }
     }
 
-    fun downloadModel(model: SegmentationModel) {
+    fun deleteModel(model: BackgroundModel) {
+        val modelFile = File(context.filesDir, "models/${model.fileName}")
+        if (modelFile.exists()) {
+            modelFile.delete()
+        }
+        
+        if (_uiState.value.selectedModel == model) {
+            tfliteInterpreter?.close()
+            tfliteInterpreter = null
+            gpuDelegate?.close()
+            gpuDelegate = null
+            
+            _uiState.update { 
+                it.copy(
+                    isModelDownloaded = false,
+                    resultBitmap = null
+                )
+            }
+        }
+    }
+
+    fun downloadModel(model: BackgroundModel) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.update { it.copy(isProcessing = true, downloadProgress = 0.01f) }
@@ -119,8 +140,15 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val request = Request.Builder().url(model.downloadUrl).build()
                 
                 okHttpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
-                    val body = response.body ?: throw Exception("Empty response body")
+                    if (!response.isSuccessful) {
+                        val errorDetail = when(response.code) {
+                            404 -> "Model not found on server (404). Please contact support."
+                            503 -> "Server unavailable. Try again later."
+                            else -> "HTTP ${response.code}"
+                        }
+                        throw Exception(errorDetail)
+                    }
+                    val body = response.body ?: throw Exception("Server returned an empty response.")
                     val totalSize = body.contentLength()
                     
                     FileOutputStream(modelFile).use { output ->
@@ -335,6 +363,9 @@ class BackgroundRemoverViewModel @Inject constructor(
                     }
                 } else {
                     val activeChannels = numChannels.coerceAtMost(channelWeights.size)
+                    val isMulticlass = _uiState.value.selectedModel?.id == "selfie_multiclass"
+                    val weights = if (isMulticlass) channelWeights else FloatArray(numChannels) { if (it == 0) 0f else 1f }
+                    
                     val channelExps = FloatArray(numChannels)
 
                     if (isNHWC) {
@@ -361,7 +392,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                                     var fgProb = 0.0f
                                     for (c in 1 until activeChannels) {
                                         val prob = channelExps[c] / sumExp
-                                        fgProb += prob * channelWeights[c]
+                                        fgProb += prob * weights.getOrElse(c) { 1f }
                                     }
                                     combinedMask[pixelIdx] = fgProb.coerceIn(0f, 1f)
                                 } else {
@@ -390,7 +421,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                                 var fgProb = 0.0f
                                 for (c in 1 until activeChannels) {
                                     val prob = channelExps[c] / sumExp
-                                    fgProb += prob * channelWeights[c]
+                                    fgProb += prob * weights.getOrElse(c) { 1f }
                                 }
                                 combinedMask[i] = fgProb.coerceIn(0f, 1f)
                             } else {
@@ -492,7 +523,7 @@ class BackgroundRemoverViewModel @Inject constructor(
 }
 
 data class BackgroundRemoverUiState(
-    val selectedModel: SegmentationModel? = null,
+    val selectedModel: BackgroundModel? = null,
     val isModelDownloaded: Boolean = false,
     val downloadProgress: Float = 0f,
     val originalBitmap: Bitmap? = null,

@@ -30,52 +30,62 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.frerox.toolz.data.media.SegmentationModel
+import androidx.compose.ui.unit.sp
+import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.SquircleShape
 
 @Composable
 fun ModelHubContent(
-    selectedModel: SegmentationModel?,
+    selectedModel: BackgroundModel?,
     isDownloading: Boolean,
     downloadProgress: Float,
-    onModelSelect: (SegmentationModel) -> Unit,
-    onDownloadClick: (SegmentationModel) -> Unit,
+    onModelSelect: (BackgroundModel) -> Unit,
+    onDownloadClick: (BackgroundModel) -> Unit,
+    onDeleteClick: (BackgroundModel) -> Unit,
     onProceed: () -> Unit,
-    isModelDownloaded: Boolean
+    isExistingModel: (BackgroundModel) -> Boolean
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Select Intelligence",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = "Choose a model optimized for your specific task.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Rounded.AutoAwesome,
+                null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "AI Model Hub",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 8.dp)
         ) {
-            items(SegmentationModel.entries) { model ->
-                ModelSelectionCard(
+            items(BackgroundModel.entries) { model ->
+                CompactModelCard(
                     model = model,
                     isSelected = selectedModel == model,
-                    onClick = { onModelSelect(model) }
+                    isDownloaded = isExistingModel(model),
+                    onClick = { onModelSelect(model) },
+                    onDelete = { onDeleteClick(model) }
                 )
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         AnimatedVisibility(
             visible = selectedModel != null,
@@ -83,39 +93,36 @@ fun ModelHubContent(
             exit = fadeOut() + shrinkVertically()
         ) {
             selectedModel?.let { model ->
-                if (isModelDownloaded) {
-                    ToolzExpressiveButton(
-                        onClick = onProceed,
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
-                        shape = SquircleShape
-                    ) {
-                        Icon(Icons.Rounded.PlayArrow, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Launch ${model.displayName}", fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    ToolzExpressiveButton(
-                        onClick = { onDownloadClick(model) },
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
-                        shape = SquircleShape,
-                        enabled = !isDownloading
-                    ) {
-                        if (isDownloading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 3.dp,
-                                progress = { downloadProgress }
-                            )
-                        } else {
-                            Icon(Icons.Rounded.Download, null)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (isDownloading) "Downloading..." else "Download ${model.displayName} (${model.sizeLabel})",
-                            fontWeight = FontWeight.Bold
+                val isDownloaded = isExistingModel(model)
+                
+                ToolzExpressiveButton(
+                    onClick = { if (isDownloaded) onProceed() else onDownloadClick(model) },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = SquircleShape,
+                    enabled = !isDownloading
+                ) {
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                            progress = { downloadProgress }
+                        )
+                    } else {
+                        Icon(
+                            if (isDownloaded) Icons.Rounded.RocketLaunch else Icons.Rounded.CloudDownload,
+                            null,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = if (isDownloading) "Downloading..." 
+                               else if (isDownloaded) "Activate ${model.displayName}" 
+                               else "Get ${model.displayName} (${model.sizeLabel})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }
@@ -123,104 +130,104 @@ fun ModelHubContent(
 }
 
 @Composable
-fun ModelSelectionCard(
-    model: SegmentationModel,
+fun CompactModelCard(
+    model: BackgroundModel,
     isSelected: Boolean,
-    onClick: () -> Unit
+    isDownloaded: Boolean,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val containerColor = if (isSelected) 
-        MaterialTheme.colorScheme.primaryContainer 
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) 
     else 
-        MaterialTheme.colorScheme.surfaceContainer
+        MaterialTheme.colorScheme.surfaceContainerLow
 
     val borderColor = if (isSelected)
         MaterialTheme.colorScheme.primary
     else
-        MaterialTheme.colorScheme.outlineVariant
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
 
     Surface(
         onClick = onClick,
         shape = SquircleShape,
         color = containerColor,
-        border = androidx.compose.foundation.BorderStroke(2.dp, borderColor),
-        tonalElevation = if (isSelected) 4.dp else 0.dp
+        border = androidx.compose.foundation.BorderStroke(1.2.dp, borderColor),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val icon = getIconForModel(model)
             Surface(
                 shape = SquircleShape,
                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         icon,
                         contentDescription = null,
+                        modifier = Modifier.size(18.dp),
                         tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
                     )
                 }
             }
 
-            Spacer(Modifier.width(20.dp))
+            Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = model.displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${model.resolution}px",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (isDownloaded) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = "Downloaded",
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
                 Text(
                     text = model.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 12.sp,
+                    maxLines = 2
                 )
-                
-                Spacer(Modifier.height(8.dp))
-                
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    model.features.forEach { feature ->
-                        Badge(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ) {
-                            Text(feature, style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
             }
 
-            if (isSelected) {
-                Icon(
-                    Icons.Rounded.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
+            if (isDownloaded) {
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.DeleteOutline,
+                        contentDescription = "Delete",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
     }
 }
 
-private fun getIconForModel(model: SegmentationModel): ImageVector {
+private fun getIconForModel(model: BackgroundModel): ImageVector {
     return when (model.id) {
-        "selfie_light" -> Icons.Rounded.Bolt
-        "selfie_multiclass" -> Icons.Rounded.Face
-        "human_pro" -> Icons.Rounded.Portrait
-        "deeplab_v3_pro" -> Icons.Rounded.FilterCenterFocus
-        "is_net_hd" -> Icons.Rounded.AutoFixHigh
-        "birefnet_ultra" -> Icons.Rounded.WorkspacePremium
+        "birefnet_lite" -> Icons.Rounded.WorkspacePremium
+        "rmbg_2" -> Icons.Rounded.ShoppingBag
+        "modnet_hd" -> Icons.Rounded.Portrait
+        "inspyrenet_mobile" -> Icons.Rounded.Layers
+        "u2net_full" -> Icons.Rounded.AutoFixHigh
         else -> Icons.Rounded.Category
     }
 }

@@ -32,17 +32,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.frerox.toolz.R
+import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.media.components.ModelHubContent
 import com.frerox.toolz.ui.theme.SquircleShape
 import com.frerox.toolz.ui.theme.toolzBackground
+import java.io.File
 
 /**
  * Background Remover screen using TensorFlow Lite for segmentation and Toolz Expressive UI.
@@ -55,6 +57,7 @@ fun BackgroundRemoverScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val haptic = rememberToolzHapticFeedback()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -64,7 +67,6 @@ fun BackgroundRemoverScreen(
         }
     }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
     val successMsg = stringResource(R.string.st_BackgroundRemover_Success)
 
     LaunchedEffect(uiState.resultBitmap) {
@@ -82,10 +84,14 @@ fun BackgroundRemoverScreen(
 
     var isHubOpen by remember { mutableStateOf(false) }
     
-    // Auto-open hub if no model is downloaded
-    LaunchedEffect(uiState.isModelDownloaded) {
-        if (!uiState.isModelDownloaded) {
-            isHubOpen = true
+    // Auto-open hub if no model is selected and none exist
+    LaunchedEffect(Unit) {
+        if (uiState.selectedModel == null) {
+            val modelsDir = File(context.filesDir, "models")
+            val hasAnyModel = modelsDir.exists() && (modelsDir.listFiles()?.size ?: 0) > 0
+            if (!hasAnyModel) {
+                isHubOpen = true
+            }
         }
     }
 
@@ -94,15 +100,13 @@ fun BackgroundRemoverScreen(
         topBar = {
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_Tool_BackgroundRemover),
-                subtitle = stringResource(R.string.st_Tool_BackgroundRemover_Desc),
+                subtitle = uiState.selectedModel?.displayName ?: stringResource(R.string.st_Tool_BackgroundRemover_Desc),
                 actions = {
-                    if (uiState.isModelDownloaded) {
-                        ToolzTonalExpressiveIconButton(
-                            onClick = { isHubOpen = true },
-                            shape = SquircleShape,
-                        ) {
-                            Icon(Icons.Rounded.Memory, "Model Hub")
-                        }
+                    ToolzTonalExpressiveIconButton(
+                        onClick = { isHubOpen = true },
+                        shape = SquircleShape,
+                    ) {
+                        Icon(Icons.Rounded.Memory, "Models", modifier = Modifier.size(20.dp))
                     }
                 },
                 navigationIcon = {
@@ -120,24 +124,22 @@ fun BackgroundRemoverScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
                     shape = SquircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                    tonalElevation = 2.dp
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 1.dp
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         AnimatedContent(
                             targetState = uiState.resultBitmap ?: uiState.originalBitmap,
                             transitionSpec = {
-                                fadeIn(spring(stiffness = Spring.StiffnessLow)) togetherWith
-                                        fadeOut(spring(stiffness = Spring.StiffnessLow))
+                                fadeIn(tween(400)) togetherWith fadeOut(tween(400))
                             },
                             label = "image_transition"
                         ) { bitmap ->
@@ -145,7 +147,7 @@ fun BackgroundRemoverScreen(
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
                                     contentDescription = "Preview",
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier.fillMaxSize().padding(8.dp),
                                     contentScale = ContentScale.Fit
                                 )
                             } else {
@@ -154,34 +156,27 @@ fun BackgroundRemoverScreen(
                                     verticalArrangement = Arrangement.Center
                                 ) {
                                     val infiniteTransition = rememberInfiniteTransition(label = "hint_anim")
-                                    val scale by infiniteTransition.animateFloat(
-                                        initialValue = 0.95f,
-                                        targetValue = 1.05f,
+                                    val alpha by infiniteTransition.animateFloat(
+                                        initialValue = 0.3f,
+                                        targetValue = 0.6f,
                                         animationSpec = infiniteRepeatable(
-                                            animation = tween(2000, easing = EaseInOutSine),
+                                            animation = tween(1500, easing = EaseInOutSine),
                                             repeatMode = RepeatMode.Reverse
                                         ),
-                                        label = "scale"
+                                        label = "alpha"
                                     )
                                     
                                     Icon(
-                                        Icons.Rounded.Portrait,
+                                        Icons.Rounded.AddPhotoAlternate,
                                         null,
-                                        modifier = Modifier
-                                            .size(80.dp)
-                                            .graphicsLayer {
-                                                scaleX = scale
-                                                scaleY = scale
-                                            },
-                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                        modifier = Modifier.size(64.dp),
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = alpha)
                                     )
-                                    Spacer(Modifier.height(24.dp))
+                                    Spacer(Modifier.height(16.dp))
                                     Text(
-                                        stringResource(R.string.st_BackgroundRemover_Hint),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 32.dp)
+                                        "Select an image to remove background",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                                     )
                                 }
                             }
@@ -189,75 +184,64 @@ fun BackgroundRemoverScreen(
 
                         if (uiState.isProcessing && uiState.downloadProgress == 0f) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.BottomCenter
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    ExpressiveStatePill(
-                                        text = stringResource(R.string.st_BackgroundRemover_Processing),
-                                        icon = Icons.Rounded.AutoAwesome,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        isFilled = true
-                                    )
-                                    Spacer(Modifier.height(16.dp))
-                                    ToolzWavyLinearProgressIndicator(
-                                        modifier = Modifier.width(200.dp)
-                                    )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                    shape = SquircleShape,
+                                    modifier = Modifier.size(120.dp)
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
+                                        Spacer(Modifier.height(12.dp))
+                                        Text("Processing", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(20.dp))
 
-                StaggeredEntrance(index = 0) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        if (uiState.resultBitmap == null) {
-                            ToolzExpressiveButton(
-                                onClick = {
-                                    launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(64.dp),
-                                shape = SquircleShape
-                            ) {
-                                Icon(Icons.Rounded.Add, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.st_BackgroundRemover_Pick), fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            ToolzOutlinedExpressiveButton(
-                                onClick = {
-                                    viewModel.clearResult()
-                                },
-                                modifier = Modifier
-                                    .weight(0.4f)
-                                    .height(64.dp),
-                                shape = SquircleShape
-                            ) {
-                                Text(stringResource(R.string.st_BackgroundRemover_Clear), fontWeight = FontWeight.Bold)
-                            }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (uiState.resultBitmap == null) {
+                        ToolzExpressiveButton(
+                            onClick = {
+                                launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape = SquircleShape,
+                            enabled = uiState.isModelDownloaded
+                        ) {
+                            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.st_BackgroundRemover_Pick), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                    } else {
+                        ToolzOutlinedExpressiveButton(
+                            onClick = { viewModel.clearResult() },
+                            modifier = Modifier.weight(0.4f).height(56.dp),
+                            shape = SquircleShape
+                        ) {
+                            Text(stringResource(R.string.st_BackgroundRemover_Clear), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
 
-                            ToolzExpressiveButton(
-                                onClick = {
-                                    uiState.resultBitmap?.let { viewModel.saveResult(it) }
-                                },
-                                modifier = Modifier
-                                    .weight(0.6f)
-                                    .height(64.dp),
-                                shape = SquircleShape
-                            ) {
-                                Icon(Icons.Rounded.Save, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.st_BackgroundRemover_Save), fontWeight = FontWeight.Bold)
-                            }
+                        ToolzExpressiveButton(
+                            onClick = { uiState.resultBitmap?.let { viewModel.saveResult(it) } },
+                            modifier = Modifier.weight(0.6f).height(56.dp),
+                            shape = SquircleShape
+                        ) {
+                            Icon(Icons.Rounded.Save, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.st_BackgroundRemover_Save), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                     }
                 }
@@ -273,15 +257,18 @@ fun BackgroundRemoverScreen(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surface
                 ) {
-                    Box(modifier = Modifier.padding(24.dp)) {
+                    Box(modifier = Modifier.padding(20.dp)) {
                         ModelHubContent(
                             selectedModel = uiState.selectedModel,
                             isDownloading = uiState.isProcessing && uiState.downloadProgress > 0f,
                             downloadProgress = uiState.downloadProgress,
                             onModelSelect = { viewModel.selectModel(it) },
                             onDownloadClick = { viewModel.downloadModel(it) },
+                            onDeleteClick = { viewModel.deleteModel(it) },
                             onProceed = { isHubOpen = false },
-                            isModelDownloaded = uiState.isModelDownloaded
+                            isExistingModel = { model ->
+                                File(context.filesDir, "models/${model.fileName}").let { it.exists() && it.length() > 1024 }
+                            }
                         )
                     }
                 }
@@ -297,8 +284,8 @@ fun BackgroundRemoverScreen(
                     Text("OK")
                 }
             },
-            title = { Text(stringResource(R.string.st_BackgroundRemover_Error)) },
-            text = { Text(uiState.error!!) },
+            title = { Text("AI Error", fontWeight = FontWeight.Bold) },
+            text = { Text(uiState.error!!, fontSize = 14.sp) },
             shape = SquircleShape
         )
     }
