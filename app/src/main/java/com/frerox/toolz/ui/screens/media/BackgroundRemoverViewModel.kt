@@ -93,52 +93,67 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (tfliteInterpreter != null) return@withLock true
 
         return@withLock withContext(Dispatchers.IO) {
-            try {
-                val modelBuffer = loadModelFile("selfie_multiclass.tflite")
-                val options = Interpreter.Options().apply {
-                    setNumThreads(4)
-                    val compatList = CompatibilityList()
-                    if (compatList.isDelegateSupportedOnThisDevice) {
-                        try {
-                            val delegate = GpuDelegate()
-                            addDelegate(delegate)
-                            gpuDelegate = delegate
-                        } catch (_: Throwable) {
-                            // Fallback to CPU if GPU delegate init fails
+            val modelNames = listOf("selfie_segmentation.tflite", "selfie_multiclass.tflite")
+            var lastException: Throwable? = null
+
+            for (modelName in modelNames) {
+                try {
+                    val modelBuffer = loadModelFile(modelName)
+                    val options = Interpreter.Options().apply {
+                        setNumThreads(4)
+                        val compatList = CompatibilityList()
+                        if (compatList.isDelegateSupportedOnThisDevice) {
+                            try {
+                                val delegate = GpuDelegate()
+                                addDelegate(delegate)
+                                gpuDelegate = delegate
+                            } catch (_: Throwable) {
+                                // Fallback to CPU delegate
+                            }
                         }
                     }
+                    tfliteInterpreter = Interpreter(modelBuffer, options)
+                    return@withContext true
+                } catch (e: Throwable) {
+                    lastException = e
                 }
-                tfliteInterpreter = Interpreter(modelBuffer, options)
-                true
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // Fallback attempt without GPU delegate
+
                 try {
-                    val modelBuffer = loadModelFile("selfie_multiclass.tflite")
+                    val modelBuffer = loadModelFile(modelName)
                     val options = Interpreter.Options().apply { setNumThreads(4) }
                     tfliteInterpreter = Interpreter(modelBuffer, options)
-                    true
-                } catch (ex: Exception) {
-                    ex.printStackTrace()
-                    _uiState.update {
-                        it.copy(
-                            isProcessing = false,
-                            error = "TFLite Init Failed: ${ex.localizedMessage ?: "Model selfie_multiclass.tflite not readable"}"
-                        )
-                    }
-                    false
+                    return@withContext true
+                } catch (e: Throwable) {
+                    lastException = e
                 }
             }
+
+            _uiState.update {
+                it.copy(
+                    isProcessing = false,
+                    error = "TFLite Init Failed: ${lastException?.localizedMessage ?: "Could not load selfie segmentation model."}"
+                )
+            }
+            false
         }
     }
 
-    private fun loadModelFile(modelName: String): MappedByteBuffer {
-        val fileDescriptor = context.assets.openFd(modelName)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+    private fun loadModelFile(modelName: String): ByteBuffer {
+        return try {
+            val fileDescriptor = context.assets.openFd(modelName)
+            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+            val fileChannel = inputStream.channel
+            val startOffset = fileDescriptor.startOffset
+            val declaredLength = fileDescriptor.declaredLength
+            fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+        } catch (_: Exception) {
+            val bytes = context.assets.open(modelName).use { it.readBytes() }
+            val buffer = ByteBuffer.allocateDirect(bytes.size)
+            buffer.order(ByteOrder.nativeOrder())
+            buffer.put(bytes)
+            buffer.rewind()
+            buffer
+        }
     }
 
     fun onImageSelected(uri: Uri) {
@@ -211,11 +226,11 @@ class BackgroundRemoverViewModel @Inject constructor(
 
                 // 5. Parse confidence masks from output tensor
                 val combinedMask = FloatArray(modelW * modelH)
-                var numChannels = 6
+                var numChannels = 1
                 var isNHWC = true
 
                 if (outputShape.size == 4) {
-                    if (outputShape[3] == 6 || outputShape[3] < outputShape[1]) {
+                    if (outputShape[3] in 1..10) {
                         // NHWC: [1, H, W, Channels]
                         numChannels = outputShape[3]
                         isNHWC = true
@@ -227,70 +242,93 @@ class BackgroundRemoverViewModel @Inject constructor(
                 }
 
                 val outputFloatBuffer = outputBuffer.asFloatBuffer()
-                val activeChannels = numChannels.coerceAtMost(channelWeights.size)
-                val channelExps = FloatArray(numChannels)
 
-                if (isNHWC) {
-                    for (y in 0 until modelH) {
-                        for (x in 0 until modelW) {
-                            val pixelIdx = y * modelW + x
-                            val offset = pixelIdx * numChannels
+                if (numChannels == 1) {
+                    val totalPixels = modelW * modelH
+                    for (i in 0 until totalPixels) {
+                        val rawVal = outputFloatBuffer.get(i)
+                        val prob = if (rawVal in 0.0f..1.0f) {
+                            rawVal
+                        } else {
+                            1.0f / (1.0f + kotlin.math.exp(-rawVal))
+                        }
+                        combinedMask[i] = prob.coerceIn(0f, 1f)
+                    }
+                } else if (numChannels == 2) {
+                    val totalPixels = modelW * modelH
+                    for (i in 0 until totalPixels) {
+                        val bgVal = outputFloatBuffer.get(if (isNHWC) i * 2 else i)
+                        val fgVal = outputFloatBuffer.get(if (isNHWC) i * 2 + 1 else totalPixels + i)
+                        val maxVal = maxOf(bgVal, fgVal)
+                        val expBg = kotlin.math.exp(bgVal - maxVal)
+                        val expFg = kotlin.math.exp(fgVal - maxVal)
+                        val sumExp = expBg + expFg
+                        combinedMask[i] = if (sumExp > 1e-5f) (expFg / sumExp).coerceIn(0f, 1f) else fgVal.coerceIn(0f, 1f)
+                    }
+                } else {
+                    val activeChannels = numChannels.coerceAtMost(channelWeights.size)
+                    val channelExps = FloatArray(numChannels)
 
-                            // Compute Softmax across all channels for this pixel
+                    if (isNHWC) {
+                        for (y in 0 until modelH) {
+                            for (x in 0 until modelW) {
+                                val pixelIdx = y * modelW + x
+                                val offset = pixelIdx * numChannels
+
+                                var maxLogit = Float.NEGATIVE_INFINITY
+                                for (c in 0 until numChannels) {
+                                    val logit = outputFloatBuffer.get(offset + c)
+                                    if (logit > maxLogit) maxLogit = logit
+                                }
+
+                                var sumExp = 0.0f
+                                for (c in 0 until numChannels) {
+                                    val logit = outputFloatBuffer.get(offset + c)
+                                    val expVal = kotlin.math.exp(logit - maxLogit)
+                                    channelExps[c] = expVal
+                                    sumExp += expVal
+                                }
+
+                                if (sumExp > 0.00001f) {
+                                    var fgProb = 0.0f
+                                    for (c in 1 until activeChannels) {
+                                        val prob = channelExps[c] / sumExp
+                                        fgProb += prob * channelWeights[c]
+                                    }
+                                    combinedMask[pixelIdx] = fgProb.coerceIn(0f, 1f)
+                                } else {
+                                    val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
+                                    combinedMask[pixelIdx] = (1f - bgProb).coerceIn(0f, 1f)
+                                }
+                            }
+                        }
+                    } else {
+                        val channelSize = modelW * modelH
+                        val tempLogits = FloatArray(numChannels)
+                        for (i in 0 until channelSize) {
                             var maxLogit = Float.NEGATIVE_INFINITY
                             for (c in 0 until numChannels) {
-                                val logit = outputFloatBuffer.get(offset + c)
+                                val logit = outputFloatBuffer.get(c * channelSize + i)
+                                tempLogits[c] = logit
                                 if (logit > maxLogit) maxLogit = logit
                             }
-
                             var sumExp = 0.0f
                             for (c in 0 until numChannels) {
-                                val logit = outputFloatBuffer.get(offset + c)
-                                val expVal = kotlin.math.exp(logit - maxLogit)
+                                val expVal = kotlin.math.exp(tempLogits[c] - maxLogit)
                                 channelExps[c] = expVal
                                 sumExp += expVal
                             }
-
                             if (sumExp > 0.00001f) {
                                 var fgProb = 0.0f
                                 for (c in 1 until activeChannels) {
                                     val prob = channelExps[c] / sumExp
                                     fgProb += prob * channelWeights[c]
                                 }
-                                combinedMask[pixelIdx] = fgProb.coerceIn(0f, 1f)
+                                combinedMask[i] = fgProb.coerceIn(0f, 1f)
                             } else {
                                 val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
-                                combinedMask[pixelIdx] = (1f - bgProb).coerceIn(0f, 1f)
+                                combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
                             }
-                        }
-                    }
-                } else {
-                    // NCHW
-                    val channelSize = modelW * modelH
-                    val tempLogits = FloatArray(numChannels)
-                    for (i in 0 until channelSize) {
-                        var maxLogit = Float.NEGATIVE_INFINITY
-                        for (c in 0 until numChannels) {
-                            val logit = outputFloatBuffer.get(c * channelSize + i)
-                            tempLogits[c] = logit
-                            if (logit > maxLogit) maxLogit = logit
-                        }
-                        var sumExp = 0.0f
-                        for (c in 0 until numChannels) {
-                            val expVal = kotlin.math.exp(tempLogits[c] - maxLogit)
-                            channelExps[c] = expVal
-                            sumExp += expVal
-                        }
-                        if (sumExp > 0.00001f) {
-                            var fgProb = 0.0f
-                            for (c in 1 until activeChannels) {
-                                val prob = channelExps[c] / sumExp
-                                fgProb += prob * channelWeights[c]
-                            }
-                            combinedMask[i] = fgProb.coerceIn(0f, 1f)
-                        } else {
-                            val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
-                            combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
                         }
                     }
                 }

@@ -31,6 +31,10 @@ android {
     namespace = "com.frerox.toolz"
     compileSdk = 37
 
+    androidResources {
+        noCompress += "tflite"
+    }
+
     defaultConfig {
         applicationId = "com.frerox.toolz"
         minSdk = 31
