@@ -93,48 +93,49 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (tfliteInterpreter != null) return@withLock true
 
         return@withLock withContext(Dispatchers.IO) {
-            val modelNames = listOf("selfie_segmentation.tflite", "selfie_multiclass.tflite")
-            var lastException: Throwable? = null
+            val modelName = "selfie_segmentation.tflite"
 
-            for (modelName in modelNames) {
-                try {
-                    val modelBuffer = loadModelFile(modelName)
-                    val options = Interpreter.Options().apply {
-                        setNumThreads(4)
-                        val compatList = CompatibilityList()
-                        if (compatList.isDelegateSupportedOnThisDevice) {
-                            try {
-                                val delegate = GpuDelegate()
-                                addDelegate(delegate)
-                                gpuDelegate = delegate
-                            } catch (_: Throwable) {
-                                // Fallback to CPU delegate
-                            }
+            // Attempt 1: Try with GPU Delegate acceleration
+            try {
+                val modelBuffer = loadModelFile(modelName)
+                val gpuOptions = Interpreter.Options().apply {
+                    setNumThreads(4)
+                    val compatList = CompatibilityList()
+                    if (compatList.isDelegateSupportedOnThisDevice) {
+                        try {
+                            val delegate = GpuDelegate()
+                            addDelegate(delegate)
+                            gpuDelegate = delegate
+                        } catch (_: Throwable) {
+                            // Ignore GPU delegate build failure
                         }
                     }
-                    tfliteInterpreter = Interpreter(modelBuffer, options)
-                    return@withContext true
-                } catch (e: Throwable) {
-                    lastException = e
                 }
-
-                try {
-                    val modelBuffer = loadModelFile(modelName)
-                    val options = Interpreter.Options().apply { setNumThreads(4) }
-                    tfliteInterpreter = Interpreter(modelBuffer, options)
-                    return@withContext true
-                } catch (e: Throwable) {
-                    lastException = e
-                }
+                tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
+                return@withContext true
+            } catch (_: Throwable) {
+                gpuDelegate?.close()
+                gpuDelegate = null
             }
 
-            _uiState.update {
-                it.copy(
-                    isProcessing = false,
-                    error = "TFLite Init Failed: ${lastException?.localizedMessage ?: "Could not load selfie segmentation model."}"
-                )
+            // Attempt 2: CPU-only multi-threaded inference fallback
+            try {
+                val modelBuffer = loadModelFile(modelName)
+                val cpuOptions = Interpreter.Options().apply {
+                    setNumThreads(4)
+                }
+                tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
+                true
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                _uiState.update {
+                    it.copy(
+                        isProcessing = false,
+                        error = "TFLite Init Failed: ${e.localizedMessage ?: "Could not load $modelName"}"
+                    )
+                }
+                false
             }
-            false
         }
     }
 
