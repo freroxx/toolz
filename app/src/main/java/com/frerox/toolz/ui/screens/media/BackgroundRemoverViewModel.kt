@@ -93,49 +93,47 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (tfliteInterpreter != null) return@withLock true
 
         return@withLock withContext(Dispatchers.IO) {
-            val modelName = "selfie_segmentation.tflite"
+            val modelNames = listOf("deeplab_v3.tflite", "selfie_segmentation.tflite")
+            var lastException: Throwable? = null
 
-            // Attempt 1: Try with GPU Delegate acceleration
-            try {
-                val modelBuffer = loadModelFile(modelName)
-                val gpuOptions = Interpreter.Options().apply {
-                    setNumThreads(4)
-                    val compatList = CompatibilityList()
-                    if (compatList.isDelegateSupportedOnThisDevice) {
-                        try {
-                            val delegate = GpuDelegate()
-                            addDelegate(delegate)
-                            gpuDelegate = delegate
-                        } catch (_: Throwable) {
-                            // Ignore GPU delegate build failure
+            for (modelName in modelNames) {
+                try {
+                    val modelBuffer = loadModelFile(modelName)
+                    val gpuOptions = Interpreter.Options().apply {
+                        setNumThreads(4)
+                        val compatList = CompatibilityList()
+                        if (compatList.isDelegateSupportedOnThisDevice) {
+                            try {
+                                val delegate = GpuDelegate()
+                                addDelegate(delegate)
+                                gpuDelegate = delegate
+                            } catch (_: Throwable) {}
                         }
                     }
+                    tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
+                    return@withContext true
+                } catch (_: Throwable) {
+                    gpuDelegate?.close()
+                    gpuDelegate = null
                 }
-                tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
-                return@withContext true
-            } catch (_: Throwable) {
-                gpuDelegate?.close()
-                gpuDelegate = null
+
+                try {
+                    val modelBuffer = loadModelFile(modelName)
+                    val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
+                    tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
+                    return@withContext true
+                } catch (e: Throwable) {
+                    lastException = e
+                }
             }
 
-            // Attempt 2: CPU-only multi-threaded inference fallback
-            try {
-                val modelBuffer = loadModelFile(modelName)
-                val cpuOptions = Interpreter.Options().apply {
-                    setNumThreads(4)
-                }
-                tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
-                true
-            } catch (e: Throwable) {
-                e.printStackTrace()
-                _uiState.update {
-                    it.copy(
-                        isProcessing = false,
-                        error = "TFLite Init Failed: ${e.localizedMessage ?: "Could not load $modelName"}"
-                    )
-                }
-                false
+            _uiState.update {
+                it.copy(
+                    isProcessing = false,
+                    error = "TFLite Init Failed: ${lastException?.localizedMessage ?: "Could not load segmentation model."}"
+                )
             }
+            false
         }
     }
 
@@ -231,12 +229,10 @@ class BackgroundRemoverViewModel @Inject constructor(
                 var isNHWC = true
 
                 if (outputShape.size == 4) {
-                    if (outputShape[3] in 1..10) {
-                        // NHWC: [1, H, W, Channels]
+                    if (outputShape[3] in 1..25) {
                         numChannels = outputShape[3]
                         isNHWC = true
                     } else {
-                        // NCHW: [1, Channels, H, W]
                         numChannels = outputShape[1]
                         isNHWC = false
                     }
@@ -244,15 +240,37 @@ class BackgroundRemoverViewModel @Inject constructor(
 
                 val outputFloatBuffer = outputBuffer.asFloatBuffer()
 
-                if (numChannels == 1) {
+                if (numChannels >= 21) {
+                    // DeepLabV3: Class 0 = Background, Class 15 = Person
+                    val PERSON_CLASS = 15
+                    for (i in 0 until (modelW * modelH)) {
+                        val offset = if (isNHWC) i * numChannels else i
+                        val stride = if (isNHWC) 1 else modelW * modelH
+
+                        var maxLogit = Float.NEGATIVE_INFINITY
+                        for (c in 0 until numChannels) {
+                            val logit = outputFloatBuffer.get(offset + c * stride)
+                            if (logit > maxLogit) maxLogit = logit
+                        }
+
+                        val personLogit = outputFloatBuffer.get(offset + PERSON_CLASS * stride)
+                        var sumExp = 0.0f
+                        var personExp = 0.0f
+
+                        for (c in 0 until numChannels) {
+                            val logit = outputFloatBuffer.get(offset + c * stride)
+                            val expVal = kotlin.math.exp(logit - maxLogit)
+                            sumExp += expVal
+                            if (c == PERSON_CLASS) personExp = expVal
+                        }
+
+                        combinedMask[i] = if (sumExp > 1e-5f) (personExp / sumExp).coerceIn(0f, 1f) else 0f
+                    }
+                } else if (numChannels == 1) {
                     val totalPixels = modelW * modelH
                     for (i in 0 until totalPixels) {
                         val rawVal = outputFloatBuffer.get(i)
-                        val prob = if (rawVal in 0.0f..1.0f) {
-                            rawVal
-                        } else {
-                            1.0f / (1.0f + kotlin.math.exp(-rawVal))
-                        }
+                        val prob = 1.0f / (1.0f + kotlin.math.exp(-rawVal))
                         combinedMask[i] = prob.coerceIn(0f, 1f)
                     }
                 } else if (numChannels == 2) {

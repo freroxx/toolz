@@ -81,35 +81,32 @@ object BackgroundRemoverEngine {
         // 1. Bilinear upsample to native image resolution
         var alpha = bilinearUpsample(maskArray, maskW, maskH, w, h)
 
-        // 2. Pure Kotlin Interior Hole-Filling (fixes holes in shirts, skin, torso)
-        alpha = fillInteriorHoles(alpha, w, h)
-
-        // 3. Classify pixels into trimap regions (FG / Unknown / BG)
+        // 2. Classify pixels into trimap regions (FG / Unknown / BG)
         val trimap = buildTrimap(alpha, w, h)
 
-        // 4. Sample-Based Alpha Matting — color-line solve per edge pixel
+        // 3. Sample-Based Alpha Matting — color-line solve per edge pixel
         alpha = sampleBasedMatting(alpha, trimap, pixels, w, h)
 
-        // 5a. First guided filter pass — wide radius for large-structure smoothing
+        // 4a. First guided filter pass — wide radius for large-structure smoothing
         alpha = guidedFilterPass(alpha, pixels, w, h, GF_RADIUS, GF_EPS)
 
-        // 5b. Second guided filter pass — tight radius to snap hair strands
+        // 4b. Second guided filter pass — tight radius to snap hair strands
         alpha = guidedFilterPass(alpha, pixels, w, h, GF_RADIUS2, GF_EPS2)
 
-        // 6. Pure Kotlin Sobel Gradient Edge Sharpening — crisp boundaries without AI blur
+        // 5. Pure Kotlin Sobel Gradient Edge Sharpening — crisp boundaries without AI blur
         alpha = sobelEdgeSharpen(alpha, pixels, w, h)
 
-        // 7. Foreground colour decontamination (eliminates background color bleed)
+        // 6. Foreground colour decontamination (eliminates background color bleed)
         val finalPixels = decontaminateEdges(pixels, alpha, w, h, DECONTAM_RADIUS)
 
-        // 8. Final alpha ramp: hard-clip noise, preserve soft hair gradient
+        // 7. Final alpha ramp: hard-clip background noise to 0, solid subject to 1
         for (i in finalPixels.indices) {
             val rawA = alpha[i]
             val a = when {
-                rawA < 0.04f -> 0f
-                rawA > 0.94f -> 1f
+                rawA < 0.22f -> 0f   // Pure background -> 100% transparent!
+                rawA > 0.85f -> 1f   // Pure subject -> 100% solid!
                 else -> {
-                    val t = (rawA - 0.04f) / (0.94f - 0.04f)
+                    val t = (rawA - 0.22f) / (0.85f - 0.22f)
                     t * t * (3f - 2f * t)   // cubic smoothstep
                 }
             }
