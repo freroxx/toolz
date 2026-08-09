@@ -24,6 +24,7 @@ import kotlinx.serialization.Serializable
 data class DeviceSpecResponse(
     @SerialName("search_query") val searchQuery: String = "",
     @SerialName("matched_device") val matchedDevice: String = "",
+    @SerialName("search_name") val searchName: String = "",   // fallback alias from older cache entries
     @SerialName("source_url") val sourceUrl: String = "",
     @SerialName("image") val image: String = "",
     @SerialName("img") val img: String = "", // Legacy support for old cache entries

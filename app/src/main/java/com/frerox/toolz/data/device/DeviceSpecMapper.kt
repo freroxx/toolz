@@ -54,13 +54,16 @@ object DeviceSpecMapper {
 
     /**
      * Attempts to elevate a low-resolution thumbnail to a high-resolution "bigpic" render.
+     * Handles both gsmarena.com and fdn2.gsmarena.com CDN hostnames.
      */
     fun sanitizeImageUrl(url: String?): String {
         if (url.isNullOrBlank()) return ""
-        
+
         return url
             .replace("/thumbs/", "/bigpic/")
             .replace("-thumb", "")
+            // fdn2 suggest images are already high-res bigpic; ensure HTTPS
+            .let { if (it.startsWith("http://")) it.replace("http://", "https://") else it }
             .trim()
     }
 
@@ -101,7 +104,11 @@ object DeviceSpecMapper {
         }.filter { it.items.isNotEmpty() }
 
         return DeviceSpecUiModel(
-            name = response.matchedDevice.trim(),
+            // Prefer matched_device (populated by revamped backend), fall back
+            // to searchName, then searchQuery so the UI always shows something
+            name = response.matchedDevice.trim().ifBlank {
+                response.searchName.trim().ifBlank { response.searchQuery.trim() }
+            },
             image = sanitizeImageUrl(response.image.ifBlank { response.img }),
             sourceUrl = response.sourceUrl,
             quickSpecs = quickSpecs,
