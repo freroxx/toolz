@@ -62,22 +62,104 @@ class DeviceInfoViewModel @Inject constructor(
     private val specsRepository: DeviceSpecsRepository,
 ) : ViewModel() {
 
-    // 1. Unified Query Key Generator matching Vercel's global CDN lookup template
+    // 1. Smart Query Builder — produces the optimal query for our GSMArena server engine.
+    //
+    // The server already handles multi-strategy normalization (Samsung SM-xxx, brand-aware
+    // scoring, etc.) so we focus on producing one authoritative, human-readable query that
+    // maps cleanly to GSMArena's device catalog — avoiding raw model codes whenever possible.
     private val defaultModelQuery: String by lazy {
-        val manufacturer = Build.MANUFACTURER.trim()
-        val model = Build.MODEL.trim()
-        val device = Build.DEVICE.trim()
-        
-        // Strategy: Use Manufacturer + Model if Model looks like a code (short/alphanumeric)
-        // or just Manufacturer + Model for clarity if not already present.
-        if (model.contains(manufacturer, ignoreCase = true)) {
-            model
-        } else if (model.length <= 4 || (model.any { it.isDigit() } && model.any { it.isLetter() } && model.length < 8)) {
-            // Likely a code like NX769J or SM-G991U
-            "$manufacturer $model".trim()
-        } else {
-            "$manufacturer $model".trim()
-        }.ifBlank { device }.ifBlank { "Unknown" }
+        buildBestQuery()
+    }
+
+    /**
+     * Constructs the best possible search query for the device specs API.
+     *
+     * Priority order:
+     *  1. Build.MODEL when it already contains a human-readable market name
+     *     (e.g. "Pixel 9 Pro", "Galaxy S24 Ultra", "Nothing Phone (2)")
+     *  2. "Brand MarketName" when model is a pure code (e.g. SM-A366B, 2201116SG)
+     *  3. Sanitized "Brand Model" as last resort
+     *
+     * The server engine handles further normalization (SM-xxx stripping, quicksearch
+     * fuzzy scoring), so we just need to give it the cleanest possible signal.
+     */
+    private fun buildBestQuery(): String {
+        val manufacturer = Build.MANUFACTURER.trim()  // e.g. "samsung", "Google", "Nothing"
+        val model       = Build.MODEL.trim()          // e.g. "SM-A366B", "Pixel 9 Pro", "A065F"
+        val brand       = Build.BRAND.trim()          // often same as manufacturer but nicer case
+        val device      = Build.DEVICE.trim()         // e.g. "a36", "husky"
+
+        // Normalize brand for display (capitalize first letter)
+        val displayBrand = brand.replaceFirstChar { it.uppercaseChar() }
+            .ifBlank { manufacturer.replaceFirstChar { it.uppercaseChar() } }
+
+        // Heuristic: is the model string a raw device code?
+        // Codes are typically short and/or dominated by digits + dashes (e.g. SM-G991U, A065F, NX769J)
+        val looksLikeCode = isModelCode(model)
+
+        val query = when {
+            // Model already includes brand → use as-is (e.g. "Galaxy S24 Ultra")
+            model.contains(manufacturer, ignoreCase = true) ||
+            model.contains(brand, ignoreCase = true) -> model
+
+            // Model is human-readable market name (Pixel 9 Pro, Nothing Phone (1))
+            !looksLikeCode && model.length > 6 -> "$displayBrand $model".trim()
+
+            // Model is a Samsung code → let server do SM-xxx normalization but also
+            // send "Samsung Galaxy <stripped>" as a hint for better quicksearch scoring
+            looksLikeCode && (manufacturer.equals("samsung", ignoreCase = true) ||
+                              brand.equals("samsung", ignoreCase = true)) -> {
+                // Strip SM-/GT- prefix and trailing region suffix (e.g. SM-A366B → A366B → A36)
+                val stripped = model
+                    .uppercase()
+                    .removePrefix("SM-")
+                    .removePrefix("GT-")
+                    .removePrefix("SCH-")
+                    .removePrefix("SGH-")
+                val baseModel = stripped.replace(Regex("[A-Z]$"), "") // remove trailing letter variant
+                "Samsung Galaxy $baseModel".trim()
+            }
+
+            // Generic code device: prepend brand and let server strategy matching do the rest
+            else -> "$displayBrand $model".trim()
+        }
+
+        return query
+            .ifBlank { "$displayBrand $device".trim() }
+            .ifBlank { "Unknown" }
+            // Remove any double-spaces from concatenation
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+    }
+
+    /**
+     * Returns true if [model] looks like a raw device/internal code rather than
+     * a human-readable market name.
+     *
+     * Examples of codes: SM-A366B, A065F, NX769J, XT2125-4, 2201116SG
+     * Examples of market names: Pixel 9 Pro, Galaxy S24, Nothing Phone (1)
+     */
+    private fun isModelCode(model: String): Boolean {
+        if (model.length < 3) return true
+
+        // Known code prefixes
+        val knownPrefixes = listOf("SM-", "GT-", "SCH-", "SGH-", "SPH-", "SCV", "SC-", "SCG",
+                                   "XT", "LG-", "HTC", "ZTE", "CPH", "CPB", "RMX", "RMP",
+                                   "IN20", "M2", "NX", "BV", "V20")
+        if (knownPrefixes.any { model.uppercase().startsWith(it) }) return true
+
+        // Model is short (≤7 chars) and contains both letters AND digits — likely a code
+        val hasDigit  = model.any { it.isDigit() }
+        val hasLetter = model.any { it.isLetter() }
+        if (model.length <= 7 && hasDigit && hasLetter) return true
+
+        // Model is purely digits (some Xiaomi/Realme internal codes)
+        if (model.all { it.isDigit() || it == '-' || it == '_' }) return true
+
+        // Model contains no spaces and is all-uppercase (internal code style)
+        if (!model.contains(' ') && model == model.uppercase() && model.length <= 10) return true
+
+        return false
     }
 
     // 2. State Initialization Pipeline
