@@ -22,49 +22,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
-import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * Professional-Grade Hybrid Alpha Matting & Pure Kotlin Precision Refinement Engine.
+ * High-Precision Sub-Pixel Alpha Matting & Edge Refinement Engine.
  *
- * Combines TFLite neural segmentation with pure Kotlin algorithms:
- *  1. Bilinear Upsampling          — Smooth sub-pixel mask upscaling.
- *  2. Morphological Hole-Filling   — BFS flood-fill from edges to eliminate interior
- *                                    holes in clothing, skin, and bodies.
- *  3. Trimap Estimation            — Classifies definite FG/BG and transition zones.
- *  4. Sample-Based Matting         — Colour-line equation for fine hair strands & cords.
- *  5. Dual-Pass Guided Filter      — Lum-guided refinement to snap soft boundaries.
- *  6. Sobel Gradient Edge Snap     — Pure Kotlin 3x3 Sobel operator for razor-sharp,
- *                                    crisp boundaries without AI blur/slop.
- *  7. Foreground Decontamination   — Strips background color spill from edge pixels.
- *  8. Alpha Contrast & Noise Ramp  — Noise floor elimination and smoothstep curve.
+ * Combines neural segmentation confidence with edge-guided color matting:
+ *  1. Sub-pixel Bilinear Upsampling — High-fidelity mask resolution match.
+ *  2. Edge-Guided Lum Refinement   — Guided filter snaps soft mask edges to physical object boundaries.
+ *  3. Edge Color Decontamination   — Strips background color spill from boundary pixels.
+ *  4. Smooth Alpha Ramp            — Eliminates noise floor without harsh stair-stepping or AI slop artifacts.
  */
 object BackgroundRemoverEngine {
 
-    // --- Trimap thresholds -------------------------------------------------
-    private const val FG_THRESH = 0.75f   // Model confidence above this → definite FG
-    private const val BG_THRESH = 0.25f   // Model confidence below this → definite BG
-
-    // --- Sample-Based Matting parameters -----------------------------------
-    private const val MATTING_SEARCH_RADIUS = 80
-    private const val CANDIDATE_SAMPLES = 6
-
     // --- Guided Filter parameters ------------------------------------------
-    private const val GF_RADIUS  = 10     // Spatial radius — larger = smoother edges
-    private const val GF_EPS     = 3e-5f  // Regularisation — lower = more edge-faithful
+    private const val GF_RADIUS = 8     // Spatial radius
+    private const val GF_EPS    = 1e-4f  // Edge regularisation
 
-    private const val GF_RADIUS2 = 4
+    private const val GF_RADIUS2 = 3
     private const val GF_EPS2    = 1e-5f
 
     // --- Colour decontamination radius -------------------------------------
-    private const val DECONTAM_RADIUS = 10
-
-    // =======================================================================
-    // Public entry point
-    // =======================================================================
+    private const val DECONTAM_RADIUS = 6
 
     suspend fun removeBackground(
         source: Bitmap,
@@ -79,55 +60,47 @@ object BackgroundRemoverEngine {
         source.getPixels(pixels, 0, w, 0, 0, w, h)
 
         // Calculate resolution scaling factor for adaptive refinement
-        val resScale = max(maskW, maskH).toFloat() / 256f
-        val adaptiveGfRadius = (GF_RADIUS * resScale).toInt().coerceIn(4, 32)
-        val adaptiveGfRadius2 = (GF_RADIUS2 * resScale).toInt().coerceIn(2, 16)
-        val adaptiveDecontamRadius = (DECONTAM_RADIUS * resScale).toInt().coerceIn(4, 24)
+        val resScale = max(w, h).toFloat() / 1024f
+        val adaptiveGfRadius = (GF_RADIUS * resScale).toInt().coerceIn(3, 20)
+        val adaptiveGfRadius2 = (GF_RADIUS2 * resScale).toInt().coerceIn(2, 10)
+        val adaptiveDecontamRadius = (DECONTAM_RADIUS * resScale).toInt().coerceIn(3, 12)
 
         // 1. Bilinear upsample to native image resolution
         var alpha = bilinearUpsample(maskArray, maskW, maskH, w, h)
 
-        // 2. Classify pixels into trimap regions (FG / Unknown / BG)
-        val trimap = buildTrimap(alpha, w, h)
-
-        // 3. Sample-Based Alpha Matting — color-line solve per edge pixel
-        alpha = sampleBasedMatting(alpha, trimap, pixels, w, h)
-
-        // 4a. First guided filter pass — wide radius for large-structure smoothing
+        // 2. First guided filter pass — structure-guided edge snapping
         alpha = guidedFilterPass(alpha, pixels, w, h, adaptiveGfRadius, GF_EPS)
 
-        // 4b. Second guided filter pass — tight radius to snap hair strands
+        // 3. Second guided filter pass — fine detail & hair strand snapping
         alpha = guidedFilterPass(alpha, pixels, w, h, adaptiveGfRadius2, GF_EPS2)
 
-        // 5. Pure Kotlin Sobel Gradient Edge Sharpening — crisp boundaries without AI blur
-        alpha = sobelEdgeSharpen(alpha, pixels, w, h)
+        // 4. Sub-pixel edge refinement based on luminance gradient
+        alpha = refineEdgeGradients(alpha, pixels, w, h)
 
-        // 6. Foreground colour decontamination (eliminates background color bleed)
+        // 5. Foreground colour decontamination (eliminates background color bleed)
         val finalPixels = decontaminateEdges(pixels, alpha, w, h, adaptiveDecontamRadius)
 
-        // 7. Final alpha ramp: hard-clip background noise to 0, solid subject to 1
+        // 6. Natural alpha ramp: clear background noise (< 0.05) and preserve smooth subject transparency
+        val outputPixels = IntArray(w * h)
         for (i in finalPixels.indices) {
             val rawA = alpha[i]
             val a = when {
-                rawA < 0.22f -> 0f   // Pure background -> 100% transparent!
-                rawA > 0.85f -> 1f   // Pure subject -> 100% solid!
+                rawA <= 0.04f -> 0f   // Pure background -> 100% transparent
+                rawA >= 0.96f -> 1f   // Pure subject -> 100% solid
                 else -> {
-                    val t = (rawA - 0.22f) / (0.85f - 0.22f)
-                    t * t * (3f - 2f * t)   // cubic smoothstep
+                    // Smooth cubic interpolation between 0.04 and 0.96
+                    val t = (rawA - 0.04f) / (0.96f - 0.04f)
+                    t * t * (3f - 2f * t)
                 }
             }
             val alphaInt = (a * 255f + 0.5f).toInt().coerceIn(0, 255)
-            finalPixels[i] = (alphaInt shl 24) or (finalPixels[i] and 0x00FFFFFF)
+            outputPixels[i] = (alphaInt shl 24) or (finalPixels[i] and 0x00FFFFFF)
         }
 
         Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
-            it.setPixels(finalPixels, 0, w, 0, 0, w, h)
+            it.setPixels(outputPixels, 0, w, 0, 0, w, h)
         }
     }
-
-    // =======================================================================
-    // Step 1 — Bilinear Upsampling
-    // =======================================================================
 
     private fun bilinearUpsample(
         mask: FloatArray, maskW: Int, maskH: Int, w: Int, h: Int,
@@ -156,225 +129,6 @@ object BackgroundRemoverEngine {
         return out
     }
 
-    // =======================================================================
-    // Step 2 — Pure Kotlin Morphological Hole-Filling (Flood-Fill BFS)
-    // Marks exterior background starting from image borders. Any enclosed
-    // interior pixel with confidence > 0.15 is forced to 1.0f foreground.
-    // =======================================================================
-
-    private fun fillInteriorHoles(alpha: FloatArray, w: Int, h: Int): FloatArray {
-        val out = alpha.copyOf()
-        val visited = BooleanArray(w * h)
-        val queue = ArrayDeque<Int>()
-
-        // Seed BFS from all four outer border pixels
-        for (x in 0 until w) {
-            val topIdx = x
-            val botIdx = (h - 1) * w + x
-            if (alpha[topIdx] < BG_THRESH && !visited[topIdx]) {
-                visited[topIdx] = true
-                queue.add(topIdx)
-            }
-            if (alpha[botIdx] < BG_THRESH && !visited[botIdx]) {
-                visited[botIdx] = true
-                queue.add(botIdx)
-            }
-        }
-        for (y in 0 until h) {
-            val leftIdx = y * w
-            val rightIdx = y * w + (w - 1)
-            if (alpha[leftIdx] < BG_THRESH && !visited[leftIdx]) {
-                visited[leftIdx] = true
-                queue.add(leftIdx)
-            }
-            if (alpha[rightIdx] < BG_THRESH && !visited[rightIdx]) {
-                visited[rightIdx] = true
-                queue.add(rightIdx)
-            }
-        }
-
-        // BFS traversal for connected exterior background
-        while (!queue.isEmpty()) {
-            val curr = queue.poll() ?: continue
-            val cx = curr % w
-            val cy = curr / w
-
-            val dxs = intArrayOf(-1, 1, 0, 0)
-            val dys = intArrayOf(0, 0, -1, 1)
-
-            for (i in 0 until 4) {
-                val nx = cx + dxs[i]
-                val ny = cy + dys[i]
-                if (nx in 0 until w && ny in 0 until h) {
-                    val nIdx = ny * w + nx
-                    if (!visited[nIdx] && alpha[nIdx] < 0.45f) {
-                        visited[nIdx] = true
-                        queue.add(nIdx)
-                    }
-                }
-            }
-        }
-
-        // Any non-visited pixel with moderate confidence is an interior hole -> fill it
-        for (i in out.indices) {
-            if (!visited[i] && alpha[i] > 0.15f) {
-                out[i] = max(out[i], 0.98f)
-            }
-        }
-
-        return out
-    }
-
-    // =======================================================================
-    // Step 3 — Trimap  (0=BG, 1=Unknown, 2=FG)
-    // =======================================================================
-
-    private fun buildTrimap(alpha: FloatArray, w: Int, h: Int): ByteArray {
-        val t = ByteArray(alpha.size)
-        for (i in alpha.indices) {
-            t[i] = when {
-                alpha[i] > FG_THRESH -> 2
-                alpha[i] < BG_THRESH -> 0
-                else -> 1
-            }
-        }
-        return t
-    }
-
-    // =======================================================================
-    // Step 4 — Sample-Based Alpha Matting
-    // =======================================================================
-
-    private data class ColorSample(val r: Float, val g: Float, val b: Float, val distSq: Int)
-
-    private suspend fun sampleBasedMatting(
-        alpha: FloatArray, trimap: ByteArray, guide: IntArray, w: Int, h: Int,
-    ): FloatArray = withContext(Dispatchers.Default) {
-
-        val out = alpha.copyOf()
-        val cpuCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
-        val stripH = (h + cpuCount - 1) / cpuCount
-
-        (0 until cpuCount).map { strip ->
-            async {
-                val yStart = strip * stripH
-                val yEnd   = min(yStart + stripH, h)
-
-                val fgCandidates = ArrayList<ColorSample>(CANDIDATE_SAMPLES)
-                val bgCandidates = ArrayList<ColorSample>(CANDIDATE_SAMPLES)
-
-                for (y in yStart until yEnd) {
-                    for (x in 0 until w) {
-                        val idx = y * w + x
-                        if (trimap[idx] != 1.toByte()) continue
-
-                        val pixC = guide[idx]
-                        val cr = ((pixC shr 16) and 0xFF).toFloat()
-                        val cg = ((pixC shr  8) and 0xFF).toFloat()
-                        val cb = ( pixC          and 0xFF).toFloat()
-
-                        fgCandidates.clear()
-                        bgCandidates.clear()
-
-                        val r = MATTING_SEARCH_RADIUS
-                        outer@ for (ring in 1..r) {
-                            val yS = max(0, y - ring); val yE = min(h - 1, y + ring)
-                            val xS = max(0, x - ring); val xE = min(w - 1, x + ring)
-
-                            for (nx in xS..xE) {
-                                fun check(ny: Int) {
-                                    val nIdx = ny * w + nx
-                                    val t = trimap[nIdx]
-                                    if (t == 2.toByte() && fgCandidates.size < CANDIDATE_SAMPLES) {
-                                        val c = guide[nIdx]
-                                        val d = (nx-x)*(nx-x)+(ny-y)*(ny-y)
-                                        fgCandidates.add(ColorSample(
-                                            ((c shr 16)and 0xFF).toFloat(),
-                                            ((c shr  8)and 0xFF).toFloat(),
-                                            (c and 0xFF).toFloat(), d))
-                                    } else if (t == 0.toByte() && bgCandidates.size < CANDIDATE_SAMPLES) {
-                                        val c = guide[nIdx]
-                                        val d = (nx-x)*(nx-x)+(ny-y)*(ny-y)
-                                        bgCandidates.add(ColorSample(
-                                            ((c shr 16)and 0xFF).toFloat(),
-                                            ((c shr  8)and 0xFF).toFloat(),
-                                            (c and 0xFF).toFloat(), d))
-                                    }
-                                }
-                                check(yS)
-                                if (yE != yS) check(yE)
-                            }
-                            for (ny in (yS + 1) until yE) {
-                                fun check(nx: Int) {
-                                    val nIdx = ny * w + nx
-                                    val t = trimap[nIdx]
-                                    if (t == 2.toByte() && fgCandidates.size < CANDIDATE_SAMPLES) {
-                                        val c = guide[nIdx]
-                                        val d = (nx-x)*(nx-x)+(ny-y)*(ny-y)
-                                        fgCandidates.add(ColorSample(
-                                            ((c shr 16)and 0xFF).toFloat(),
-                                            ((c shr  8)and 0xFF).toFloat(),
-                                            (c and 0xFF).toFloat(), d))
-                                    } else if (t == 0.toByte() && bgCandidates.size < CANDIDATE_SAMPLES) {
-                                        val c = guide[nIdx]
-                                        val d = (nx-x)*(nx-x)+(ny-y)*(ny-y)
-                                        bgCandidates.add(ColorSample(
-                                            ((c shr 16)and 0xFF).toFloat(),
-                                            ((c shr  8)and 0xFF).toFloat(),
-                                            (c and 0xFF).toFloat(), d))
-                                    }
-                                }
-                                check(xS)
-                                if (xE != xS) check(xE)
-                            }
-                            if (fgCandidates.size >= CANDIDATE_SAMPLES &&
-                                bgCandidates.size >= CANDIDATE_SAMPLES) break@outer
-                        }
-
-                        if (fgCandidates.isEmpty() || bgCandidates.isEmpty()) continue
-
-                        var bestAlpha    = alpha[idx]
-                        var bestResidual = Float.MAX_VALUE
-
-                        for (fg in fgCandidates) {
-                            for (bg in bgCandidates) {
-                                val fbr = fg.r - bg.r
-                                val fbg = fg.g - bg.g
-                                val fbb = fg.b - bg.b
-                                val cbr = cr - bg.r
-                                val cbg = cg - bg.g
-                                val cbb = cb - bg.b
-
-                                val dot   = cbr*fbr + cbg*fbg + cbb*fbb
-                                val denom = fbr*fbr + fbg*fbg + fbb*fbb + 1e-3f
-                                val a     = (dot / denom).coerceIn(0f, 1f)
-
-                                val er = cr - (a*fg.r + (1-a)*bg.r)
-                                val eg = cg - (a*fg.g + (1-a)*bg.g)
-                                val eb = cb - (a*fg.b + (1-a)*bg.b)
-                                val residual = er*er + eg*eg + eb*eb +
-                                    0.0001f * fg.distSq.toFloat() +
-                                    0.0001f * bg.distSq.toFloat()
-
-                                if (residual < bestResidual) {
-                                    bestResidual = residual
-                                    bestAlpha    = a
-                                }
-                            }
-                        }
-
-                        out[idx] = (0.60f * bestAlpha + 0.40f * alpha[idx]).coerceIn(0f, 1f)
-                    }
-                }
-            }
-        }.awaitAll()
-        out
-    }
-
-    // =======================================================================
-    // Step 5 — Guided Filter
-    // =======================================================================
-
     private suspend fun guidedFilterPass(
         p: FloatArray, guide: IntArray, w: Int, h: Int, r: Int, eps: Float,
     ): FloatArray = withContext(Dispatchers.Default) {
@@ -399,7 +153,7 @@ object BackgroundRemoverEngine {
                     for (x in 0 until w) {
                         val idx = y * w + x
                         val pVal = p[idx]
-                        if (pVal < 0.02f || pVal > 0.98f) continue
+                        if (pVal < 0.03f || pVal > 0.97f) continue
 
                         val ys = max(0, y - r); val ye = min(h - 1, y + r)
                         val xs = max(0, x - r); val xe = min(w - 1, x + r)
@@ -432,13 +186,7 @@ object BackgroundRemoverEngine {
         out
     }
 
-    // =======================================================================
-    // Step 6 — Pure Kotlin 3x3 Sobel Gradient Edge Sharpening
-    // Computes image edge strength to sharpen transition boundaries, giving
-    // razor-sharp precision without fuzzy AI blur.
-    // =======================================================================
-
-    private suspend fun sobelEdgeSharpen(
+    private suspend fun refineEdgeGradients(
         alpha: FloatArray, guide: IntArray, w: Int, h: Int,
     ): FloatArray = withContext(Dispatchers.Default) {
         val out = alpha.copyOf()
@@ -454,9 +202,8 @@ object BackgroundRemoverEngine {
                     for (x in 1 until (w - 1)) {
                         val idx = y * w + x
                         val aVal = alpha[idx]
-                        if (aVal <= 0.08f || aVal >= 0.92f) continue
+                        if (aVal <= 0.05f || aVal >= 0.95f) continue
 
-                        // Fetch 3x3 luminance neighborhood
                         fun getLum(px: Int, py: Int): Float {
                             val c = guide[py * w + px]
                             return (0.299f * ((c shr 16) and 0xFF) +
@@ -468,20 +215,18 @@ object BackgroundRemoverEngine {
                         val l10 = getLum(x - 1, y);                                 val l12 = getLum(x + 1, y)
                         val l20 = getLum(x - 1, y + 1); val l21 = getLum(x, y + 1); val l22 = getLum(x + 1, y + 1)
 
-                        // 3x3 Sobel kernel gradients
                         val gx = (l02 + 2f * l12 + l22) - (l00 + 2f * l10 + l20)
                         val gy = (l20 + 2f * l21 + l22) - (l00 + 2f * l01 + l02)
                         val gradMag = sqrt(gx * gx + gy * gy)
 
-                        if (gradMag > 0.15f) {
-                            // Sharpen transition: push values >0.5 towards 1, <0.5 towards 0 proportional to gradient
-                            val factor = min(gradMag * 2.5f, 1.0f)
-                            val sharpened = if (aVal > 0.50f) {
-                                aVal + (1.0f - aVal) * factor * 0.45f
+                        if (gradMag > 0.12f) {
+                            val factor = min(gradMag * 1.5f, 0.8f)
+                            val refined = if (aVal > 0.50f) {
+                                aVal + (1.0f - aVal) * factor * 0.3f
                             } else {
-                                aVal - aVal * factor * 0.45f
+                                aVal - aVal * factor * 0.3f
                             }
-                            out[idx] = sharpened.coerceIn(0f, 1f)
+                            out[idx] = refined.coerceIn(0f, 1f)
                         }
                     }
                 }
@@ -489,10 +234,6 @@ object BackgroundRemoverEngine {
         }.awaitAll()
         out
     }
-
-    // =======================================================================
-    // Step 7 — Foreground Colour Decontamination
-    // =======================================================================
 
     private fun decontaminateEdges(
         pixels: IntArray, alpha: FloatArray, w: Int, h: Int, r: Int,
@@ -504,7 +245,7 @@ object BackgroundRemoverEngine {
             for (x in 0 until w) {
                 val idx = rowOffset + x
                 val a = alpha[idx]
-                if (a <= 0.05f || a >= 0.95f) continue
+                if (a <= 0.08f || a >= 0.92f) continue
 
                 val xs = max(0, x - r); val xe = min(w - 1, x + r)
                 var fgR = 0.0; var fgG = 0.0; var fgB = 0.0; var fgW = 0.0

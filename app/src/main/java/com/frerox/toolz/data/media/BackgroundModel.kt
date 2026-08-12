@@ -18,8 +18,8 @@
 package com.frerox.toolz.data.media
 
 /**
- * Metadata for all supported background removal models.
- * All models are downloaded on-demand to maintain a compact APK size.
+ * Pro Intelligence Lineup for Background Removal.
+ * All models are downloaded on-demand through the Model Hub to maintain a compact APK footprint.
  */
 enum class BackgroundModel(
     val id: String,
@@ -31,58 +31,58 @@ enum class BackgroundModel(
     val fileName: String,
     val features: List<String>
 ) {
-    BIREFNET_LITE(
-        id = "birefnet_lite",
-        displayName = "BiRefNet Lite (2026 SOTA)",
-        description = "The absolute best for extreme detail. Preserves hair strands, translucent fabrics, and complex boundaries.",
-        sizeLabel = "18 MB",
-        resolution = 512,
-        downloadUrl = "https://huggingface.co/ZhengPeng7/BiRefNet_lite-matting/resolve/main/birefnet_lite_matting.tflite",
-        fileName = "birefnet_lite_512.tflite",
-        features = listOf("Studio Quality", "Hair & Glass", "SOTA")
+    SELFIE_PORTRAIT(
+        id = "selfie_portrait",
+        displayName = "MediaPipe Selfie Portrait",
+        description = "Ultra-fast SOTA portrait segmentation engine. Instant response and ultra-low battery usage.",
+        sizeLabel = "250 KB",
+        resolution = 256,
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+        fileName = "selfie_segmenter.tflite",
+        features = listOf("Studio Portrait", "Instant Speed", "Low Memory")
     ),
 
-    RMBG_2(
-        id = "rmbg_2",
-        displayName = "BRIA RMBG 2.0",
-        description = "Industry standard for e-commerce and objects. Handles complex backgrounds and product shadows effortlessly.",
-        sizeLabel = "22 MB",
-        resolution = 1024,
-        downloadUrl = "https://huggingface.co/litert-community/bria-rmbg-2.0/resolve/main/bria-rmbg-2.0.tflite",
-        fileName = "rmbg_2_1024_int8.tflite",
-        features = listOf("E-Commerce", "1024p Native", "Shadow Aware")
+    SELFIE_LANDSCAPE(
+        id = "selfie_landscape",
+        displayName = "MediaPipe Selfie Landscape",
+        description = "Optimized for widescreen photos, full-body portraits, and multi-person group shots.",
+        sizeLabel = "250 KB",
+        resolution = 256,
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite",
+        fileName = "selfie_segmenter_landscape.tflite",
+        features = listOf("Full-Body & Group", "Widescreen Native", "Fast Speed")
+    ),
+
+    SELFIE_MULTICLASS(
+        id = "selfie_multiclass",
+        displayName = "MediaPipe Studio Anatomical Matte",
+        description = "Anatomical 6-channel segmentation engine isolating body, hair, clothing, and accessories.",
+        sizeLabel = "15.6 MB",
+        resolution = 256,
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
+        fileName = "selfie_multiclass_256x256.tflite",
+        features = listOf("Anatomical 6-Chan", "Hair & Clothing", "Studio Quality")
+    ),
+
+    DEEPLABV3_OBJECTS(
+        id = "deeplabv3_objects",
+        displayName = "DeepLabV3 Universal Object Engine",
+        description = "Isolates pets, animals, vehicles, furniture, products, plants, and 20+ object classes.",
+        sizeLabel = "2.65 MB",
+        resolution = 257,
+        downloadUrl = "https://tfhub.dev/tensorflow/lite-model/deeplabv3/1/metadata/2?lite-format=tflite",
+        fileName = "deeplabv3.tflite",
+        features = listOf("Pets & Animals", "Vehicles & Products", "20+ Object Classes")
     ),
 
     MODNET_HD(
         id = "modnet_hd",
-        displayName = "MODNet HD Matting",
-        description = "Dedicated portrait matting engine. Produces a true 8-bit continuous alpha map specifically for people.",
-        sizeLabel = "13 MB",
+        displayName = "MODNet LiteRT High-Res Matting",
+        description = "Dedicated 512p photographic portrait matting engine for continuous alpha details.",
+        sizeLabel = "24.9 MB",
         resolution = 512,
-        downloadUrl = "https://github.com/shubham0204/Portrait_Segmentation_TFLite/raw/main/app/src/main/assets/modnet_photographic_portrait_matting.tflite",
-        fileName = "modnet_hd.tflite",
-        features = listOf("Portrait Matte", "Continuous Alpha")
-    ),
-
-    INSPYRENET_MOBILE(
-        id = "inspyrenet_mobile",
-        displayName = "InSPyReNet Mobile",
-        description = "Uses image pyramids to separate subjects from cluttered or low-contrast backgrounds where other models fail.",
-        sizeLabel = "15 MB",
-        resolution = 384,
-        downloadUrl = "https://huggingface.co/signature-ai/InSPyReNet/resolve/main/inspyrenet_mobile.tflite",
-        fileName = "inspyrenet_384.tflite",
-        features = listOf("Cluttered BG", "High Contrast Mask")
-    ),
-
-    U2NET_FULL(
-        id = "u2net_full",
-        displayName = "U2-Net Full (Unpruned)",
-        description = "The uncompressed 176MB original U2-Net. High compute cost, but vastly superior boundary accuracy over U2Net-P.",
-        sizeLabel = "176 MB",
-        resolution = 320,
-        downloadUrl = "https://github.com/shubham0204/BackgroundRemoval-Android/raw/master/app/src/main/assets/u2net.tflite",
-        fileName = "u2net_full.tflite",
-        features = listOf("Universal", "Zero Compression Loss")
+        downloadUrl = "https://huggingface.co/litert-community/MODNet-LiteRT/resolve/main/modnet.tflite",
+        fileName = "modnet.tflite",
+        features = listOf("512p Native", "Continuous Alpha", "Fine Hair Strands")
     );
 }

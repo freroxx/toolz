@@ -56,10 +56,7 @@ import java.nio.channels.FileChannel
 import javax.inject.Inject
 
 /**
- * Pro ViewModel for Background Remover using direct TensorFlow Lite inference.
- *
- * Replaces MediaPipe framework to eliminate native crashes & cut APK size drastically.
- * Runs `selfie_multiclass.tflite` directly with GPU acceleration & CPU fallback.
+ * ViewModel for Background Remover with Model Hub support using direct TensorFlow Lite inference.
  */
 @HiltViewModel
 class BackgroundRemoverViewModel @Inject constructor(
@@ -75,23 +72,24 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val initMutex = Mutex()
     private var activeJob: Job? = null
 
-    // Channel weights for multiclass segmentation:
-    // 0: Background (ignored/subtracted)
-    // 1: Hair (weight 1.0 - critical fine detail)
-    // 2: Body / Skin (weight 1.0)
-    // 3: Face (weight 1.0)
-    // 4: Clothes (weight 0.95)
-    // 5: Accessories (weight 0.90)
-    private val channelWeights = floatArrayOf(0.0f, 1.0f, 1.0f, 1.0f, 0.95f, 0.90f)
-
     init {
-        // Models are now selected and downloaded by the user
+        // Automatically select the first model if downloaded
+        val firstModel = BackgroundModel.SELFIE_PORTRAIT
+        val modelFile = File(context.filesDir, "models/${firstModel.fileName}")
+        if (modelFile.exists() && modelFile.length() > 1024) {
+            selectModel(firstModel)
+        }
     }
 
     fun selectModel(model: BackgroundModel) {
         val modelFile = File(context.filesDir, "models/${model.fileName}")
         val isDownloaded = modelFile.exists() && modelFile.length() > 1024
         
+        tfliteInterpreter?.close()
+        tfliteInterpreter = null
+        gpuDelegate?.close()
+        gpuDelegate = null
+
         _uiState.update { 
             it.copy(
                 selectedModel = model,
@@ -129,7 +127,8 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     fun downloadModel(model: BackgroundModel) {
-        viewModelScope.launch(Dispatchers.IO) {
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.update { it.copy(isProcessing = true, downloadProgress = 0.01f) }
                 
@@ -142,18 +141,18 @@ class BackgroundRemoverViewModel @Inject constructor(
                 okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         val errorDetail = when(response.code) {
-                            404 -> "Model not found on server (404). Please contact support."
+                            404 -> "Model not found on server (404)."
                             503 -> "Server unavailable. Try again later."
-                            else -> "HTTP ${response.code}"
+                            else -> "Network Error: ${response.code}"
                         }
                         throw Exception(errorDetail)
                     }
-                    val body = response.body ?: throw Exception("Server returned an empty response.")
+                    val body = response.body
                     val totalSize = body.contentLength()
                     
                     FileOutputStream(modelFile).use { output ->
                         val input = body.byteStream()
-                        val buffer = ByteArray(8192)
+                        val buffer = ByteArray(16384)
                         var bytesRead: Int
                         var totalRead = 0L
                         
@@ -168,8 +167,15 @@ class BackgroundRemoverViewModel @Inject constructor(
                     }
                 }
                 
-                _uiState.update { it.copy(isProcessing = false, isModelDownloaded = true, downloadProgress = 1f) }
+                _uiState.update { it.copy(isProcessing = false, selectedModel = model, isModelDownloaded = true, downloadProgress = 1f) }
                 ensureInterpreterReady()
+
+                // If an image was already loaded, run background removal automatically after model download
+                _uiState.value.originalBitmap?.let { bitmap ->
+                    processImage(bitmap)
+                }
+            } catch (ce: CancellationException) {
+                // Ignore
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.update { it.copy(isProcessing = false, error = "Download failed: ${e.localizedMessage}") }
@@ -188,7 +194,7 @@ class BackgroundRemoverViewModel @Inject constructor(
             try {
                 val modelBuffer = loadModelFile(modelFile)
                 val gpuOptions = Interpreter.Options().apply {
-                    setNumThreads(4)
+                    setNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
                     val compatList = CompatibilityList()
                     if (compatList.isDelegateSupportedOnThisDevice) {
                         try {
@@ -203,54 +209,51 @@ class BackgroundRemoverViewModel @Inject constructor(
             } catch (_: Throwable) {
                 gpuDelegate?.close()
                 gpuDelegate = null
-            }
-
-            try {
-                val modelBuffer = loadModelFile(modelFile)
-                val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
-                tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
-                return@withContext true
-            } catch (e: Throwable) {
-                e.printStackTrace()
-                _uiState.update {
-                    it.copy(
-                        isProcessing = false,
-                        error = "TFLite Init Failed: ${e.localizedMessage ?: "Could not load model."}"
-                    )
+                
+                try {
+                    val modelBuffer = loadModelFile(modelFile)
+                    val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
+                    tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
+                    return@withContext true
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    _uiState.update { it.copy(isProcessing = false, error = "AI Engine Init Failed: ${e.localizedMessage}") }
+                    false
                 }
-                false
             }
         }
     }
 
     private fun loadModelFile(file: File): ByteBuffer {
-        val inputStream = FileInputStream(file)
-        val fileChannel = inputStream.channel
-        val length = fileChannel.size()
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, length).also {
-            inputStream.close()
+        FileInputStream(file).use { inputStream ->
+            val fileChannel = inputStream.channel
+            val length = fileChannel.size()
+            return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, length)
         }
     }
 
     fun onImageSelected(uri: Uri) {
         activeJob?.cancel()
         activeJob = viewModelScope.launch {
-            _uiState.update { BackgroundRemoverUiState(isProcessing = true) }
+            _uiState.update { it.copy(isProcessing = true, resultBitmap = null, error = null) }
             try {
                 val bitmap = withContext(Dispatchers.IO) {
                     ImageUtils.loadOptimizedBitmap(context, uri)
                 } ?: run {
-                    _uiState.update { it.copy(isProcessing = false, error = "Invalid image file.") }
+                    _uiState.update { it.copy(isProcessing = false, error = "Could not load image.") }
                     return@launch
                 }
 
                 _uiState.update { it.copy(originalBitmap = bitmap) }
-                processImage(bitmap)
-            } catch (_: CancellationException) {
-                // Ignore cancellation
+                
+                if (_uiState.value.isModelDownloaded) {
+                    processImage(bitmap)
+                } else {
+                    _uiState.update { it.copy(isProcessing = false) }
+                }
             } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}")
+                if (e !is CancellationException) {
+                    _uiState.update { it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}") }
                 }
             }
         }
@@ -258,20 +261,23 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     private suspend fun processImage(bitmap: Bitmap) {
         if (!ensureInterpreterReady()) return
-        val interpreter = tfliteInterpreter ?: return
+        val interpreter = tfliteInterpreter ?: run {
+            _uiState.update { it.copy(isProcessing = false, error = "AI Engine uninitialized.") }
+            return
+        }
+        val model = _uiState.value.selectedModel ?: return
 
         try {
             withContext(Dispatchers.Default) {
-                // 1. Inspect model input/output tensor dimensions dynamically
                 val inputTensor = interpreter.getInputTensor(0)
-                val inputShape = inputTensor.shape() // Typically [1, 256, 256, 3]
+                val inputShape = inputTensor.shape()
                 val modelH = if (inputShape.size >= 3) inputShape[1] else 256
                 val modelW = if (inputShape.size >= 3) inputShape[2] else 256
 
                 val outputTensor = interpreter.getOutputTensor(0)
-                val outputShape = outputTensor.shape() // Typically [1, 256, 256, 6] or [1, 6, 256, 256]
+                val outputShape = outputTensor.shape()
 
-                // 2. Preprocess bitmap to model input float buffer
+                // Preprocess bitmap to model input buffer
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, modelW, modelH, true)
                 val inputPixels = IntArray(modelW * modelH)
                 scaledBitmap.getPixels(inputPixels, 0, modelW, 0, 0, modelW, modelH)
@@ -279,34 +285,44 @@ class BackgroundRemoverViewModel @Inject constructor(
                     scaledBitmap.recycle()
                 }
 
-                val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * 4)
+                val isFloatInput = inputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
+                val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * (if (isFloatInput) 4 else 1))
                 inputBuffer.order(ByteOrder.nativeOrder())
+                
                 for (pixel in inputPixels) {
-                    val r = ((pixel shr 16) and 0xFF) / 255.0f
-                    val g = ((pixel shr 8) and 0xFF) / 255.0f
-                    val b = (pixel and 0xFF) / 255.0f
-                    inputBuffer.putFloat(r)
-                    inputBuffer.putFloat(g)
-                    inputBuffer.putFloat(b)
+                    val r = ((pixel shr 16) and 0xFF)
+                    val g = ((pixel shr 8) and 0xFF)
+                    val b = (pixel and 0xFF)
+                    
+                    if (isFloatInput) {
+                        inputBuffer.putFloat(r / 255.0f)
+                        inputBuffer.putFloat(g / 255.0f)
+                        inputBuffer.putFloat(b / 255.0f)
+                    } else {
+                        inputBuffer.put(r.toByte())
+                        inputBuffer.put(g.toByte())
+                        inputBuffer.put(b.toByte())
+                    }
                 }
                 inputBuffer.rewind()
 
-                // 3. Prepare output buffer
+                // Prepare output buffer
                 val totalOutputElements = outputShape.reduce { acc, i -> acc * i }
-                val outputBuffer = ByteBuffer.allocateDirect(totalOutputElements * 4)
+                val isFloatOutput = outputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
+                val outputBuffer = ByteBuffer.allocateDirect(totalOutputElements * (if (isFloatOutput) 4 else 1))
                 outputBuffer.order(ByteOrder.nativeOrder())
 
-                // 4. Run inference
+                // Run inference
                 interpreter.run(inputBuffer, outputBuffer)
                 outputBuffer.rewind()
 
-                // 5. Parse confidence masks from output tensor
+                // Parse confidence mask
                 val combinedMask = FloatArray(modelW * modelH)
                 var numChannels = 1
                 var isNHWC = true
 
                 if (outputShape.size == 4) {
-                    if (outputShape[3] in 1..25) {
+                    if (outputShape[3] in 1..32) {
                         numChannels = outputShape[3]
                         isNHWC = true
                     } else {
@@ -315,140 +331,72 @@ class BackgroundRemoverViewModel @Inject constructor(
                     }
                 }
 
-                val outputFloatBuffer = outputBuffer.asFloatBuffer()
-
-                if (numChannels >= 21) {
-                    // DeepLabV3: Class 0 = Background, Class 15 = Person
-                    val PERSON_CLASS = 15
-                    for (i in 0 until (modelW * modelH)) {
-                        val offset = if (isNHWC) i * numChannels else i
-                        val stride = if (isNHWC) 1 else modelW * modelH
-
-                        var maxLogit = Float.NEGATIVE_INFINITY
-                        for (c in 0 until numChannels) {
-                            val logit = outputFloatBuffer.get(offset + c * stride)
-                            if (logit > maxLogit) maxLogit = logit
-                        }
-
-                        val personLogit = outputFloatBuffer.get(offset + PERSON_CLASS * stride)
-                        var sumExp = 0.0f
-                        var personExp = 0.0f
-
-                        for (c in 0 until numChannels) {
-                            val logit = outputFloatBuffer.get(offset + c * stride)
-                            val expVal = kotlin.math.exp(logit - maxLogit)
-                            sumExp += expVal
-                            if (c == PERSON_CLASS) personExp = expVal
-                        }
-
-                        combinedMask[i] = if (sumExp > 1e-5f) (personExp / sumExp).coerceIn(0f, 1f) else 0f
-                    }
-                } else if (numChannels == 1) {
-                    val totalPixels = modelW * modelH
-                    for (i in 0 until totalPixels) {
-                        val rawVal = outputFloatBuffer.get(i)
-                        val prob = 1.0f / (1.0f + kotlin.math.exp(-rawVal))
-                        combinedMask[i] = prob.coerceIn(0f, 1f)
-                    }
-                } else if (numChannels == 2) {
-                    val totalPixels = modelW * modelH
-                    for (i in 0 until totalPixels) {
-                        val bgVal = outputFloatBuffer.get(if (isNHWC) i * 2 else i)
-                        val fgVal = outputFloatBuffer.get(if (isNHWC) i * 2 + 1 else totalPixels + i)
-                        val maxVal = maxOf(bgVal, fgVal)
-                        val expBg = kotlin.math.exp(bgVal - maxVal)
-                        val expFg = kotlin.math.exp(fgVal - maxVal)
-                        val sumExp = expBg + expFg
-                        combinedMask[i] = if (sumExp > 1e-5f) (expFg / sumExp).coerceIn(0f, 1f) else fgVal.coerceIn(0f, 1f)
-                    }
-                } else {
-                    val activeChannels = numChannels.coerceAtMost(channelWeights.size)
-                    val isMulticlass = _uiState.value.selectedModel?.id == "selfie_multiclass"
-                    val weights = if (isMulticlass) channelWeights else FloatArray(numChannels) { if (it == 0) 0f else 1f }
+                if (isFloatOutput) {
+                    val fb = outputBuffer.asFloatBuffer()
                     
-                    val channelExps = FloatArray(numChannels)
-
-                    if (isNHWC) {
-                        for (y in 0 until modelH) {
-                            for (x in 0 until modelW) {
-                                val pixelIdx = y * modelW + x
-                                val offset = pixelIdx * numChannels
-
-                                var maxLogit = Float.NEGATIVE_INFINITY
-                                for (c in 0 until numChannels) {
-                                    val logit = outputFloatBuffer.get(offset + c)
-                                    if (logit > maxLogit) maxLogit = logit
-                                }
-
-                                var sumExp = 0.0f
-                                for (c in 0 until numChannels) {
-                                    val logit = outputFloatBuffer.get(offset + c)
-                                    val expVal = kotlin.math.exp(logit - maxLogit)
-                                    channelExps[c] = expVal
-                                    sumExp += expVal
-                                }
-
-                                if (sumExp > 0.00001f) {
-                                    var fgProb = 0.0f
-                                    for (c in 1 until activeChannels) {
-                                        val prob = channelExps[c] / sumExp
-                                        fgProb += prob * weights.getOrElse(c) { 1f }
-                                    }
-                                    combinedMask[pixelIdx] = fgProb.coerceIn(0f, 1f)
-                                } else {
-                                    val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
-                                    combinedMask[pixelIdx] = (1f - bgProb).coerceIn(0f, 1f)
-                                }
+                    if (numChannels == 1) {
+                        for (i in 0 until (modelW * modelH)) {
+                            val v = fb.get(i)
+                            // If value is already in 0..1 range (MediaPipe models), use directly; otherwise apply sigmoid for raw logits
+                            combinedMask[i] = if (v in 0f..1f) v else (1.0f / (1.0f + kotlin.math.exp(-v.toDouble()))).toFloat()
+                        }
+                    } else if (model.id == "selfie_multiclass") {
+                        // 6-channel anatomical selfie matte: channels 1..5 are subject components (hair, skin, clothes, accessories)
+                        for (i in 0 until (modelW * modelH)) {
+                            var fgProb = 0f
+                            var sumExp = 0f
+                            val channelVals = FloatArray(numChannels)
+                            for (c in 0 until numChannels) {
+                                val offset = if (isNHWC) i * numChannels + c else c * (modelW * modelH) + i
+                                channelVals[c] = fb.get(offset)
                             }
+                            val maxLogit = channelVals.maxOrNull() ?: 0f
+                            for (c in 0 until numChannels) {
+                                val exp = kotlin.math.exp((channelVals[c] - maxLogit).toDouble()).toFloat()
+                                sumExp += exp
+                                if (c > 0) fgProb += exp
+                            }
+                            combinedMask[i] = (fgProb / (sumExp + 1e-6f)).coerceIn(0f, 1f)
+                        }
+                    } else if (model.id == "deeplabv3_objects") {
+                        // 21-channel DeepLabV3: channel 0 is background, channels 1..20 are objects
+                        for (i in 0 until (modelW * modelH)) {
+                            var bgExp = 0f
+                            var sumExp = 0f
+                            val channelVals = FloatArray(numChannels)
+                            for (c in 0 until numChannels) {
+                                val offset = if (isNHWC) i * numChannels + c else c * (modelW * modelH) + i
+                                channelVals[c] = fb.get(offset)
+                            }
+                            val maxLogit = channelVals.maxOrNull() ?: 0f
+                            for (c in 0 until numChannels) {
+                                val exp = kotlin.math.exp((channelVals[c] - maxLogit).toDouble()).toFloat()
+                                sumExp += exp
+                                if (c == 0) bgExp = exp
+                            }
+                            val bgProb = bgExp / (sumExp + 1e-6f)
+                            combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
                         }
                     } else {
-                        val channelSize = modelW * modelH
-                        val tempLogits = FloatArray(numChannels)
-                        for (i in 0 until channelSize) {
-                            var maxLogit = Float.NEGATIVE_INFINITY
-                            for (c in 0 until numChannels) {
-                                val logit = outputFloatBuffer.get(c * channelSize + i)
-                                tempLogits[c] = logit
-                                if (logit > maxLogit) maxLogit = logit
-                            }
-                            var sumExp = 0.0f
-                            for (c in 0 until numChannels) {
-                                val expVal = kotlin.math.exp(tempLogits[c] - maxLogit)
-                                channelExps[c] = expVal
-                                sumExp += expVal
-                            }
-                            if (sumExp > 0.00001f) {
-                                var fgProb = 0.0f
-                                for (c in 1 until activeChannels) {
-                                    val prob = channelExps[c] / sumExp
-                                    fgProb += prob * weights.getOrElse(c) { 1f }
-                                }
-                                combinedMask[i] = fgProb.coerceIn(0f, 1f)
-                            } else {
-                                val bgProb = if (sumExp > 0f) channelExps[0] / sumExp else 1f
-                                combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
-                            }
+                        // Standard multi-channel softmax / 2-channel foreground
+                        for (i in 0 until (modelW * modelH)) {
+                            val fgIdx = numChannels - 1
+                            val offset = if (isNHWC) i * numChannels + fgIdx else fgIdx * (modelW * modelH) + i
+                            val v = fb.get(offset)
+                            combinedMask[i] = if (v in 0f..1f) v else (1.0f / (1.0f + kotlin.math.exp(-v.toDouble()))).toFloat()
                         }
                     }
-                }
-
-                // 6. Verify mask quality with forgiving threshold
-                var maxConf = 0f
-                for (v in combinedMask) {
-                    if (v > maxConf) maxConf = v
-                }
-
-                if (maxConf < 0.10f) {
-                    _uiState.update {
-                        it.copy(
-                            isProcessing = false,
-                            error = "No clear subject detected. Try a photo with a visible person or object."
-                        )
+                } else {
+                    // UINT8 Quantized
+                    for (i in 0 until (modelW * modelH)) {
+                        val offset = if (numChannels > 1) {
+                            if (isNHWC) i * numChannels + (numChannels - 1) else (numChannels - 1) * (modelW * modelH) + i
+                        } else i
+                        combinedMask[i] = (outputBuffer.get(offset).toInt() and 0xFF) / 255.0f
                     }
-                    return@withContext
                 }
 
-                // 7. Post-process using Studio-Grade Engine
+                // Post-process with sub-pixel refinement
                 val resultBitmap = BackgroundRemoverEngine.removeBackground(
                     source = bitmap,
                     maskArray = combinedMask,
@@ -458,12 +406,10 @@ class BackgroundRemoverViewModel @Inject constructor(
 
                 _uiState.update { it.copy(isProcessing = false, resultBitmap = resultBitmap) }
             }
-        } catch (_: CancellationException) {
-            // Ignore
         } catch (e: Exception) {
-            e.printStackTrace()
-            _uiState.update {
-                it.copy(isProcessing = false, error = "Processing Error: ${e.localizedMessage}")
+            if (e !is CancellationException) {
+                e.printStackTrace()
+                _uiState.update { it.copy(isProcessing = false, error = "Processing Error: ${e.localizedMessage}") }
             }
         }
     }
@@ -472,13 +418,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true) }
             val success = withContext(Dispatchers.IO) { saveImageToGallery(bitmap) }
-            _uiState.update {
-                it.copy(
-                    isProcessing = false,
-                    saveSuccess = success,
-                    error = if (!success) "Save failed." else null
-                )
-            }
+            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
         }
     }
 
@@ -492,8 +432,7 @@ class BackgroundRemoverViewModel @Inject constructor(
             }
         }
         val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            ?: return false
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return false
         return try {
             resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             true
@@ -505,7 +444,7 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     fun clearResult() {
         activeJob?.cancel()
-        _uiState.update { BackgroundRemoverUiState() }
+        _uiState.update { BackgroundRemoverUiState(selectedModel = it.selectedModel, isModelDownloaded = it.isModelDownloaded) }
     }
 
     fun dismissError() {

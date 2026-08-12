@@ -51,7 +51,9 @@ fun ModelHubContent(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -97,7 +99,9 @@ fun ModelHubContent(
                 
                 ToolzExpressiveButton(
                     onClick = { if (isDownloaded) onProceed() else onDownloadClick(model) },
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
                     shape = SquircleShape,
                     enabled = !isDownloading
                 ) {
@@ -117,9 +121,9 @@ fun ModelHubContent(
                     }
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = if (isDownloading) "Downloading..." 
+                        text = if (isDownloading) "Downloading... ${(downloadProgress * 100).toInt()}%" 
                                else if (isDownloaded) "Activate ${model.displayName}" 
-                               else "Get ${model.displayName} (${model.sizeLabel})",
+                               else "Download ${model.displayName} (${model.sizeLabel})",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
@@ -223,11 +227,11 @@ fun CompactModelCard(
 
 private fun getIconForModel(model: BackgroundModel): ImageVector {
     return when (model.id) {
-        "birefnet_lite" -> Icons.Rounded.WorkspacePremium
-        "rmbg_2" -> Icons.Rounded.ShoppingBag
-        "modnet_hd" -> Icons.Rounded.Portrait
-        "inspyrenet_mobile" -> Icons.Rounded.Layers
-        "u2net_full" -> Icons.Rounded.AutoFixHigh
+        "selfie_portrait" -> Icons.Rounded.Person
+        "selfie_landscape" -> Icons.Rounded.Groups
+        "selfie_multiclass" -> Icons.Rounded.AutoAwesome
+        "deeplabv3_objects" -> Icons.Rounded.Pets
+        "modnet_hd" -> Icons.Rounded.WorkspacePremium
         else -> Icons.Rounded.Category
     }
 }
