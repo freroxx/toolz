@@ -50,6 +50,19 @@ data class WhisperProfileUpdate(
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean? = null,
+    @SerialName("public_key") val publicKey: String? = null,
+)
+
+/** Minimal insert model — only contains fields that the app sets; no server-managed timestamps. */
+@Serializable
+data class WhisperProfileInsert(
+    val id: String,
+    val username: String,
+    @SerialName("display_name") val displayName: String? = null,
+    val bio: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+    @SerialName("is_private") val isPrivate: Boolean = false,
+    @SerialName("public_key") val publicKey: String? = null,
 )
 
 // ─────────────────────────────────────────────────────────────

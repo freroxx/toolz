@@ -26,6 +26,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -42,8 +43,23 @@ class WhisperAuthViewModel @Inject constructor(
     val generatedToken: StateFlow<WhisperAnonToken?> = _generatedToken.asStateFlow()
 
     init {
-        if (authManager.currentUserId != null) {
-            _authState.value = WhisperAuthState.Authenticated
+        // Observe session status: initializing and authenticated
+        viewModelScope.launch {
+            combine(
+                authManager.isInitializing,
+                authManager.isAuthenticated,
+            ) { initializing, authenticated ->
+                Pair(initializing, authenticated)
+            }.collect { (initializing, authenticated) ->
+                when {
+                    initializing  -> _authState.value = WhisperAuthState.Loading
+                    authenticated -> _authState.value = WhisperAuthState.Authenticated
+                    // Only reset to Idle if we were in Loading (not a user-triggered Error)
+                    _authState.value is WhisperAuthState.Loading -> {
+                        _authState.value = WhisperAuthState.Idle
+                    }
+                }
+            }
         }
     }
 
@@ -52,7 +68,7 @@ class WhisperAuthViewModel @Inject constructor(
             _authState.value = WhisperAuthState.Loading
             authManager.loginWithEmail(email, password)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
-                .onFailure { _authState.value = WhisperAuthState.Error(it.message ?: "Login failed") }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
@@ -61,7 +77,7 @@ class WhisperAuthViewModel @Inject constructor(
             _authState.value = WhisperAuthState.Loading
             authManager.registerWithEmail(email, password)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
-                .onFailure { _authState.value = WhisperAuthState.Error(it.message ?: "Registration failed") }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
@@ -75,7 +91,7 @@ class WhisperAuthViewModel @Inject constructor(
             _authState.value = WhisperAuthState.Loading
             authManager.registerWithToken(token)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
-                .onFailure { _authState.value = WhisperAuthState.Error(it.message ?: "Registration failed") }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
@@ -84,11 +100,27 @@ class WhisperAuthViewModel @Inject constructor(
             _authState.value = WhisperAuthState.Loading
             authManager.loginWithToken(rawToken)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
-                .onFailure { _authState.value = WhisperAuthState.Error(it.message ?: "Invalid token") }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
     fun clearError() {
         _authState.value = WhisperAuthState.Idle
+    }
+
+    private fun formatError(throwable: Throwable): String {
+        val msg = throwable.message ?: return "Unknown error"
+        return when {
+            msg.contains("Invalid login credentials", ignoreCase = true) ->
+                "Invalid email or password"
+            msg.contains("User already registered", ignoreCase = true) ->
+                "An account with this email already exists"
+            msg.contains("Email not confirmed", ignoreCase = true) ->
+                "Please confirm your email before signing in"
+            msg.contains("network", ignoreCase = true) ||
+            msg.contains("connect", ignoreCase = true) ->
+                "Network error — check your connection"
+            else -> msg
+        }
     }
 }

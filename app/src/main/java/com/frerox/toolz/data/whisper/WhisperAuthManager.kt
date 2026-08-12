@@ -53,6 +53,10 @@ class WhisperAuthManager @Inject constructor(
     val isAuthenticated: Flow<Boolean>
         get() = supabase.auth.sessionStatus.map { it is SessionStatus.Authenticated }
 
+    /** True while the SDK is initializing (loading persisted session from disk). */
+    val isInitializing: Flow<Boolean>
+        get() = supabase.auth.sessionStatus.map { it is SessionStatus.Initializing }
+
     /** The authenticated user's UUID, or null if not signed in. */
     val currentUserId: String?
         get() = supabase.auth.currentUserOrNull()?.id

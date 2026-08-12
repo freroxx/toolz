@@ -21,7 +21,6 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
-import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
@@ -40,6 +39,7 @@ import javax.inject.Singleton
 @Singleton
 class WhisperRepository @Inject constructor(
     private val supabase: SupabaseClient,
+    private val crypto: WhisperCrypto,
 ) {
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
@@ -50,11 +50,42 @@ class WhisperRepository @Inject constructor(
     // Profiles
     // ─────────────────────────────────────────────────────────
 
-    /** Fetch the current user's own profile. */
+    /** Fetch the current user's own profile. Creates a default profile if the trigger didn't. */
     suspend fun getMyProfile(): Result<WhisperProfile> = runCatching {
-        db.from("profiles")
+        val existing = db.from("profiles")
             .select { filter { WhisperProfile::id eq myId } }
-            .decodeSingle()
+            .decodeList<WhisperProfile>()
+            .firstOrNull()
+
+        val pubKey = crypto.getPublicKeyBase64()
+
+        if (existing == null) {
+            // Trigger may have failed on anon accounts — create a safe default
+            val defaultUsername = "user_${myId.take(8)}"
+            val insertData = WhisperProfileInsert(
+                id = myId,
+                username = defaultUsername,
+                publicKey = pubKey,
+            )
+            db.from("profiles")
+                .insert(insertData) { defaultToNull = false }
+            WhisperProfile(
+                id = myId,
+                username = defaultUsername,
+                publicKey = pubKey,
+            )
+        } else {
+            // Ensure public key is uploaded if missing
+            if (existing.publicKey == null && pubKey != null) {
+                db.from("profiles")
+                    .update(WhisperProfileUpdate(publicKey = pubKey)) {
+                        filter { WhisperProfile::id eq myId }
+                    }
+                existing.copy(publicKey = pubKey)
+            } else {
+                existing
+            }
+        }
     }
 
     /** Fetch another user's profile by their UUID. */
@@ -65,7 +96,7 @@ class WhisperRepository @Inject constructor(
     }
 
     /**
-     * Search public profiles by username (case-insensitive prefix match).
+     * Search public profiles by username (case-insensitive match).
      * Private profiles appear in results but without bio/details (enforced by RLS).
      */
     suspend fun searchProfiles(query: String): Result<List<WhisperProfile>> = runCatching {
@@ -82,8 +113,13 @@ class WhisperRepository @Inject constructor(
 
     /** Update the current user's profile. */
     suspend fun updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {
+        val pubKey = crypto.getPublicKeyBase64()
+        val updateWithKey = if (update.publicKey == null && pubKey != null) {
+            update.copy(publicKey = pubKey)
+        } else update
+
         db.from("profiles")
-            .update(update) { filter { WhisperProfile::id eq myId } }
+            .update(updateWithKey) { filter { WhisperProfile::id eq myId } }
     }
 
     /**
@@ -106,13 +142,16 @@ class WhisperRepository @Inject constructor(
     // Messages
     // ─────────────────────────────────────────────────────────
 
-    /** Fetch paginated messages for a conversation with [otherUserId]. */
+    /** Fetch paginated messages for a conversation with [otherUserId] (with E2EE decryption). */
     suspend fun getMessages(
         otherUserId: String,
         limit: Int = 50,
         beforeCreatedAt: String? = null,
     ): Result<List<WhisperMessage>> = runCatching {
-        db.from("messages")
+        val partnerProfile = getProfile(otherUserId).getOrNull()
+        val partnerPubKey = partnerProfile?.publicKey
+
+        val rawMessages = db.from("messages")
             .select {
                 filter {
                     or {
@@ -131,15 +170,46 @@ class WhisperRepository @Inject constructor(
                 limit(limit.toLong())
             }
             .decodeList<WhisperMessage>()
-            .reversed()
+
+        rawMessages.map { msg ->
+            if (msg.contentIv != null && partnerPubKey != null) {
+                val decrypted = crypto.decryptMessage(msg.content, msg.contentIv, partnerPubKey)
+                msg.copy(content = decrypted)
+            } else msg
+        }.reversed()
     }
 
-    /** Send a message to [receiverId]. */
+    /** Send a message to [receiverId] with automatic E2EE encryption when available. */
     suspend fun sendMessage(receiverId: String, content: String): Result<WhisperMessage> =
         runCatching {
-            db.from("messages")
-                .insert(WhisperMessageInsert(senderId = myId, receiverId = receiverId, content = content))
-                .decodeSingle()
+            val receiverProfile = getProfile(receiverId).getOrNull()
+            val receiverPubKey = receiverProfile?.publicKey
+
+            val encryptedPair = receiverPubKey?.let { key ->
+                crypto.encryptMessage(content, key)
+            }
+
+            val insert = if (encryptedPair != null) {
+                WhisperMessageInsert(
+                    senderId = myId,
+                    receiverId = receiverId,
+                    content = encryptedPair.first,
+                    contentIv = encryptedPair.second,
+                )
+            } else {
+                WhisperMessageInsert(
+                    senderId = myId,
+                    receiverId = receiverId,
+                    content = content,
+                )
+            }
+
+            val insertedMsg = db.from("messages")
+                .insert(insert) { select() }
+                .decodeSingle<WhisperMessage>()
+
+            // Return with decrypted content for local UI display
+            insertedMsg.copy(content = content)
         }
 
     /** Mark all unread messages from [senderId] as read. */
@@ -162,12 +232,12 @@ class WhisperRepository @Inject constructor(
         val channel = supabase.channel("whisper-messages-$myId")
         val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
             table = "messages"
-            filter("receiver_id", FilterOperator.EQ, myId)
         }
         channel.subscribe()
         changes.collect { action ->
             try {
-                emit(action.decodeRecord<WhisperMessage>())
+                val msg = action.decodeRecord<WhisperMessage>()
+                if (msg.receiverId == myId) emit(msg)
             } catch (_: Exception) { /* skip malformed records */ }
         }
     }
@@ -177,21 +247,18 @@ class WhisperRepository @Inject constructor(
      * Returns conversations sorted by most recent message descending.
      */
     suspend fun getConversations(): Result<List<WhisperConversation>> = runCatching {
-        // Fetch all messages involving current user (RLS handles filtering)
         val allMessages = db.from("messages")
             .select { order("created_at", Order.DESCENDING) }
             .decodeList<WhisperMessage>()
 
-        // Group by conversation partner
         val grouped = allMessages.groupBy { msg ->
             if (msg.senderId == myId) msg.receiverId else msg.senderId
         }
 
         val conversations = mutableListOf<WhisperConversation>()
         for ((partnerId, msgs) in grouped) {
-            val profileResult = getProfile(partnerId)
-            val profile = profileResult.getOrNull() ?: continue
-            val lastMsg = msgs.first() // already sorted desc
+            val profile = getProfile(partnerId).getOrNull() ?: continue
+            val lastMsg = msgs.first()
             val unread = msgs.count { it.receiverId == myId && !it.isRead }
             conversations.add(WhisperConversation(profile, lastMsg, unread))
         }
@@ -302,12 +369,12 @@ class WhisperRepository @Inject constructor(
         val channel = supabase.channel("whisper-friends-$myId")
         val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
             table = "friends"
-            filter("user_b", FilterOperator.EQ, myId)
         }
         channel.subscribe()
         changes.collect { action ->
             try {
-                emit(action.decodeRecord<WhisperFriendship>())
+                val friendship = action.decodeRecord<WhisperFriendship>()
+                if (friendship.userB == myId) emit(friendship)
             } catch (_: Exception) { /* skip */ }
         }
     }

@@ -18,6 +18,12 @@
 import java.util.Properties
 import java.io.FileInputStream
 
+// Read local.properties for Supabase credentials
+val localProperties = Properties().also { props ->
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) props.load(FileInputStream(localFile))
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -43,6 +49,12 @@ android {
         versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Supabase config — set these in local.properties:
+        // SUPABASE_URL=https://your-project-id.supabase.co
+        // SUPABASE_ANON_KEY=your-anon-key
+        buildConfigField("String", "SUPABASE_URL", "\"${localProperties.getProperty("SUPABASE_URL", "")}\"") 
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProperties.getProperty("SUPABASE_ANON_KEY", "")}\"")
     }
 
     splits {
@@ -265,4 +277,12 @@ dependencies {
     
     ksp(libs.androidx.room.compiler)
     ksp(libs.moshi.kotlin.codegen)
+
+    // Supabase — Whisper messaging
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth.kt)
+    implementation(libs.supabase.postgrest.kt)
+    implementation(libs.supabase.realtime.kt)
+    implementation(libs.supabase.storage.kt)
+    implementation(libs.ktor.client.okhttp)
 }
