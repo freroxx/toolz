@@ -34,6 +34,7 @@ import javax.inject.Inject
 class WhisperChatViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
+    private val crypto: WhisperCrypto,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -43,6 +44,10 @@ class WhisperChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(WhisperChatUiState())
     val uiState: StateFlow<WhisperChatUiState> = _uiState.asStateFlow()
 
+    private val _draftText = MutableStateFlow("")
+    val draftText: StateFlow<String> = _draftText.asStateFlow()
+
+    private var partnerPublicKey: String? = null
     private var realtimeJob: Job? = null
 
     init {
@@ -57,6 +62,7 @@ class WhisperChatViewModel @Inject constructor(
             // Load other user's profile
             repository.getProfile(otherUserId)
                 .onSuccess { profile ->
+                    partnerPublicKey = profile.publicKey
                     _uiState.update { it.copy(otherUser = profile) }
                 }
 
@@ -92,15 +98,35 @@ class WhisperChatViewModel @Inject constructor(
 
     fun sendMessage(content: String) {
         if (content.isBlank()) return
+        
+        val originalText = content
+        _draftText.value = ""
+        val trimmedContent = content.trim()
+        val optimisticMsg = WhisperMessage(
+            id = "pending_${System.currentTimeMillis()}",
+            senderId = myUserId,
+            receiverId = otherUserId,
+            content = trimmedContent
+        )
+
+        _uiState.update { state ->
+            state.copy(messages = state.messages + optimisticMsg)
+        }
+
         viewModelScope.launch {
-            repository.sendMessage(otherUserId, content.trim())
+            repository.sendMessage(otherUserId, trimmedContent)
                 .onSuccess { newMsg ->
                     _uiState.update { state ->
-                        state.copy(messages = state.messages + newMsg)
+                        val filtered = state.messages.filter { it.id != optimisticMsg.id }
+                        state.copy(messages = filtered + newMsg)
                     }
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = err.message) }
+                    _draftText.value = originalText
+                    _uiState.update { state ->
+                        val filtered = state.messages.filter { it.id != optimisticMsg.id }
+                        state.copy(error = err.message, messages = filtered)
+                    }
                 }
         }
     }
@@ -119,13 +145,21 @@ class WhisperChatViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    fun updateDraft(text: String) {
+        _draftText.value = text
+    }
+
     private fun subscribeToMessages() {
         realtimeJob = viewModelScope.launch {
             try {
                 repository.subscribeToIncomingMessages().collect { newMsg ->
                     if (newMsg.senderId == otherUserId) {
+                        val decryptedContent = if (newMsg.contentIv != null && partnerPublicKey != null) {
+                            crypto.decryptMessage(newMsg.content, newMsg.contentIv, partnerPublicKey!!)
+                        } else newMsg.content
+                        
                         _uiState.update { state ->
-                            val updatedMessages = state.messages + newMsg
+                            val updatedMessages = state.messages + newMsg.copy(content = decryptedContent)
                             state.copy(messages = updatedMessages)
                         }
                         repository.markMessagesAsRead(otherUserId)

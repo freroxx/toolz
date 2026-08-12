@@ -1,20 +1,7 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ * GPL-3.0
  */
-
 package com.frerox.toolz.ui.screens.whisper
 
 import androidx.lifecycle.ViewModel
@@ -22,7 +9,10 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.WhisperAuthManager
 import com.frerox.toolz.data.whisper.WhisperAnonToken
 import com.frerox.toolz.data.whisper.WhisperAuthState
+import com.frerox.toolz.data.whisper.WhisperRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,37 +20,67 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+sealed class UsernameAvailability {
+    object Idle : UsernameAvailability()
+    object Checking : UsernameAvailability()
+    object Available : UsernameAvailability()
+    object Taken : UsernameAvailability()
+    data class Invalid(val reason: String) : UsernameAvailability()
+}
+
 @HiltViewModel
 class WhisperAuthViewModel @Inject constructor(
     private val authManager: WhisperAuthManager,
+    private val repository: WhisperRepository,
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<WhisperAuthState>(WhisperAuthState.Idle)
     val authState: StateFlow<WhisperAuthState> = _authState.asStateFlow()
-
-    // The generated anonymous token — held in memory for display/copy
     private val _generatedToken = MutableStateFlow<WhisperAnonToken?>(null)
     val generatedToken: StateFlow<WhisperAnonToken?> = _generatedToken.asStateFlow()
 
+    private val _usernameAvailability = MutableStateFlow<UsernameAvailability>(UsernameAvailability.Idle)
+    val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
+
     init {
-        // Observe session status: initializing and authenticated
         viewModelScope.launch {
-            combine(
-                authManager.isInitializing,
-                authManager.isAuthenticated,
-            ) { initializing, authenticated ->
+            combine(authManager.isInitializing, authManager.isAuthenticated) { initializing, authenticated ->
                 Pair(initializing, authenticated)
             }.collect { (initializing, authenticated) ->
                 when {
-                    initializing  -> _authState.value = WhisperAuthState.Loading
+                    initializing -> _authState.value = WhisperAuthState.Loading
                     authenticated -> _authState.value = WhisperAuthState.Authenticated
-                    // Only reset to Idle if we were in Loading (not a user-triggered Error)
                     _authState.value is WhisperAuthState.Loading -> {
                         _authState.value = WhisperAuthState.Idle
                     }
                 }
             }
         }
+    }
+
+    private var usernameCheckJob: Job? = null
+    fun checkUsernameAvailable(username: String) {
+        usernameCheckJob?.cancel()
+        val clean = username.trim().lowercase()
+        if (clean.isEmpty()) { _usernameAvailability.value = UsernameAvailability.Idle; return }
+        val validationError = validateUsernameFormat(clean)
+        if (validationError != null) { _usernameAvailability.value = UsernameAvailability.Invalid(validationError); return }
+        usernameCheckJob = viewModelScope.launch {
+            _usernameAvailability.value = UsernameAvailability.Checking
+            delay(500)
+            repository.checkUsernameAvailable(clean)
+                .onSuccess { available ->
+                    _usernameAvailability.value = if (available) UsernameAvailability.Available else UsernameAvailability.Taken
+                }
+                .onFailure { _usernameAvailability.value = UsernameAvailability.Idle }
+        }
+    }
+
+    private fun validateUsernameFormat(username: String): String? {
+        if (username.length !in 3..20) return "Username must be 3-20 characters"
+        if (!username.matches(Regex("[a-z0-9_]+"))) return "Only letters, numbers, and underscores allowed"
+        if (username.startsWith("_") || username.endsWith("_")) return "Cannot start or end with underscore"
+        return null
     }
 
     fun loginWithEmail(email: String, password: String) {
@@ -72,10 +92,10 @@ class WhisperAuthViewModel @Inject constructor(
         }
     }
 
-    fun registerWithEmail(email: String, password: String) {
+    fun registerWithEmail(email: String, password: String, username: String, displayName: String) {
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
-            authManager.registerWithEmail(email, password)
+            authManager.registerWithEmail(email, password, username, displayName)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
@@ -85,41 +105,50 @@ class WhisperAuthViewModel @Inject constructor(
         _generatedToken.value = authManager.generateAnonToken()
     }
 
-    fun registerWithGeneratedToken() {
+    fun registerWithGeneratedToken(displayName: String) {
         val token = _generatedToken.value ?: return
+        val cleanName = displayName.trim()
+        if (cleanName.isEmpty()) {
+            _authState.value = WhisperAuthState.Error("Choose a display name to continue")
+            return
+        }
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
-            authManager.registerWithToken(token)
+            val username = "user_" + token.token.take(8)
+            authManager.registerWithToken(token, username = username, displayName = cleanName)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
     fun loginWithToken(rawToken: String) {
+        if (!authManager.isValidToken(authManager.normalizeToken(rawToken))) {
+            _authState.value = WhisperAuthState.Error("That token doesn't look right. Check for missing or extra characters.")
+            return
+        }
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
             authManager.loginWithToken(rawToken)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+                .onFailure {
+                    val message = if (authManager.isInvalidCredentials(it)) "Token not recognized. Double-check it and try again." else formatError(it)
+                    _authState.value = WhisperAuthState.Error(message)
+                }
         }
     }
 
-    fun clearError() {
-        _authState.value = WhisperAuthState.Idle
-    }
+    fun normalizeToken(raw: String): String = authManager.normalizeToken(raw)
+    fun clearError() { _authState.value = WhisperAuthState.Idle }
 
     private fun formatError(throwable: Throwable): String {
-        val msg = throwable.message ?: return "Unknown error"
+        val msg = throwable.message ?: return "Something went wrong. Try again."
         return when {
-            msg.contains("Invalid login credentials", ignoreCase = true) ->
-                "Invalid email or password"
-            msg.contains("User already registered", ignoreCase = true) ->
-                "An account with this email already exists"
-            msg.contains("Email not confirmed", ignoreCase = true) ->
-                "Please confirm your email before signing in"
-            msg.contains("network", ignoreCase = true) ||
-            msg.contains("connect", ignoreCase = true) ->
-                "Network error — check your connection"
+            msg.contains("Token must be", ignoreCase = true) || msg.contains("doesn't look right", ignoreCase = true) ->
+                "That token doesn't look right. Check for missing or extra characters."
+            authManager.isInvalidCredentials(throwable) -> "Invalid email or password"
+            msg.contains("User already registered", ignoreCase = true) -> "An account with this email already exists"
+            msg.contains("Email not confirmed", ignoreCase = true) -> "Please confirm your email before signing in"
+            msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true) -> "Network error — check your connection"
             else -> msg
         }
     }

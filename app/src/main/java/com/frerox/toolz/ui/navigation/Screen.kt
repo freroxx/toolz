@@ -108,4 +108,14 @@ sealed class Screen(val route: String) {
 
     // System
     object FileCleaner : Screen("file_cleaner")
+
+    // Whisper — Privacy Messaging
+    object WhisperAuth : Screen("whisper_auth")
+    object Whisper : Screen("whisper")
+    object WhisperChat : Screen("whisper_chat/{otherUserId}") {
+        fun createRoute(otherUserId: String) = "whisper_chat/$otherUserId"
+    }
+    object WhisperUserProfile : Screen("whisper_profile/{userId}") {
+        fun createRoute(userId: String) = "whisper_profile/$userId"
+    }
 }

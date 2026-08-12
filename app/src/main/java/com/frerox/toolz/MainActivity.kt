@@ -112,6 +112,7 @@ import com.frerox.toolz.ui.screens.browser.WebViewViewModel
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
 import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
+import com.frerox.toolz.ui.screens.whisper.*
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.ui.components.MarkdownContent
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
@@ -1171,6 +1172,44 @@ fun ToolzNavHost(
                         musicViewModel.playUri(uri)
                         navController.navigate(Screen.MusicPlayer.route)
                     }
+                }
+            )
+        }
+        composable(Screen.WhisperAuth.route) {
+            WhisperAuthScreen(
+                onAuthenticated = {
+                    navController.navigate(Screen.Whisper.route) {
+                        popUpTo(Screen.WhisperAuth.route) { inclusive = true }
+                    }
+                },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Whisper.route) {
+            WhisperMainScreen(
+                onNavigateToChat = { otherUserId ->
+                    navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
+                },
+                onNavigateToProfile = { userId ->
+                    navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
+                },
+                onLoggedOut = {
+                    navController.navigate(Screen.WhisperAuth.route) {
+                        popUpTo(Screen.Whisper.route) { inclusive = true }
+                    }
+                }
+            )
+        }
+        composable(Screen.WhisperChat.route) {
+            WhisperChatScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.WhisperUserProfile.route) {
+            WhisperUserProfileScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToChat = { otherUserId ->
+                    navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
                 }
             )
         }

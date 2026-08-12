@@ -26,6 +26,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +34,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -50,7 +53,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
@@ -72,10 +75,18 @@ fun WhisperMainScreen(
     viewModel: WhisperViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    // Automatic logout navigation: reactive session observation fixes the "stuck" UI
+    LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated == false) {
+            onLoggedOut()
+        }
+    }
 
     // Show errors
     LaunchedEffect(uiState.error) {
@@ -86,7 +97,7 @@ fun WhisperMainScreen(
     }
 
     val tabs = listOf(
-        Triple(stringResource(R.string.st_Whisper_Tab_Chats), Icons.Rounded.Chat, Icons.Rounded.Chat),
+        Triple(stringResource(R.string.st_Whisper_Tab_Chats), Icons.AutoMirrored.Rounded.Chat, Icons.AutoMirrored.Rounded.Chat),
         Triple(stringResource(R.string.st_Whisper_Tab_Friends), Icons.Rounded.Group, Icons.Rounded.Group),
         Triple(stringResource(R.string.st_Whisper_Tab_Discover), Icons.Rounded.Explore, Icons.Rounded.Explore),
         Triple(stringResource(R.string.st_Whisper_Tab_Profile), Icons.Rounded.Person, Icons.Rounded.Person),
@@ -142,20 +153,25 @@ fun WhisperMainScreen(
         containerColor = Color.Transparent,
         modifier = Modifier.toolzBackground(),
     ) { paddingValues ->
-        AnimatedContent(
-            targetState = selectedTab,
-            transitionSpec = {
-                (fadeIn(tween(200)) + scaleIn(tween(200), 0.97f))
-                    .togetherWith(fadeOut(tween(150)) + scaleOut(tween(150), 0.97f))
-            },
-            label = "tabContent",
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = { viewModel.loadAll(isRefresh = true) },
             modifier = Modifier.padding(paddingValues),
-        ) { tab ->
-            when (tab) {
-                0 -> ChatsTab(uiState, onNavigateToChat)
-                1 -> FriendsTab(uiState, viewModel)
-                2 -> DiscoverTab(uiState, viewModel, onNavigateToChat, onNavigateToProfile)
-                3 -> ProfileTab(uiState, viewModel, onLoggedOut)
+        ) {
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    (fadeIn(tween(300)) + scaleIn(tween(300), 0.95f))
+                        .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), 0.95f))
+                },
+                label = "tabContent",
+            ) { tab ->
+                when (tab) {
+                    0 -> ChatsTab(uiState, onNavigateToChat)
+                    1 -> FriendsTab(uiState, viewModel, onNavigateToChat)
+                    2 -> DiscoverTab(uiState, viewModel, onNavigateToChat, onNavigateToProfile)
+                    3 -> ProfileTab(uiState, viewModel, onLoggedOut)
+                }
             }
         }
     }
@@ -173,9 +189,21 @@ private fun ChatsTab(
 ) {
     val haptic = rememberToolzHapticFeedback()
 
-    if (uiState.conversations.isEmpty() && !uiState.isLoading) {
+    // Shimmer loading skeleton
+    if (uiState.isLoading && uiState.conversations.isEmpty()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(5) { ConversationSkeleton() }
+        }
+        return
+    }
+
+    if (uiState.conversations.isEmpty()) {
         WhisperEmptyState(
-            icon = Icons.Rounded.Chat,
+            icon = Icons.AutoMirrored.Rounded.Chat,
             title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
             subtitle = stringResource(R.string.st_Whisper_Chats_EmptySubtitle),
         )
@@ -271,6 +299,7 @@ private fun ConversationCard(
 private fun FriendsTab(
     uiState: WhisperUiState,
     viewModel: WhisperViewModel,
+    onNavigateToChat: (String) -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
 
@@ -322,7 +351,10 @@ private fun FriendsTab(
             item { SectionHeader("${stringResource(R.string.st_Whisper_Tab_Friends)} (${uiState.friends.size})") }
             itemsIndexed(uiState.friends) { index, friend ->
                 StaggeredEntrance(index = index) {
-                    FriendCard(friend = friend)
+                    FriendCard(
+                        friend = friend,
+                        onChat = { haptic.click(); onNavigateToChat(friend.id) },
+                    )
                 }
             }
         }
@@ -380,8 +412,14 @@ private fun OutgoingRequestCard(friendship: WhisperFriendship, onCancel: () -> U
 }
 
 @Composable
-private fun FriendCard(friend: WhisperProfile) {
-    ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+private fun FriendCard(
+    friend: WhisperProfile,
+    onChat: (() -> Unit)? = null,
+) {
+    ExpressiveCard(
+        onClick = { onChat?.invoke() },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -391,6 +429,14 @@ private fun FriendCard(friend: WhisperProfile) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(friend.effectiveName, fontWeight = FontWeight.Bold)
                 Text("@${friend.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (onChat != null) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Chat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
     }
@@ -483,6 +529,7 @@ private fun DiscoverUserCard(
                     }
                 }
                 Text("@${profile.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Email intentionally omitted — privacy
                 if (!profile.isPrivate && !profile.bio.isNullOrBlank()) {
                     Text(
                         profile.bio,
@@ -503,7 +550,7 @@ private fun DiscoverUserCard(
                 onClick = onChat,
                 modifier = Modifier.weight(1f),
             ) {
-                Icon(Icons.Rounded.Chat, null, Modifier.size(16.dp))
+                Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.st_Whisper_Discover_Message))
             }
@@ -534,7 +581,8 @@ private fun ProfileTab(
     val haptic = rememberToolzHapticFeedback()
     val context = LocalContext.current
 
-    var username by remember(profile) { mutableStateOf(profile.username) }
+    // username is read-only — chosen at registration, never editable
+    val username = profile.username
     var displayName by remember(profile) { mutableStateOf(profile.displayName ?: "") }
     var bio by remember(profile) { mutableStateOf(profile.bio ?: "") }
     var isPrivate by remember(profile) { mutableStateOf(profile.isPrivate) }
@@ -572,7 +620,7 @@ private fun ProfileTab(
                         .bouncyClick(onClick = { imagePickerLauncher.launch("image/*") }),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Rounded.CameraAlt, "Change photo", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -582,9 +630,12 @@ private fun ProfileTab(
             Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = username,
-                    onValueChange = { username = it.lowercase().replace(" ", "_") },
+                    onValueChange = {},  // Read-only: username is immutable
+                    readOnly = true,
                     label = { Text(stringResource(R.string.st_Whisper_Profile_Username)) },
                     leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
+                    trailingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp)) },
+                    supportingText = { Text(stringResource(R.string.st_Whisper_Profile_UsernameCannotChange), style = MaterialTheme.typography.labelSmall) },
                     singleLine = true,
                     shape = MediumExpressiveShape,
                     modifier = Modifier.fillMaxWidth(),
@@ -645,7 +696,7 @@ private fun ProfileTab(
             ToolzExpressiveButton(
                 onClick = {
                     haptic.success()
-                    viewModel.updateProfile(username, displayName, bio, isPrivate)
+                    viewModel.updateProfile(displayName, bio, isPrivate)
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) {
@@ -664,7 +715,7 @@ private fun ProfileTab(
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
             ) {
-                Icon(Icons.Rounded.Logout, null, Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
             }
@@ -677,7 +728,7 @@ private fun ProfileTab(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            icon = { Icon(Icons.Rounded.Logout, null) },
+            icon = { Icon(Icons.AutoMirrored.Rounded.Logout, null) },
             title = { Text(stringResource(R.string.st_Whisper_Profile_LogOutTitle), fontWeight = FontWeight.Bold) },
             text = { Text(stringResource(R.string.st_Whisper_Profile_LogOutDesc)) },
             confirmButton = {
@@ -736,7 +787,7 @@ fun WhisperAvatar(
                 profile.avatarInitial,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                 fontWeight = FontWeight.Black,
-                fontSize = (size.value * 0.4f).sp,
+                fontSize = (size.value * 0.42f).sp,
             )
         }
     }
@@ -773,7 +824,50 @@ fun WhisperEmptyState(
         Spacer(Modifier.height(16.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+/** Animated shimmer skeleton for a single conversation row while loading */
+@Composable
+private fun ConversationSkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmerAlpha",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.55f)
+                    .height(14.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(10.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.3f))
+            )
+        }
     }
 }
 

@@ -35,6 +35,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -43,7 +44,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
@@ -60,6 +61,8 @@ import com.frerox.toolz.ui.theme.toolzBackground
  *  - Scrollable message list (newest at bottom)
  *  - Friend gate banner when not friends
  *  - Message input bar with animated send button
+ * 
+ * Note: WhisperChatViewModel requires fun updateDraft(text: String) { _draftText.value = text }
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -98,7 +101,7 @@ fun WhisperChatScreen(
                 },
                 navigationIcon = {
                     ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
                     }
                 },
                 actions = {
@@ -107,7 +110,7 @@ fun WhisperChatScreen(
                     if (status == FriendStatus.ACCEPTED) {
                         Icon(
                             Icons.Rounded.VerifiedUser,
-                            contentDescription = "Friends",
+                            contentDescription = stringResource(R.string.st_Whisper_Friends_Accept),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp),
                         )
@@ -160,6 +163,7 @@ fun WhisperChatScreen(
                 ) {
                     itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                         val isMine = message.isSentByMe(viewModel.myUserId)
+                        val isPending = message.id.startsWith("pending_")
 
                         // Date separator
                         val showDateSeparator = index == 0 ||
@@ -176,6 +180,7 @@ fun WhisperChatScreen(
                             MessageBubble(
                                 message = message,
                                 isMine = isMine,
+                                isPending = isPending,
                             )
                         }
                     }
@@ -184,8 +189,11 @@ fun WhisperChatScreen(
 
             // Message input bar
             val canSendMessage = uiState.friendStatus == FriendStatus.ACCEPTED
+            val draftText by viewModel.draftText.collectAsStateWithLifecycle()
             MessageInputBar(
                 enabled = canSendMessage,
+                draftText = draftText,
+                onDraftChanged = { viewModel.updateDraft(it) },
                 onSend = { text ->
                     haptic.success()
                     viewModel.sendMessage(text)
@@ -258,6 +266,7 @@ private fun DateSeparator(date: String) {
 private fun MessageBubble(
     message: WhisperMessage,
     isMine: Boolean,
+    isPending: Boolean = false,
 ) {
     val bubbleShape = when {
         isMine  -> RoundedCornerShape(topStart = 20.dp, topEnd = 4.dp,  bottomStart = 20.dp, bottomEnd = 20.dp)
@@ -275,6 +284,7 @@ private fun MessageBubble(
                 .widthIn(max = 280.dp)
                 .clip(bubbleShape)
                 .background(bubbleColor)
+                .alpha(if (isPending) 0.7f else 1f)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             Column {
@@ -289,18 +299,26 @@ private fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.align(Alignment.End),
                 ) {
-                    Text(
-                        message.createdAt.formatTimestamp(),
-                        color = textColor.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    if (isMine) {
-                        Icon(
-                            if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
-                            contentDescription = if (message.isRead) "Read" else "Sent",
-                            tint = if (message.isRead) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.5f),
-                            modifier = Modifier.size(14.dp),
+                    if (isPending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                            color = textColor.copy(alpha = 0.6f)
                         )
+                    } else {
+                        Text(
+                            message.createdAt.formatTimestamp(),
+                            color = textColor.copy(alpha = 0.6f),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        if (isMine) {
+                            Icon(
+                                if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
+                                contentDescription = if (message.isRead) "Read" else "Sent",
+                                tint = if (message.isRead) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.5f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -312,11 +330,12 @@ private fun MessageBubble(
 @Composable
 private fun MessageInputBar(
     enabled: Boolean,
+    draftText: String,
+    onDraftChanged: (String) -> Unit,
     onSend: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
     val haptic = rememberToolzHapticFeedback()
-    val canSend = text.isNotBlank() && enabled
+    val canSend = draftText.isNotBlank() && enabled
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -331,8 +350,8 @@ private fun MessageInputBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = draftText,
+                onValueChange = onDraftChanged,
                 placeholder = {
                     Text(
                         if (enabled) stringResource(R.string.st_Whisper_Chat_InputPlaceholder) else stringResource(R.string.st_Whisper_Chat_InputPlaceholderDisabled),
@@ -363,15 +382,13 @@ private fun MessageInputBar(
                         if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh
                     )
                     .bouncyClick(enabled = canSend, onClick = {
-                        val toSend = text.trim()
-                        text = ""
-                        onSend(toSend)
+                        onSend(draftText.trim())
                     }),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.AutoMirrored.Rounded.Send,
-                    contentDescription = "Send",
+                    contentDescription = null,
                     tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline,
                     modifier = Modifier.size(20.dp),
                 )
@@ -381,4 +398,4 @@ private fun MessageInputBar(
 }
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
-fun String.extractDate(): String = try { this.take(10) } catch (_: Exception) { "" }
+fun String.extractDate(): String = if (length >= 10) take(10) else ""

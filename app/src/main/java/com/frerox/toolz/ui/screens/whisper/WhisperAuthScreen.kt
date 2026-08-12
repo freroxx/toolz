@@ -17,29 +17,31 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
@@ -51,10 +53,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperAuthState
@@ -62,8 +63,14 @@ import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 
 /**
- * Whisper authentication screen — 100% Material 3 Expressive.
- * Supports standard Email Auth and Zero-Knowledge Anonymous Token Auth.
+ * Whisper authentication screen — Material 3 Expressive.
+ *
+ * Two paths, presented with equal weight and no visual trickery:
+ *  - Email + password, for people who want normal account recovery.
+ *  - A locally generated token, for people who don't want to give an email at all.
+ *    The token IS the account secret — Whisper never sees it, only two one-way hashes
+ *    derived from it. Losing the token means losing the account; there is no recovery,
+ *    and the UI says so plainly instead of hiding the tradeoff.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -74,6 +81,7 @@ fun WhisperAuthScreen(
 ) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
+    val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val haptic = rememberToolzHapticFeedback()
 
@@ -83,6 +91,7 @@ fun WhisperAuthScreen(
 
     LaunchedEffect(authState) {
         (authState as? WhisperAuthState.Error)?.let { err ->
+            haptic.error()
             snackbarHostState.showSnackbar(err.message)
             viewModel.clearError()
         }
@@ -92,23 +101,10 @@ fun WhisperAuthScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             ExpressiveTopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.Shield,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Black)
-                    }
-                },
+                title = { Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
                     }
                 },
             )
@@ -119,11 +115,14 @@ fun WhisperAuthScreen(
         WhisperAuthContent(
             authState = authState,
             generatedToken = generatedToken?.token,
+            usernameAvailability = usernameAvailability,
+            onCheckUsername = viewModel::checkUsernameAvailable,
             onLoginEmail = viewModel::loginWithEmail,
             onRegisterEmail = viewModel::registerWithEmail,
             onGenerateToken = viewModel::generateToken,
             onRegisterToken = viewModel::registerWithGeneratedToken,
             onLoginToken = viewModel::loginWithToken,
+            onNormalizeToken = viewModel::normalizeToken,
             modifier = Modifier.padding(paddingValues),
         )
     }
@@ -134,14 +133,17 @@ fun WhisperAuthScreen(
 private fun WhisperAuthContent(
     authState: WhisperAuthState,
     generatedToken: String?,
+    usernameAvailability: UsernameAvailability,
+    onCheckUsername: (String) -> Unit,
     onLoginEmail: (String, String) -> Unit,
-    onRegisterEmail: (String, String) -> Unit,
+    onRegisterEmail: (String, String, String, String) -> Unit,
     onGenerateToken: () -> Unit,
-    onRegisterToken: () -> Unit,
+    onRegisterToken: (displayName: String) -> Unit,
     onLoginToken: (String) -> Unit,
+    onNormalizeToken: (String) -> String,
     modifier: Modifier = Modifier,
 ) {
-    // 0 = Login, 1 = Register, 2 = Token
+    // 0 = Email, 1 = Token
     var selectedMode by remember { mutableIntStateOf(0) }
     val isLoading = authState is WhisperAuthState.Loading
 
@@ -149,147 +151,136 @@ private fun WhisperAuthContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        // Expressive Hero Header
-        StaggeredEntrance(index = 0) {
-            WhisperAuthHero()
-        }
+        WhisperAuthHeader()
 
-        // Mode Segmented Control
-        StaggeredEntrance(index = 1) {
-            ToolzConnectedButtonGroup(
-                selectedIndex = selectedMode,
-                options = listOf(
-                    stringResource(R.string.st_Whisper_Auth_Mode_Login),
-                    stringResource(R.string.st_Whisper_Auth_Mode_Register),
-                    stringResource(R.string.st_Whisper_Auth_Mode_Token),
-                ),
-                unCheckedIcons = listOf(
-                    Icons.AutoMirrored.Rounded.Login,
-                    Icons.Rounded.PersonAdd,
-                    Icons.Rounded.Key,
-                ),
-                checkedIcons = listOf(
-                    Icons.AutoMirrored.Rounded.Login,
-                    Icons.Rounded.PersonAdd,
-                    Icons.Rounded.Key,
-                ),
-                onOptionSelected = { selectedMode = it },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        // Mode Segmented Control — Email vs Token, equal weight
+        ToolzConnectedButtonGroup(
+            selectedIndex = selectedMode,
+            options = listOf(
+                stringResource(R.string.st_Whisper_Auth_Mode_Email),
+                stringResource(R.string.st_Whisper_Auth_Mode_Token),
+            ),
+            unCheckedIcons = listOf(Icons.Rounded.Email, Icons.Rounded.Key),
+            checkedIcons = listOf(Icons.Rounded.Email, Icons.Rounded.Key),
+            onOptionSelected = { selectedMode = it },
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-        // Mode Content
-        StaggeredEntrance(index = 2) {
-            AnimatedContent(
-                targetState = selectedMode,
-                transitionSpec = {
-                    (fadeIn(spring()) + slideInHorizontally(spring()) { if (targetState > initialState) 60 else -60 })
-                        .togetherWith(fadeOut(spring()) + slideOutHorizontally(spring()) { if (targetState > initialState) -60 else 60 })
-                },
-                label = "authModeContent"
-            ) { mode ->
-                when (mode) {
-                    0 -> EmailAuthForm(
-                        isLoading = isLoading,
-                        ctaLabel = stringResource(R.string.st_Whisper_Auth_SignIn),
-                        onSubmit = onLoginEmail,
-                    )
-                    1 -> EmailAuthForm(
-                        isLoading = isLoading,
-                        ctaLabel = stringResource(R.string.st_Whisper_Auth_CreateAccount),
-                        onSubmit = onRegisterEmail,
-                        isRegister = true,
-                    )
-                    2 -> TokenAuthForm(
-                        isLoading = isLoading,
-                        generatedToken = generatedToken,
-                        onGenerate = onGenerateToken,
-                        onRegister = onRegisterToken,
-                        onLogin = onLoginToken,
-                    )
-                }
+        AnimatedContent(
+            targetState = selectedMode,
+            transitionSpec = {
+                (fadeIn(spring()) + slideInHorizontally(spring()) { if (targetState > initialState) 40 else -40 })
+                    .togetherWith(fadeOut(spring()) + slideOutHorizontally(spring()) { if (targetState > initialState) -40 else 40 })
+            },
+            label = "authModeContent",
+        ) { mode ->
+            when (mode) {
+                0 -> EmailAuthSection(
+                    isLoading = isLoading,
+                    usernameAvailability = usernameAvailability,
+                    onCheckUsername = onCheckUsername,
+                    onLogin = onLoginEmail,
+                    onRegister = onRegisterEmail,
+                )
+                1 -> TokenAuthSection(
+                    isLoading = isLoading,
+                    generatedToken = generatedToken,
+                    onGenerate = onGenerateToken,
+                    onRegister = onRegisterToken,
+                    onLogin = onLoginToken,
+                    onNormalizeToken = onNormalizeToken,
+                )
             }
         }
 
-        // Security & E2EE Assurance Footer
-        StaggeredEntrance(index = 3) {
-            WhisperPrivacyNote()
-        }
-
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
 
+/**
+ * Plain, static header. No animated glow, no pulsing scale, no gradient hero box —
+ * the lock glyph and copy do the work. Restraint reads as more trustworthy for a
+ * security-focused product than motion for its own sake.
+ */
 @Composable
-private fun WhisperAuthHero() {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "heroScale"
-    )
-
+private fun WhisperAuthHeader() {
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // Glowing Icon Box
         Box(
             modifier = Modifier
-                .size(92.dp)
-                .clip(RoundedCornerShape(36.dp))
-                .background(
-                    Brush.radialGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                        )
-                    )
-                )
-                .border(
-                    2.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.tertiary
-                        )
-                    ),
-                    RoundedCornerShape(36.dp)
-                ),
+                .size(52.dp)
+                .clip(MediumExpressiveShape)
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Rounded.Lock,
                 contentDescription = null,
-                modifier = Modifier.size(46.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
-
+        Spacer(Modifier.height(4.dp))
         Text(
-            stringResource(R.string.st_Whisper_Title),
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Black,
+            stringResource(R.string.st_Whisper_Auth_Headline),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
         )
-
         Text(
             stringResource(R.string.st_Whisper_Auth_Subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun EmailAuthSection(
+    isLoading: Boolean,
+    usernameAvailability: UsernameAvailability,
+    onCheckUsername: (String) -> Unit,
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String, String, String) -> Unit,
+) {
+    var isRegisterMode by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        ToolzConnectedButtonGroup(
+            selectedIndex = if (isRegisterMode) 1 else 0,
+            options = listOf(
+                stringResource(R.string.st_Whisper_Auth_SignIn),
+                stringResource(R.string.st_Whisper_Auth_CreateAccount),
+            ),
+            onOptionSelected = { isRegisterMode = it == 1 },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        AnimatedContent(
+            targetState = isRegisterMode,
+            transitionSpec = { fadeIn(spring()).togetherWith(fadeOut(spring())) },
+            label = "emailMode",
+        ) { registerMode ->
+            EmailAuthForm(
+                isLoading = isLoading,
+                ctaLabel = if (registerMode) {
+                    stringResource(R.string.st_Whisper_Auth_CreateAccount)
+                } else {
+                    stringResource(R.string.st_Whisper_Auth_SignIn)
+                },
+                isRegister = registerMode,
+                usernameAvailability = usernameAvailability,
+                onCheckUsername = onCheckUsername,
+                onLogin = onLogin,
+                onRegister = onRegister,
+            )
+        }
     }
 }
 
@@ -298,28 +289,52 @@ private fun WhisperAuthHero() {
 private fun EmailAuthForm(
     isLoading: Boolean,
     ctaLabel: String,
-    onSubmit: (String, String) -> Unit,
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String, String, String) -> Unit,
     isRegister: Boolean = false,
+    usernameAvailability: UsernameAvailability = UsernameAvailability.Idle,
+    onCheckUsername: (String) -> Unit = {},
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var displayName by remember { mutableStateOf("") }
+    
     var showPassword by remember { mutableStateOf(false) }
+    var touchedConfirm by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val haptic = rememberToolzHapticFeedback()
 
     val passwordsMatch = !isRegister || password == confirmPassword
-    val canSubmit = email.isNotBlank() && password.length >= 6 && passwordsMatch && !isLoading
+    val canSubmit = if (isRegister) {
+        email.isNotBlank() && password.length >= 6 && passwordsMatch && !isLoading &&
+        usernameAvailability is UsernameAvailability.Available && displayName.isNotBlank()
+    } else {
+        email.isNotBlank() && password.length >= 6 && !isLoading
+    }
+
+    fun submit() {
+        if (canSubmit) {
+            haptic.success()
+            focusManager.clearFocus()
+            if (isRegister) {
+                onRegister(email.trim(), password, username.trim().lowercase(), displayName.trim())
+            } else {
+                onLogin(email.trim(), password)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
             label = { Text(stringResource(R.string.st_Whisper_Auth_Email)) },
-            leadingIcon = { Icon(Icons.Rounded.Email, null, tint = MaterialTheme.colorScheme.primary) },
+            leadingIcon = { Icon(Icons.Rounded.Email, null) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
                 imeAction = ImeAction.Next,
@@ -334,7 +349,7 @@ private fun EmailAuthForm(
             value = password,
             onValueChange = { password = it },
             label = { Text(stringResource(R.string.st_Whisper_Auth_Password)) },
-            leadingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary) },
+            leadingIcon = { Icon(Icons.Rounded.Password, null) },
             trailingIcon = {
                 ToolzExpressiveIconButton(onClick = { showPassword = !showPassword }) {
                     Icon(
@@ -350,61 +365,80 @@ private fun EmailAuthForm(
             ),
             keyboardActions = KeyboardActions(
                 onNext = { focusManager.moveFocus(FocusDirection.Down) },
-                onDone = { if (canSubmit) { haptic.success(); onSubmit(email, password) } },
+                onDone = { if (!isRegister) submit() },
             ),
             singleLine = true,
             shape = MediumExpressiveShape,
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // Live Password Strength Bar for Registration
         if (isRegister && password.isNotEmpty()) {
-            val score = calculatePasswordScore(password)
-            val barColor = when (score) {
-                1 -> MaterialTheme.colorScheme.error
-                2 -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
-            }
-            val label = when (score) {
-                1 -> "Weak password"
-                2 -> "Medium strength"
-                else -> "Strong password"
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                LinearProgressIndicator(
-                    progress = { score / 3f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                    color = barColor,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                )
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = barColor,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+            PasswordStrengthMeter(password)
         }
 
         if (isRegister) {
             OutlinedTextField(
                 value = confirmPassword,
-                onValueChange = { confirmPassword = it },
+                onValueChange = { confirmPassword = it; touchedConfirm = true },
                 label = { Text(stringResource(R.string.st_Whisper_Auth_ConfirmPassword)) },
-                leadingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary) },
+                leadingIcon = { Icon(Icons.Rounded.Password, null) },
                 visualTransformation = PasswordVisualTransformation(),
-                isError = confirmPassword.isNotEmpty() && !passwordsMatch,
-                supportingText = if (confirmPassword.isNotEmpty() && !passwordsMatch) {
+                isError = touchedConfirm && confirmPassword.isNotEmpty() && !passwordsMatch,
+                supportingText = if (touchedConfirm && confirmPassword.isNotEmpty() && !passwordsMatch) {
                     { Text(stringResource(R.string.st_Whisper_Auth_PasswordsDoNotMatch)) }
                 } else null,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done,
+                    imeAction = ImeAction.Next,
                 ),
-                keyboardActions = KeyboardActions(
-                    onDone = { if (canSubmit) { haptic.success(); onSubmit(email, password) } },
-                ),
+                keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
+                singleLine = true,
+                shape = MediumExpressiveShape,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            
+            OutlinedTextField(
+                value = username,
+                onValueChange = {
+                    val formatted = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '_' }
+                    username = formatted
+                    onCheckUsername(formatted)
+                },
+                label = { Text(stringResource(R.string.st_Whisper_Auth_ChooseUsername)) },
+                leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
+                trailingIcon = {
+                    when (usernameAvailability) {
+                        is UsernameAvailability.Checking -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        is UsernameAvailability.Available -> Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                        is UsernameAvailability.Taken -> Icon(Icons.Rounded.Cancel, null, tint = MaterialTheme.colorScheme.error)
+                        is UsernameAvailability.Invalid -> Icon(Icons.Rounded.Error, null, tint = MaterialTheme.colorScheme.error)
+                        else -> {}
+                    }
+                },
+                isError = usernameAvailability is UsernameAvailability.Taken || usernameAvailability is UsernameAvailability.Invalid,
+                supportingText = {
+                    when (usernameAvailability) {
+                        is UsernameAvailability.Taken -> Text(stringResource(R.string.st_Whisper_Auth_UsernameTaken))
+                        is UsernameAvailability.Available -> Text(stringResource(R.string.st_Whisper_Auth_UsernameAvailable))
+                        is UsernameAvailability.Checking -> Text(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
+                        is UsernameAvailability.Invalid -> Text(usernameAvailability.reason)
+                        else -> {}
+                    }
+                },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
+                singleLine = true,
+                shape = MediumExpressiveShape,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            
+            OutlinedTextField(
+                value = displayName,
+                onValueChange = { displayName = it },
+                label = { Text(stringResource(R.string.st_Whisper_Auth_DisplayName)) },
+                leadingIcon = { Icon(Icons.Rounded.Badge, null) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
                 singleLine = true,
                 shape = MediumExpressiveShape,
                 modifier = Modifier.fillMaxWidth(),
@@ -412,14 +446,14 @@ private fun EmailAuthForm(
         }
 
         ToolzExpressiveButton(
-            onClick = { haptic.success(); onSubmit(email, password) },
+            onClick = { submit() },
             enabled = canSubmit,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) {
             AnimatedContent(
                 targetState = isLoading,
                 transitionSpec = { fadeIn().togetherWith(fadeOut()) },
-                label = "btnLoading"
+                label = "btnLoading",
             ) { loading ->
                 if (loading) {
                     ToolzLoadingIndicator(modifier = Modifier.size(24.dp))
@@ -431,57 +465,50 @@ private fun EmailAuthForm(
     }
 }
 
+@Composable
+private fun PasswordStrengthMeter(password: String) {
+    val score = calculatePasswordScore(password)
+    val barColor = when (score) {
+        1 -> MaterialTheme.colorScheme.error
+        2 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val label = when (score) {
+        1 -> stringResource(R.string.st_Whisper_Auth_PasswordWeak)
+        2 -> stringResource(R.string.st_Whisper_Auth_PasswordMedium)
+        else -> stringResource(R.string.st_Whisper_Auth_PasswordStrong)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LinearProgressIndicator(
+            progress = { score / 3f },
+            modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+            color = barColor,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = barColor)
+    }
+}
+
+/**
+ * Token auth: create-new or sign-in-with-existing, toggled the same way as email mode
+ * for visual consistency rather than a distinct nested-toggle pattern.
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun TokenAuthForm(
+private fun TokenAuthSection(
     isLoading: Boolean,
     generatedToken: String?,
     onGenerate: () -> Unit,
-    onRegister: () -> Unit,
+    onRegister: (displayName: String) -> Unit,
     onLogin: (String) -> Unit,
+    onNormalizeToken: (String) -> String,
 ) {
-    var tokenInput by remember { mutableStateOf("") }
     var isLoginMode by remember { mutableStateOf(false) }
-    var isCopied by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
-    val haptic = rememberToolzHapticFeedback()
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        // Zero-Knowledge Info Card
-        ExpressiveCard(
-            onClick = {},
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Icon(
-                    Icons.Rounded.VerifiedUser,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp).padding(top = 2.dp),
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        stringResource(R.string.st_Whisper_Auth_ZeroKnowledgeTitle),
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        stringResource(R.string.st_Whisper_Auth_ZeroKnowledgeDesc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        TokenExplainerCard()
 
-        // Sub-mode toggle
         ToolzConnectedButtonGroup(
             selectedIndex = if (isLoginMode) 1 else 0,
             options = listOf(
@@ -495,125 +522,24 @@ private fun TokenAuthForm(
         AnimatedContent(
             targetState = isLoginMode,
             transitionSpec = { fadeIn(spring()).togetherWith(fadeOut(spring())) },
-            label = "tokenMode"
+            label = "tokenMode",
         ) { loginMode ->
             if (loginMode) {
-                // Login with existing token
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = tokenInput,
-                        onValueChange = { if (it.length <= 64) tokenInput = it },
-                        label = { Text(stringResource(R.string.st_Whisper_Auth_PasteToken)) },
-                        leadingIcon = { Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingIcon = {
-                            ToolzExpressiveIconButton(onClick = {
-                                haptic.click()
-                                clipboard.getText()?.text?.let { tokenInput = it.trim().take(64) }
-                            }) { Icon(Icons.Rounded.ContentPaste, "Paste") }
-                        },
-                        singleLine = true,
-                        shape = MediumExpressiveShape,
-                        modifier = Modifier.fillMaxWidth(),
-                        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
-                        supportingText = { Text("${tokenInput.length}/64") },
-                    )
-                    ToolzExpressiveButton(
-                        onClick = { haptic.success(); onLogin(tokenInput) },
-                        enabled = tokenInput.length == 64 && !isLoading,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                    ) {
-                        AnimatedContent(isLoading, transitionSpec = { fadeIn().togetherWith(fadeOut()) }, label = "loginBtn") { l ->
-                            if (l) ToolzLoadingIndicator(Modifier.size(24.dp))
-                            else Text(stringResource(R.string.st_Whisper_Auth_SignIn), fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+                TokenLoginForm(isLoading = isLoading, onLogin = onLogin, onNormalizeToken = onNormalizeToken)
             } else {
-                // Generate new token
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (generatedToken == null) {
-                        ToolzExpressiveButton(
-                            onClick = { haptic.success(); onGenerate() },
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                        ) {
-                            Icon(Icons.Rounded.Key, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.st_Whisper_Auth_GenerateMyToken), fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        // Token Display Card
-                        ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(R.string.st_Whisper_Auth_YourToken), fontWeight = FontWeight.Bold)
-                                    Spacer(Modifier.weight(1f))
-                                    ToolzExpressiveIconButton(onClick = {
-                                        haptic.success()
-                                        clipboard.setText(AnnotatedString(generatedToken))
-                                        isCopied = true
-                                    }) {
-                                        Icon(
-                                            if (isCopied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
-                                            "Copy",
-                                            tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                        )
-                                    }
-                                }
-                                Text(
-                                    generatedToken,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(SmallExpressiveShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
-                                        .padding(12.dp),
-                                )
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Warning,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Text(
-                                        stringResource(R.string.st_Whisper_Auth_SaveTokenWarning),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        }
-
-                        ToolzExpressiveButton(
-                            onClick = { haptic.success(); onRegister() },
-                            enabled = !isLoading,
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                        ) {
-                            AnimatedContent(isLoading, transitionSpec = { fadeIn().togetherWith(fadeOut()) }, label = "regBtn") { l ->
-                                if (l) ToolzLoadingIndicator(Modifier.size(24.dp))
-                                else Text(stringResource(R.string.st_Whisper_Auth_CreateAccount), fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
+                TokenRegisterForm(
+                    isLoading = isLoading,
+                    generatedToken = generatedToken,
+                    onGenerate = onGenerate,
+                    onRegister = onRegister,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun WhisperPrivacyNote() {
+private fun TokenExplainerCard() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -621,19 +547,229 @@ private fun WhisperPrivacyNote() {
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         Icon(
-            Icons.Rounded.Security,
+            Icons.Rounded.VerifiedUser,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(20.dp),
         )
-        Text(
-            stringResource(R.string.st_Whisper_Auth_Phase2Note),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                stringResource(R.string.st_Whisper_Auth_ZeroKnowledgeTitle),
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                stringResource(R.string.st_Whisper_Auth_ZeroKnowledgeDesc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun TokenLoginForm(
+    isLoading: Boolean,
+    onLogin: (String) -> Unit,
+    onNormalizeToken: (String) -> String,
+) {
+    var tokenInput by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val haptic = rememberToolzHapticFeedback()
+
+    // Normalize as the user types/pastes so whitespace or newlines from a paste never
+    // silently break validation.
+    val normalized = onNormalizeToken(tokenInput)
+    val isValidLength = normalized.length == 64
+    val hasInvalidChars = normalized.isNotEmpty() && normalized.any { it !in '0'..'9' && it !in 'a'..'f' }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { if (it.length <= 80) tokenInput = it },
+            label = { Text(stringResource(R.string.st_Whisper_Auth_PasteToken)) },
+            leadingIcon = { Icon(Icons.Rounded.Key, null) },
+            trailingIcon = {
+                ToolzExpressiveIconButton(onClick = {
+                    haptic.click()
+                    clipboard.getText()?.text?.let { tokenInput = it }
+                }) { Icon(Icons.Rounded.ContentPaste, stringResource(R.string.cd_Paste)) }
+            },
+            isError = hasInvalidChars,
+            singleLine = true,
+            shape = MediumExpressiveShape,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+            supportingText = {
+                Text(
+                    if (hasInvalidChars) {
+                        stringResource(R.string.st_Whisper_Auth_TokenInvalidChars)
+                    } else {
+                        "${normalized.length}/64"
+                    }
+                )
+            },
         )
+        ToolzExpressiveButton(
+            onClick = { haptic.success(); onLogin(normalized) },
+            enabled = isValidLength && !hasInvalidChars && !isLoading,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) {
+            AnimatedContent(isLoading, transitionSpec = { fadeIn().togetherWith(fadeOut()) }, label = "loginBtn") { l ->
+                if (l) ToolzLoadingIndicator(Modifier.size(24.dp))
+                else Text(stringResource(R.string.st_Whisper_Auth_SignIn), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun TokenRegisterForm(
+    isLoading: Boolean,
+    generatedToken: String?,
+    onGenerate: () -> Unit,
+    onRegister: (displayName: String) -> Unit,
+) {
+    var isCopied by remember { mutableStateOf(false) }
+    var hasSavedToken by remember { mutableStateOf(false) }
+    var displayName by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val haptic = rememberToolzHapticFeedback()
+    val nameFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isCopied) {
+        if (isCopied) hasSavedToken = true
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (generatedToken == null) {
+            ToolzExpressiveButton(
+                onClick = { haptic.success(); onGenerate() },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) {
+                Icon(Icons.Rounded.Key, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.st_Whisper_Auth_GenerateMyToken), fontWeight = FontWeight.Bold)
+            }
+        } else {
+            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.st_Whisper_Auth_YourToken),
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        ToolzExpressiveIconButton(onClick = {
+                            haptic.success()
+                            clipboard.setText(AnnotatedString(generatedToken))
+                            isCopied = true
+                        }) {
+                            Icon(
+                                if (isCopied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                                stringResource(R.string.cd_CopyToken),
+                                tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                    Text(
+                        generatedToken,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(SmallExpressiveShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(12.dp),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Rounded.WarningAmber,
+                            null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            stringResource(R.string.st_Whisper_Auth_SaveTokenWarning),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+
+            // Explicit confirmation gate — registration is blocked until the person has
+            // taken an action (copy) proving they've captured the only credential that
+            // will ever exist for this account. No recovery flow exists, so this gate
+            // matters more than it would for a normal password.
+            if (!hasSavedToken) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(SmallExpressiveShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(12.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Info,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Auth_CopyToContinue),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Auth_ChooseDisplayName)) },
+                    leadingIcon = { Icon(Icons.Rounded.Badge, null) },
+                    singleLine = true,
+                    shape = MediumExpressiveShape,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(nameFocusRequester),
+                )
+
+                LaunchedEffect(hasSavedToken) {
+                    if (hasSavedToken) nameFocusRequester.requestFocus()
+                }
+
+                ToolzExpressiveButton(
+                    onClick = { haptic.success(); onRegister(displayName.trim()) },
+                    enabled = !isLoading && displayName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                ) {
+                    AnimatedContent(isLoading, transitionSpec = { fadeIn().togetherWith(fadeOut()) }, label = "regBtn") { l ->
+                        if (l) ToolzLoadingIndicator(Modifier.size(24.dp))
+                        else Text(stringResource(R.string.st_Whisper_Auth_CreateAccount), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }
 

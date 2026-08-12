@@ -38,7 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
@@ -74,7 +74,7 @@ fun WhisperUserProfileScreen(
                 title = { Text(uiState.profile?.effectiveName ?: "", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
                     }
                 },
             )
@@ -85,6 +85,19 @@ fun WhisperUserProfileScreen(
         if (uiState.isLoading && uiState.profile == null) {
             Box(Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                 ToolzLoadingIndicator()
+            }
+        } else if (uiState.profile == null && !uiState.isLoading) {
+            // Profile not found
+            Box(Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Icon(Icons.Rounded.PersonOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                    Text(stringResource(R.string.st_Whisper_Profile_NotFound), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ToolzTonalExpressiveButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.cd_Back))
+                    }
+                }
             }
         } else {
             val profile = uiState.profile
@@ -126,39 +139,41 @@ fun WhisperUserProfileScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Privacy badge
-                            AssistChip(
-                                onClick = {},
-                                label = {
-                                    Text(
-                                        if (profile.isPrivate) stringResource(R.string.st_Whisper_Discover_PrivateProfile)
-                                        else stringResource(R.string.st_Whisper_Discover_PublicProfile)
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (profile.isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                            )
+                            // Privacy badge - a styled pill, not interactive
+                            Surface(
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(if (profile.isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
+                                        contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Text(if (profile.isPrivate) stringResource(R.string.st_Whisper_Discover_PrivateProfile) else stringResource(R.string.st_Whisper_Discover_PublicProfile),
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
 
-                            // E2EE Key badge
-                            AssistChip(
-                                onClick = {},
-                                label = {
-                                    Text(if (profile.publicKey != null) "E2EE Secured" else "Standard Auth")
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (profile.publicKey != null) Icons.Rounded.Key else Icons.Rounded.Shield,
-                                        contentDescription = null,
-                                        tint = if (profile.publicKey != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                },
-                            )
+                            // E2EE badge
+                            Surface(
+                                shape = MaterialTheme.shapes.extraLarge,
+                                color = if (profile.publicKey != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(if (profile.publicKey != null) Icons.Rounded.Key else Icons.Rounded.Shield,
+                                        contentDescription = null, modifier = Modifier.size(14.dp),
+                                        tint = if (profile.publicKey != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                                    Text(if (profile.publicKey != null) stringResource(R.string.st_Whisper_Profile_E2EEBadge) else "Standard Auth",
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                         }
                     }
 
@@ -245,7 +260,7 @@ fun WhisperUserProfileScreen(
                                     ) {
                                         Icon(Icons.Rounded.PersonRemove, null, Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Remove Friend", fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.st_Whisper_Profile_RemoveFriend), fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 else -> {}
