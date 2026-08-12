@@ -124,7 +124,16 @@ class WhisperRepository @Inject constructor(
         val rawMessages = db.from("messages")
             .select {
                 filter {
-                    or("and(sender_id.eq.$myId,receiver_id.eq.$otherUserId),and(sender_id.eq.$otherUserId,receiver_id.eq.$myId)")
+                    or {
+                        and {
+                            eq("sender_id", myId)
+                            eq("receiver_id", otherUserId)
+                        }
+                        and {
+                            eq("sender_id", otherUserId)
+                            eq("receiver_id", myId)
+                        }
+                    }
                     if (beforeCreatedAt != null) lt("created_at", beforeCreatedAt)
                 }
                 order("created_at", Order.DESCENDING)
@@ -163,7 +172,6 @@ class WhisperRepository @Inject constructor(
         val channel = supabase.channel("whisper-messages-$myId")
         val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
             table = "messages"
-            filter = "receiver_id=eq.$myId"  // server-side filter!
         }
         channel.subscribe()
         changes.collect { action ->
@@ -223,7 +231,10 @@ class WhisperRepository @Inject constructor(
             val allMessages = db.from("messages")
                 .select {
                     filter {
-                        or("sender_id.eq.$myId,receiver_id.eq.$myId")
+                        or {
+                            eq("sender_id", myId)
+                            eq("receiver_id", myId)
+                        }
                     }
                     order("created_at", Order.DESCENDING)
                     limit(200)

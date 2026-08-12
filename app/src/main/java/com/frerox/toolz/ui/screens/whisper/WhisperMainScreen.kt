@@ -824,6 +824,10 @@ fun WhisperEmptyState(
         Spacer(Modifier.height(16.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
+    }
+}
+
 /** Animated shimmer skeleton for a single conversation row while loading */
 @Composable
 private fun ConversationSkeleton() {
