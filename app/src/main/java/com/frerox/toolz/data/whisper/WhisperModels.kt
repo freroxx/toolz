@@ -28,7 +28,6 @@ import kotlinx.serialization.Serializable
 data class WhisperProfile(
     val id: String = "",
     val username: String = "",
-    val email: String? = null,
     @SerialName("display_name") val displayName: String? = null,
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
@@ -47,7 +46,6 @@ data class WhisperProfile(
 @Serializable
 data class WhisperProfileUpdate(
     val username: String? = null,
-    val email: String? = null,
     @SerialName("display_name") val displayName: String? = null,
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
@@ -60,7 +58,6 @@ data class WhisperProfileUpdate(
 data class WhisperProfileInsert(
     val id: String,
     val username: String,
-    val email: String? = null,
     @SerialName("display_name") val displayName: String? = null,
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,

@@ -55,21 +55,18 @@ class WhisperRepository @Inject constructor(
             .firstOrNull()
 
         val pubKey = crypto.getPublicKeyBase64()
-        val authUser = supabase.auth.currentUserOrNull()
-        val email = authUser?.email
 
         if (existing == null) {
             val defaultUsername = "user_${myId.take(8)}"
-            val insertData = WhisperProfileInsert(id = myId, username = defaultUsername, email = email, publicKey = pubKey)
+            val insertData = WhisperProfileInsert(id = myId, username = defaultUsername, publicKey = pubKey)
             db.from("profiles").insert(insertData) { defaultToNull = false }
-            WhisperProfile(id = myId, username = defaultUsername, email = email, publicKey = pubKey)
+            WhisperProfile(id = myId, username = defaultUsername, publicKey = pubKey)
         } else {
             val needsKey = existing.publicKey == null && pubKey != null
-            val needsEmail = existing.email == null && email != null
-            if (needsKey || needsEmail) {
-                val update = WhisperProfileUpdate(publicKey = pubKey.takeIf { needsKey }, email = email.takeIf { needsEmail })
+            if (needsKey) {
+                val update = WhisperProfileUpdate(publicKey = pubKey)
                 db.from("profiles").update(update) { filter { WhisperProfile::id eq myId } }
-                existing.copy(publicKey = pubKey ?: existing.publicKey, email = email ?: existing.email)
+                existing.copy(publicKey = pubKey)
             } else existing
         }
     }
