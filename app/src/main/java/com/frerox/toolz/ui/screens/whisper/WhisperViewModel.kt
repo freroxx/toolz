@@ -25,6 +25,7 @@ class WhisperViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
     private val notificationManager: WhisperNotificationManager,
+    private val mutePrefs: WhisperMutePreferences,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WhisperUiState())
@@ -42,11 +43,26 @@ class WhisperViewModel @Inject constructor(
 
     private var messagesJob: Job? = null
     private var friendsJob: Job? = null
+    private var muteJob: Job? = null
 
     init {
+        observeMutes()
         loadAll()
         subscribeToMessages()
         subscribeToFriends()
+    }
+
+    private fun observeMutes() {
+        muteJob = viewModelScope.launch {
+            mutePrefs.mutedUsers.collect { mutedSet ->
+                _uiState.update { state ->
+                    val updatedConvos = state.conversations.map { convo ->
+                        convo.copy(isMuted = convo.otherUser.id in mutedSet)
+                    }
+                    state.copy(mutedUserIds = mutedSet, conversations = updatedConvos)
+                }
+            }
+        }
     }
 
     fun loadAll(isRefresh: Boolean = false) {
@@ -56,23 +72,34 @@ class WhisperViewModel @Inject constructor(
 
             coroutineScope {
                 val profileDeferred = async {
-                    repository.getMyProfile()
+                    repository.getMyProfile(forceRefresh = isRefresh)
                         .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
                         .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getMyProfile")) } }
                 }
-                val convosDeferred = async {
-                    repository.getConversations()
-                        .onSuccess { convos -> _uiState.update { it.copy(conversations = convos) } }
-                        .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getConversations")) } }
-                }
+                val convosDeferred = async { loadConversationsInternal() }
                 val friendsDeferred = async { loadFriendsInternal() }
+                val recommendedDeferred = async { loadRecommendationsInternal() }
+
                 profileDeferred.await()
                 convosDeferred.await()
                 friendsDeferred.await()
+                recommendedDeferred.await()
             }
 
             _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
         }
+    }
+
+    private suspend fun loadConversationsInternal() {
+        repository.getConversations()
+            .onSuccess { convos ->
+                val muted = mutePrefs.mutedUsers.value
+                val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
+                _uiState.update { it.copy(conversations = mapped) }
+            }
+            .onFailure { err ->
+                _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getConversations")) }
+            }
     }
 
     private suspend fun loadFriendsInternal() {
@@ -84,8 +111,16 @@ class WhisperViewModel @Inject constructor(
             .onSuccess { pending -> _uiState.update { it.copy(pendingOutgoing = pending) } }
     }
 
+    private suspend fun loadRecommendationsInternal() {
+        repository.getFriendsOfFriends()
+            .onSuccess { recommended -> _uiState.update { it.copy(recommendedProfiles = recommended) } }
+    }
+
     fun searchProfiles(query: String) {
-        if (query.isBlank()) { _uiState.update { it.copy(searchResults = emptyList()) }; return }
+        if (query.isBlank()) {
+            _uiState.update { it.copy(searchResults = emptyList()) }
+            return
+        }
         viewModelScope.launch {
             repository.searchProfiles(query)
                 .onSuccess { results -> _uiState.update { it.copy(searchResults = results) } }
@@ -96,7 +131,7 @@ class WhisperViewModel @Inject constructor(
     fun sendFriendRequest(targetUserId: String) {
         viewModelScope.launch {
             repository.sendFriendRequest(targetUserId)
-                .onSuccess { loadAll() }
+                .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
         }
     }
@@ -104,7 +139,7 @@ class WhisperViewModel @Inject constructor(
     fun acceptFriendRequest(friendshipId: String) {
         viewModelScope.launch {
             repository.acceptFriendRequest(friendshipId)
-                .onSuccess { loadAll() }
+                .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "acceptFriendRequest")) } }
         }
     }
@@ -112,7 +147,7 @@ class WhisperViewModel @Inject constructor(
     fun declineFriendRequest(friendshipId: String) {
         viewModelScope.launch {
             repository.deleteFriendship(friendshipId)
-                .onSuccess { loadAll() }
+                .onSuccess { loadFriendsInternal() }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "declineFriendRequest")) } }
         }
     }
@@ -123,11 +158,19 @@ class WhisperViewModel @Inject constructor(
                 .onSuccess { (_, friendship) ->
                     if (friendship != null) {
                         repository.deleteFriendship(friendship.id)
-                            .onSuccess { loadAll() }
+                            .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
                             .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "unfriend")) } }
                     }
                 }
                 .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "getFriendshipStatus")) } }
+        }
+    }
+
+    fun toggleMuteUser(userId: String) {
+        if (mutePrefs.isMuted(userId)) {
+            mutePrefs.unmuteUser(userId)
+        } else {
+            mutePrefs.muteUser(userId)
         }
     }
 
@@ -139,20 +182,23 @@ class WhisperViewModel @Inject constructor(
                 isPrivate = isPrivate,
             )
             repository.updateProfile(update)
-                .onSuccess { loadAll() }
+                .onSuccess {
+                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                        _uiState.update { it.copy(currentProfile = p) }
+                    }
+                }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "updateProfile")) } }
         }
     }
 
     fun uploadAvatar(imageBytes: ByteArray, mimeType: String) {
         viewModelScope.launch {
-            // Downscale to ~1024px max and 80% quality to stay well within Supabase limits
             val optimizedBytes = com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
-            
             repository.uploadAvatar(optimizedBytes, mimeType)
                 .onSuccess { url ->
-                    repository.updateProfile(WhisperProfileUpdate(avatarUrl = url))
-                        .onSuccess { loadAll() }
+                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                        _uiState.update { it.copy(currentProfile = p) }
+                    }
                 }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "uploadAvatar")) } }
         }
@@ -161,7 +207,11 @@ class WhisperViewModel @Inject constructor(
     fun deleteAvatar() {
         viewModelScope.launch {
             repository.deleteAvatar()
-                .onSuccess { loadAll() }
+                .onSuccess {
+                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                        _uiState.update { it.copy(currentProfile = p) }
+                    }
+                }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "deleteAvatar")) } }
         }
     }
@@ -176,19 +226,20 @@ class WhisperViewModel @Inject constructor(
 
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return
-        
+
         messagesJob = viewModelScope.launch {
             try {
                 repository.subscribeToIncomingMessages(myId).collect { msg ->
-                    loadAll()
-                    // Send in-process notification if message is from another user
-                    val senderProfile = repository.getProfile(msg.senderId).getOrNull()
-                    val senderName = senderProfile?.effectiveName ?: "Someone"
-                    notificationManager.showMessageNotification(
-                        senderId = msg.senderId,
-                        senderName = senderName,
-                        preview = msg.content
-                    )
+                    loadConversationsInternal()
+                    if (msg.senderId != myId) {
+                        val senderProfile = repository.getProfile(msg.senderId).getOrNull()
+                        val senderName = senderProfile?.effectiveName ?: "Someone"
+                        notificationManager.showMessageNotification(
+                            senderId = msg.senderId,
+                            senderName = senderName,
+                            preview = msg.content
+                        )
+                    }
                 }
             } catch (_: Exception) { }
         }
@@ -198,7 +249,8 @@ class WhisperViewModel @Inject constructor(
         friendsJob = viewModelScope.launch {
             try {
                 repository.subscribeToFriendUpdates().collect { friendship ->
-                    loadAll()
+                    loadFriendsInternal()
+                    loadRecommendationsInternal()
                     val myId = authManager.currentUserId
                     if (friendship.userB == myId && friendship.status == "pending") {
                         val senderProfile = repository.getProfile(friendship.userA).getOrNull()
@@ -214,5 +266,6 @@ class WhisperViewModel @Inject constructor(
         super.onCleared()
         messagesJob?.cancel()
         friendsJob?.cancel()
+        muteJob?.cancel()
     }
 }

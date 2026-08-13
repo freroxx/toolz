@@ -39,13 +39,11 @@ import javax.inject.Singleton
  *
  * Posts a system notification when a new message arrives and the app is in the background.
  * Notifications are grouped by sender conversation (one notification per chat thread).
- *
- * NOTE: This is an in-process notification system. Notifications only fire when the
- * app process is alive. True background delivery requires FCM + Edge Function setup.
  */
 @Singleton
 class WhisperNotificationManager @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val mutePrefs: WhisperMutePreferences,
 ) {
     companion object {
         const val CHANNEL_ID = "whisper_messages"
@@ -57,7 +55,7 @@ class WhisperNotificationManager @Inject constructor(
 
     private val notifManager = NotificationManagerCompat.from(context)
     private var isInForeground = true
-    var currentChatId: String? = null // Track which chat the user is currently viewing
+    var currentChatId: String? = null
 
     init {
         createChannel()
@@ -85,16 +83,19 @@ class WhisperNotificationManager @Inject constructor(
 
     /**
      * Shows a message notification for [senderId].
-     * Uses the notification ID derived from the senderId so it is updated (not duplicated)
-     * for each new message from the same sender.
-     *
-     * Only shows when the app is NOT in the foreground.
+     * Suppressed if user is in that active chat or if user is muted.
      */
     fun showMessageNotification(
         senderId: String,
         senderName: String,
         preview: String,
     ) {
+        // Skip if muted
+        if (mutePrefs.isMuted(senderId)) {
+            Log.d(TAG, "User $senderName ($senderId) is muted — skipping notification")
+            return
+        }
+
         // Skip notification if the app is in foreground AND the user is already in that specific chat
         if (isInForeground && currentChatId == senderId) {
             Log.d(TAG, "User in chat with $senderName — skipping notification")
@@ -103,7 +104,6 @@ class WhisperNotificationManager @Inject constructor(
 
         val notifId = senderNotifId(senderId)
 
-        // Deep link intent → open WhisperChat for this sender
         val deepLinkIntent = Intent(context, MainActivity::class.java).apply {
             action = "com.frerox.toolz.OPEN_WHISPER_CHAT"
             putExtra("otherUserId", senderId)
@@ -128,7 +128,6 @@ class WhisperNotificationManager @Inject constructor(
             .build()
 
         try {
-            Log.d(TAG, "Posting message notification for $senderName (ID: $notifId)")
             notifManager.notify(notifId, notification)
         } catch (e: SecurityException) {
             Log.e(TAG, "Notification permission not granted: ${e.message}")
@@ -149,7 +148,6 @@ class WhisperNotificationManager @Inject constructor(
             .setAutoCancel(true)
             .build()
         try {
-            Log.d(TAG, "Posting friend request notification for $fromName")
             notifManager.notify(notifId, notification)
         } catch (e: SecurityException) {
             Log.e(TAG, "Notification permission not granted: ${e.message}")
@@ -158,7 +156,7 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
-    /** Call when the user opens a chat to dismiss its notification. */
+    /** Dismiss notification when user opens chat */
     fun cancelMessageNotification(senderId: String) {
         notifManager.cancel(senderNotifId(senderId))
     }

@@ -64,7 +64,8 @@ class WhisperAuthManager @Inject constructor(
         val cleanToken = normalizeToken(anonToken.token)
         require(isValidToken(cleanToken)) { "Token must be a valid 64-character hex string." }
         val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
-        val virtualPassword = sha512(cleanToken)
+        // Bcrypt max password length is 72 bytes. Using 64-char hex string derived from SHA-256
+        val virtualPassword = sha256("pwd_" + cleanToken)
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
         supabase.auth.signUpWith(Email) {
@@ -81,7 +82,7 @@ class WhisperAuthManager @Inject constructor(
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
         val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
-        val virtualPassword = sha512(cleanToken)
+        val virtualPassword = sha256("pwd_" + cleanToken)
         supabase.auth.signInWith(Email) {
             this.email = virtualEmail
             this.password = virtualPassword
@@ -98,6 +99,5 @@ class WhisperAuthManager @Inject constructor(
     suspend fun signOut(): Result<Unit> = runCatching { supabase.auth.signOut() }
 
     private fun sha256(input: String): String = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
-    private fun sha512(input: String): String = MessageDigest.getInstance("SHA-512").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
 }

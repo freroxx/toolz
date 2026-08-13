@@ -55,38 +55,55 @@ class WhisperRepository @Inject constructor(
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
     private val realtime get() = supabase.realtime
-    private val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
+    val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
     private val profileCache = mutableMapOf<String, WhisperProfile>()
 
     // PROFILES
-    suspend fun getMyProfile(): Result<WhisperProfile> = runCatching {
+    suspend fun getMyProfile(forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
+        if (!forceRefresh && profileCache.containsKey(myId)) {
+            val cached = profileCache[myId]
+            if (cached?.publicKey != null) return Result.success(cached)
+        }
+
         val existing = db.from("profiles")
-            .select { filter { WhisperProfile::id eq myId } }
+            .select { filter { eq("id", myId) } }
             .decodeList<WhisperProfile>()
             .firstOrNull()
 
         val pubKey = crypto.getPublicKeyBase64()
 
-        if (existing == null) {
+        val profile = if (existing == null) {
             val defaultUsername = "user_${myId.take(8)}"
-            val insertData = WhisperProfileInsert(id = myId, username = defaultUsername, publicKey = pubKey)
+            val insertData = WhisperProfileInsert(
+                id = myId,
+                username = defaultUsername,
+                isPrivate = false,
+                publicKey = pubKey
+            )
             db.from("profiles").insert(insertData) { defaultToNull = false }
-            WhisperProfile(id = myId, username = defaultUsername, publicKey = pubKey)
+            WhisperProfile(id = myId, username = defaultUsername, isPrivate = false, publicKey = pubKey)
         } else {
-            val needsKey = existing.publicKey == null && pubKey != null
+            val needsKey = existing.publicKey.isNullOrBlank() && pubKey != null
             if (needsKey) {
                 val update = WhisperProfileUpdate(publicKey = pubKey)
-                db.from("profiles").update(update) { filter { WhisperProfile::id eq myId } }
+                db.from("profiles").update(update) { filter { eq("id", myId) } }
                 existing.copy(publicKey = pubKey)
             } else existing
         }
+        profileCache[myId] = profile
+        profile
     }
 
-    suspend fun getProfile(userId: String): Result<WhisperProfile> = runCatching {
-        profileCache[userId]?.let { return Result.success(it) }
+    suspend fun getProfile(userId: String, forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
+        if (!forceRefresh && profileCache.containsKey(userId)) {
+            val cached = profileCache[userId]
+            if (cached != null && (!cached.publicKey.isNullOrBlank() || userId == myId)) {
+                return Result.success(cached)
+            }
+        }
         val p = db.from("profiles")
-            .select { filter { WhisperProfile::id eq userId } }
+            .select { filter { eq("id", userId) } }
             .decodeSingle<WhisperProfile>()
         profileCache[userId] = p
         p
@@ -118,27 +135,36 @@ class WhisperRepository @Inject constructor(
     suspend fun updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {
         val pubKey = crypto.getPublicKeyBase64()
         val updateWithKey = if (update.publicKey == null && pubKey != null) update.copy(publicKey = pubKey) else update
-        db.from("profiles").update(updateWithKey) { filter { WhisperProfile::id eq myId } }
+        db.from("profiles").update(updateWithKey) { filter { eq("id", myId) } }
+        profileCache.remove(myId)
     }
 
     suspend fun uploadAvatar(imageBytes: ByteArray, mimeType: String): Result<String> = runCatching {
-        val ext = when (mimeType) { "image/jpeg" -> "jpg"; "image/png" -> "png"; "image/webp" -> "webp"; else -> "jpg" }
+        val ext = when (mimeType) {
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            else -> "jpg"
+        }
         val path = "$myId/avatar.$ext"
         store.from("whisper-avatars").upload(path, imageBytes) { upsert = true }
-        store.from("whisper-avatars").publicUrl(path)
+        val publicUrl = store.from("whisper-avatars").publicUrl(path)
+        val urlWithCacheBuster = "$publicUrl?t=${System.currentTimeMillis()}"
+        updateProfile(WhisperProfileUpdate(avatarUrl = urlWithCacheBuster))
+        profileCache.remove(myId)
+        urlWithCacheBuster
     }
 
     suspend fun deleteAvatar(): Result<Unit> = runCatching {
-        // Explicitly update to null. Postgrest update takes a map or serializable.
-        // To ensure null is sent, we can use a map.
-        db.from("profiles").update(mapOf("avatar_url" to null)) {
-            filter { WhisperProfile::id eq myId }
+        db.from("profiles").update(mapOf("avatar_url" to null as String?)) {
+            filter { eq("id", myId) }
         }
+        profileCache.remove(myId)
     }
 
     // MESSAGES
-    suspend fun getMessages(otherUserId: String, limit: Int = 50, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
-        val partnerProfile = getProfile(otherUserId).getOrNull()
+    suspend fun getMessages(otherUserId: String, limit: Int = 100, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
+        val partnerProfile = getProfile(otherUserId, forceRefresh = true).getOrNull()
         val partnerPubKey = partnerProfile?.publicKey
 
         val rawMessages = db.from("messages")
@@ -170,7 +196,7 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun sendMessage(receiverId: String, content: String): Result<WhisperMessage> = runCatching {
-        val receiverProfile = getProfile(receiverId).getOrNull()
+        val receiverProfile = getProfile(receiverId, forceRefresh = true).getOrNull()
         val receiverPubKey = receiverProfile?.publicKey
         val encryptedPair = receiverPubKey?.let { key -> crypto.encryptMessage(content, key) }
         val insert = if (encryptedPair != null) {
@@ -197,7 +223,6 @@ class WhisperRepository @Inject constructor(
 
         val channelName = "whisper-messages-$userId"
         val channel = supabase.channel(channelName)
-        android.util.Log.d("WhisperRepo", "Subscribing to $channelName")
 
         val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
             table = "messages"
@@ -207,18 +232,15 @@ class WhisperRepository @Inject constructor(
             changes.collect { action ->
                 try {
                     val msg = action.decodeRecord<WhisperMessage>()
-                    android.util.Log.d("WhisperRepo", "Incoming realtime msg: ${msg.id} sender=${msg.senderId}")
-                    
-                    if (msg.receiverId == userId) {
-                        // Attempt decryption
-                        val decrypted = if (msg.contentIv != null) {
-                            val senderProfile = runCatching { getProfile(msg.senderId).getOrNull() }.getOrNull()
-                            val senderKey = senderProfile?.publicKey
-                            if (senderKey != null) {
-                                crypto.decryptMessage(msg.content, msg.contentIv, senderKey)
-                            } else msg.content
+                    if (msg.receiverId == userId || msg.senderId == userId) {
+                        val otherId = if (msg.senderId == userId) msg.receiverId else msg.senderId
+                        val otherProfile = runCatching { getProfile(otherId).getOrNull() }.getOrNull()
+                        val otherKey = otherProfile?.publicKey
+
+                        val decrypted = if (msg.contentIv != null && otherKey != null) {
+                            crypto.decryptMessage(msg.content, msg.contentIv, otherKey)
                         } else msg.content
-                        
+
                         trySend(msg.copy(content = decrypted))
                     }
                 } catch (e: Exception) {
@@ -230,17 +252,58 @@ class WhisperRepository @Inject constructor(
         channel.subscribe()
 
         awaitClose {
-            android.util.Log.d("WhisperRepo", "Closing subscription to $channelName")
             job.cancel()
-            // Launch cleanup as it's a suspend function
             launch {
                 try { realtime.removeChannel(channel) } catch (_: Exception) {}
             }
         }
     }
 
+    // CLEAR CHAT
+    suspend fun clearMessagesForRange(
+        otherUserId: String,
+        fromIso: String? = null,
+        toIso: String? = null
+    ): Result<List<WhisperMessage>> = runCatching {
+        // First, fetch messages sent by me in this range so we can support undo
+        val toDelete = db.from("messages").select {
+            filter {
+                eq("sender_id", myId)
+                eq("receiver_id", otherUserId)
+                if (fromIso != null) gte("created_at", fromIso)
+                if (toIso != null) lte("created_at", toIso)
+            }
+        }.decodeList<WhisperMessage>()
+
+        if (toDelete.isNotEmpty()) {
+            db.from("messages").delete {
+                filter {
+                    eq("sender_id", myId)
+                    eq("receiver_id", otherUserId)
+                    if (fromIso != null) gte("created_at", fromIso)
+                    if (toIso != null) lte("created_at", toIso)
+                }
+            }
+        }
+        toDelete
+    }
+
+    suspend fun restoreMessages(messages: List<WhisperMessage>): Result<Unit> = runCatching {
+        if (messages.isEmpty()) return@runCatching
+        val inserts = messages.map { msg ->
+            WhisperMessageInsert(
+                senderId = msg.senderId,
+                receiverId = msg.receiverId,
+                content = msg.content,
+                contentIv = msg.contentIv,
+                isRead = msg.isRead,
+                createdAt = msg.createdAt
+            )
+        }
+        db.from("messages").insert(inserts)
+    }
+
     suspend fun getConversations(): Result<List<WhisperConversation>> = runCatching {
-        // Try RPC first for O(n partners) efficiency
         @Serializable
         data class ConvRow(
             @SerialName("partner_id") val partnerId: String = "",
@@ -249,12 +312,12 @@ class WhisperRepository @Inject constructor(
             @SerialName("last_created_at") val lastCreatedAt: String = "",
             @SerialName("unread_count") val unreadCount: Long = 0,
         )
-        
+
         val rows = runCatching {
             db.rpc("get_conversations", buildJsonObject { put("p_user_id", myId) })
                 .decodeList<ConvRow>()
         }.getOrNull()
-        
+
         if (rows != null) {
             val conversations = mutableListOf<WhisperConversation>()
             for (row in rows) {
@@ -274,7 +337,6 @@ class WhisperRepository @Inject constructor(
             }
             conversations
         } else {
-            // Fallback: limited query when RPC not available
             val allMessages = db.from("messages")
                 .select {
                     filter {
@@ -287,7 +349,7 @@ class WhisperRepository @Inject constructor(
                     limit(200)
                 }
                 .decodeList<WhisperMessage>()
-            
+
             val grouped = allMessages.groupBy { msg ->
                 if (msg.senderId == myId) msg.receiverId else msg.senderId
             }
@@ -350,18 +412,6 @@ class WhisperRepository @Inject constructor(
         Pair(record?.friendStatus() ?: FriendStatus.NONE, record)
     }
 
-    fun subscribeToFriendRequests(): Flow<WhisperFriendship> = flow {
-        val channel = supabase.channel("whisper-friends-$myId")
-        val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") { table = "friends" }
-        channel.subscribe()
-        changes.collect { action ->
-            try {
-                val friendship = action.decodeRecord<WhisperFriendship>()
-                if (friendship.userB == myId) emit(friendship)
-            } catch (_: Exception) { }
-        }
-    }
-
     fun subscribeToFriendUpdates(): Flow<WhisperFriendship> = flow {
         val channel = supabase.channel("whisper-friends-all-$myId")
         val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = "friends" }
@@ -378,6 +428,127 @@ class WhisperRepository @Inject constructor(
                 }
             } catch (_: Exception) { }
         }
+    }
+
+    // BLOCKING
+    suspend fun blockUser(targetUserId: String): Result<Unit> = runCatching {
+        // First try dedicated blocks table, fallback to friends table blocked status
+        val insertResult = runCatching {
+            db.from("whisper_blocks").insert(WhisperBlockInsert(blockerId = myId, blockedId = targetUserId))
+        }
+        if (insertResult.isFailure) {
+            // Fallback: update friendship status to blocked
+            val statusResult = getFriendshipStatus(targetUserId).getOrNull()
+            val existing = statusResult?.second
+            if (existing != null) {
+                db.from("friends").update({ set("status", "blocked") }) { filter { eq("id", existing.id) } }
+            } else {
+                db.from("friends").insert(WhisperFriendship(userA = myId, userB = targetUserId, status = "blocked"))
+            }
+        }
+    }
+
+    suspend fun unblockUser(targetUserId: String): Result<Unit> = runCatching {
+        runCatching {
+            db.from("whisper_blocks").delete { filter { eq("blocker_id", myId); eq("blocked_id", targetUserId) } }
+        }
+        // Also cleanup friends blocked status
+        val statusResult = getFriendshipStatus(targetUserId).getOrNull()
+        val existing = statusResult?.second
+        if (existing != null && existing.status == "blocked") {
+            deleteFriendship(existing.id)
+        }
+    }
+
+    suspend fun getBlockStatus(otherUserId: String): Result<Pair<Boolean, Boolean>> = runCatching {
+        var blockedByMe = false
+        var blockedByOther = false
+
+        // Check blocks table
+        val blocks = runCatching {
+            db.from("whisper_blocks").select {
+                filter {
+                    or {
+                        and { eq("blocker_id", myId); eq("blocked_id", otherUserId) }
+                        and { eq("blocker_id", otherUserId); eq("blocked_id", myId) }
+                    }
+                }
+            }.decodeList<WhisperBlock>()
+        }.getOrNull() ?: emptyList()
+
+        for (b in blocks) {
+            if (b.blockerId == myId) blockedByMe = true
+            if (b.blockerId == otherUserId) blockedByOther = true
+        }
+
+        // Check friends table as fallback
+        val friendship = getFriendshipStatus(otherUserId).getOrNull()?.second
+        if (friendship?.status == "blocked") {
+            if (friendship.userA == myId) blockedByMe = true
+            else blockedByOther = true
+        }
+
+        Pair(blockedByMe, blockedByOther)
+    }
+
+    // FRIENDS OF FRIENDS (RECOMMENDED PROFILES)
+    suspend fun getFriendsOfFriends(): Result<List<WhisperProfile>> = runCatching {
+        // 1. Get my current friends
+        val myFriends = getFriends().getOrNull() ?: emptyList()
+        val myFriendIds = myFriends.map { it.id }.toSet() + myId
+
+        if (myFriends.isEmpty()) {
+            // If no friends, return some public profiles as recommendations
+            return@runCatching db.from("profiles")
+                .select {
+                    filter {
+                        eq("is_private", false)
+                        neq("id", myId)
+                    }
+                    limit(15)
+                }
+                .decodeList<WhisperProfile>()
+        }
+
+        // 2. Query friendships involving my friends
+        val candidateFriendships = db.from("friends").select {
+            filter {
+                eq("status", "accepted")
+            }
+            limit(100)
+        }.decodeList<WhisperFriendship>()
+
+        val candidateUserIds = mutableSetOf<String>()
+        for (f in candidateFriendships) {
+            if (f.userA in myFriendIds && f.userB !in myFriendIds) {
+                candidateUserIds.add(f.userB)
+            } else if (f.userB in myFriendIds && f.userA !in myFriendIds) {
+                candidateUserIds.add(f.userA)
+            }
+        }
+
+        if (candidateUserIds.isEmpty()) {
+            // Fallback to general public profiles
+            return@runCatching db.from("profiles")
+                .select {
+                    filter {
+                        eq("is_private", false)
+                        neq("id", myId)
+                    }
+                    limit(15)
+                }
+                .decodeList<WhisperProfile>()
+                .filter { it.id !in myFriendIds }
+        }
+
+        val recommended = mutableListOf<WhisperProfile>()
+        for (cId in candidateUserIds.take(15)) {
+            val p = getProfile(cId).getOrNull()
+            if (p != null && !p.isPrivate && p.id != myId) {
+                recommended.add(p)
+            }
+        }
+        recommended
     }
 
     // TYPING INDICATORS
@@ -414,5 +585,3 @@ class WhisperRepository @Inject constructor(
         }
     }
 }
-
-

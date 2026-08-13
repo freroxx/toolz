@@ -26,11 +26,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -64,8 +67,8 @@ import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.launch
 
 /**
- * The main Whisper hub screen with 4 bottom-nav tabs:
- * Chats · Friends · Discover · Profile
+ * The main Whisper hub screen with 3 bottom-nav tabs:
+ * Chats (Merged Chats & Friends) · Discover · Profile
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -81,17 +84,14 @@ fun WhisperMainScreen(
     val toastState = rememberWhisperToastState()
     val scope = rememberCoroutineScope()
 
-    val pagerState = rememberPagerState(initialPage = 0) { 4 }
+    val pagerState = rememberPagerState(initialPage = 0) { 3 }
 
-    // Automatic logout navigation: reactive session observation fixes the "stuck" UI
     LaunchedEffect(isAuthenticated) {
         if (isAuthenticated == false) {
             onLoggedOut()
         }
     }
 
-    // Auth Guard: If not yet determined or definitely false, show a loading placeholder
-    // instead of flashing the main screen content.
     if (isAuthenticated == null) {
         Box(Modifier.fillMaxSize().toolzBackground(), contentAlignment = Alignment.Center) {
             ToolzLoadingIndicator()
@@ -99,12 +99,10 @@ fun WhisperMainScreen(
         return
     }
 
-    var selectedTab by remember { mutableIntStateOf(0) }
     var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
     var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
     var showAvatarOptions by remember { mutableStateOf(false) }
 
-    // Show errors using redesigned Expressive Toast
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
             toastState.show(it, WhisperToastType.ERROR)
@@ -114,7 +112,6 @@ fun WhisperMainScreen(
 
     val tabs = listOf(
         Triple(stringResource(R.string.st_Whisper_Tab_Chats), Icons.AutoMirrored.Rounded.Chat, Icons.AutoMirrored.Rounded.Chat),
-        Triple(stringResource(R.string.st_Whisper_Tab_Friends), Icons.Rounded.Group, Icons.Rounded.Group),
         Triple(stringResource(R.string.st_Whisper_Tab_Discover), Icons.Rounded.Explore, Icons.Rounded.Explore),
         Triple(stringResource(R.string.st_Whisper_Tab_Profile), Icons.Rounded.Person, Icons.Rounded.Person),
     )
@@ -128,7 +125,7 @@ fun WhisperMainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Black)
                         }
                     },
@@ -145,10 +142,10 @@ fun WhisperMainScreen(
                 ExpressiveNavigationBar {
                     tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
                         val unread = if (index == 0) uiState.conversations.sumOf { it.unreadCount } else 0
-                        val pendingCount = if (index == 1) uiState.pendingIncoming.size else 0
+                        val pendingCount = if (index == 0) uiState.pendingIncoming.size else 0
                         ExpressiveNavigationBarItem(
                             selected = pagerState.currentPage == index,
-                            onClick = { 
+                            onClick = {
                                 haptic.click()
                                 scope.launch { pagerState.animateScrollToPage(index) }
                             },
@@ -179,13 +176,29 @@ fun WhisperMainScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = true, // Allow swiping
+                    userScrollEnabled = true,
                 ) { page ->
                     when (page) {
-                        0 -> ChatsTab(uiState, onNavigateToChat, onLongClickConvo = { selectedConvoForOptions = it })
-                        1 -> FriendsTab(uiState, viewModel, onNavigateToChat, onLongClickFriend = { selectedFriendForOptions = it })
-                        2 -> DiscoverTab(uiState, viewModel, onNavigateToChat, onNavigateToProfile)
-                        3 -> ProfileTab(uiState, viewModel, onLoggedOut, onShowAvatarOptions = { showAvatarOptions = true })
+                        0 -> MergedChatsAndFriendsTab(
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onNavigateToChat = onNavigateToChat,
+                            onNavigateToProfile = onNavigateToProfile,
+                            onLongClickConvo = { selectedConvoForOptions = it },
+                            onLongClickFriend = { selectedFriendForOptions = it }
+                        )
+                        1 -> DiscoverTab(
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onNavigateToChat = onNavigateToChat,
+                            onNavigateToProfile = onNavigateToProfile
+                        )
+                        2 -> ProfileTab(
+                            uiState = uiState,
+                            viewModel = viewModel,
+                            onLoggedOut = onLoggedOut,
+                            onShowAvatarOptions = { showAvatarOptions = true }
+                        )
                     }
                 }
             }
@@ -216,6 +229,7 @@ fun WhisperMainScreen(
                     haptic.click()
                     viewModel.deleteAvatar()
                     showAvatarOptions = false
+                    toastState.show("Profile photo removed", WhisperToastType.INFO)
                 }
             )
         }
@@ -339,67 +353,42 @@ fun WhisperMainScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("View Profile")
                 }
-            }
-        }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AvatarOptionsSheet(
-    profile: WhisperProfile,
-    onDismiss: () -> Unit,
-    onChoosePhoto: () -> Unit,
-    onDeletePhoto: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-
-            ToolzTonalExpressiveButton(
-                onClick = onChoosePhoto,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Choose from Gallery")
-            }
-
-            if (profile.avatarUrl != null) {
                 ToolzOutlinedExpressiveButton(
-                    onClick = onDeletePhoto,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    onClick = {
+                        val uId = convo.otherUser.id
+                        selectedConvoForOptions = null
+                        viewModel.toggleMuteUser(uId)
+                        toastState.show(if (convo.isMuted) "Unmuted notifications" else "Muted notifications", WhisperToastType.INFO)
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                    Icon(if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Remove Photo")
+                    Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications")
                 }
             }
-
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-// CHATS TAB
+// MERGED CHATS + FRIENDS TAB
 // ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatsTab(
+private fun MergedChatsAndFriendsTab(
     uiState: WhisperUiState,
+    viewModel: WhisperViewModel,
     onNavigateToChat: (String) -> Unit,
+    onNavigateToProfile: (String) -> Unit,
     onLongClickConvo: (WhisperConversation) -> Unit,
+    onLongClickFriend: (WhisperProfile) -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
 
-    if (uiState.isLoading && uiState.conversations.isEmpty()) {
+    if (uiState.isLoading && uiState.conversations.isEmpty() && uiState.friends.isEmpty()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
@@ -410,22 +399,75 @@ private fun ChatsTab(
         return
     }
 
-    if (uiState.conversations.isEmpty()) {
+    if (uiState.conversations.isEmpty() && uiState.friends.isEmpty() && uiState.pendingIncoming.isEmpty()) {
         WhisperEmptyState(
             icon = Icons.AutoMirrored.Rounded.Chat,
             title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
-            subtitle = stringResource(R.string.st_Whisper_Chats_EmptySubtitle),
+            subtitle = "Search for users in Discover to start end-to-end encrypted chats.",
         )
         return
     }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        itemsIndexed(uiState.conversations, key = { _, c -> c.otherUser.id }) { index, convo ->
-            StaggeredEntrance(index = index) {
+        // Incoming Friend Requests Banner
+        if (uiState.pendingIncoming.isNotEmpty()) {
+            item {
+                SectionHeader("Friend Requests (${uiState.pendingIncoming.size})")
+            }
+            items(uiState.pendingIncoming, key = { "req_${it.id}" }) { friendship ->
+                FriendRequestCard(
+                    friendship = friendship,
+                    onAccept = { haptic.success(); viewModel.acceptFriendRequest(friendship.id) },
+                    onDecline = { haptic.click(); viewModel.declineFriendRequest(friendship.id) },
+                )
+            }
+        }
+
+        // Friends Quick Bar
+        if (uiState.friends.isNotEmpty()) {
+            item {
+                SectionHeader("Friends (${uiState.friends.size})")
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(uiState.friends, key = { "friend_chip_${it.id}" }) { friend ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(64.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .combinedClickable(
+                                    onClick = { haptic.click(); onNavigateToChat(friend.id) },
+                                    onLongClick = { haptic.longClick(); onLongClickFriend(friend) }
+                                )
+                                .padding(vertical = 4.dp)
+                        ) {
+                            WhisperAvatar(friend, 48.dp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = friend.effectiveName,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Conversations List
+        if (uiState.conversations.isNotEmpty()) {
+            item {
+                SectionHeader("Messages (${uiState.conversations.size})")
+            }
+            itemsIndexed(uiState.conversations, key = { _, c -> c.otherUser.id }) { _, convo ->
                 ConversationCard(
                     conversation = convo,
                     onClick = {
@@ -449,134 +491,83 @@ private fun ConversationCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val unread = conversation.unreadCount > 0
+
     ExpressiveCard(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            ),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            WhisperAvatar(profile = conversation.otherUser, size = 50.dp)
+            WhisperAvatar(conversation.otherUser, 50.dp)
 
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        conversation.otherUser.effectiveName,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Text(
+                            conversation.otherUser.effectiveName,
+                            fontWeight = if (unread) FontWeight.Black else FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (conversation.isMuted) {
+                            Icon(
+                                Icons.Rounded.NotificationsOff,
+                                contentDescription = "Muted",
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
                     Text(
                         conversation.lastMessage.createdAt.formatTimestamp(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                        fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
-                Spacer(Modifier.height(4.dp))
+
                 Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         conversation.lastMessage.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+
                     if (conversation.unreadCount > 0) {
-                        Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                            Text(
-                                conversation.unreadCount.coerceAtMost(99).toString(),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
+                        Badge(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ) {
+                            Text(conversation.unreadCount.coerceAtMost(99).toString(), fontWeight = FontWeight.Bold)
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// FRIENDS TAB
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun FriendsTab(
-    uiState: WhisperUiState,
-    viewModel: WhisperViewModel,
-    onNavigateToChat: (String) -> Unit,
-    onLongClickFriend: (WhisperProfile) -> Unit,
-) {
-    val haptic = rememberToolzHapticFeedback()
-
-    if (uiState.friends.isEmpty() && uiState.pendingIncoming.isEmpty() && uiState.pendingOutgoing.isEmpty()) {
-        WhisperEmptyState(
-            icon = Icons.Rounded.Group,
-            title = stringResource(R.string.st_Whisper_Friends_EmptyTitle),
-            subtitle = stringResource(R.string.st_Whisper_Friends_EmptySubtitle),
-        )
-        return
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // Pending incoming
-        if (uiState.pendingIncoming.isNotEmpty()) {
-            item {
-                SectionHeader("${stringResource(R.string.st_Whisper_Friends_Requests)} (${uiState.pendingIncoming.size})")
-            }
-            itemsIndexed(uiState.pendingIncoming) { index, friendship ->
-                StaggeredEntrance(index = index) {
-                    FriendRequestCard(
-                        friendship = friendship,
-                        onAccept = { haptic.success(); viewModel.acceptFriendRequest(friendship.id) },
-                        onDecline = { haptic.click(); viewModel.declineFriendRequest(friendship.id) },
-                    )
-                }
-            }
-        }
-
-        // Pending outgoing
-        if (uiState.pendingOutgoing.isNotEmpty()) {
-            item { SectionHeader(stringResource(R.string.st_Whisper_Friends_SentRequests)) }
-            itemsIndexed(uiState.pendingOutgoing) { index, friendship ->
-                StaggeredEntrance(index = index) {
-                    OutgoingRequestCard(
-                        friendship = friendship,
-                        onCancel = { haptic.click(); viewModel.declineFriendRequest(friendship.id) },
-                    )
-                }
-            }
-        }
-
-        // Accepted friends
-        if (uiState.friends.isNotEmpty()) {
-            item { SectionHeader("${stringResource(R.string.st_Whisper_Tab_Friends)} (${uiState.friends.size})") }
-            itemsIndexed(uiState.friends) { index, friend ->
-                StaggeredEntrance(index = index) {
-                    FriendCard(
-                        friend = friend,
-                        onChat = { haptic.click(); onNavigateToChat(friend.id) },
-                        onLongClick = { haptic.longClick(); onLongClickFriend(friend) },
-                    )
                 }
             }
         }
@@ -612,67 +603,8 @@ private fun FriendRequestCard(
     }
 }
 
-@Composable
-private fun OutgoingRequestCard(friendship: WhisperFriendship, onCancel: () -> Unit) {
-    ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiaryContainer),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Rounded.HourglassTop, null, tint = MaterialTheme.colorScheme.onTertiaryContainer) }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.st_Whisper_Friends_Pending), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                Text(friendship.userB.take(8) + "…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            ToolzOutlinedExpressiveButton(onClick = onCancel) { Text(stringResource(R.string.st_Whisper_Friends_Cancel)) }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun FriendCard(
-    friend: WhisperProfile,
-    onChat: (() -> Unit)? = null,
-    onLongClick: (() -> Unit)? = null,
-) {
-    ExpressiveCard(
-        onClick = { onChat?.invoke() },
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = { onChat?.invoke() },
-                onLongClick = { onLongClick?.invoke() }
-            ),
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            WhisperAvatar(friend, 44.dp)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(friend.effectiveName, fontWeight = FontWeight.Bold)
-                Text("@${friend.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (onChat != null) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.Chat,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────
-// DISCOVER TAB
+// DISCOVER TAB (WITH FRIENDS-OF-FRIENDS RECOMMENDATIONS)
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -700,28 +632,22 @@ private fun DiscoverTab(
             )
         }
 
-        if (searchQuery.isBlank()) {
-            WhisperEmptyState(
-                icon = Icons.Rounded.Search,
-                title = stringResource(R.string.st_Whisper_Discover_EmptyTitle),
-                subtitle = stringResource(R.string.st_Whisper_Discover_EmptySubtitle),
-            )
-        } else if (uiState.searchResults.isEmpty()) {
-            WhisperEmptyState(
-                icon = Icons.Rounded.PersonSearch,
-                title = stringResource(R.string.st_Whisper_Discover_NoResultsTitle),
-                subtitle = stringResource(R.string.st_Whisper_Discover_NoResultsSubtitle),
-            )
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                itemsIndexed(uiState.searchResults, key = { _, p -> p.id }) { index, profile ->
-                    val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
-                    val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+        if (searchQuery.isNotBlank()) {
+            if (uiState.searchResults.isEmpty()) {
+                WhisperEmptyState(
+                    icon = Icons.Rounded.PersonSearch,
+                    title = stringResource(R.string.st_Whisper_Discover_NoResultsTitle),
+                    subtitle = stringResource(R.string.st_Whisper_Discover_NoResultsSubtitle),
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    itemsIndexed(uiState.searchResults, key = { _, p -> p.id }) { _, profile ->
+                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
+                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
 
-                    StaggeredEntrance(index = index) {
                         DiscoverUserCard(
                             profile = profile,
                             isAlreadyFriend = isAlreadyFriend,
@@ -729,6 +655,47 @@ private fun DiscoverTab(
                             onChat = { haptic.click(); onNavigateToChat(profile.id) },
                             onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
                             onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                        )
+                    }
+                }
+            }
+        } else {
+            // Search is blank -> Show Recommendations (Friends of Friends)
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (uiState.recommendedProfiles.isNotEmpty()) {
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            SectionHeader("Suggested For You")
+                        }
+                    }
+
+                    items(uiState.recommendedProfiles, key = { "rec_${it.id}" }) { profile ->
+                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
+                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+
+                        DiscoverUserCard(
+                            profile = profile,
+                            isAlreadyFriend = isAlreadyFriend,
+                            isPendingOutgoing = isPendingOutgoing,
+                            onChat = { haptic.click(); onNavigateToChat(profile.id) },
+                            onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
+                            onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                        )
+                    }
+                } else {
+                    item {
+                        WhisperEmptyState(
+                            icon = Icons.Rounded.Search,
+                            title = stringResource(R.string.st_Whisper_Discover_EmptyTitle),
+                            subtitle = stringResource(R.string.st_Whisper_Discover_EmptySubtitle),
                         )
                     }
                 }
@@ -841,7 +808,6 @@ private fun ProfileTab(
     var isPrivate by remember(profile) { mutableStateOf(profile.isPrivate) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    // Launcher must be at the top of the composable
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -854,7 +820,6 @@ private fun ProfileTab(
         }
     }
 
-    // Effect to handle picking photo when requested by parent sheet
     val pickTrigger by viewModel.pickPhotoTrigger.collectAsStateWithLifecycle()
     LaunchedEffect(pickTrigger) {
         if (pickTrigger > 0) {
@@ -871,116 +836,108 @@ private fun ProfileTab(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         // Avatar
-        StaggeredEntrance(index = 0) {
-            Box(contentAlignment = Alignment.BottomEnd) {
-                WhisperAvatar(profile, 96.dp, onClick = onShowAvatarOptions)
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .bouncyClick(onClick = onShowAvatarOptions),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
-                }
+        Box(contentAlignment = Alignment.BottomEnd) {
+            WhisperAvatar(profile, 96.dp, onClick = onShowAvatarOptions)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+                    .bouncyClick(onClick = onShowAvatarOptions),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
             }
         }
 
         // Profile form
-        StaggeredEntrance(index = 1) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = {},  // Read-only
-                    readOnly = true,
-                    label = { Text(stringResource(R.string.st_Whisper_Profile_Username)) },
-                    leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
-                    trailingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp)) },
-                    supportingText = { Text(stringResource(R.string.st_Whisper_Profile_UsernameCannotChange), style = MaterialTheme.typography.labelSmall) },
-                    singleLine = true,
-                    shape = MediumExpressiveShape,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it },
-                    label = { Text(stringResource(R.string.st_Whisper_Profile_DisplayName)) },
-                    leadingIcon = { Icon(Icons.Rounded.Badge, null) },
-                    singleLine = true,
-                    shape = MediumExpressiveShape,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = bio,
-                    onValueChange = { if (it.length <= 160) bio = it },
-                    label = { Text(stringResource(R.string.st_Whisper_Profile_Bio)) },
-                    leadingIcon = { Icon(Icons.Rounded.Info, null) },
-                    minLines = 2,
-                    maxLines = 4,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    shape = MediumExpressiveShape,
-                    supportingText = { Text("${bio.length}/160") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = username,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text(stringResource(R.string.st_Whisper_Profile_Username)) },
+                leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
+                trailingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp)) },
+                supportingText = { Text(stringResource(R.string.st_Whisper_Profile_UsernameCannotChange), style = MaterialTheme.typography.labelSmall) },
+                singleLine = true,
+                shape = MediumExpressiveShape,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = displayName,
+                onValueChange = { displayName = it },
+                label = { Text(stringResource(R.string.st_Whisper_Profile_DisplayName)) },
+                leadingIcon = { Icon(Icons.Rounded.Badge, null) },
+                singleLine = true,
+                shape = MediumExpressiveShape,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = bio,
+                onValueChange = { if (it.length <= 160) bio = it },
+                label = { Text(stringResource(R.string.st_Whisper_Profile_Bio)) },
+                leadingIcon = { Icon(Icons.Rounded.Info, null) },
+                minLines = 2,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                shape = MediumExpressiveShape,
+                supportingText = { Text("${bio.length}/160") },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-                // Privacy toggle
-                ExpressiveCard(onClick = { isPrivate = !isPrivate }, modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        Icon(
-                            if (isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
-                            null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(if (isPrivate) stringResource(R.string.st_Whisper_Discover_PrivateProfile) else stringResource(R.string.st_Whisper_Discover_PublicProfile), fontWeight = FontWeight.Bold)
-                            Text(
-                                if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        ExpressiveSwitch(
-                            checked = isPrivate,
-                            onCheckedChange = { isPrivate = it },
+            // Privacy toggle
+            ExpressiveCard(onClick = { isPrivate = !isPrivate }, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Icon(
+                        if (isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
+                        null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(if (isPrivate) stringResource(R.string.st_Whisper_Discover_PrivateProfile) else stringResource(R.string.st_Whisper_Discover_PublicProfile), fontWeight = FontWeight.Bold)
+                        Text(
+                            if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    ExpressiveSwitch(
+                        checked = isPrivate,
+                        onCheckedChange = { isPrivate = it },
+                    )
                 }
             }
         }
 
         // Save button
-        StaggeredEntrance(index = 2) {
-            ToolzExpressiveButton(
-                onClick = {
-                    haptic.success()
-                    viewModel.updateProfile(displayName, bio, isPrivate)
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-            ) {
-                Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.st_Whisper_Profile_SaveChanges), fontWeight = FontWeight.Bold)
-            }
+        ToolzExpressiveButton(
+            onClick = {
+                haptic.success()
+                viewModel.updateProfile(displayName, bio, isPrivate)
+            },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+        ) {
+            Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.st_Whisper_Profile_SaveChanges), fontWeight = FontWeight.Bold)
         }
 
         HorizontalDivider()
 
         // Logout
-        StaggeredEntrance(index = 3) {
-            ToolzOutlinedExpressiveButton(
-                onClick = { haptic.click(); showLogoutDialog = true },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
-            }
+        ToolzOutlinedExpressiveButton(
+            onClick = { haptic.click(); showLogoutDialog = true },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -999,24 +956,67 @@ private fun ProfileTab(
                         viewModel.signOut()
                         onLoggedOut()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                ) { Text(stringResource(R.string.st_Whisper_Profile_LogOut)) }
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.st_Whisper_Profile_LogOut))
+                }
             },
             dismissButton = {
-                ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }) { Text(stringResource(R.string.st_Whisper_Friends_Cancel)) }
-            },
+                ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }) {
+                    Text(stringResource(R.string.st_Whisper_Friends_Cancel))
+                }
+            }
         )
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Shared UI Utilities
-// ─────────────────────────────────────────────────────────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AvatarOptionsSheet(
+    profile: WhisperProfile,
+    onDismiss: () -> Unit,
+    onChoosePhoto: () -> Unit,
+    onDeletePhoto: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+
+            ToolzTonalExpressiveButton(
+                onClick = onChoosePhoto,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Choose from Gallery")
+            }
+
+            if (!profile.avatarUrl.isNullOrBlank()) {
+                ToolzOutlinedExpressiveButton(
+                    onClick = onDeletePhoto,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Remove Photo")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
 
 @Composable
 fun WhisperAvatar(
     profile: WhisperProfile,
-    size: androidx.compose.ui.unit.Dp,
+    size: Dp,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {

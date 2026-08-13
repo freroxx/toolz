@@ -75,7 +75,7 @@ data class WhisperMessage(
     @SerialName("sender_id") val senderId: String = "",
     @SerialName("receiver_id") val receiverId: String = "",
     val content: String = "",
-    @SerialName("content_iv") val contentIv: String? = null,   // For Phase 2 E2E
+    @SerialName("content_iv") val contentIv: String? = null,
     @SerialName("is_read") val isRead: Boolean = false,
     @SerialName("created_at") val createdAt: String = "",
 ) {
@@ -84,10 +84,13 @@ data class WhisperMessage(
 
 @Serializable
 data class WhisperMessageInsert(
+    val id: String? = null,
     @SerialName("sender_id") val senderId: String,
     @SerialName("receiver_id") val receiverId: String,
     val content: String,
     @SerialName("content_iv") val contentIv: String? = null,
+    @SerialName("is_read") val isRead: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 /**
@@ -97,6 +100,7 @@ data class WhisperConversation(
     val otherUser: WhisperProfile,
     val lastMessage: WhisperMessage,
     val unreadCount: Int,
+    val isMuted: Boolean = false,
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -132,6 +136,36 @@ data class WhisperFriendshipInsert(
 )
 
 // ─────────────────────────────────────────────────────────────
+// Blocked Users
+// ─────────────────────────────────────────────────────────────
+
+@Serializable
+data class WhisperBlock(
+    val id: String = "",
+    @SerialName("blocker_id") val blockerId: String = "",
+    @SerialName("blocked_id") val blockedId: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class WhisperBlockInsert(
+    @SerialName("blocker_id") val blockerId: String,
+    @SerialName("blocked_id") val blockedId: String,
+)
+
+// ─────────────────────────────────────────────────────────────
+// Clear Chat Options
+// ─────────────────────────────────────────────────────────────
+
+enum class ClearChatTimeRange {
+    PAST_24_HOURS,
+    PAST_7_DAYS,
+    PAST_30_DAYS,
+    ALL_TIME,
+    CUSTOM
+}
+
+// ─────────────────────────────────────────────────────────────
 // Auth Token (anonymous)
 // ─────────────────────────────────────────────────────────────
 
@@ -143,7 +177,6 @@ data class WhisperFriendshipInsert(
 data class WhisperAnonToken(
     val token: String,          // 64-char hex string — user must save this!
     val virtualEmail: String,   // SHA-256(token) + "@anon.toolz"
-    // password derived from SHA-512(token) — kept in memory only
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -166,16 +199,22 @@ data class WhisperUiState(
     val pendingIncoming: List<WhisperFriendship> = emptyList(),
     val pendingOutgoing: List<WhisperFriendship> = emptyList(),
     val searchResults: List<WhisperProfile> = emptyList(),
+    val recommendedProfiles: List<WhisperProfile> = emptyList(),
+    val mutedUserIds: Set<String> = emptySet(),
     val error: String? = null,
 )
 
 data class WhisperChatUiState(
     val isLoading: Boolean = false,
+    val isFriendStatusLoaded: Boolean = false,
     val otherUser: WhisperProfile? = null,
     val messages: List<WhisperMessage> = emptyList(),
     val friendStatus: FriendStatus = FriendStatus.NONE,
     val iAmRequester: Boolean = false,
     val isPartnerTyping: Boolean = false,
+    val isMuted: Boolean = false,
+    val isBlockedByMe: Boolean = false,
+    val isBlockedByOther: Boolean = false,
+    val clearedUndoMessagesCount: Int = 0,
     val error: String? = null,
 )
-

@@ -56,20 +56,20 @@ class WhisperUserProfileViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            repository.getProfile(targetUserId)
+            repository.getProfile(targetUserId, forceRefresh = true)
                 .onSuccess { profile ->
                     _uiState.update { it.copy(profile = profile) }
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = err.message) }
+                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getProfile")) }
                 }
 
             repository.getFriendshipStatus(targetUserId)
                 .onSuccess { (status, record) ->
                     _uiState.update { it.copy(friendshipStatus = status, friendshipRecord = record, isLoading = false) }
                 }
-                .onFailure {
-                    _uiState.update { s -> s.copy(isLoading = false) }
+                .onFailure { err ->
+                    _uiState.update { s -> s.copy(isLoading = false, error = WhisperErrorMapper.map(err, "getFriendshipStatus")) }
                 }
         }
     }
@@ -78,7 +78,7 @@ class WhisperUserProfileViewModel @Inject constructor(
         viewModelScope.launch {
             repository.sendFriendRequest(targetUserId)
                 .onSuccess { loadData() }
-                .onFailure { err -> _uiState.update { it.copy(error = err.message) } }
+                .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "sendFriendRequest")) } }
         }
     }
 
@@ -87,7 +87,7 @@ class WhisperUserProfileViewModel @Inject constructor(
         viewModelScope.launch {
             repository.acceptFriendRequest(recordId)
                 .onSuccess { loadData() }
-                .onFailure { err -> _uiState.update { it.copy(error = err.message) } }
+                .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "acceptFriendRequest")) } }
         }
     }
 
@@ -96,7 +96,7 @@ class WhisperUserProfileViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteFriendship(recordId)
                 .onSuccess { loadData() }
-                .onFailure { err -> _uiState.update { it.copy(error = err.message) } }
+                .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "deleteFriendship")) } }
         }
     }
 

@@ -62,7 +62,7 @@ class WhisperCrypto @Inject constructor() {
                 kpg.generateKeyPair()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("WhisperCrypto", "Key pair generation failed", e)
         }
     }
 
@@ -71,7 +71,7 @@ class WhisperCrypto @Inject constructor() {
             val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
             val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
             val publicKey = entry?.certificate?.publicKey ?: return null
-            Base64.encodeToString(publicKey.encoded, Base64.DEFAULT)
+            Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
         } catch (_: Exception) { null }
     }
 
@@ -85,7 +85,8 @@ class WhisperCrypto @Inject constructor() {
 
     private fun parsePublicKey(base64PublicKey: String): PublicKey? {
         return try {
-            val bytes = Base64.decode(base64PublicKey, Base64.DEFAULT)
+            val cleanKey = base64PublicKey.trim()
+            val bytes = Base64.decode(cleanKey, Base64.NO_WRAP)
             val keySpec = X509EncodedKeySpec(bytes)
             val keyFactory = KeyFactory.getInstance("EC")
             keyFactory.generatePublic(keySpec)
@@ -96,31 +97,29 @@ class WhisperCrypto @Inject constructor() {
         val privateKey = getPrivateKey() ?: return null
         val recipientPubKey = parsePublicKey(recipientPublicKeyBase64) ?: return null
         return try {
-                        val keyAgreement = KeyAgreement.getInstance("ECDH")
+            val keyAgreement = KeyAgreement.getInstance("ECDH")
             keyAgreement.init(privateKey)
             keyAgreement.doPhase(recipientPubKey, true)
             val sharedSecret = keyAgreement.generateSecret()
-            
-            android.util.Log.d("WhisperCrypto", "Derived shared secret (size: ${sharedSecret.size})")
 
             // HKDF-Extract: PRK = HMAC-SHA256(salt=ByteArray(32), IKM=sharedSecret)
             val mac = Mac.getInstance("HmacSHA256")
-            val salt = ByteArray(32) // 32 bytes of 0x00
+            val salt = ByteArray(32) // 32 bytes of zeros
             mac.init(SecretKeySpec(salt, "HmacSHA256"))
             val prk = mac.doFinal(sharedSecret)
-            
+
             // HKDF-Expand: OKM = T(1) where T(1) = HMAC-SHA256(PRK, info + 0x01)
             mac.init(SecretKeySpec(prk, "HmacSHA256"))
             val info = "whisper-e2ee-v1".toByteArray(Charsets.UTF_8)
             val infoWithOne = ByteArray(info.size + 1)
             System.arraycopy(info, 0, infoWithOne, 0, info.size)
             infoWithOne[info.size] = 0x01.toByte()
-            val okm = mac.doFinal(infoWithOne) // This is exactly 32 bytes for SHA-256
-            
-            SecretKeySpec(okm.sliceArray(0 until 16), "AES") // Use first 16 bytes for AES-128
-        } catch (e: Exception) { 
+            val okm = mac.doFinal(infoWithOne) // 32 bytes for AES-256
+
+            SecretKeySpec(okm, "AES")
+        } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Error deriving shared key", e)
-            null 
+            null
         }
     }
 
@@ -132,8 +131,8 @@ class WhisperCrypto @Inject constructor() {
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, gcmSpec)
             val cipherBytes = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-            val cipherTextBase64 = Base64.encodeToString(cipherBytes, Base64.DEFAULT)
-            val ivBase64 = Base64.encodeToString(iv, Base64.DEFAULT)
+            val cipherTextBase64 = Base64.encodeToString(cipherBytes, Base64.NO_WRAP)
+            val ivBase64 = Base64.encodeToString(iv, Base64.NO_WRAP)
             Pair(cipherTextBase64, ivBase64)
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Encryption failed", e)
@@ -144,16 +143,12 @@ class WhisperCrypto @Inject constructor() {
     fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String {
         val failSentinel = "\u26A0\uFE0F Decryption failed"
         if (ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) {
-            android.util.Log.e("WhisperCrypto", "Decryption failed: missing IV or sender key")
             return failSentinel
         }
-        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: run {
-            android.util.Log.e("WhisperCrypto", "Decryption failed: could not derive shared key")
-            return failSentinel
-        }
+        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return failSentinel
         return try {
-            val iv = Base64.decode(ivBase64, Base64.DEFAULT)
-            val cipherBytes = Base64.decode(cipherTextBase64, Base64.DEFAULT)
+            val iv = Base64.decode(ivBase64.trim(), Base64.NO_WRAP)
+            val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.NO_WRAP)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
