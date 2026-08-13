@@ -23,6 +23,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.broadcast.BroadcastPayload
 import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
@@ -56,6 +57,8 @@ class WhisperRepository @Inject constructor(
     private val realtime get() = supabase.realtime
     private val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
+    private val profileCache = mutableMapOf<String, WhisperProfile>()
+
     // PROFILES
     suspend fun getMyProfile(): Result<WhisperProfile> = runCatching {
         val existing = db.from("profiles")
@@ -81,9 +84,12 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun getProfile(userId: String): Result<WhisperProfile> = runCatching {
-        db.from("profiles")
+        profileCache[userId]?.let { return Result.success(it) }
+        val p = db.from("profiles")
             .select { filter { WhisperProfile::id eq userId } }
-            .decodeSingle()
+            .decodeSingle<WhisperProfile>()
+        profileCache[userId] = p
+        p
     }
 
     suspend fun searchProfiles(query: String): Result<List<WhisperProfile>> = runCatching {
@@ -123,7 +129,9 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteAvatar(): Result<Unit> = runCatching {
-        db.from("profiles").update(WhisperProfileUpdate(avatarUrl = null)) {
+        // Explicitly update to null. Postgrest update takes a map or serializable.
+        // To ensure null is sent, we can use a map.
+        db.from("profiles").update(mapOf("avatar_url" to null)) {
             filter { WhisperProfile::id eq myId }
         }
     }
@@ -180,15 +188,14 @@ class WhisperRepository @Inject constructor(
         }
     }
 
-    fun subscribeToIncomingMessages(): Flow<WhisperMessage> = callbackFlow {
-        val currentId = myId
-        if (currentId.isEmpty()) {
-            android.util.Log.w("WhisperRepo", "Cannot subscribe: myId is empty")
+    fun subscribeToIncomingMessages(userId: String): Flow<WhisperMessage> = callbackFlow {
+        if (userId.isEmpty()) {
+            android.util.Log.w("WhisperRepo", "Cannot subscribe: userId is empty")
             close()
             return@callbackFlow
         }
 
-        val channelName = "whisper-messages-$currentId"
+        val channelName = "whisper-messages-$userId"
         val channel = supabase.channel(channelName)
         android.util.Log.d("WhisperRepo", "Subscribing to $channelName")
 
@@ -202,7 +209,7 @@ class WhisperRepository @Inject constructor(
                     val msg = action.decodeRecord<WhisperMessage>()
                     android.util.Log.d("WhisperRepo", "Incoming realtime msg: ${msg.id} sender=${msg.senderId}")
                     
-                    if (msg.receiverId == currentId) {
+                    if (msg.receiverId == userId) {
                         // Attempt decryption
                         val decrypted = if (msg.contentIv != null) {
                             val senderProfile = runCatching { getProfile(msg.senderId).getOrNull() }.getOrNull()
@@ -381,10 +388,12 @@ class WhisperRepository @Inject constructor(
             channel.subscribe()
             channel.broadcast(
                 event = "typing",
-                message = buildJsonObject {
-                    put("sender_id", myId)
-                    put("is_typing", isTyping)
-                }
+                payload = BroadcastPayload.Json(
+                    buildJsonObject {
+                        put("sender_id", myId)
+                        put("is_typing", isTyping)
+                    }
+                )
             )
         }
     }

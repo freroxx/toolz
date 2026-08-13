@@ -190,9 +190,12 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     private fun subscribeToMessages() {
+        val myId = myUserId
+        if (myId.isEmpty()) return
+        
         realtimeJob = viewModelScope.launch {
             try {
-                repository.subscribeToIncomingMessages().collect { newMsg ->
+                repository.subscribeToIncomingMessages(myId).collect { newMsg ->
                     android.util.Log.d("WhisperChatVM", "Collected message: ${newMsg.id} sender=${newMsg.senderId}")
                     if (newMsg.senderId == otherUserId) {
                         val decryptedContent = if (newMsg.contentIv != null && partnerPublicKey != null) {

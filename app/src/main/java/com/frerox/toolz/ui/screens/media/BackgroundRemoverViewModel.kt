@@ -44,9 +44,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.CompatibilityList
-import org.tensorflow.lite.gpu.GpuDelegate
+import com.google.android.gms.tflite.client.TfLiteInitializationOptions
+import org.tensorflow.lite.gpu.GpuDelegateFactory
+import com.google.android.gms.tflite.java.TfLite
+import org.tensorflow.lite.InterpreterApi
+import org.tensorflow.lite.InterpreterApi.Options.TfLiteRuntime
+import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -67,8 +70,7 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
     val uiState: StateFlow<BackgroundRemoverUiState> = _uiState.asStateFlow()
 
-    private var tfliteInterpreter: Interpreter? = null
-    private var gpuDelegate: GpuDelegate? = null
+    private var tfliteInterpreter: InterpreterApi? = null
     private val initMutex = Mutex()
     private var activeJob: Job? = null
 
@@ -87,8 +89,6 @@ class BackgroundRemoverViewModel @Inject constructor(
         
         tfliteInterpreter?.close()
         tfliteInterpreter = null
-        gpuDelegate?.close()
-        gpuDelegate = null
 
         _uiState.update { 
             it.copy(
@@ -114,8 +114,6 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (_uiState.value.selectedModel == model) {
             tfliteInterpreter?.close()
             tfliteInterpreter = null
-            gpuDelegate?.close()
-            gpuDelegate = null
             
             _uiState.update { 
                 it.copy(
@@ -192,32 +190,32 @@ class BackgroundRemoverViewModel @Inject constructor(
 
         return@withLock withContext(Dispatchers.IO) {
             try {
+                // Initialize TfLite in Play Services with GPU support
+                val initOptions = TfLiteInitializationOptions.builder()
+                    .setEnableGpuDelegateSupport(true)
+                    .build()
+                TfLite.initialize(context, initOptions).await()
+
                 val modelBuffer = loadModelFile(modelFile)
-                val gpuOptions = Interpreter.Options().apply {
+                val options = InterpreterApi.Options().apply {
+                    setRuntime(TfLiteRuntime.FROM_SYSTEM_ONLY)
                     setNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
-                    val compatList = CompatibilityList()
-                    if (compatList.isDelegateSupportedOnThisDevice) {
-                        try {
-                            val delegate = GpuDelegate()
-                            addDelegate(delegate)
-                            gpuDelegate = delegate
-                        } catch (_: Throwable) {}
-                    }
+                    addDelegateFactory(GpuDelegateFactory())
                 }
-                tfliteInterpreter = Interpreter(modelBuffer, gpuOptions)
+                tfliteInterpreter = InterpreterApi.create(modelBuffer, options)
                 return@withContext true
-            } catch (_: Throwable) {
-                gpuDelegate?.close()
-                gpuDelegate = null
-                
+            } catch (e: Throwable) {
                 try {
                     val modelBuffer = loadModelFile(modelFile)
-                    val cpuOptions = Interpreter.Options().apply { setNumThreads(4) }
-                    tfliteInterpreter = Interpreter(modelBuffer, cpuOptions)
+                    val cpuOptions = InterpreterApi.Options().apply {
+                        setRuntime(TfLiteRuntime.FROM_SYSTEM_ONLY)
+                        setNumThreads(4)
+                    }
+                    tfliteInterpreter = InterpreterApi.create(modelBuffer, cpuOptions)
                     return@withContext true
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                    _uiState.update { it.copy(isProcessing = false, error = "AI Engine Init Failed: ${e.localizedMessage}") }
+                } catch (e2: Throwable) {
+                    e2.printStackTrace()
+                    _uiState.update { it.copy(isProcessing = false, error = "AI Engine Init Failed: ${e2.localizedMessage}") }
                     false
                 }
             }
@@ -456,8 +454,6 @@ class BackgroundRemoverViewModel @Inject constructor(
         activeJob?.cancel()
         tfliteInterpreter?.close()
         tfliteInterpreter = null
-        gpuDelegate?.close()
-        gpuDelegate = null
     }
 }
 

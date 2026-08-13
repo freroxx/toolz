@@ -574,7 +574,7 @@ private fun AiConfigDropdown(
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
             shape = SmallExpressiveShape
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

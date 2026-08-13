@@ -99,8 +99,10 @@ fun WhisperMainScreen(
         return
     }
 
+    var selectedTab by remember { mutableIntStateOf(0) }
     var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
     var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
+    var showAvatarOptions by remember { mutableStateOf(false) }
 
     // Show errors using redesigned Expressive Toast
     LaunchedEffect(uiState.error) {
@@ -183,7 +185,7 @@ fun WhisperMainScreen(
                         0 -> ChatsTab(uiState, onNavigateToChat, onLongClickConvo = { selectedConvoForOptions = it })
                         1 -> FriendsTab(uiState, viewModel, onNavigateToChat, onLongClickFriend = { selectedFriendForOptions = it })
                         2 -> DiscoverTab(uiState, viewModel, onNavigateToChat, onNavigateToProfile)
-                        3 -> ProfileTab(uiState, viewModel, onLoggedOut)
+                        3 -> ProfileTab(uiState, viewModel, onLoggedOut, onShowAvatarOptions = { showAvatarOptions = true })
                     }
                 }
             }
@@ -197,6 +199,26 @@ fun WhisperMainScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 80.dp)
         )
+    }
+
+    // Avatar Options Bottom Sheet
+    if (showAvatarOptions) {
+        val profile = uiState.currentProfile
+        if (profile != null) {
+            AvatarOptionsSheet(
+                profile = profile,
+                onDismiss = { showAvatarOptions = false },
+                onChoosePhoto = {
+                    showAvatarOptions = false
+                    viewModel.triggerPickPhoto()
+                },
+                onDeletePhoto = {
+                    haptic.click()
+                    viewModel.deleteAvatar()
+                    showAvatarOptions = false
+                }
+            )
+        }
     }
 
     // Friend Options Bottom Sheet
@@ -318,6 +340,49 @@ fun WhisperMainScreen(
                     Text("View Profile")
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AvatarOptionsSheet(
+    profile: WhisperProfile,
+    onDismiss: () -> Unit,
+    onChoosePhoto: () -> Unit,
+    onDeletePhoto: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+
+            ToolzTonalExpressiveButton(
+                onClick = onChoosePhoto,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Choose from Gallery")
+            }
+
+            if (profile.avatarUrl != null) {
+                ToolzOutlinedExpressiveButton(
+                    onClick = onDeletePhoto,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Remove Photo")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -764,6 +829,7 @@ private fun ProfileTab(
     uiState: WhisperUiState,
     viewModel: WhisperViewModel,
     onLoggedOut: () -> Unit,
+    onShowAvatarOptions: () -> Unit,
 ) {
     val profile = uiState.currentProfile ?: return
     val haptic = rememberToolzHapticFeedback()
@@ -774,8 +840,8 @@ private fun ProfileTab(
     var bio by remember(profile) { mutableStateOf(profile.bio ?: "") }
     var isPrivate by remember(profile) { mutableStateOf(profile.isPrivate) }
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var showAvatarOptions by remember { mutableStateOf(false) }
 
+    // Launcher must be at the top of the composable
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -785,6 +851,14 @@ private fun ProfileTab(
                 val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
                 viewModel.uploadAvatar(bytes, mimeType)
             }
+        }
+    }
+
+    // Effect to handle picking photo when requested by parent sheet
+    val pickTrigger by viewModel.pickPhotoTrigger.collectAsStateWithLifecycle()
+    LaunchedEffect(pickTrigger) {
+        if (pickTrigger > 0) {
+            imagePickerLauncher.launch("image/*")
         }
     }
 
@@ -799,13 +873,13 @@ private fun ProfileTab(
         // Avatar
         StaggeredEntrance(index = 0) {
             Box(contentAlignment = Alignment.BottomEnd) {
-                WhisperAvatar(profile, 96.dp, onClick = { showAvatarOptions = true })
+                WhisperAvatar(profile, 96.dp, onClick = onShowAvatarOptions)
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .bouncyClick(onClick = { showAvatarOptions = true }),
+                        .bouncyClick(onClick = onShowAvatarOptions),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
@@ -932,49 +1006,6 @@ private fun ProfileTab(
                 ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }) { Text(stringResource(R.string.st_Whisper_Friends_Cancel)) }
             },
         )
-    }
-
-    if (showAvatarOptions) {
-        ModalBottomSheet(onDismissRequest = { showAvatarOptions = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                
-                ToolzTonalExpressiveButton(
-                    onClick = {
-                        showAvatarOptions = false
-                        imagePickerLauncher.launch("image/*")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Choose from Gallery")
-                }
-
-                if (profile.avatarUrl != null) {
-                    ToolzOutlinedExpressiveButton(
-                        onClick = {
-                            showAvatarOptions = false
-                            haptic.click()
-                            viewModel.deleteAvatar()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Remove Photo")
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-            }
-        }
     }
 }
 

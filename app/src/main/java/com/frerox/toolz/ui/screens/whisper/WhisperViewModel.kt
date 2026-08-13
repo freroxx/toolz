@@ -30,6 +30,13 @@ class WhisperViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(WhisperUiState())
     val uiState: StateFlow<WhisperUiState> = _uiState.asStateFlow()
 
+    private val _pickPhotoTrigger = MutableStateFlow(0)
+    val pickPhotoTrigger: StateFlow<Int> = _pickPhotoTrigger.asStateFlow()
+
+    fun triggerPickPhoto() {
+        _pickPhotoTrigger.value += 1
+    }
+
     val isAuthenticated: StateFlow<Boolean?> = authManager.isAuthenticated
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -168,9 +175,11 @@ class WhisperViewModel @Inject constructor(
     }
 
     private fun subscribeToMessages() {
+        val myId = authManager.currentUserId ?: return
+        
         messagesJob = viewModelScope.launch {
             try {
-                repository.subscribeToIncomingMessages().collect { msg ->
+                repository.subscribeToIncomingMessages(myId).collect { msg ->
                     loadAll()
                     // Send in-process notification if message is from another user
                     val senderProfile = repository.getProfile(msg.senderId).getOrNull()

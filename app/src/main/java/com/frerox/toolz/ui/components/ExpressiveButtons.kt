@@ -45,6 +45,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedToggleButton
+import androidx.compose.material3.ElevatedToggleButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
@@ -72,7 +73,6 @@ import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedIconToggleButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButtonColors
-import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.ToggleButtonShapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -222,7 +222,7 @@ fun ToolzElevatedExpressiveToggleButton(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: ToggleButtonColors = ToggleButtonDefaults.elevatedToggleButtonColors(),
+    colors: ToggleButtonColors = ElevatedToggleButtonDefaults.elevatedToggleButtonColors(),
     shapes: ToggleButtonShapes = ToggleButtonShapes(ButtonDefaults.shape, ButtonDefaults.shape, ButtonDefaults.shape),
     shape: Shape? = null,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
