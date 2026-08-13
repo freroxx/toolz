@@ -50,9 +50,7 @@ class WhisperAuthViewModel @Inject constructor(
                 when {
                     initializing -> _authState.value = WhisperAuthState.Loading
                     authenticated -> _authState.value = WhisperAuthState.Authenticated
-                    _authState.value is WhisperAuthState.Loading -> {
-                        _authState.value = WhisperAuthState.Idle
-                    }
+                    else -> _authState.value = WhisperAuthState.Idle
                 }
             }
         }
@@ -105,24 +103,35 @@ class WhisperAuthViewModel @Inject constructor(
         _generatedToken.value = authManager.generateAnonToken()
     }
 
-    fun registerWithGeneratedToken(displayName: String) {
+    fun registerWithGeneratedToken(displayName: String, customUsername: String? = null) {
         val token = _generatedToken.value ?: return
         val cleanName = displayName.trim()
         if (cleanName.isEmpty()) {
             _authState.value = WhisperAuthState.Error("Choose a display name to continue")
             return
         }
+        val cleanUsername = if (!customUsername.isNullOrBlank()) {
+            val valid = validateUsernameFormat(customUsername.trim().lowercase())
+            if (valid != null) {
+                _authState.value = WhisperAuthState.Error(valid)
+                return
+            }
+            customUsername.trim().lowercase()
+        } else {
+            "anon_" + token.token.take(6)
+        }
+
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
-            val username = "user_" + token.token.take(8)
-            authManager.registerWithToken(token, username = username, displayName = cleanName)
+            authManager.registerWithToken(token, username = cleanUsername, displayName = cleanName)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
     fun loginWithToken(rawToken: String) {
-        if (!authManager.isValidToken(authManager.normalizeToken(rawToken))) {
+        val cleanToken = authManager.normalizeToken(rawToken)
+        if (!authManager.isValidToken(cleanToken)) {
             _authState.value = WhisperAuthState.Error("That token doesn't look right. Check for missing or extra characters.")
             return
         }

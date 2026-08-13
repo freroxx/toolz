@@ -85,9 +85,11 @@ fun WhisperMainScreen(
     val scope = rememberCoroutineScope()
 
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
+    var isLoggingOut by remember { mutableStateOf(false) }
 
     LaunchedEffect(isAuthenticated) {
-        if (isAuthenticated == false) {
+        if (isAuthenticated == false && !isLoggingOut) {
+            isLoggingOut = true
             onLoggedOut()
         }
     }
@@ -196,7 +198,12 @@ fun WhisperMainScreen(
                         2 -> ProfileTab(
                             uiState = uiState,
                             viewModel = viewModel,
-                            onLoggedOut = onLoggedOut,
+                            onLoggedOut = {
+                                if (!isLoggingOut) {
+                                    isLoggingOut = true
+                                    onLoggedOut()
+                                }
+                            },
                             onShowAvatarOptions = { showAvatarOptions = true }
                         )
                     }
@@ -214,7 +221,7 @@ fun WhisperMainScreen(
         )
     }
 
-    // Avatar Options Bottom Sheet
+    // Material 3 Expressive Avatar Options Bottom Sheet
     if (showAvatarOptions) {
         val profile = uiState.currentProfile
         if (profile != null) {
@@ -235,140 +242,53 @@ fun WhisperMainScreen(
         }
     }
 
-    // Friend Options Bottom Sheet
+    // Material 3 Expressive Friend Options Bottom Sheet
     selectedFriendForOptions?.let { friend ->
-        ModalBottomSheet(
-            onDismissRequest = { selectedFriendForOptions = null }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    WhisperAvatar(friend, 48.dp)
-                    Column {
-                        Text(friend.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        Text("@${friend.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                HorizontalDivider()
-
-                ToolzExpressiveButton(
-                    onClick = {
-                        val fId = friend.id
-                        selectedFriendForOptions = null
-                        onNavigateToChat(fId)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.st_Whisper_Discover_Message))
-                }
-
-                ToolzTonalExpressiveButton(
-                    onClick = {
-                        val fId = friend.id
-                        selectedFriendForOptions = null
-                        onNavigateToProfile(fId)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("View Profile")
-                }
-
-                ToolzOutlinedExpressiveButton(
-                    onClick = {
-                        val fId = friend.id
-                        selectedFriendForOptions = null
-                        haptic.click()
-                        viewModel.unfriend(fId)
-                        toastState.show("Removed friend", WhisperToastType.INFO)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Icon(Icons.Rounded.PersonRemove, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.st_Whisper_Profile_RemoveFriend))
-                }
+        FriendOptionsSheet(
+            friend = friend,
+            onDismiss = { selectedFriendForOptions = null },
+            onChat = {
+                val fId = friend.id
+                selectedFriendForOptions = null
+                onNavigateToChat(fId)
+            },
+            onViewProfile = {
+                val fId = friend.id
+                selectedFriendForOptions = null
+                onNavigateToProfile(fId)
+            },
+            onUnfriend = {
+                val fId = friend.id
+                selectedFriendForOptions = null
+                haptic.click()
+                viewModel.unfriend(fId)
+                toastState.show("Removed friend", WhisperToastType.INFO)
             }
-        }
+        )
     }
 
-    // Conversation Options Bottom Sheet
+    // Material 3 Expressive Conversation Options Bottom Sheet
     selectedConvoForOptions?.let { convo ->
-        ModalBottomSheet(
-            onDismissRequest = { selectedConvoForOptions = null }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    WhisperAvatar(convo.otherUser, 48.dp)
-                    Column {
-                        Text(convo.otherUser.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                        Text("@${convo.otherUser.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                HorizontalDivider()
-
-                ToolzExpressiveButton(
-                    onClick = {
-                        val uId = convo.otherUser.id
-                        selectedConvoForOptions = null
-                        onNavigateToChat(uId)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Open Chat")
-                }
-
-                ToolzTonalExpressiveButton(
-                    onClick = {
-                        val uId = convo.otherUser.id
-                        selectedConvoForOptions = null
-                        onNavigateToProfile(uId)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("View Profile")
-                }
-
-                ToolzOutlinedExpressiveButton(
-                    onClick = {
-                        val uId = convo.otherUser.id
-                        selectedConvoForOptions = null
-                        viewModel.toggleMuteUser(uId)
-                        toastState.show(if (convo.isMuted) "Unmuted notifications" else "Muted notifications", WhisperToastType.INFO)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications")
-                }
+        ConversationOptionsSheet(
+            convo = convo,
+            onDismiss = { selectedConvoForOptions = null },
+            onOpenChat = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                onNavigateToChat(uId)
+            },
+            onViewProfile = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                onNavigateToProfile(uId)
+            },
+            onToggleMute = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                viewModel.toggleMuteUser(uId)
+                toastState.show(if (convo.isMuted) "Unmuted notifications" else "Muted notifications", WhisperToastType.INFO)
             }
-        }
+        )
     }
 }
 
@@ -414,13 +334,24 @@ private fun MergedChatsAndFriendsTab(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // Incoming Friend Requests Banner
-        if (uiState.pendingIncoming.isNotEmpty()) {
+        if (uiState.pendingIncomingRequests.isNotEmpty()) {
+            item {
+                SectionHeader("Friend Requests (${uiState.pendingIncomingRequests.size})")
+            }
+            items(uiState.pendingIncomingRequests, key = { "req_${it.friendship.id}" }) { reqItem ->
+                FriendRequestCard(
+                    reqItem = reqItem,
+                    onAccept = { haptic.success(); viewModel.acceptFriendRequest(reqItem.friendship.id) },
+                    onDecline = { haptic.click(); viewModel.declineFriendRequest(reqItem.friendship.id) },
+                )
+            }
+        } else if (uiState.pendingIncoming.isNotEmpty()) {
             item {
                 SectionHeader("Friend Requests (${uiState.pendingIncoming.size})")
             }
             items(uiState.pendingIncoming, key = { "req_${it.id}" }) { friendship ->
                 FriendRequestCard(
-                    friendship = friendship,
+                    reqItem = WhisperFriendRequestItem(friendship, null),
                     onAccept = { haptic.success(); viewModel.acceptFriendRequest(friendship.id) },
                     onDecline = { haptic.click(); viewModel.declineFriendRequest(friendship.id) },
                 )
@@ -440,8 +371,8 @@ private fun MergedChatsAndFriendsTab(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .width(64.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .width(68.dp)
+                                .clip(RoundedCornerShape(14.dp))
                                 .combinedClickable(
                                     onClick = { haptic.click(); onNavigateToChat(friend.id) },
                                     onLongClick = { haptic.longClick(); onLongClickFriend(friend) }
@@ -576,29 +507,64 @@ private fun ConversationCard(
 
 @Composable
 private fun FriendRequestCard(
-    friendship: WhisperFriendship,
+    reqItem: WhisperFriendRequestItem,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
 ) {
+    val profile = reqItem.senderProfile
+    val friendship = reqItem.friendship
+
     ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(
-                modifier = Modifier.size(42.dp).clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                contentAlignment = Alignment.Center,
+            if (profile != null) {
+                WhisperAvatar(profile, 44.dp)
+            } else {
+                Box(
+                    modifier = Modifier.size(44.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(
+                    text = profile?.effectiveName ?: stringResource(R.string.st_Whisper_Friends_FriendRequest),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (profile != null) "@${profile.effectiveUsername}" else friendship.userA.take(8) + "…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.st_Whisper_Friends_FriendRequest), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                Text(friendship.userA.take(8) + "…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ToolzTonalExpressiveButton(onClick = onAccept) {
+                    Icon(Icons.Rounded.Check, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.st_Whisper_Friends_Accept), style = MaterialTheme.typography.labelSmall)
+                }
+                ToolzOutlinedExpressiveButton(onClick = onDecline) {
+                    Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
+                }
             }
-            ToolzTonalExpressiveButton(onClick = onAccept) { Icon(Icons.Rounded.Check, null); Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.st_Whisper_Friends_Accept)) }
-            ToolzOutlinedExpressiveButton(onClick = onDecline) { Icon(Icons.Rounded.Close, null) }
         }
     }
 }
@@ -622,7 +588,6 @@ private fun DiscoverTab(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Search field
         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             ExpressiveSearchField(
                 query = searchQuery,
@@ -660,7 +625,6 @@ private fun DiscoverTab(
                 }
             }
         } else {
-            // Search is blank -> Show Recommendations (Friends of Friends)
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -734,7 +698,7 @@ private fun DiscoverUserCard(
                         Icon(Icons.Rounded.VerifiedUser, "Friend", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 }
-                Text("@${profile.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("@${profile.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!profile.isPrivate && !profile.bio.isNullOrBlank()) {
                     Text(
                         profile.bio,
@@ -840,13 +804,13 @@ private fun ProfileTab(
             WhisperAvatar(profile, 96.dp, onClick = onShowAvatarOptions)
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
                     .bouncyClick(onClick = onShowAvatarOptions),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
             }
         }
 
@@ -943,32 +907,51 @@ private fun ProfileTab(
         Spacer(Modifier.height(24.dp))
     }
 
+    // Material 3 Expressive Logout Confirmation Dialog
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            icon = { Icon(Icons.AutoMirrored.Rounded.Logout, null) },
-            title = { Text(stringResource(R.string.st_Whisper_Profile_LogOutTitle), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.st_Whisper_Profile_LogOutDesc)) },
+            shape = RoundedCornerShape(32.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.Logout, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = { Text(stringResource(R.string.st_Whisper_Profile_LogOutTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge) },
+            text = { Text(stringResource(R.string.st_Whisper_Profile_LogOutDesc), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
             confirmButton = {
                 ToolzExpressiveButton(
                     onClick = {
                         showLogoutDialog = false
-                        viewModel.signOut()
-                        onLoggedOut()
+                        viewModel.signOut {
+                            onLoggedOut()
+                        }
                     },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text(stringResource(R.string.st_Whisper_Profile_LogOut))
+                    Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }) {
-                    Text(stringResource(R.string.st_Whisper_Friends_Cancel))
+                ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
                 }
             }
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────
+// MATERIAL 3 EXPRESSIVE BOTTOM SHEETS FOR MAIN SCREEN
+// ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -978,37 +961,194 @@ private fun AvatarOptionsSheet(
     onChoosePhoto: () -> Unit,
     onDeletePhoto: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
+                .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.CameraAlt, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                }
+                Column {
+                    Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("Choose or update your profile picture", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
 
             ToolzTonalExpressiveButton(
                 onClick = onChoosePhoto,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
                 Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Choose from Gallery")
+                Text("Choose from Gallery", fontWeight = FontWeight.SemiBold)
             }
 
             if (!profile.avatarUrl.isNullOrBlank()) {
                 ToolzOutlinedExpressiveButton(
                     onClick = onDeletePhoto,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
                     Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Remove Photo")
+                    Text("Remove Current Photo", fontWeight = FontWeight.SemiBold)
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FriendOptionsSheet(
+    friend: WhisperProfile,
+    onDismiss: () -> Unit,
+    onChat: () -> Unit,
+    onViewProfile: () -> Unit,
+    onUnfriend: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                WhisperAvatar(friend, 52.dp)
+                Column {
+                    Text(friend.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("@${friend.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            ToolzExpressiveButton(
+                onClick = onChat,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.st_Whisper_Discover_Message), fontWeight = FontWeight.Bold)
+            }
+
+            ToolzTonalExpressiveButton(
+                onClick = onViewProfile,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("View Full Profile", fontWeight = FontWeight.SemiBold)
+            }
+
+            ToolzOutlinedExpressiveButton(
+                onClick = onUnfriend,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+            ) {
+                Icon(Icons.Rounded.PersonRemove, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.st_Whisper_Profile_RemoveFriend), fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationOptionsSheet(
+    convo: WhisperConversation,
+    onDismiss: () -> Unit,
+    onOpenChat: () -> Unit,
+    onViewProfile: () -> Unit,
+    onToggleMute: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                WhisperAvatar(convo.otherUser, 52.dp)
+                Column {
+                    Text(convo.otherUser.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("@${convo.otherUser.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            ToolzExpressiveButton(
+                onClick = onOpenChat,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open Chat", fontWeight = FontWeight.Bold)
+            }
+
+            ToolzTonalExpressiveButton(
+                onClick = onViewProfile,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("View Profile", fontWeight = FontWeight.SemiBold)
+            }
+
+            ToolzOutlinedExpressiveButton(
+                onClick = onToggleMute,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

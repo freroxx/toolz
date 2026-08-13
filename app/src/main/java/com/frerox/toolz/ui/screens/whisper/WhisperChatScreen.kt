@@ -19,7 +19,9 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -55,7 +58,8 @@ import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 
 /**
- * Individual conversation screen with 3-dot feature menu (Clear Chat, Mute, Block).
+ * Individual conversation screen with Material 3 Expressive popups, bottom sheets,
+ * message deletion on long press, and 3-dot feature menu.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +76,7 @@ fun WhisperChatScreen(
     var showClearChatSheet by remember { mutableStateOf(false) }
     var showMuteDialog by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
+    var selectedMessageForDelete by remember { mutableStateOf<WhisperMessage?>(null) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -89,7 +94,7 @@ fun WhisperChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(14.dp))
                                 .clickable(enabled = uiState.otherUser != null) {
                                     haptic.click()
                                     uiState.otherUser?.id?.let { onNavigateToProfile(it) }
@@ -97,7 +102,7 @@ fun WhisperChatScreen(
                                 .padding(horizontal = 4.dp, vertical = 4.dp),
                         ) {
                             uiState.otherUser?.let { user ->
-                                WhisperAvatar(user, 36.dp)
+                                WhisperAvatar(user, 38.dp)
                                 Column {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -113,7 +118,7 @@ fun WhisperChatScreen(
                                             )
                                         }
                                     }
-                                    Text("@${user.username}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("@${user.effectiveUsername}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             } ?: Text("Chat", fontWeight = FontWeight.Bold)
                         }
@@ -143,12 +148,12 @@ fun WhisperChatScreen(
                             DropdownMenu(
                                 expanded = showMenu,
                                 onDismissRequest = { showMenu = false },
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(20.dp),
                             ) {
                                 // Feature 1: Clear Chat
                                 DropdownMenuItem(
-                                    text = { Text("Clear chat") },
-                                    leadingIcon = { Icon(Icons.Rounded.CleaningServices, null) },
+                                    text = { Text("Clear chat", fontWeight = FontWeight.Medium) },
+                                    leadingIcon = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
                                     onClick = {
                                         showMenu = false
                                         haptic.click()
@@ -159,7 +164,7 @@ fun WhisperChatScreen(
                                 // Undo Clear Chat option if active
                                 if (uiState.clearedUndoMessagesCount > 0) {
                                     DropdownMenuItem(
-                                        text = { Text("Undo last clear (${uiState.clearedUndoMessagesCount} msgs)") },
+                                        text = { Text("Undo last clear (${uiState.clearedUndoMessagesCount} msgs)", fontWeight = FontWeight.Bold) },
                                         leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = MaterialTheme.colorScheme.primary) },
                                         onClick = {
                                             showMenu = false
@@ -172,11 +177,12 @@ fun WhisperChatScreen(
 
                                 // Feature 2: Mute / Unmute
                                 DropdownMenuItem(
-                                    text = { Text(if (uiState.isMuted) "Unmute notifications" else "Mute notifications") },
+                                    text = { Text(if (uiState.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.Medium) },
                                     leadingIcon = {
                                         Icon(
                                             if (uiState.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                                            null
+                                            null,
+                                            tint = if (uiState.isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     },
                                     onClick = {
@@ -198,6 +204,7 @@ fun WhisperChatScreen(
                                     text = {
                                         Text(
                                             if (uiState.isBlockedByMe) "Unblock user" else "Block user",
+                                            fontWeight = FontWeight.SemiBold,
                                             color = if (uiState.isBlockedByMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                                         )
                                     },
@@ -235,7 +242,7 @@ fun WhisperChatScreen(
             ) {
                 // Friend gate banner: ONLY show when friend status is loaded and not accepted
                 AnimatedVisibility(
-                    visible = uiState.isFriendStatusLoaded && uiState.friendStatus != FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther,
+                    visible = uiState.isFriendStatusLoaded && uiState.friendStatus != FriendStatus.ACCEPTED && !uiState.isBlockedByMe,
                     enter = slideInVertically { -it } + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut(),
                 ) {
@@ -246,7 +253,7 @@ fun WhisperChatScreen(
                     )
                 }
 
-                // Blocked state banners
+                // Blocked state banner (Visible to blocker only)
                 if (uiState.isBlockedByMe) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
@@ -267,24 +274,6 @@ fun WhisperChatScreen(
                             ToolzTonalExpressiveButton(onClick = { viewModel.toggleBlock() }) {
                                 Text("Unblock")
                             }
-                        }
-                    }
-                } else if (uiState.isBlockedByOther) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            Text(
-                                "You cannot message this user.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 }
@@ -325,6 +314,13 @@ fun WhisperChatScreen(
                                 message = message,
                                 isMine = isMine,
                                 isPending = isPending,
+                                partnerName = uiState.otherUser?.effectiveName ?: "User",
+                                onLongClick = {
+                                    if (!message.isDeletedForEveryone && !isPending) {
+                                        haptic.longClick()
+                                        selectedMessageForDelete = message
+                                    }
+                                }
                             )
                         }
                     }
@@ -338,7 +334,8 @@ fun WhisperChatScreen(
                 ) {
                     Surface(
                         color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = 4.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -346,12 +343,13 @@ fun WhisperChatScreen(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                         ) {
-                            Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
                             Text(
                                 "Cleared ${uiState.clearedUndoMessagesCount} messages",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 modifier = Modifier.weight(1f)
                             )
@@ -361,9 +359,9 @@ fun WhisperChatScreen(
                                     viewModel.undoClearChat()
                                 }
                             ) {
-                                Icon(Icons.AutoMirrored.Rounded.Undo, null, Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Undo (60s)")
+                                Icon(Icons.AutoMirrored.Rounded.Undo, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Undo (60s)", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -394,7 +392,7 @@ fun WhisperChatScreen(
                 }
 
                 // Message input bar
-                val canSendMessage = uiState.friendStatus == FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther
+                val canSendMessage = uiState.friendStatus == FriendStatus.ACCEPTED && !uiState.isBlockedByMe
                 val draftText by viewModel.draftText.collectAsStateWithLifecycle()
                 MessageInputBar(
                     enabled = canSendMessage,
@@ -418,7 +416,28 @@ fun WhisperChatScreen(
         )
     }
 
-    // Clear Chat Bottom Sheet
+    // Material 3 Expressive Delete Message Bottom Sheet
+    selectedMessageForDelete?.let { msg ->
+        DeleteMessageSheet(
+            message = msg,
+            isMine = msg.isSentByMe(viewModel.myUserId),
+            onDismiss = { selectedMessageForDelete = null },
+            onDeleteForEveryone = {
+                selectedMessageForDelete = null
+                haptic.error()
+                viewModel.deleteMessageForEveryone(msg)
+                toastState.show("Message deleted for everyone", WhisperToastType.INFO)
+            },
+            onDeleteForMe = {
+                selectedMessageForDelete = null
+                haptic.click()
+                viewModel.deleteMessageForMe(msg)
+                toastState.show("Message deleted for you", WhisperToastType.INFO)
+            }
+        )
+    }
+
+    // Material 3 Expressive Clear Chat Bottom Sheet
     if (showClearChatSheet) {
         ClearChatSheet(
             onDismiss = { showClearChatSheet = false },
@@ -431,7 +450,7 @@ fun WhisperChatScreen(
         )
     }
 
-    // Mute Dialog
+    // Material 3 Expressive Mute Dialog
     if (showMuteDialog) {
         MuteOptionsDialog(
             onDismiss = { showMuteDialog = false },
@@ -444,36 +463,117 @@ fun WhisperChatScreen(
         )
     }
 
-    // Block Confirmation Dialog
+    // Material 3 Expressive Block Confirmation Dialog
     if (showBlockConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showBlockConfirmDialog = false },
-            icon = { Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Block ${uiState.otherUser?.effectiveName ?: "this user"}?") },
-            text = {
-                Text("Blocked users cannot send you messages or view your online activity. You can unblock at any time from this menu.")
-            },
-            confirmButton = {
-                ToolzExpressiveButton(
-                    onClick = {
-                        showBlockConfirmDialog = false
-                        haptic.error()
-                        viewModel.toggleBlock()
-                        toastState.show("User blocked", WhisperToastType.INFO)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Block")
-                }
-            },
-            dismissButton = {
-                ToolzOutlinedExpressiveButton(onClick = { showBlockConfirmDialog = false }) {
-                    Text("Cancel")
-                }
+        BlockConfirmDialog(
+            partnerName = uiState.otherUser?.effectiveName ?: "this user",
+            onDismiss = { showBlockConfirmDialog = false },
+            onConfirmBlock = {
+                showBlockConfirmDialog = false
+                haptic.error()
+                viewModel.toggleBlock()
+                toastState.show("User blocked", WhisperToastType.INFO)
             }
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────
+// MATERIAL 3 EXPRESSIVE DELETE MESSAGE SHEET
+// ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeleteMessageSheet(
+    message: WhisperMessage,
+    isMine: Boolean,
+    onDismiss: () -> Unit,
+    onDeleteForEveryone: () -> Unit,
+    onDeleteForMe: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(24.dp))
+                }
+                Column {
+                    Text("Delete Message", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("This action is permanent and cannot be undone", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+
+            // Message preview
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = message.content.take(120),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            if (isMine) {
+                ToolzExpressiveButton(
+                    onClick = onDeleteForEveryone,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete for everyone", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            ToolzTonalExpressiveButton(
+                onClick = onDeleteForMe,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Delete for me", fontWeight = FontWeight.SemiBold)
+            }
+
+            ToolzOutlinedExpressiveButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Cancel", fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// MATERIAL 3 EXPRESSIVE SHEETS & POPUPS
+// ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -483,28 +583,55 @@ private fun ClearChatSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary)
-                Text("Clear Chat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                }
+                Column {
+                    Text("Clear Chat History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Deletes your sent messages from all devices", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            Text(
-                "Choose time period to clear your messages. You'll have 60 seconds to undo if needed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
-            HorizontalDivider()
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    Text(
+                        "You'll have 60 seconds to undo this action if needed.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
 
             val options = listOf(
                 Pair("Past 24 hours", ClearChatTimeRange.PAST_24_HOURS),
@@ -516,22 +643,23 @@ private fun ClearChatSheet(
             options.forEach { (label, range) ->
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(18.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onSelectRange(range) }
+                        .clip(RoundedCornerShape(18.dp))
+                        .bouncyClick { onSelectRange(range) }
                 ) {
                     Row(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(label, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
                     }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
         }
     }
 }
@@ -550,20 +678,45 @@ private fun MuteOptionsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.NotificationsOff, null) },
-        title = { Text("Mute notifications", fontWeight = FontWeight.Bold) },
+        shape = RoundedCornerShape(32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.NotificationsOff, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(28.dp))
+            }
+        },
+        title = {
+            Text("Mute notifications", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "You will not receive notification sounds or banners for new messages.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
                 durations.forEach { (label, durationMs) ->
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelectDuration(durationMs) }
+                            .clip(RoundedCornerShape(16.dp))
+                            .bouncyClick { onSelectDuration(durationMs) }
                     ) {
-                        Row(modifier = Modifier.padding(14.dp)) {
-                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Icon(Icons.Rounded.RadioButtonUnchecked, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -571,7 +724,59 @@ private fun MuteOptionsDialog(
         },
         confirmButton = {},
         dismissButton = {
-            ToolzOutlinedExpressiveButton(onClick = onDismiss) { Text("Cancel") }
+            ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    )
+}
+
+@Composable
+private fun BlockConfirmDialog(
+    partnerName: String,
+    onDismiss: () -> Unit,
+    onConfirmBlock: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+            }
+        },
+        title = {
+            Text("Block $partnerName?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+        },
+        text = {
+            Text(
+                "Blocked users will not be able to send you messages. You can unblock them at any time from this chat menu.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        confirmButton = {
+            ToolzExpressiveButton(
+                onClick = onConfirmBlock,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Icon(Icons.Rounded.Block, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Block User", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+            }
         }
     )
 }
@@ -635,18 +840,31 @@ private fun DateSeparator(date: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     message: WhisperMessage,
     isMine: Boolean,
     isPending: Boolean = false,
+    partnerName: String = "User",
+    onLongClick: () -> Unit = {},
 ) {
+    val isDeleted = message.isDeletedForEveryone
+
     val bubbleShape = when {
         isMine  -> RoundedCornerShape(topStart = 20.dp, topEnd = 4.dp,  bottomStart = 20.dp, bottomEnd = 20.dp)
         else    -> RoundedCornerShape(topStart = 4.dp,  topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
     }
-    val bubbleColor = if (isMine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
-    val textColor   = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+    val bubbleColor = when {
+        isDeleted -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+        isMine    -> MaterialTheme.colorScheme.primaryContainer
+        else      -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val textColor = when {
+        isDeleted -> MaterialTheme.colorScheme.outline
+        isMine    -> MaterialTheme.colorScheme.onPrimaryContainer
+        else      -> MaterialTheme.colorScheme.onSurface
+    }
 
     Column(
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
@@ -658,14 +876,34 @@ private fun MessageBubble(
                 .clip(bubbleShape)
                 .background(bubbleColor)
                 .alpha(if (isPending) 0.7f else 1f)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongClick
+                )
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             Column {
-                Text(
-                    message.content,
-                    color = textColor,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                if (isDeleted) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Rounded.DeleteOutline, null, tint = textColor, modifier = Modifier.size(15.dp))
+                        Text(
+                            text = if (isMine) "You deleted this message" else "$partnerName deleted this message",
+                            color = textColor,
+                            fontStyle = FontStyle.Italic,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                } else {
+                    Text(
+                        message.content,
+                        color = textColor,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
                 Spacer(Modifier.height(4.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -684,7 +922,7 @@ private fun MessageBubble(
                             color = textColor.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.labelSmall,
                         )
-                        if (isMine) {
+                        if (isMine && !isDeleted) {
                             Icon(
                                 if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
                                 contentDescription = if (message.isRead) "Read" else "Sent",

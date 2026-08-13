@@ -122,7 +122,7 @@ fun WhisperUserProfileScreen(
                             )
 
                             Text(
-                                "@${profile.username}",
+                                "@${profile.effectiveUsername}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

@@ -105,8 +105,15 @@ class WhisperViewModel @Inject constructor(
     private suspend fun loadFriendsInternal() {
         repository.getFriends()
             .onSuccess { friends -> _uiState.update { it.copy(friends = friends) } }
-        repository.getPendingIncoming()
-            .onSuccess { pending -> _uiState.update { it.copy(pendingIncoming = pending) } }
+        repository.getPendingIncomingWithProfiles()
+            .onSuccess { pendingRequests ->
+                _uiState.update {
+                    it.copy(
+                        pendingIncomingRequests = pendingRequests,
+                        pendingIncoming = pendingRequests.map { r -> r.friendship }
+                    )
+                }
+            }
         repository.getPendingOutgoing()
             .onSuccess { pending -> _uiState.update { it.copy(pendingOutgoing = pending) } }
     }
@@ -216,8 +223,11 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    fun signOut() {
-        viewModelScope.launch { authManager.signOut() }
+    fun signOut(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            authManager.signOut()
+            onComplete()
+        }
     }
 
     fun clearError() {

@@ -66,7 +66,7 @@ class WhisperChatViewModel @Inject constructor(
         notificationManager.cancelMessageNotification(otherUserId)
         _uiState.update { it.copy(isMuted = mutePrefs.isMuted(otherUserId)) }
         loadInitialData()
-        subscribeToMessages()
+        subscribeToChat()
         subscribeToTyping()
     }
 
@@ -104,11 +104,9 @@ class WhisperChatViewModel @Inject constructor(
                     }
                 }
 
-            // 3. Load block status
-            repository.getBlockStatus(otherUserId)
-                .onSuccess { (byMe, byOther) ->
-                    _uiState.update { it.copy(isBlockedByMe = byMe, isBlockedByOther = byOther) }
-                }
+            // 3. Load block status (Only check if blocked by me)
+            val blockedByMe = repository.isBlockedByMe(otherUserId)
+            _uiState.update { it.copy(isBlockedByMe = blockedByMe) }
 
             // 4. Load messages
             loadMessages()
@@ -130,8 +128,8 @@ class WhisperChatViewModel @Inject constructor(
 
     fun sendMessage(content: String) {
         if (content.isBlank()) return
-        if (uiState.value.isBlockedByMe || uiState.value.isBlockedByOther) {
-            _uiState.update { it.copy(error = "Cannot send message while blocked.") }
+        if (uiState.value.isBlockedByMe) {
+            _uiState.update { it.copy(error = "Unblock user to send messages.") }
             return
         }
 
@@ -154,7 +152,7 @@ class WhisperChatViewModel @Inject constructor(
             repository.sendMessage(otherUserId, trimmedContent)
                 .onSuccess { newMsg ->
                     _uiState.update { state ->
-                        val filtered = state.messages.filter { it.id != optimisticMsg.id }
+                        val filtered = state.messages.filter { it.id != optimisticMsg.id && it.id != newMsg.id }
                         state.copy(messages = filtered + newMsg)
                     }
                 }
@@ -168,11 +166,53 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    // ── MESSAGE DELETION ──
+    fun deleteMessageForEveryone(message: WhisperMessage) {
+        val myProfile = uiState.value.otherUser
+        val myDisplayName = authManager.currentUserId?.let { "You" } ?: "User"
+
+        // Optimistic local update
+        val tombstone = "[deleted_by_sender:$myDisplayName]"
+        _uiState.update { state ->
+            val updated = state.messages.map {
+                if (it.id == message.id) it.copy(content = tombstone, contentIv = null) else it
+            }
+            state.copy(messages = updated)
+        }
+
+        viewModelScope.launch {
+            repository.deleteMessageForEveryone(message.id, myDisplayName)
+                .onFailure { err ->
+                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "deleteMessage")) }
+                    loadMessages()
+                }
+        }
+    }
+
+    fun deleteMessageForMe(message: WhisperMessage) {
+        _uiState.update { state ->
+            state.copy(messages = state.messages.filter { it.id != message.id })
+        }
+
+        viewModelScope.launch {
+            repository.deleteMessageForMe(message.id)
+                .onFailure { loadMessages() }
+        }
+    }
+
     fun sendFriendRequest() {
         viewModelScope.launch {
             repository.sendFriendRequest(otherUserId)
                 .onSuccess {
-                    _uiState.update { it.copy(friendStatus = FriendStatus.PENDING, iAmRequester = true) }
+                    repository.getFriendshipStatus(otherUserId).onSuccess { (status, friendship) ->
+                        _uiState.update {
+                            it.copy(
+                                friendStatus = status,
+                                iAmRequester = friendship?.iRequested(myUserId) ?: false,
+                                isFriendStatusLoaded = true
+                            )
+                        }
+                    }
                 }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
         }
@@ -202,7 +242,6 @@ class WhisperChatViewModel @Inject constructor(
                         )
                     }
 
-                    // Start 60-second undo countdown
                     undoTimerJob?.cancel()
                     undoTimerJob = viewModelScope.launch {
                         delay(60_000)
@@ -247,7 +286,7 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    // ── BLOCK / UNBLOCK ──
+    // ── BLOCK / UNBLOCK (ROBUST: USER2 NEVER TOLD THEY ARE BLOCKED) ──
     fun toggleBlock() {
         val isBlocked = uiState.value.isBlockedByMe
         viewModelScope.launch {
@@ -303,35 +342,32 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    private fun subscribeToMessages() {
+    private fun subscribeToChat() {
         val myId = myUserId
         if (myId.isEmpty()) return
 
         realtimeJob = viewModelScope.launch {
             try {
-                repository.subscribeToIncomingMessages(myId).collect { newMsg ->
-                    if (newMsg.senderId == otherUserId || (newMsg.senderId == myId && newMsg.receiverId == otherUserId)) {
-                        val keyToUse = partnerPublicKey
-                        val decryptedContent = if (newMsg.contentIv != null && keyToUse != null) {
-                            crypto.decryptMessage(newMsg.content, newMsg.contentIv, keyToUse)
-                        } else newMsg.content
-
-                        _uiState.update { state ->
-                            if (state.messages.any { it.id == newMsg.id }) {
-                                state
-                            } else {
-                                val updatedMessages = state.messages + newMsg.copy(content = decryptedContent)
-                                state.copy(messages = updatedMessages)
-                            }
+                repository.subscribeToChat(otherUserId).collect { newMsg ->
+                    _uiState.update { state ->
+                        val existingIndex = state.messages.indexOfFirst { it.id == newMsg.id }
+                        if (existingIndex >= 0) {
+                            // Update existing message (e.g. deletion tombstone, read status)
+                            val mutableList = state.messages.toMutableList()
+                            mutableList[existingIndex] = newMsg
+                            state.copy(messages = mutableList)
+                        } else {
+                            val filtered = state.messages.filter { !it.id.startsWith("pending_") || it.content != newMsg.content }
+                            state.copy(messages = filtered + newMsg)
                         }
-                        if (newMsg.senderId == otherUserId) {
-                            repository.markMessagesAsRead(otherUserId)
-                            notificationManager.cancelMessageNotification(otherUserId)
-                        }
+                    }
+                    if (newMsg.senderId == otherUserId) {
+                        repository.markMessagesAsRead(otherUserId)
+                        notificationManager.cancelMessageNotification(otherUserId)
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("WhisperChatVM", "Realtime collect error", e)
+                android.util.Log.e("WhisperChatVM", "Chat realtime collect error", e)
             }
         }
     }
