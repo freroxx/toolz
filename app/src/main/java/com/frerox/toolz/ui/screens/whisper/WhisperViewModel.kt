@@ -24,6 +24,7 @@ import javax.inject.Inject
 class WhisperViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
+    private val notificationManager: WhisperNotificationManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WhisperUiState())
@@ -32,11 +33,13 @@ class WhisperViewModel @Inject constructor(
     val isAuthenticated: StateFlow<Boolean?> = authManager.isAuthenticated
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    private var realtimeJob: Job? = null
+    private var messagesJob: Job? = null
+    private var friendsJob: Job? = null
 
     init {
         loadAll()
         subscribeToMessages()
+        subscribeToFriends()
     }
 
     fun loadAll(isRefresh: Boolean = false) {
@@ -48,12 +51,12 @@ class WhisperViewModel @Inject constructor(
                 val profileDeferred = async {
                     repository.getMyProfile()
                         .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
-                        .onFailure { err -> _uiState.update { it.copy(error = err.message) } }
+                        .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getMyProfile")) } }
                 }
                 val convosDeferred = async {
                     repository.getConversations()
                         .onSuccess { convos -> _uiState.update { it.copy(conversations = convos) } }
-                        .onFailure { err -> _uiState.update { it.copy(error = err.message) } }
+                        .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getConversations")) } }
                 }
                 val friendsDeferred = async { loadFriendsInternal() }
                 profileDeferred.await()
@@ -79,6 +82,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.searchProfiles(query)
                 .onSuccess { results -> _uiState.update { it.copy(searchResults = results) } }
+                .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "searchProfiles")) } }
         }
     }
 
@@ -86,7 +90,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.sendFriendRequest(targetUserId)
                 .onSuccess { loadAll() }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
         }
     }
 
@@ -94,7 +98,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.acceptFriendRequest(friendshipId)
                 .onSuccess { loadAll() }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "acceptFriendRequest")) } }
         }
     }
 
@@ -102,7 +106,21 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteFriendship(friendshipId)
                 .onSuccess { loadAll() }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "declineFriendRequest")) } }
+        }
+    }
+
+    fun unfriend(targetUserId: String) {
+        viewModelScope.launch {
+            repository.getFriendshipStatus(targetUserId)
+                .onSuccess { (_, friendship) ->
+                    if (friendship != null) {
+                        repository.deleteFriendship(friendship.id)
+                            .onSuccess { loadAll() }
+                            .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "unfriend")) } }
+                    }
+                }
+                .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "getFriendshipStatus")) } }
         }
     }
 
@@ -115,7 +133,7 @@ class WhisperViewModel @Inject constructor(
             )
             repository.updateProfile(update)
                 .onSuccess { loadAll() }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "updateProfile")) } }
         }
     }
 
@@ -126,7 +144,7 @@ class WhisperViewModel @Inject constructor(
                     repository.updateProfile(WhisperProfileUpdate(avatarUrl = url))
                         .onSuccess { loadAll() }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "uploadAvatar")) } }
         }
     }
 
@@ -139,15 +157,42 @@ class WhisperViewModel @Inject constructor(
     }
 
     private fun subscribeToMessages() {
-        realtimeJob = viewModelScope.launch {
+        messagesJob = viewModelScope.launch {
             try {
-                repository.subscribeToIncomingMessages().collect { loadAll() }
+                repository.subscribeToIncomingMessages().collect { msg ->
+                    loadAll()
+                    // Send in-process notification if message is from another user
+                    val senderProfile = repository.getProfile(msg.senderId).getOrNull()
+                    val senderName = senderProfile?.effectiveName ?: "Someone"
+                    notificationManager.showMessageNotification(
+                        senderId = msg.senderId,
+                        senderName = senderName,
+                        preview = msg.content
+                    )
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun subscribeToFriends() {
+        friendsJob = viewModelScope.launch {
+            try {
+                repository.subscribeToFriendUpdates().collect { friendship ->
+                    loadAll()
+                    val myId = authManager.currentUserId
+                    if (friendship.userB == myId && friendship.status == "pending") {
+                        val senderProfile = repository.getProfile(friendship.userA).getOrNull()
+                        val senderName = senderProfile?.effectiveName ?: "Someone"
+                        notificationManager.showFriendRequestNotification(senderName)
+                    }
+                }
             } catch (_: Exception) { }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        realtimeJob?.cancel()
+        messagesJob?.cancel()
+        friendsJob?.cancel()
     }
 }

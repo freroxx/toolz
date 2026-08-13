@@ -175,5 +175,7 @@ data class WhisperChatUiState(
     val messages: List<WhisperMessage> = emptyList(),
     val friendStatus: FriendStatus = FriendStatus.NONE,
     val iAmRequester: Boolean = false,
+    val isPartnerTyping: Boolean = false,
     val error: String? = null,
 )
+

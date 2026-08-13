@@ -23,6 +23,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
@@ -32,8 +33,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -174,6 +179,7 @@ class WhisperRepository @Inject constructor(
         changes.collect { action ->
             try {
                 val msg = action.decodeRecord<WhisperMessage>()
+                android.util.Log.d("WhisperRepo", "Incoming message: ${msg.id} from ${msg.senderId} to ${msg.receiverId}")
                 if (msg.receiverId == myId) {  // double-check
                     // Attempt decryption
                     val decrypted = if (msg.contentIv != null) {
@@ -185,7 +191,9 @@ class WhisperRepository @Inject constructor(
                     } else msg.content
                     emit(msg.copy(content = decrypted))
                 }
-            } catch (_: Exception) { /* skip malformed */ }
+            } catch (e: Exception) {
+                android.util.Log.e("WhisperRepo", "Error decoding realtime message: ${e.message}")
+            }
         }
     }
 
@@ -311,4 +319,56 @@ class WhisperRepository @Inject constructor(
             } catch (_: Exception) { }
         }
     }
+
+    fun subscribeToFriendUpdates(): Flow<WhisperFriendship> = flow {
+        val channel = supabase.channel("whisper-friends-all-$myId")
+        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = "friends" }
+        channel.subscribe()
+        changes.collect { action ->
+            try {
+                val record = when (action) {
+                    is PostgresAction.Insert -> action.decodeRecord<WhisperFriendship>()
+                    is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
+                    else -> null
+                }
+                if (record != null && (record.userA == myId || record.userB == myId)) {
+                    emit(record)
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    // TYPING INDICATORS
+    suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {
+        runCatching {
+            val channelKey = if (myId < targetUserId) "${myId}_${targetUserId}" else "${targetUserId}_${myId}"
+            val channel = supabase.channel("typing_$channelKey")
+            channel.subscribe()
+            channel.broadcast(
+                event = "typing",
+                message = buildJsonObject {
+                    put("sender_id", myId)
+                    put("is_typing", isTyping)
+                }
+            )
+        }
+    }
+
+    fun subscribeToTypingStatus(otherUserId: String): Flow<Boolean> = flow {
+        val channelKey = if (myId < otherUserId) "${myId}_${otherUserId}" else "${otherUserId}_${myId}"
+        val channel = supabase.channel("typing_$channelKey")
+        val broadcasts = channel.broadcastFlow<JsonObject>("typing")
+        channel.subscribe()
+        broadcasts.collect { json ->
+            try {
+                val senderId = json["sender_id"]?.jsonPrimitive?.content
+                val isTyping = json["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
+                if (senderId == otherUserId) {
+                    emit(isTyping)
+                }
+            } catch (_: Exception) { }
+        }
+    }
 }
+
+

@@ -82,7 +82,7 @@ fun WhisperAuthScreen(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
 
     LaunchedEffect(authState) {
@@ -92,41 +92,52 @@ fun WhisperAuthScreen(
     LaunchedEffect(authState) {
         (authState as? WhisperAuthState.Error)?.let { err ->
             haptic.error()
-            snackbarHostState.showSnackbar(err.message)
+            toastState.show(err.message, WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            ExpressiveTopAppBar(
-                title = { Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
-                    }
-                },
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                ExpressiveTopAppBar(
+                    title = { Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
+                        }
+                    },
+                )
+            },
+            containerColor = Color.Transparent,
+            modifier = Modifier.toolzBackground(),
+        ) { paddingValues ->
+
+            WhisperAuthContent(
+                authState = authState,
+                generatedToken = generatedToken?.token,
+                usernameAvailability = usernameAvailability,
+                onCheckUsername = viewModel::checkUsernameAvailable,
+                onLoginEmail = viewModel::loginWithEmail,
+                onRegisterEmail = viewModel::registerWithEmail,
+                onGenerateToken = viewModel::generateToken,
+                onRegisterToken = viewModel::registerWithGeneratedToken,
+                onLoginToken = viewModel::loginWithToken,
+                onNormalizeToken = viewModel::normalizeToken,
+                modifier = Modifier.padding(paddingValues),
             )
-        },
-        containerColor = Color.Transparent,
-        modifier = Modifier.toolzBackground(),
-    ) { paddingValues ->
-        WhisperAuthContent(
-            authState = authState,
-            generatedToken = generatedToken?.token,
-            usernameAvailability = usernameAvailability,
-            onCheckUsername = viewModel::checkUsernameAvailable,
-            onLoginEmail = viewModel::loginWithEmail,
-            onRegisterEmail = viewModel::registerWithEmail,
-            onGenerateToken = viewModel::generateToken,
-            onRegisterToken = viewModel::registerWithGeneratedToken,
-            onLoginToken = viewModel::loginWithToken,
-            onNormalizeToken = viewModel::normalizeToken,
-            modifier = Modifier.padding(paddingValues),
+        }
+
+        WhisperToastHost(
+            hostState = toastState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp)
         )
     }
 }
+
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -581,11 +592,11 @@ private fun TokenLoginForm(
     val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
 
-    // Normalize as the user types/pastes so whitespace or newlines from a paste never
-    // silently break validation.
+    val cleanRaw = tokenInput.trim()
+    val hasInvalidChars = cleanRaw.isNotEmpty() && cleanRaw.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }
     val normalized = onNormalizeToken(tokenInput)
     val isValidLength = normalized.length == 64
-    val hasInvalidChars = normalized.isNotEmpty() && normalized.any { it !in '0'..'9' && it !in 'a'..'f' }
+
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(

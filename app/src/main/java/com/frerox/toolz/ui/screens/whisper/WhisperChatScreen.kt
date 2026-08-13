@@ -20,6 +20,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -39,14 +40,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
 import com.frerox.toolz.data.whisper.WhisperMessage
@@ -55,151 +54,183 @@ import com.frerox.toolz.ui.theme.toolzBackground
 
 /**
  * Individual conversation screen.
- *
- * Layout:
- *  - ExpressiveTopAppBar with other user's name + avatar
- *  - Scrollable message list (newest at bottom)
- *  - Friend gate banner when not friends
- *  - Message input bar with animated send button
- * 
- * Note: WhisperChatViewModel requires fun updateDraft(text: String) { _draftText.value = text }
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WhisperChatScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToProfile: (String) -> Unit = {},
     viewModel: WhisperChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val toastState = rememberWhisperToastState()
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            snackbarHostState.showSnackbar(it)
+            toastState.show(it, WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            ExpressiveTopAppBar(
-                title = {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                ExpressiveTopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(enabled = uiState.otherUser != null) {
+                                    haptic.click()
+                                    uiState.otherUser?.id?.let { onNavigateToProfile(it) }
+                                }
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                        ) {
+                            uiState.otherUser?.let { user ->
+                                WhisperAvatar(user, 36.dp)
+                                Column {
+                                    Text(user.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                    Text("@${user.username}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            } ?: Text("Chat", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    navigationIcon = {
+                        ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
+                        }
+                    },
+                    actions = {
+                        val status = uiState.friendStatus
+                        if (status == FriendStatus.ACCEPTED) {
+                            Icon(
+                                Icons.Rounded.VerifiedUser,
+                                contentDescription = stringResource(R.string.st_Whisper_Friends_Accept),
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(12.dp))
+                        }
+                    },
+                )
+            },
+            containerColor = Color.Transparent,
+            modifier = Modifier.toolzBackground(),
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+            ) {
+                // Friend gate banner
+                AnimatedVisibility(
+                    visible = uiState.friendStatus != FriendStatus.ACCEPTED,
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut(),
+                ) {
+                    FriendGateBanner(
+                        friendStatus = uiState.friendStatus,
+                        iAmRequester = uiState.iAmRequester,
+                        onSendRequest = { haptic.success(); viewModel.sendFriendRequest() },
+                    )
+                }
+
+                // Messages
+                val listState = rememberLazyListState()
+                val messages = uiState.messages
+
+                LaunchedEffect(messages.size) {
+                    if (messages.isNotEmpty()) {
+                        listState.animateScrollToItem(messages.lastIndex)
+                    }
+                }
+
+                if (uiState.isLoading && messages.isEmpty()) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        ToolzLoadingIndicator()
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                            val isMine = message.isSentByMe(viewModel.myUserId)
+                            val isPending = message.id.startsWith("pending_")
+
+                            val showDateSeparator = index == 0 ||
+                                messages[index - 1].createdAt.extractDate() != message.createdAt.extractDate()
+
+                            if (showDateSeparator) {
+                                DateSeparator(message.createdAt.extractDate())
+                            }
+
+                            AnimatedVisibility(
+                                visible = true,
+                                enter = fadeIn(spring()) + slideInHorizontally(spring()) { if (isMine) 80 else -80 },
+                            ) {
+                                MessageBubble(
+                                    message = message,
+                                    isMine = isMine,
+                                    isPending = isPending,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Typing indicator banner
+                AnimatedVisibility(
+                    visible = uiState.isPartnerTyping,
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut()
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                     ) {
-                        uiState.otherUser?.let { user ->
-                            WhisperAvatar(user, 36.dp)
-                            Column {
-                                Text(user.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                                Text("@${user.username}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        } ?: Text("Chat", fontWeight = FontWeight.Bold)
-                    }
-                },
-                navigationIcon = {
-                    ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
-                    }
-                },
-                actions = {
-                    // Friend status pill
-                    val status = uiState.friendStatus
-                    if (status == FriendStatus.ACCEPTED) {
-                        Icon(
-                            Icons.Rounded.VerifiedUser,
-                            contentDescription = stringResource(R.string.st_Whisper_Friends_Accept),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                            color = MaterialTheme.colorScheme.primary,
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${uiState.otherUser?.effectiveName ?: "Partner"} is typing…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
                     }
-                },
-            )
-        },
-        containerColor = Color.Transparent,
-        modifier = Modifier.toolzBackground(),
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-        ) {
-            // Friend gate banner
-            AnimatedVisibility(
-                visible = uiState.friendStatus != FriendStatus.ACCEPTED,
-                enter = slideInVertically { -it } + fadeIn(),
-                exit = slideOutVertically { -it } + fadeOut(),
-            ) {
-                FriendGateBanner(
-                    friendStatus = uiState.friendStatus,
-                    iAmRequester = uiState.iAmRequester,
-                    onSendRequest = { haptic.success(); viewModel.sendFriendRequest() },
+                }
+
+                // Message input bar
+                val canSendMessage = uiState.friendStatus == FriendStatus.ACCEPTED
+                val draftText by viewModel.draftText.collectAsStateWithLifecycle()
+                MessageInputBar(
+                    enabled = canSendMessage,
+                    draftText = draftText,
+                    onDraftChanged = { viewModel.updateDraft(it) },
+                    onSend = { text ->
+                        haptic.success()
+                        viewModel.sendMessage(text)
+                    },
                 )
             }
-
-            // Messages
-            val listState = rememberLazyListState()
-            val messages = uiState.messages
-
-            LaunchedEffect(messages.size) {
-                if (messages.isNotEmpty()) {
-                    listState.animateScrollToItem(messages.lastIndex)
-                }
-            }
-
-            if (uiState.isLoading && messages.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    ToolzLoadingIndicator()
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
-                        val isMine = message.isSentByMe(viewModel.myUserId)
-                        val isPending = message.id.startsWith("pending_")
-
-                        // Date separator
-                        val showDateSeparator = index == 0 ||
-                            messages[index - 1].createdAt.extractDate() != message.createdAt.extractDate()
-
-                        if (showDateSeparator) {
-                            DateSeparator(message.createdAt.extractDate())
-                        }
-
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn(spring()) + slideInHorizontally(spring()) { if (isMine) 80 else -80 },
-                        ) {
-                            MessageBubble(
-                                message = message,
-                                isMine = isMine,
-                                isPending = isPending,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Message input bar
-            val canSendMessage = uiState.friendStatus == FriendStatus.ACCEPTED
-            val draftText by viewModel.draftText.collectAsStateWithLifecycle()
-            MessageInputBar(
-                enabled = canSendMessage,
-                draftText = draftText,
-                onDraftChanged = { viewModel.updateDraft(it) },
-                onSend = { text ->
-                    haptic.success()
-                    viewModel.sendMessage(text)
-                },
-            )
         }
+
+        // Expressive Toast Host
+        WhisperToastHost(
+            hostState = toastState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 80.dp)
+        )
     }
 }
 
@@ -334,7 +365,6 @@ private fun MessageInputBar(
     onDraftChanged: (String) -> Unit,
     onSend: (String) -> Unit,
 ) {
-    val haptic = rememberToolzHapticFeedback()
     val canSend = draftText.isNotBlank() && enabled
 
     Surface(
@@ -366,7 +396,6 @@ private fun MessageInputBar(
                 modifier = Modifier.weight(1f),
             )
 
-            // Animated send button
             val sendScale by animateFloatAsState(
                 targetValue = if (canSend) 1f else 0.85f,
                 animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
@@ -399,3 +428,4 @@ private fun MessageInputBar(
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
 fun String.extractDate(): String = if (length >= 10) take(10) else ""
+

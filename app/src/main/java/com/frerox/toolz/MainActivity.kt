@@ -1202,9 +1202,13 @@ fun ToolzNavHost(
         }
         composable(Screen.WhisperChat.route) {
             WhisperChatScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToProfile = { userId ->
+                    navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
+                }
             )
         }
+
         composable(Screen.WhisperUserProfile.route) {
             WhisperUserProfileScreen(
                 onNavigateBack = { navController.popBackStack() },

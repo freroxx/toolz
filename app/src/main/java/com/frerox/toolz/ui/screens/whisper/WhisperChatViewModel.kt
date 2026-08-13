@@ -23,6 +23,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,7 @@ class WhisperChatViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
     private val crypto: WhisperCrypto,
+    private val notificationManager: WhisperNotificationManager,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -49,10 +51,16 @@ class WhisperChatViewModel @Inject constructor(
 
     private var partnerPublicKey: String? = null
     private var realtimeJob: Job? = null
+    private var typingSubscriptionJob: Job? = null
+    private var typingDebounceJob: Job? = null
+    private var isCurrentlyTyping = false
 
     init {
+        notificationManager.currentChatId = otherUserId
+        notificationManager.cancelMessageNotification(otherUserId)
         loadInitialData()
         subscribeToMessages()
+        subscribeToTyping()
     }
 
     private fun loadInitialData() {
@@ -65,6 +73,9 @@ class WhisperChatViewModel @Inject constructor(
                     partnerPublicKey = profile.publicKey
                     _uiState.update { it.copy(otherUser = profile) }
                 }
+                .onFailure { err ->
+                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getProfile")) }
+                }
 
             // Load friendship status
             repository.getFriendshipStatus(otherUserId)
@@ -75,6 +86,9 @@ class WhisperChatViewModel @Inject constructor(
                             iAmRequester = friendship?.iRequested(myUserId) ?: false,
                         )
                     }
+                }
+                .onFailure { err ->
+                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getFriendshipStatus")) }
                 }
 
             // Load messages
@@ -91,7 +105,7 @@ class WhisperChatViewModel @Inject constructor(
                     repository.markMessagesAsRead(otherUserId)
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = err.message, isLoading = false) }
+                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getMessages"), isLoading = false) }
                 }
         }
     }
@@ -101,6 +115,7 @@ class WhisperChatViewModel @Inject constructor(
         
         val originalText = content
         _draftText.value = ""
+        sendTypingSignal(false)
         val trimmedContent = content.trim()
         val optimisticMsg = WhisperMessage(
             id = "pending_${System.currentTimeMillis()}",
@@ -125,7 +140,7 @@ class WhisperChatViewModel @Inject constructor(
                     _draftText.value = originalText
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id }
-                        state.copy(error = err.message, messages = filtered)
+                        state.copy(error = WhisperErrorMapper.map(err, "sendMessage"), messages = filtered)
                     }
                 }
         }
@@ -137,7 +152,7 @@ class WhisperChatViewModel @Inject constructor(
                 .onSuccess {
                     _uiState.update { it.copy(friendStatus = FriendStatus.PENDING, iAmRequester = true) }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = it.message) } }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
         }
     }
 
@@ -147,6 +162,31 @@ class WhisperChatViewModel @Inject constructor(
 
     fun updateDraft(text: String) {
         _draftText.value = text
+        
+        if (text.isNotBlank()) {
+            if (!isCurrentlyTyping) {
+                isCurrentlyTyping = true
+                sendTypingSignal(true)
+            }
+            typingDebounceJob?.cancel()
+            typingDebounceJob = viewModelScope.launch {
+                delay(2500)
+                isCurrentlyTyping = false
+                sendTypingSignal(false)
+            }
+        } else {
+            if (isCurrentlyTyping) {
+                isCurrentlyTyping = false
+                sendTypingSignal(false)
+            }
+            typingDebounceJob?.cancel()
+        }
+    }
+
+    private fun sendTypingSignal(isTyping: Boolean) {
+        viewModelScope.launch {
+            repository.sendTypingStatus(otherUserId, isTyping)
+        }
     }
 
     private fun subscribeToMessages() {
@@ -159,18 +199,36 @@ class WhisperChatViewModel @Inject constructor(
                         } else newMsg.content
                         
                         _uiState.update { state ->
-                            val updatedMessages = state.messages + newMsg.copy(content = decryptedContent)
-                            state.copy(messages = updatedMessages)
+                            if (state.messages.any { it.id == newMsg.id }) {
+                                state
+                            } else {
+                                val updatedMessages = state.messages + newMsg.copy(content = decryptedContent)
+                                state.copy(messages = updatedMessages)
+                            }
                         }
                         repository.markMessagesAsRead(otherUserId)
+                        notificationManager.cancelMessageNotification(otherUserId)
                     }
                 }
             } catch (_: Exception) { /* handled by Realtime reconnect */ }
         }
     }
 
+    private fun subscribeToTyping() {
+        typingSubscriptionJob = viewModelScope.launch {
+            try {
+                repository.subscribeToTypingStatus(otherUserId).collect { isTyping ->
+                    _uiState.update { it.copy(isPartnerTyping = isTyping) }
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        notificationManager.currentChatId = null
         realtimeJob?.cancel()
+        typingSubscriptionJob?.cancel()
+        typingDebounceJob?.cancel()
     }
 }
