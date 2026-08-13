@@ -27,10 +27,14 @@ import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.upload
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -49,8 +53,8 @@ class WhisperRepository @Inject constructor(
 ) {
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
-    private val myId get() = supabase.auth.currentUserOrNull()?.id
-        ?: error("Not authenticated")
+    private val realtime get() = supabase.realtime
+    private val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
     // PROFILES
     suspend fun getMyProfile(): Result<WhisperProfile> = runCatching {
@@ -118,6 +122,12 @@ class WhisperRepository @Inject constructor(
         store.from("whisper-avatars").publicUrl(path)
     }
 
+    suspend fun deleteAvatar(): Result<Unit> = runCatching {
+        db.from("profiles").update(WhisperProfileUpdate(avatarUrl = null)) {
+            filter { WhisperProfile::id eq myId }
+        }
+    }
+
     // MESSAGES
     suspend fun getMessages(otherUserId: String, limit: Int = 50, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
         val partnerProfile = getProfile(otherUserId).getOrNull()
@@ -170,29 +180,54 @@ class WhisperRepository @Inject constructor(
         }
     }
 
-    fun subscribeToIncomingMessages(): Flow<WhisperMessage> = flow {
-        val channel = supabase.channel("whisper-messages-$myId")
+    fun subscribeToIncomingMessages(): Flow<WhisperMessage> = callbackFlow {
+        val currentId = myId
+        if (currentId.isEmpty()) {
+            android.util.Log.w("WhisperRepo", "Cannot subscribe: myId is empty")
+            close()
+            return@callbackFlow
+        }
+
+        val channelName = "whisper-messages-$currentId"
+        val channel = supabase.channel(channelName)
+        android.util.Log.d("WhisperRepo", "Subscribing to $channelName")
+
         val changes = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
             table = "messages"
         }
-        channel.subscribe()
-        changes.collect { action ->
-            try {
-                val msg = action.decodeRecord<WhisperMessage>()
-                android.util.Log.d("WhisperRepo", "Incoming message: ${msg.id} from ${msg.senderId} to ${msg.receiverId}")
-                if (msg.receiverId == myId) {  // double-check
-                    // Attempt decryption
-                    val decrypted = if (msg.contentIv != null) {
-                        val senderProfile = runCatching { getProfile(msg.senderId).getOrNull() }.getOrNull()
-                        val senderKey = senderProfile?.publicKey
-                        if (senderKey != null) {
-                            crypto.decryptMessage(msg.content, msg.contentIv, senderKey)
+
+        val job = launch {
+            changes.collect { action ->
+                try {
+                    val msg = action.decodeRecord<WhisperMessage>()
+                    android.util.Log.d("WhisperRepo", "Incoming realtime msg: ${msg.id} sender=${msg.senderId}")
+                    
+                    if (msg.receiverId == currentId) {
+                        // Attempt decryption
+                        val decrypted = if (msg.contentIv != null) {
+                            val senderProfile = runCatching { getProfile(msg.senderId).getOrNull() }.getOrNull()
+                            val senderKey = senderProfile?.publicKey
+                            if (senderKey != null) {
+                                crypto.decryptMessage(msg.content, msg.contentIv, senderKey)
+                            } else msg.content
                         } else msg.content
-                    } else msg.content
-                    emit(msg.copy(content = decrypted))
+                        
+                        trySend(msg.copy(content = decrypted))
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Realtime collect error", e)
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("WhisperRepo", "Error decoding realtime message: ${e.message}")
+            }
+        }
+
+        channel.subscribe()
+
+        awaitClose {
+            android.util.Log.d("WhisperRepo", "Closing subscription to $channelName")
+            job.cancel()
+            // Launch cleanup as it's a suspend function
+            launch {
+                try { realtime.removeChannel(channel) } catch (_: Exception) {}
             }
         }
     }

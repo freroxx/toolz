@@ -139,12 +139,23 @@ class WhisperViewModel @Inject constructor(
 
     fun uploadAvatar(imageBytes: ByteArray, mimeType: String) {
         viewModelScope.launch {
-            repository.uploadAvatar(imageBytes, mimeType)
+            // Downscale to ~1024px max and 80% quality to stay well within Supabase limits
+            val optimizedBytes = com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
+            
+            repository.uploadAvatar(optimizedBytes, mimeType)
                 .onSuccess { url ->
                     repository.updateProfile(WhisperProfileUpdate(avatarUrl = url))
                         .onSuccess { loadAll() }
                 }
                 .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "uploadAvatar")) } }
+        }
+    }
+
+    fun deleteAvatar() {
+        viewModelScope.launch {
+            repository.deleteAvatar()
+                .onSuccess { loadAll() }
+                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "deleteAvatar")) } }
         }
     }
 

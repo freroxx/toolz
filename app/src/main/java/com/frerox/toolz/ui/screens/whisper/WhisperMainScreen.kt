@@ -27,6 +27,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -58,6 +61,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.launch
 
 /**
  * The main Whisper hub screen with 4 bottom-nav tabs:
@@ -75,10 +79,9 @@ fun WhisperMainScreen(
     val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
+    val scope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
-    var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
+    val pagerState = rememberPagerState(initialPage = 0) { 4 }
 
     // Automatic logout navigation: reactive session observation fixes the "stuck" UI
     LaunchedEffect(isAuthenticated) {
@@ -86,6 +89,18 @@ fun WhisperMainScreen(
             onLoggedOut()
         }
     }
+
+    // Auth Guard: If not yet determined or definitely false, show a loading placeholder
+    // instead of flashing the main screen content.
+    if (isAuthenticated == null) {
+        Box(Modifier.fillMaxSize().toolzBackground(), contentAlignment = Alignment.Center) {
+            ToolzLoadingIndicator()
+        }
+        return
+    }
+
+    var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
+    var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
 
     // Show errors using redesigned Expressive Toast
     LaunchedEffect(uiState.error) {
@@ -117,7 +132,7 @@ fun WhisperMainScreen(
                     },
                     actions = {
                         val totalUnread = uiState.conversations.sumOf { it.unreadCount }
-                        if (totalUnread > 0 && selectedTab != 0) {
+                        if (totalUnread > 0 && pagerState.currentPage != 0) {
                             Badge { Text(totalUnread.coerceAtMost(99).toString()) }
                             Spacer(Modifier.width(16.dp))
                         }
@@ -130,8 +145,11 @@ fun WhisperMainScreen(
                         val unread = if (index == 0) uiState.conversations.sumOf { it.unreadCount } else 0
                         val pendingCount = if (index == 1) uiState.pendingIncoming.size else 0
                         ExpressiveNavigationBarItem(
-                            selected = selectedTab == index,
-                            onClick = { haptic.click(); selectedTab = index },
+                            selected = pagerState.currentPage == index,
+                            onClick = { 
+                                haptic.click()
+                                scope.launch { pagerState.animateScrollToPage(index) }
+                            },
                             icon = {
                                 BadgedBox(
                                     badge = {
@@ -140,7 +158,7 @@ fun WhisperMainScreen(
                                         }
                                     }
                                 ) {
-                                    Icon(if (selectedTab == index) selectedIcon else icon, label)
+                                    Icon(if (pagerState.currentPage == index) selectedIcon else icon, label)
                                 }
                             },
                             label = { Text(label) },
@@ -156,15 +174,12 @@ fun WhisperMainScreen(
                 onRefresh = { viewModel.loadAll(isRefresh = true) },
                 modifier = Modifier.padding(paddingValues),
             ) {
-                AnimatedContent(
-                    targetState = selectedTab,
-                    transitionSpec = {
-                        (fadeIn(tween(300)) + scaleIn(tween(300), 0.95f))
-                            .togetherWith(fadeOut(tween(250)) + scaleOut(tween(250), 0.95f))
-                    },
-                    label = "tabContent",
-                ) { tab ->
-                    when (tab) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    userScrollEnabled = true, // Allow swiping
+                ) { page ->
+                    when (page) {
                         0 -> ChatsTab(uiState, onNavigateToChat, onLongClickConvo = { selectedConvoForOptions = it })
                         1 -> FriendsTab(uiState, viewModel, onNavigateToChat, onLongClickFriend = { selectedFriendForOptions = it })
                         2 -> DiscoverTab(uiState, viewModel, onNavigateToChat, onNavigateToProfile)
@@ -743,7 +758,7 @@ private fun DiscoverUserCard(
 // PROFILE TAB
 // ─────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileTab(
     uiState: WhisperUiState,
@@ -759,6 +774,7 @@ private fun ProfileTab(
     var bio by remember(profile) { mutableStateOf(profile.bio ?: "") }
     var isPrivate by remember(profile) { mutableStateOf(profile.isPrivate) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showAvatarOptions by remember { mutableStateOf(false) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -783,13 +799,13 @@ private fun ProfileTab(
         // Avatar
         StaggeredEntrance(index = 0) {
             Box(contentAlignment = Alignment.BottomEnd) {
-                WhisperAvatar(profile, 96.dp, onClick = { imagePickerLauncher.launch("image/*") })
+                WhisperAvatar(profile, 96.dp, onClick = { showAvatarOptions = true })
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .bouncyClick(onClick = { imagePickerLauncher.launch("image/*") }),
+                        .bouncyClick(onClick = { showAvatarOptions = true }),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
@@ -916,6 +932,49 @@ private fun ProfileTab(
                 ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }) { Text(stringResource(R.string.st_Whisper_Friends_Cancel)) }
             },
         )
+    }
+
+    if (showAvatarOptions) {
+        ModalBottomSheet(onDismissRequest = { showAvatarOptions = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                
+                ToolzTonalExpressiveButton(
+                    onClick = {
+                        showAvatarOptions = false
+                        imagePickerLauncher.launch("image/*")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Choose from Gallery")
+                }
+
+                if (profile.avatarUrl != null) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = {
+                            showAvatarOptions = false
+                            haptic.click()
+                            viewModel.deleteAvatar()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Remove Photo")
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+            }
+        }
     }
 }
 

@@ -103,4 +103,43 @@ object ImageUtils {
         }
         return rotated
     }
+
+    /**
+     * Downscales an image to fit within maxDimension and compresses it.
+     */
+    fun downscaleAndCompress(imageBytes: ByteArray, maxDimension: Int = 1024, quality: Int = 80): ByteArray {
+        val options = BitmapFactory.Options().apply { inMutable = true }
+        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options) ?: return imageBytes
+        
+        val width = bitmap.width
+        val height = bitmap.height
+        
+        if (width <= maxDimension && height <= maxDimension) {
+            val outputStream = java.io.ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+            val result = outputStream.toByteArray()
+            bitmap.recycle()
+            return result
+        }
+        
+        val aspectRatio = width.toFloat() / height.toFloat()
+        val newWidth: Int
+        val newHeight: Int
+        if (width > height) {
+            newWidth = maxDimension
+            newHeight = (maxDimension / aspectRatio).toInt()
+        } else {
+            newHeight = maxDimension
+            newWidth = (maxDimension * aspectRatio).toInt()
+        }
+        
+        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        val outputStream = java.io.ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+        
+        if (scaledBitmap != bitmap) bitmap.recycle()
+        val result = outputStream.toByteArray()
+        scaledBitmap.recycle()
+        return result
+    }
 }

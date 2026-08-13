@@ -186,6 +186,13 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         scheduleUpdateCheck()
         scheduleFocusUsageSnapshot()
 
+        // Request notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
@@ -714,6 +721,15 @@ fun ToolzNavHost(
     LaunchedEffect(incomingIntentVersion) {
         val latestIntent = incomingIntent ?: return@LaunchedEffect
         
+        // Handle Whisper Chat Deep Link
+        if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_CHAT") {
+            val otherUserId = latestIntent.getStringExtra("otherUserId")
+            if (otherUserId != null) {
+                navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
+                return@LaunchedEffect
+            }
+        }
+
         // Handle PDF View/Send Intent explicitly
         if (latestIntent.action == Intent.ACTION_VIEW || latestIntent.action == Intent.ACTION_SEND) {
             val uri = if (latestIntent.action == Intent.ACTION_SEND) {

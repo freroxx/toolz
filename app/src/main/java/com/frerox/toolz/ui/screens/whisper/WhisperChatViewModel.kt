@@ -193,6 +193,7 @@ class WhisperChatViewModel @Inject constructor(
         realtimeJob = viewModelScope.launch {
             try {
                 repository.subscribeToIncomingMessages().collect { newMsg ->
+                    android.util.Log.d("WhisperChatVM", "Collected message: ${newMsg.id} sender=${newMsg.senderId}")
                     if (newMsg.senderId == otherUserId) {
                         val decryptedContent = if (newMsg.contentIv != null && partnerPublicKey != null) {
                             crypto.decryptMessage(newMsg.content, newMsg.contentIv, partnerPublicKey!!)
@@ -200,6 +201,7 @@ class WhisperChatViewModel @Inject constructor(
                         
                         _uiState.update { state ->
                             if (state.messages.any { it.id == newMsg.id }) {
+                                android.util.Log.d("WhisperChatVM", "Message already in list: ${newMsg.id}")
                                 state
                             } else {
                                 val updatedMessages = state.messages + newMsg.copy(content = decryptedContent)
@@ -210,7 +212,9 @@ class WhisperChatViewModel @Inject constructor(
                         notificationManager.cancelMessageNotification(otherUserId)
                     }
                 }
-            } catch (_: Exception) { /* handled by Realtime reconnect */ }
+            } catch (e: Exception) {
+                android.util.Log.e("WhisperChatVM", "Realtime collect error", e)
+            }
         }
     }
 

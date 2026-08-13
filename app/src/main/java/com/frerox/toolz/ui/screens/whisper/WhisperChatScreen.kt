@@ -123,7 +123,8 @@ fun WhisperChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
+                    .padding(paddingValues)
+                    .imePadding(),
             ) {
                 // Friend gate banner
                 AnimatedVisibility(
@@ -172,7 +173,9 @@ fun WhisperChatScreen(
 
                             AnimatedVisibility(
                                 visible = true,
-                                enter = fadeIn(spring()) + slideInHorizontally(spring()) { if (isMine) 80 else -80 },
+                                enter = fadeIn(tween(400)) + slideInVertically(
+                                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)
+                                ) { 30 },
                             ) {
                                 MessageBubble(
                                     message = message,
@@ -370,12 +373,15 @@ private fun MessageInputBar(
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 3.dp,
+        shape = RoundedCornerShape(28.dp),
+        modifier = Modifier
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {

@@ -128,9 +128,12 @@ class WhisperNotificationManager @Inject constructor(
             .build()
 
         try {
+            Log.d(TAG, "Posting message notification for $senderName (ID: $notifId)")
             notifManager.notify(notifId, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Notification permission not granted: ${e.message}")
+            Log.e(TAG, "Notification permission not granted: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error posting notification", e)
         }
     }
 
@@ -146,9 +149,12 @@ class WhisperNotificationManager @Inject constructor(
             .setAutoCancel(true)
             .build()
         try {
+            Log.d(TAG, "Posting friend request notification for $fromName")
             notifManager.notify(notifId, notification)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Notification permission not granted: ${e.message}")
+            Log.e(TAG, "Notification permission not granted: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error posting notification", e)
         }
     }
 
