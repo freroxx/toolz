@@ -141,7 +141,7 @@ fun WhisperMainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.AutoMirrored.Rounded.Chat, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Black)
                         }
                     },
@@ -449,7 +449,9 @@ private fun MergedChatsAndFriendsTab(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .fadingEdges(top = 16.dp, bottom = 32.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -733,6 +735,7 @@ private fun DiscoverTab(
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
                 ) {
                     itemsIndexed(uiState.searchResults, key = { _, p -> p.id }) { _, profile ->
                         val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
@@ -754,6 +757,7 @@ private fun DiscoverTab(
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
             ) {
                 if (uiState.recommendedProfiles.isNotEmpty()) {
                     item {
@@ -976,7 +980,8 @@ private fun ProfileTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp)
+            .fadingEdges(top = 16.dp, bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {

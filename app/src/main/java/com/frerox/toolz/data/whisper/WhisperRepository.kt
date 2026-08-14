@@ -52,6 +52,8 @@ import javax.inject.Singleton
 class WhisperRepository @Inject constructor(
     private val supabase: SupabaseClient,
     private val crypto: WhisperCrypto,
+    private val deletedStore: WhisperDeletedMessagesStore,
+    private val offlineManager: com.frerox.toolz.util.OfflineManager,
 ) {
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
@@ -83,6 +85,27 @@ class WhisperRepository @Inject constructor(
 
     fun invalidateConversationsCache() {
         conversationsCache = null
+    }
+
+    private suspend fun <T> retryWithBackoff(
+        times: Int = 3,
+        initialDelayMs: Long = 300,
+        maxDelayMs: Long = 1200,
+        factor: Double = 2.0,
+        block: suspend () -> T
+    ): T {
+        var currentDelay = initialDelayMs
+        repeat(times - 1) {
+            try {
+                return block()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (e is io.github.jan.supabase.exceptions.RestException && e.statusCode in 400..404) throw e
+                kotlinx.coroutines.delay(currentDelay)
+                currentDelay = (currentDelay * factor).toLong().coerceAtMost(maxDelayMs)
+            }
+        }
+        return block()
     }
 
     // PROFILES
@@ -214,31 +237,33 @@ class WhisperRepository @Inject constructor(
         // If I blocked this user, do not load their incoming messages
         val isBlocked = isUserBlockedByMe(otherUserId)
 
-        val rawMessages = db.from("messages")
-            .select {
-                filter {
-                    or {
-                        and {
-                            eq("sender_id", myId)
-                            eq("receiver_id", otherUserId)
+        val rawMessages = retryWithBackoff {
+            db.from("messages")
+                .select {
+                    filter {
+                        or {
+                            and {
+                                eq("sender_id", myId)
+                                eq("receiver_id", otherUserId)
+                            }
+                            and {
+                                eq("sender_id", otherUserId)
+                                eq("receiver_id", myId)
+                            }
                         }
-                        and {
-                            eq("sender_id", otherUserId)
-                            eq("receiver_id", myId)
-                        }
+                        if (beforeCreatedAt != null) lt("created_at", beforeCreatedAt)
                     }
-                    if (beforeCreatedAt != null) lt("created_at", beforeCreatedAt)
+                    order("created_at", Order.DESCENDING)
+                    limit(limit.toLong())
                 }
-                order("created_at", Order.DESCENDING)
-                limit(limit.toLong())
-            }
-            .decodeList<WhisperMessage>()
+                .decodeList<WhisperMessage>()
+        }
 
         val myProfile = getMyProfile().getOrNull()
 
-        // Decrypt messages first
+        // Decrypt messages first, filtering out locally deleted messages
         val decryptedMessages = rawMessages
-            .filter { msg -> !isBlocked || msg.senderId == myId }
+            .filter { msg -> (!isBlocked || msg.senderId == myId) && !deletedStore.isMessageDeleted(msg.id) }
             .map { msg ->
                 if (msg.isDeletedForEveryone) {
                     msg
@@ -448,11 +473,18 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteMessageForMe(messageId: String): Result<Unit> = runCatching {
-        // If it's my sent message, delete from server; otherwise delete locally
-        db.from("messages").delete {
-            filter {
-                eq("id", messageId)
-                eq("sender_id", myId)
+        if (messageId.isBlank()) return@runCatching
+        // 1. Mark as deleted locally in persistent store so it never reappears on reload
+        deletedStore.markMessageDeleted(messageId)
+        // 2. Invalidate conversation cache
+        invalidateConversationsCache()
+        // 3. If sent by me, attempt to delete from server
+        runCatching {
+            db.from("messages").delete {
+                filter {
+                    eq("id", messageId)
+                    eq("sender_id", myId)
+                }
             }
         }
     }
@@ -727,7 +759,9 @@ class WhisperRepository @Inject constructor(
             }
         }.decodeList<WhisperMessage>()
 
-        if (toDelete.isNotEmpty()) {
+        val toDeleteIds = toDelete.map { it.id }.filter { it.isNotBlank() }
+        if (toDeleteIds.isNotEmpty()) {
+            deletedStore.markMessagesDeleted(toDeleteIds)
             db.from("messages").delete {
                 filter {
                     eq("sender_id", myId)
@@ -737,11 +771,13 @@ class WhisperRepository @Inject constructor(
                 }
             }
         }
+        invalidateConversationsCache()
         toDelete
     }
 
     suspend fun restoreMessages(messages: List<WhisperMessage>): Result<Unit> = runCatching {
         if (messages.isEmpty()) return@runCatching
+        deletedStore.unmarkMessagesDeleted(messages.map { it.id })
         val inserts = messages.map { msg ->
             WhisperMessageInsert(
                 senderId = msg.senderId,
@@ -753,6 +789,7 @@ class WhisperRepository @Inject constructor(
             )
         }
         db.from("messages").insert(inserts)
+        invalidateConversationsCache()
     }
 
     suspend fun getConversations(forceRefresh: Boolean = false): Result<List<WhisperConversation>> = runCatching {
@@ -822,8 +859,10 @@ class WhisperRepository @Inject constructor(
             val conversations = mutableListOf<WhisperConversation>()
             for ((partnerId, msgs) in grouped) {
                 if (isUserBlockedByMe(partnerId)) continue
+                val visibleMsgs = msgs.filter { !deletedStore.isMessageDeleted(it.id) }
+                if (visibleMsgs.isEmpty()) continue
                 val profile = getProfile(partnerId).getOrNull() ?: continue
-                val lastMsg = msgs.first()
+                val lastMsg = visibleMsgs.first()
                 val decryptedContent = if (lastMsg.isDeletedForEveryone) {
                     "Message deleted"
                 } else if (lastMsg.contentIv != null && profile.publicKey != null) {
@@ -832,7 +871,7 @@ class WhisperRepository @Inject constructor(
                     "🔒 Encrypted message"
                 } else lastMsg.content
 
-                val unread = msgs.count { it.receiverId == myId && !it.isRead }
+                val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
                 conversations.add(WhisperConversation(profile, lastMsg.copy(content = decryptedContent), unread))
             }
             conversations.sortedByDescending { it.lastMessage.createdAt }

@@ -33,6 +33,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -163,7 +164,8 @@ private fun WhisperAuthContent(
             .fillMaxSize()
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .fadingEdges(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         WhisperAuthHeader()
@@ -214,7 +216,7 @@ private fun WhisperAuthContent(
 
 /**
  * Plain, static header. No animated glow, no pulsing scale, no gradient hero box —
- * the lock glyph and copy do the work. Restraint reads as more trustworthy for a
+ * the chat glyph and copy do the work. Restraint reads as more trustworthy for a
  * security-focused product than motion for its own sake.
  */
 @Composable
@@ -231,7 +233,7 @@ private fun WhisperAuthHeader() {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                Icons.Rounded.Lock,
+                Icons.AutoMirrored.Rounded.Chat,
                 contentDescription = null,
                 modifier = Modifier.size(26.dp),
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,

@@ -350,7 +350,9 @@ fun WhisperChatScreen(
                     } else {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .fadingEdges(top = 16.dp, bottom = 32.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
@@ -362,45 +364,61 @@ fun WhisperChatScreen(
                                     messages[index - 1].createdAt.extractDate() != message.createdAt.extractDate()
 
                                 if (showDateSeparator) {
-                                    DateSeparator(message.createdAt.extractDate())
+                                    StaggeredEntrance(
+                                        index = index,
+                                        enter = fadeIn(tween(320)) + scaleIn(
+                                            initialScale = 0.92f,
+                                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                                        ),
+                                        exit = fadeOut(tween(150)),
+                                    ) {
+                                        DateSeparator(message.createdAt.extractDate())
+                                    }
                                 }
 
                                 val isHighlighted = uiState.matchingMessageIds.contains(message.id)
 
-                                MessageBubble(
-                                    message = message,
-                                    isMine = isMine,
-                                    isPending = isPending,
-                                    isHighlighted = isHighlighted,
-                                    partnerName = uiState.otherUser?.effectiveName ?: "User",
-                                    onReply = {
-                                        haptic.click()
-                                        viewModel.setReplyTarget(message)
-                                    },
-                                    onQuotedClick = { targetId ->
-                                        val targetIndex = messages.indexOfFirst { it.id == targetId }
-                                        if (targetIndex >= 0) {
+                                StaggeredEntrance(
+                                    index = index,
+                                    modifier = Modifier.animateItem(
+                                        placementSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)
+                                    ),
+                                ) {
+                                    MessageBubble(
+                                        message = message,
+                                        isMine = isMine,
+                                        isPending = isPending,
+                                        isHighlighted = isHighlighted,
+                                        partnerName = uiState.otherUser?.effectiveName ?: "User",
+                                        onReply = {
                                             haptic.click()
-                                            scope.launch {
-                                                listState.animateScrollToItem(targetIndex)
+                                            viewModel.setReplyTarget(message)
+                                        },
+                                        onQuotedClick = { targetId ->
+                                            val targetIndex = messages.indexOfFirst { it.id == targetId }
+                                            if (targetIndex >= 0) {
+                                                haptic.click()
+                                                scope.launch {
+                                                    listState.animateScrollToItem(targetIndex)
+                                                }
+                                            }
+                                        },
+                                        onDoubleTap = {
+                                            haptic.click()
+                                            quickReactionTargetMessage = message
+                                        },
+                                        onReactionClick = { emoji ->
+                                            haptic.click()
+                                            viewModel.toggleReaction(message, emoji)
+                                        },
+                                        onLongClick = {
+                                            if (!message.isDeletedForEveryone && !isPending) {
+                                                haptic.longClick()
+                                                selectedMessageForDelete = message
                                             }
                                         }
-                                    },
-                                    onDoubleTap = {
-                                        haptic.click()
-                                        quickReactionTargetMessage = message
-                                    },
-                                    onReactionClick = { emoji ->
-                                        haptic.click()
-                                        viewModel.toggleReaction(message, emoji)
-                                    },
-                                    onLongClick = {
-                                        if (!message.isDeletedForEveryone && !isPending) {
-                                            haptic.longClick()
-                                            selectedMessageForDelete = message
-                                        }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
@@ -522,10 +540,17 @@ fun WhisperChatScreen(
                     else -> stringResource(R.string.st_Whisper_Chat_InputPlaceholder)
                 }
                 val draftText by viewModel.draftText.collectAsStateWithLifecycle()
+                var sendPulse by remember { mutableIntStateOf(0) }
+                LaunchedEffect(messages.size) {
+                    messages.lastOrNull()?.let {
+                        if (it.id.startsWith("pending_")) sendPulse++
+                    }
+                }
                 MessageInputBar(
                     enabled = canSendMessage,
                     draftText = draftText,
                     placeholderText = placeholderText,
+                    pulseTrigger = sendPulse,
                     onDraftChanged = { viewModel.updateDraft(it) },
                     onSend = { text ->
                         haptic.success()
@@ -1331,6 +1356,23 @@ private fun MessageBubble(
         label = "swipeReplyOffset"
     )
 
+    // Sending pulse: soft breathing alpha + scale while a message is pending delivery
+    val statePulse = rememberInfiniteTransition(label = "msgStatePulse")
+    val pulseAlpha by statePulse.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "pendingAlpha"
+    )
+    val pulseScale by statePulse.animateFloat(
+        initialValue = 0.98f,
+        targetValue = 1.03f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "pendingScale"
+    )
+    val bubbleAlpha = if (isPending) pulseAlpha else 1f
+    val bubbleScale = if (isPending) pulseScale else 1f
+
     val bubbleShape = when {
         isMine  -> RoundedCornerShape(topStart = 20.dp, topEnd = 4.dp,  bottomStart = 20.dp, bottomEnd = 20.dp)
         else    -> RoundedCornerShape(topStart = 4.dp,  topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
@@ -1370,13 +1412,14 @@ private fun MessageBubble(
                 modifier = Modifier
                     .offset { IntOffset(animatedOffsetX.roundToInt(), 0) }
                     .widthIn(max = 290.dp)
+                    .graphicsLayer { scaleX = bubbleScale; scaleY = bubbleScale }
                     .clip(bubbleShape)
                     .background(bubbleColor)
                     .then(
                         if (isHighlighted) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, bubbleShape)
                         else Modifier
                     )
-                    .alpha(if (isPending) 0.7f else 1f)
+                    .alpha(bubbleAlpha)
                     .combinedClickable(
                         onClick = {},
                         onDoubleClick = onDoubleTap,
@@ -1486,12 +1529,21 @@ private fun MessageBubble(
                                 style = MaterialTheme.typography.labelSmall,
                             )
                             if (isMine && !isDeleted) {
-                                Icon(
-                                    if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
-                                    contentDescription = if (message.isRead) "Read" else "Sent",
-                                    tint = if (message.isRead) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(14.dp),
-                                )
+                                AnimatedContent(
+                                    targetState = message.isRead,
+                                    transitionSpec = {
+                                        (fadeIn(tween(220)) + scaleIn(initialScale = 0.7f, animationSpec = spring(Spring.DampingRatioMediumBouncy)))
+                                            .togetherWith(fadeOut(tween(120)))
+                                    },
+                                    label = "readReceipt",
+                                ) { read ->
+                                    Icon(
+                                        if (read) Icons.Rounded.DoneAll else Icons.Rounded.Done,
+                                        contentDescription = if (read) "Read" else "Sent",
+                                        tint = if (read) MaterialTheme.colorScheme.primary else textColor.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -1500,7 +1552,14 @@ private fun MessageBubble(
         }
 
         // Emoji Reaction Chips
-        if (message.reactions.isNotEmpty()) {
+        AnimatedVisibility(
+            visible = message.reactions.isNotEmpty(),
+            enter = fadeIn(tween(200)) + scaleIn(
+                initialScale = 0.85f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+            ),
+            exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.9f, animationSpec = tween(120)),
+        ) {
             Row(
                 modifier = Modifier
                     .padding(top = 2.dp, start = if (isMine) 0.dp else 8.dp, end = if (isMine) 8.dp else 0.dp),
@@ -1541,10 +1600,21 @@ private fun MessageInputBar(
     enabled: Boolean,
     draftText: String,
     placeholderText: String = stringResource(R.string.st_Whisper_Chat_InputPlaceholder),
+    pulseTrigger: Int = 0,
     onDraftChanged: (String) -> Unit,
     onSend: (String) -> Unit,
 ) {
     val canSend = draftText.isNotBlank() && enabled
+
+    // Send pop: a quick bounce whenever a new message is dispatched
+    val sendPop = remember { Animatable(1f) }
+    LaunchedEffect(pulseTrigger) {
+        if (pulseTrigger > 0) {
+            sendPop.snapTo(1f)
+            sendPop.animateTo(1.22f, spring(dampingRatio = 0.5f, stiffness = 900f))
+            sendPop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = 600f))
+        }
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1587,7 +1657,7 @@ private fun MessageInputBar(
                 modifier = Modifier
                     .size(52.dp)
                     .animateContentSize()
-                    .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
+                    .graphicsLayer { scaleX = sendScale * sendPop.value; scaleY = sendScale * sendPop.value }
                     .clip(CircleShape)
                     .background(
                         if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh

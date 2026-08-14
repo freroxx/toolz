@@ -23,6 +23,7 @@ import android.os.Environment
 import android.os.StatFs
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.*
@@ -146,7 +147,8 @@ class DashboardViewModel @Inject constructor(
                 cat.copy(
                     items = cat.items.filter { item ->
                         item.route != Screen.AiAssistant.route &&
-                                item.route != Screen.Search.route
+                        item.route != Screen.Search.route &&
+                        item.route != Screen.Whisper.route
                     },
                 )
             }.filter { it.items.isNotEmpty() }
@@ -464,7 +466,7 @@ class DashboardViewModel @Inject constructor(
             com.frerox.toolz.R.string.st_Dashboard_Cat_SmartFlow,
             listOf(
                 ToolItem(com.frerox.toolz.R.string.st_Tool_AiAssistant, Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, com.frerox.toolz.R.string.st_Tool_AiAssistant_Desc, Color(0xFF8E24AA)),
-                ToolItem(com.frerox.toolz.R.string.st_Tool_Whisper, Icons.Rounded.Lock, Screen.Whisper.route, com.frerox.toolz.R.string.st_Tool_Whisper_Desc, Color(0xFF00B0FF)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_Whisper, Icons.AutoMirrored.Rounded.Chat, Screen.Whisper.route, com.frerox.toolz.R.string.st_Tool_Whisper_Desc, Color(0xFF00B0FF)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Search, Icons.Rounded.Search, Screen.Search.route, com.frerox.toolz.R.string.st_Tool_Search_Desc, Color(0xFF3F51B5)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_FocusFlow, Icons.Rounded.Toll, Screen.FocusFlow.route, com.frerox.toolz.R.string.st_Tool_FocusFlow_Desc, Color(0xFF1976D2)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_TodoList, Icons.Rounded.TaskAlt, Screen.Todo.route, com.frerox.toolz.R.string.st_Tool_TodoList_Desc, Color(0xFF43A047)),

@@ -74,12 +74,19 @@ object WhisperErrorMapper {
             msg.contains("doesn't look right", ignoreCase = true) ->
                 "Token format is invalid. Check for missing or extra characters."
 
-            // Network errors
+            // Network & offline errors
+            msg.contains("offline", ignoreCase = true) ||
+            msg.contains("Unable to resolve host", ignoreCase = true) ||
+            msg.contains("ConnectException", ignoreCase = true) ||
+            msg.contains("SocketTimeoutException", ignoreCase = true) ||
+            msg.contains("NoRouteToHostException", ignoreCase = true) ||
+            msg.contains("SSLHandshakeException", ignoreCase = true) ||
+            msg.contains("HttpTimeout", ignoreCase = true) ||
             msg.contains("network", ignoreCase = true) ||
             msg.contains("connect", ignoreCase = true) ||
             msg.contains("timeout", ignoreCase = true) ||
             msg.contains("unreachable", ignoreCase = true) ->
-                "Can't reach Whisper servers. Check your connection."
+                "You are currently offline. Please check your internet connection."
 
             // Permission / database errors
             msg.contains("blocked", ignoreCase = true) ->
@@ -93,15 +100,15 @@ object WhisperErrorMapper {
             throwable is RestException && throwable.statusCode == 409 ->
                 "Already up to date."
             throwable is RestException && throwable.statusCode in 400..499 ->
-                "Unable to complete request. Please verify and try again."
+                "Request could not be completed. Please try again."
             throwable is RestException && throwable.statusCode in 500..599 ->
-                "Server is temporarily busy. Please try again shortly."
+                "Server is temporarily busy. Retrying..."
 
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->
                 "⚠️ Could not decrypt this message."
 
-            else -> "Unable to complete request. Please try again."
+            else -> "Request could not be completed. Please try again."
         }
     }
 

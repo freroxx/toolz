@@ -103,7 +103,8 @@ fun WhisperUserProfileScreen(
                             .fillMaxSize()
                             .padding(paddingValues)
                             .verticalScroll(rememberScrollState())
-                            .padding(24.dp),
+                            .padding(24.dp)
+                            .fadingEdges(top = 16.dp, bottom = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
