@@ -17,15 +17,29 @@
 
 package com.frerox.toolz.data.music
 
+import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
+import android.util.Size
+import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -43,6 +57,48 @@ class MusicRepository @Inject constructor(
     val favoriteTracks: Flow<List<MusicTrack>> = musicDao.getFavoriteTracks()
     val recentlyPlayed: Flow<List<MusicTrack>> = musicDao.getRecentlyPlayed()
     val mostPlayed: Flow<List<MusicTrack>> = musicDao.getMostPlayed()
+
+    private var liveObserver: ContentObserver? = null
+    private var debounceJob: Job? = null
+
+    fun hasAudioPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED ||
+                    (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        }
+    }
+
+    /**
+     * Registers a MediaStore ContentObserver for real-time live refresh
+     * whenever audio files are added, modified, moved, or deleted on the device.
+     */
+    fun startLiveObserver(scope: CoroutineScope) {
+        if (liveObserver != null) return
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                if (!hasAudioPermission()) return
+                debounceJob?.cancel()
+                debounceJob = scope.launch(Dispatchers.IO) {
+                    delay(1200) // Debounce rapid file events
+                    scanDeviceForMusic()
+                }
+            }
+        }
+        liveObserver = observer
+        try {
+            context.contentResolver.registerContentObserver(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     suspend fun getTrackByUri(uri: String): MusicTrack? = withContext(Dispatchers.IO) {
         musicDao.getTrackByUri(uri)
@@ -73,8 +129,107 @@ class MusicRepository @Inject constructor(
         ))
     }
 
+    private fun getArtworkStorageDir(): File {
+        val dir = File(context.filesDir, "album_thumbs")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun isThumbnailValid(thumbUri: String?): Boolean {
+        if (thumbUri.isNullOrBlank()) return false
+        if (thumbUri.startsWith("content://media/external/audio/albumart")) return false
+        if (thumbUri.startsWith("file://")) {
+            val filePath = Uri.parse(thumbUri).path ?: return false
+            val file = File(filePath)
+            // Storing in cacheDir is volatile; only filesDir thumbs are permanently valid
+            return file.exists() && file.length() > 0 && !filePath.contains("/cache/")
+        }
+        return true
+    }
+
+    private fun getEmbeddedArtworkUri(uri: Uri, path: String? = null, albumId: Long = -1): String? {
+        val thumbsDir = getArtworkStorageDir()
+        val uniqueKey = "${path ?: uri.toString()}_${albumId}".hashCode()
+        val targetFile = File(thumbsDir, "thumb_${uniqueKey}.jpg")
+
+        if (targetFile.exists() && targetFile.length() > 0) {
+            return Uri.fromFile(targetFile).toString()
+        }
+
+        // 1. Try extracting embedded picture via MediaMetadataRetriever
+        val retriever = MediaMetadataRetriever()
+        try {
+            if (path != null && File(path).exists()) {
+                retriever.setDataSource(path)
+            } else {
+                retriever.setDataSource(context, uri)
+            }
+            val artwork = retriever.embeddedPicture
+            if (artwork != null && artwork.isNotEmpty()) {
+                FileOutputStream(targetFile).use { it.write(artwork) }
+                return Uri.fromFile(targetFile).toString()
+            }
+        } catch (e: Exception) {
+            if (path != null && File(path).exists()) {
+                try {
+                    retriever.setDataSource(path)
+                    val artwork = retriever.embeddedPicture
+                    if (artwork != null && artwork.isNotEmpty()) {
+                        FileOutputStream(targetFile).use { it.write(artwork) }
+                        return Uri.fromFile(targetFile).toString()
+                    }
+                } catch (e2: Exception) {}
+            }
+        } finally {
+            try { retriever.release() } catch (e: Exception) {}
+        }
+
+        // 2. Try ContentResolver.loadThumbnail on Android 10+ (Q+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content") {
+            try {
+                val bitmap = context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
+                FileOutputStream(targetFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                return Uri.fromFile(targetFile).toString()
+            } catch (e: Exception) {}
+        }
+
+        // 3. Fallback to MediaStore album art URI if available
+        if (albumId >= 0) {
+            val albumArt = getAlbumArtUri(albumId)
+            if (albumArt != null) {
+                try {
+                    context.contentResolver.openInputStream(albumArt)?.use { input ->
+                        FileOutputStream(targetFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (targetFile.exists() && targetFile.length() > 0) {
+                        return Uri.fromFile(targetFile).toString()
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+
+        return null
+    }
+
+    private fun getAlbumArtUri(albumId: Long): Uri? {
+        if (albumId < 0) return null
+        return ContentUris.withAppendedId(
+            Uri.parse("content://media/external/audio/albumart"),
+            albumId
+        )
+    }
+
     suspend fun scanDeviceForMusic(): List<MusicTrack> = withContext(Dispatchers.IO) {
-        val tracks = mutableListOf<MusicTrack>()
+        if (!hasAudioPermission()) return@withContext emptyList()
+
+        val scannedUris = mutableSetOf<String>()
+        val scannedPaths = mutableSetOf<String>()
+        val newOrUpdatedTracks = mutableListOf<MusicTrack>()
+
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
@@ -88,43 +243,46 @@ class MusicRepository @Inject constructor(
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
-        val cursor = context.contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            null,
-            sortOrder
-        )
+        try {
+            val cursor = context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                sortOrder
+            )
 
-        cursor?.use {
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+            cursor?.use {
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val dataColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idColumn)
-                val title = cursor.getString(titleColumn) ?: "Unknown"
-                val artist = cursor.getString(artistColumn) ?: "Unknown Artist"
-                val album = cursor.getString(albumColumn) ?: "Unknown Album"
-                val albumId = cursor.getLong(albumIdColumn)
-                val duration = cursor.getLong(durationColumn)
-                val path = cursor.getString(dataColumn)
-                val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idColumn)
+                    val title = cursor.getString(titleColumn) ?: "Unknown"
+                    val artist = cursor.getString(artistColumn) ?: "Unknown Artist"
+                    val album = cursor.getString(albumColumn) ?: "Unknown Album"
+                    val albumId = cursor.getLong(albumIdColumn)
+                    val duration = cursor.getLong(durationColumn)
+                    val path = cursor.getString(dataColumn)
+                    val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                    val contentUriString = contentUri.toString()
 
-                val existingTrack = musicDao.getTrackByUri(contentUri.toString())
-                    ?: (path?.let { musicDao.getTrackByPath(it) })
-                    ?: musicDao.findDuplicate(title, artist, duration, path)
+                    scannedUris.add(contentUriString)
+                    if (path != null) scannedPaths.add(path)
 
-                if (existingTrack == null) {
-                    val embeddedThumb = getEmbeddedArtworkUri(contentUri)
-                    val thumbnailUri = embeddedThumb ?: (if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null)
-                    tracks.add(
-                        MusicTrack(
-                            uri = contentUri.toString(),
+                    val existingTrack = musicDao.getTrackByUri(contentUriString)
+                        ?: (path?.let { musicDao.getTrackByPath(it) })
+                        ?: musicDao.findDuplicate(title, artist, duration, path)
+
+                    if (existingTrack == null) {
+                        val thumbnailUri = getEmbeddedArtworkUri(contentUri, path, albumId)
+                        val newTrack = MusicTrack(
+                            uri = contentUriString,
                             title = title,
                             artist = artist,
                             album = album,
@@ -135,101 +293,120 @@ class MusicRepository @Inject constructor(
                             lastPlayed = 0L,
                             playCount = 0,
                             path = path,
-                            dateAdded = java.lang.System.currentTimeMillis()
+                            dateAdded = System.currentTimeMillis()
                         )
-                    )
-                } else {
-                    // Update existing track and fix potential buggy thumbnailUri
-                    val currentThumb = existingTrack.thumbnailUri
-                    val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
-                    val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
+                        musicDao.insertTrack(newTrack)
+                        newOrUpdatedTracks.add(newTrack)
+                    } else {
+                        val currentThumb = existingTrack.thumbnailUri
+                        val isThumbValid = isThumbnailValid(currentThumb) && currentThumb != existingTrack.uri && currentThumb != existingTrack.path
 
-                    val needsArtworkCheck = currentThumb == null || isBuggyThumb || isMediaStoreThumb
-                    
-                    var newThumb = currentThumb
-                    if (needsArtworkCheck) {
-                        val embeddedThumb = getEmbeddedArtworkUri(contentUri)
-                        newThumb = embeddedThumb ?: (if (albumId >= 0) getAlbumArtUri(albumId)?.toString() else null)
-                    }
+                        val newThumb = if (!isThumbValid) {
+                            getEmbeddedArtworkUri(contentUri, path, albumId) ?: currentThumb
+                        } else {
+                            currentThumb
+                        }
 
-                    val needsUpdate = existingTrack.uri != contentUri.toString() ||
-                            existingTrack.path != path ||
-                            newThumb != currentThumb
+                        if (existingTrack.uri != contentUriString) {
+                            // Primary key changed (file relocated or re-indexed)
+                            // 1. Delete old row
+                            musicDao.deleteTrackByUri(existingTrack.uri)
+                            // 2. Insert new row with preserved user metadata
+                            val updatedTrack = existingTrack.copy(
+                                uri = contentUriString,
+                                title = if (title != "Unknown") title else existingTrack.title,
+                                artist = if (artist != "Unknown Artist") artist else existingTrack.artist,
+                                album = if (album != "Unknown Album") album else existingTrack.album,
+                                albumId = albumId,
+                                duration = if (duration > 0) duration else existingTrack.duration,
+                                path = path,
+                                thumbnailUri = newThumb
+                            )
+                            musicDao.insertTrack(updatedTrack)
+                            newOrUpdatedTracks.add(updatedTrack)
 
-                    if (needsUpdate) {
-                        musicDao.updateTrack(existingTrack.copy(
-                            uri = contentUri.toString(),
-                            path = path,
-                            albumId = albumId,
-                            thumbnailUri = newThumb
-                        ))
+                            // 3. Migrate playlist entries referencing the old URI
+                            val allPlaylists = musicDao.getAllPlaylistsSync()
+                            allPlaylists.forEach { pl ->
+                                if (pl.trackUris.contains(existingTrack.uri)) {
+                                    val updatedUris = pl.trackUris.map { if (it == existingTrack.uri) contentUriString else it }
+                                    musicDao.updatePlaylist(pl.copy(trackUris = updatedUris))
+                                }
+                            }
+                        } else {
+                            // Same URI: update in place
+                            val needsUpdate = existingTrack.path != path ||
+                                    existingTrack.albumId != albumId ||
+                                    (duration > 0 && existingTrack.duration <= 0) ||
+                                    newThumb != currentThumb
+
+                            if (needsUpdate) {
+                                val updatedTrack = existingTrack.copy(
+                                    path = path,
+                                    albumId = albumId,
+                                    duration = if (duration > 0) duration else existingTrack.duration,
+                                    thumbnailUri = newThumb
+                                )
+                                musicDao.updateTrack(updatedTrack)
+                                newOrUpdatedTracks.add(updatedTrack)
+                            }
+                        }
                     }
                 }
             }
+
+            // Prune dead/stale tracks that no longer exist in MediaStore AND don't exist on disk
+            val allExistingTracks = musicDao.getAllTracksSync()
+            allExistingTracks.forEach { track ->
+                // Do not delete remote online-only catalog tracks
+                if (track.sourceUrl != null && track.path == null && !track.uri.startsWith("content://")) {
+                    return@forEach
+                }
+
+                // If not found in current scan
+                if (!scannedUris.contains(track.uri)) {
+                    val fileOnDiskExists = track.path?.let { File(it).exists() } == true
+                    if (!fileOnDiskExists) {
+                        // Dead track: remove from database and playlists
+                        musicDao.deleteTrack(track)
+                        val allPlaylists = musicDao.getAllPlaylistsSync()
+                        allPlaylists.forEach { pl ->
+                            if (pl.trackUris.contains(track.uri)) {
+                                musicDao.updatePlaylist(pl.copy(trackUris = pl.trackUris - track.uri))
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        tracks.forEach { musicDao.insertTrack(it) }
         fixAllThumbnails()
-        tracks
+        newOrUpdatedTracks
     }
 
     suspend fun fixAllThumbnails() = withContext(Dispatchers.IO) {
         val allTracks = musicDao.getAllTracksSync()
         allTracks.forEach { track ->
             val currentThumb = track.thumbnailUri
-            val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
-            val isBuggyThumb = currentThumb != null && (currentThumb == track.uri || currentThumb == track.path)
+            val isThumbValid = isThumbnailValid(currentThumb) && currentThumb != track.uri && currentThumb != track.path
             val isCatalogDownload = track.sourceUrl != null && track.path != null
-            
-            val needsFix = currentThumb == null || isMediaStoreThumb || isBuggyThumb || isCatalogDownload
+
+            val needsFix = !isThumbValid || isCatalogDownload
 
             if (needsFix) {
-                val fileUri = track.path?.let { 
+                val fileUri = track.path?.let {
                     if (it.startsWith("content://") || it.startsWith("file://")) Uri.parse(it)
                     else Uri.fromFile(File(it))
                 } ?: Uri.parse(track.uri)
 
-                val newThumb = getEmbeddedArtworkUri(fileUri)
+                val newThumb = getEmbeddedArtworkUri(fileUri, track.path, track.albumId)
                 if (newThumb != null && newThumb != currentThumb) {
                     musicDao.updateTrack(track.copy(thumbnailUri = newThumb))
-                } else if (currentThumb == null && track.albumId >= 0) {
-                    // Fallback to MediaStore if still no embedded thumb but we have an albumId
-                    val mediaStoreThumb = getAlbumArtUri(track.albumId)?.toString()
-                    if (mediaStoreThumb != null) {
-                        musicDao.updateTrack(track.copy(thumbnailUri = mediaStoreThumb))
-                    }
                 }
             }
         }
-    }
-
-    private fun getEmbeddedArtworkUri(uri: Uri): String? {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(context, uri)
-            val artwork = retriever.embeddedPicture
-            if (artwork != null) {
-                val fileName = "thumb_${uri.toString().hashCode()}.jpg"
-                val file = File(context.cacheDir, fileName)
-                FileOutputStream(file).use { it.write(artwork) }
-                return Uri.fromFile(file).toString()
-            }
-        } catch (e: Exception) {
-            // Ignore extraction errors
-        } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {}
-        }
-        return null
-    }
-
-    private fun getAlbumArtUri(albumId: Long): Uri? {
-        if (albumId < 0) return null
-        return ContentUris.withAppendedId(
-            Uri.parse("content://media/external/audio/albumart"),
-            albumId
-        )
     }
 
     suspend fun scanCustomFolder(folderUri: Uri): List<MusicTrack> = withContext(Dispatchers.IO) {
@@ -243,42 +420,79 @@ class MusicRepository @Inject constructor(
                         scanRecursive(file)
                     } else if (isAudioFile(file.name ?: "")) {
                         val retriever = MediaMetadataRetriever()
-                        retriever.setDataSource(context, file.uri)
-                        val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-                            ?: file.name?.substringBeforeLast(".") ?: "Unknown"
-                        val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Unknown Artist"
-                        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
-                        retriever.release()
+                        try {
+                            retriever.setDataSource(context, file.uri)
+                            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                                ?: file.name?.substringBeforeLast(".") ?: "Unknown"
+                            val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Unknown Artist"
+                            val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "Unknown Album"
+                            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
 
-                        val existingTrack = musicDao.getTrackByUri(file.uri.toString())
-                            ?: musicDao.findDuplicate(title, artist, duration, file.uri.path)
+                            val fileUriString = file.uri.toString()
+                            val existingTrack = musicDao.getTrackByUri(fileUriString)
+                                ?: musicDao.findDuplicate(title, artist, duration, file.uri.path)
 
-                        if (existingTrack == null) {
-                            tracks.add(extractMetadata(file.uri))
-                        } else {
-                            val currentThumb = existingTrack.thumbnailUri
-                            val isMediaStoreThumb = currentThumb != null && currentThumb.startsWith("content://media/external/audio/albumart")
-                            val isBuggyThumb = currentThumb != null && (currentThumb == existingTrack.uri || currentThumb == existingTrack.path)
-                            if (currentThumb == null || isBuggyThumb || isMediaStoreThumb) {
-                                val meta = extractMetadata(file.uri)
-                                musicDao.updateTrack(existingTrack.copy(
-                                    thumbnailUri = meta.thumbnailUri,
-                                    uri = file.uri.toString()
-                                ))
+                            val thumb = getEmbeddedArtworkUri(file.uri, file.uri.path)
+
+                            if (existingTrack == null) {
+                                val track = MusicTrack(
+                                    uri = fileUriString,
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    duration = duration,
+                                    thumbnailUri = thumb,
+                                    isFavorite = false,
+                                    lastPlayed = 0L,
+                                    playCount = 0,
+                                    path = file.uri.path,
+                                    dateAdded = System.currentTimeMillis()
+                                )
+                                musicDao.insertTrack(track)
+                                tracks.add(track)
+                            } else {
+                                if (existingTrack.uri != fileUriString) {
+                                    musicDao.deleteTrackByUri(existingTrack.uri)
+                                    val updated = existingTrack.copy(
+                                        uri = fileUriString,
+                                        title = title,
+                                        artist = artist,
+                                        album = album,
+                                        duration = if (duration > 0) duration else existingTrack.duration,
+                                        thumbnailUri = thumb ?: existingTrack.thumbnailUri
+                                    )
+                                    musicDao.insertTrack(updated)
+                                    tracks.add(updated)
+
+                                    val allPlaylists = musicDao.getAllPlaylistsSync()
+                                    allPlaylists.forEach { pl ->
+                                        if (pl.trackUris.contains(existingTrack.uri)) {
+                                            musicDao.updatePlaylist(pl.copy(trackUris = pl.trackUris.map { if (it == existingTrack.uri) fileUriString else it }))
+                                        }
+                                    }
+                                } else {
+                                    val updated = existingTrack.copy(
+                                        title = title,
+                                        artist = artist,
+                                        album = album,
+                                        duration = if (duration > 0) duration else existingTrack.duration,
+                                        thumbnailUri = thumb ?: existingTrack.thumbnailUri
+                                    )
+                                    musicDao.updateTrack(updated)
+                                    tracks.add(updated)
+                                }
                             }
+                        } finally {
+                            try { retriever.release() } catch (e: Exception) {}
                         }
                     }
                 } catch (e: Exception) {
-                    val existingTrack = musicDao.getTrackByUri(file.uri.toString())
-                    if (existingTrack == null) {
-                        tracks.add(extractMetadata(file.uri))
-                    }
+                    e.printStackTrace()
                 }
             }
         }
 
         rootFolder?.let { scanRecursive(it) }
-        tracks.forEach { musicDao.insertTrack(it) }
         tracks
     }
 
@@ -311,7 +525,7 @@ class MusicRepository @Inject constructor(
                 lastPlayed = 0L,
                 playCount = 0,
                 path = null,
-                dateAdded = java.lang.System.currentTimeMillis()
+                dateAdded = System.currentTimeMillis()
             )
         } catch (e: Exception) {
             MusicTrack(
@@ -325,7 +539,7 @@ class MusicRepository @Inject constructor(
                 lastPlayed = 0L,
                 playCount = 0,
                 path = null,
-                dateAdded = java.lang.System.currentTimeMillis()
+                dateAdded = System.currentTimeMillis()
             )
         } finally {
             try {
@@ -352,15 +566,12 @@ class MusicRepository @Inject constructor(
     }
 
     suspend fun upsertDownloadedTrack(track: MusicTrack) = withContext(Dispatchers.IO) {
-        // Find any pre-existing record for this track (could be catalog track with YouTube URL as uri)
         val existing = track.sourceUrl?.let { musicDao.getTrackBySourceUrl(it) }
             ?: musicDao.getTrackByUri(track.uri)
 
         if (existing == null) {
-            // Brand new track: just insert
             musicDao.insertTrack(track)
         } else if (existing.uri == track.uri) {
-            // Same URI (content:// → content:// re-download): safe to update in-place
             musicDao.updateTrack(existing.copy(
                 title       = track.title,
                 artist      = track.artist,
@@ -372,8 +583,6 @@ class MusicRepository @Inject constructor(
                 dateAdded   = track.dateAdded
             ))
         } else {
-            // URI is CHANGING (YouTube URL → content://). Room @PrimaryKey means we can't UPDATE.
-            // We must: 1) preserve important metadata, 2) delete old row, 3) insert new row.
             val merged = track.copy(
                 isFavorite            = existing.isFavorite,
                 playCount             = existing.playCount,

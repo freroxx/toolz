@@ -272,6 +272,15 @@ fun MusicPlayerScreen(
     }
     val currentTabLabel = tabs.getOrNull(currentTab)
 
+    // Auto-refresh library every time the user opens the tool, and periodically while active
+    LaunchedEffect(Unit) {
+        viewModel.refreshLibraryOnOpen()
+        while (isActive) {
+            delay(45_000)
+            viewModel.refreshLibrarySilent()
+        }
+    }
+
     LaunchedEffect(state.currentTrack) {
         state.currentTrack?.let { aiViewModel.updateSong(it) }
     }

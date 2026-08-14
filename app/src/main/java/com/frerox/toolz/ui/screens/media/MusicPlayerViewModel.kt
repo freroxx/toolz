@@ -348,6 +348,11 @@ class MusicPlayerViewModel @Inject constructor(
             Log.e("MusicPlayerViewModel", "Playback error: ${error.errorCodeName}", error)
             _uiState.update { it.copy(isResolvingCatalog = false, isPlaying = false, isLoading = false) }
 
+            // Auto-refresh/heal library if file was moved or not found
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.scanDeviceForMusic()
+            }
+
             if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
                 || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
             ) {
@@ -356,7 +361,7 @@ class MusicPlayerViewModel @Inject constructor(
                 viewModelScope.launch(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         context,
-                        "Playback error: ${error.localizedMessage ?: "Unknown error"}",
+                        "Playback error: ${error.localizedMessage ?: "File moved or unplayable"}",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
@@ -450,6 +455,9 @@ class MusicPlayerViewModel @Inject constructor(
 
         observeSettings()
         observeLibrary()
+
+        // Start real-time MediaStore live observer
+        repository.startLiveObserver(viewModelScope)
 
         if (player.isPlaying) startProgressUpdate()
     }
@@ -991,6 +999,20 @@ class MusicPlayerViewModel @Inject constructor(
         _sliderPosition.value = null
     }
 
+    fun refreshLibraryOnOpen() {
+        if (repository.hasAudioPermission()) {
+            scanMusic()
+        }
+    }
+
+    fun refreshLibrarySilent() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (repository.hasAudioPermission()) {
+                repository.scanDeviceForMusic()
+            }
+        }
+    }
+
     fun scanMusic() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -1256,16 +1278,12 @@ class MusicPlayerViewModel @Inject constructor(
             .setArtworkUri(thumbnailUri?.toUri())
             .apply { sourceUrl?.let { setExtras(android.os.Bundle().apply { putString("source_url", it) }) } }
             .build()
-        val playableUri = if (uri.startsWith("content://") || uri.startsWith("file://")) {
-            uri
-        } else {
-            path?.let {
-                when {
-                    it.startsWith("content://") || it.startsWith("file://") -> it
-                    it.startsWith("/") -> android.net.Uri.fromFile(java.io.File(it)).toString()
-                    else -> it
-                }
-            } ?: uri
+        val playableUri = when {
+            path != null && java.io.File(path).exists() -> android.net.Uri.fromFile(java.io.File(path)).toString()
+            uri.startsWith("content://") || uri.startsWith("file://") -> uri
+            path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
+            path != null && path.startsWith("/") -> android.net.Uri.fromFile(java.io.File(path)).toString()
+            else -> uri
         }
         val parsedUri = if (playableUri.startsWith("/")) android.net.Uri.fromFile(java.io.File(playableUri)) else playableUri.toUri()
         return MediaItem.Builder()

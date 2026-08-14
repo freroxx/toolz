@@ -604,16 +604,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             .setArtworkUri(thumbnailUri?.let { Uri.parse(it) })
             .apply { sourceUrl?.let { setExtras(Bundle().apply { putString("source_url", it) }) } }
             .build()
-        val playableUri = if (uri.startsWith("content://") || uri.startsWith("file://")) {
-            uri
-        } else {
-            path?.let {
-                when {
-                    it.startsWith("content://") || it.startsWith("file://") -> it
-                    it.startsWith("/") -> Uri.fromFile(File(it)).toString()
-                    else -> it
-                }
-            } ?: uri
+        val playableUri = when {
+            path != null && File(path).exists() -> Uri.fromFile(File(path)).toString()
+            uri.startsWith("content://") || uri.startsWith("file://") -> uri
+            path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
+            path != null && path.startsWith("/") -> Uri.fromFile(File(path)).toString()
+            else -> uri
         }
         val parsedUri = if (playableUri.startsWith("/")) Uri.fromFile(File(playableUri)) else Uri.parse(playableUri)
         return MediaItem.Builder()
