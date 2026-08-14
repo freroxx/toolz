@@ -86,11 +86,14 @@ class WhisperCrypto @Inject constructor() {
     private fun parsePublicKey(base64PublicKey: String): PublicKey? {
         return try {
             val cleanKey = base64PublicKey.trim()
-            val bytes = Base64.decode(cleanKey, Base64.NO_WRAP)
+            val bytes = Base64.decode(cleanKey, Base64.DEFAULT)
             val keySpec = X509EncodedKeySpec(bytes)
             val keyFactory = KeyFactory.getInstance("EC")
             keyFactory.generatePublic(keySpec)
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            android.util.Log.e("WhisperCrypto", "parsePublicKey failed: ${e.message}")
+            null
+        }
     }
 
     private fun deriveSharedKey(recipientPublicKeyBase64: String): SecretKeySpec? {
@@ -118,7 +121,7 @@ class WhisperCrypto @Inject constructor() {
 
             SecretKeySpec(okm, "AES")
         } catch (e: Exception) {
-            android.util.Log.e("WhisperCrypto", "Error deriving shared key", e)
+            android.util.Log.e("WhisperCrypto", "Error deriving shared key: ${e.message}")
             null
         }
     }
@@ -141,22 +144,22 @@ class WhisperCrypto @Inject constructor() {
     }
 
     fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String {
-        val failSentinel = "\u26A0\uFE0F Decryption failed"
+        // If message is unencrypted (no IV) or missing public key, return as-is
         if (ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) {
-            return failSentinel
+            return cipherTextBase64
         }
-        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return failSentinel
+        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return "🔒 [Encrypted message]"
         return try {
-            val iv = Base64.decode(ivBase64.trim(), Base64.NO_WRAP)
-            val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.NO_WRAP)
+            val iv = Base64.decode(ivBase64.trim(), Base64.DEFAULT)
+            val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.DEFAULT)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
             val plainBytes = cipher.doFinal(cipherBytes)
             String(plainBytes, Charsets.UTF_8)
         } catch (e: Exception) {
-            android.util.Log.e("WhisperCrypto", "Decryption failed during cipher op: ${e.message}")
-            failSentinel
+            android.util.Log.e("WhisperCrypto", "Decryption failed: ${e.message}")
+            "🔒 [Encrypted message]"
         }
     }
 }

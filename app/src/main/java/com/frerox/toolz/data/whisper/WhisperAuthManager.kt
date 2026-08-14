@@ -10,6 +10,7 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.buildJsonObject
@@ -31,6 +32,43 @@ class WhisperAuthManager @Inject constructor(
         get() = supabase.auth.currentUserOrNull()?.id
     val isReady: Boolean
         get() = supabase.auth.sessionStatus.value !is SessionStatus.Initializing
+    val isAnonymousTokenUser: Boolean
+        get() = supabase.auth.currentUserOrNull()?.email?.endsWith("@whisper.toolz.app") == true
+
+    suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
+        val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
+        val email = user.email ?: error("No email associated")
+        val isTokenUser = email.endsWith("@whisper.toolz.app")
+
+        if (!isTokenUser) {
+            require(!password.isNullOrBlank()) { "Password is required to delete account." }
+            // Re-authenticate to verify password before deletion
+            supabase.auth.signInWith(Email) {
+                this.email = email
+                this.password = password
+            }
+        }
+
+        // Delete user's profile and friends entries
+        try {
+            supabase.postgrest.from("profiles").delete { filter { eq("id", user.id) } }
+        } catch (_: Exception) {}
+
+        try {
+            supabase.postgrest.from("friends").delete {
+                filter { eq("user_a", user.id) }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            supabase.postgrest.from("friends").delete {
+                filter { eq("user_b", user.id) }
+            }
+        } catch (_: Exception) {}
+
+        // Sign out
+        supabase.auth.signOut()
+    }
 
     suspend fun registerWithEmail(email: String, password: String, username: String, displayName: String): Result<Unit> = runCatching {
         val cleanEmail = email.trim()

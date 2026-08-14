@@ -23,6 +23,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -49,14 +50,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -104,6 +111,13 @@ fun WhisperMainScreen(
     var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
     var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
     var showAvatarOptions by remember { mutableStateOf(false) }
+    var profileForFullView by remember { mutableStateOf<WhisperProfile?>(null) }
+
+    var hasUnsavedProfileChanges by remember { mutableStateOf(false) }
+    var pendingTabSwitchIndex by remember { mutableStateOf<Int?>(null) }
+    var showUnsavedChangesDialog by remember { mutableStateOf(false) }
+    var triggerProfileSaveFromDialog by remember { mutableStateOf(0) }
+    var triggerProfileDiscardFromDialog by remember { mutableStateOf(0) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -149,7 +163,12 @@ fun WhisperMainScreen(
                             selected = pagerState.currentPage == index,
                             onClick = {
                                 haptic.click()
-                                scope.launch { pagerState.animateScrollToPage(index) }
+                                if (pagerState.currentPage == 2 && hasUnsavedProfileChanges && index != 2) {
+                                    pendingTabSwitchIndex = index
+                                    showUnsavedChangesDialog = true
+                                } else {
+                                    scope.launch { pagerState.animateScrollToPage(index) }
+                                }
                             },
                             icon = {
                                 BadgedBox(
@@ -178,7 +197,7 @@ fun WhisperMainScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    userScrollEnabled = true,
+                    userScrollEnabled = pagerState.currentPage != 2 || !hasUnsavedProfileChanges,
                 ) { page ->
                     when (page) {
                         0 -> MergedChatsAndFriendsTab(
@@ -187,24 +206,31 @@ fun WhisperMainScreen(
                             onNavigateToChat = onNavigateToChat,
                             onNavigateToProfile = onNavigateToProfile,
                             onLongClickConvo = { selectedConvoForOptions = it },
-                            onLongClickFriend = { selectedFriendForOptions = it }
+                            onLongClickFriend = { selectedFriendForOptions = it },
+                            onViewAvatarFull = { profileForFullView = it }
                         )
                         1 -> DiscoverTab(
                             uiState = uiState,
                             viewModel = viewModel,
                             onNavigateToChat = onNavigateToChat,
-                            onNavigateToProfile = onNavigateToProfile
+                            onNavigateToProfile = onNavigateToProfile,
+                            onViewAvatarFull = { profileForFullView = it }
                         )
                         2 -> ProfileTab(
                             uiState = uiState,
                             viewModel = viewModel,
+                            toastState = toastState,
+                            saveTrigger = triggerProfileSaveFromDialog,
+                            discardTrigger = triggerProfileDiscardFromDialog,
+                            onUnsavedChangesChanged = { hasUnsavedProfileChanges = it },
                             onLoggedOut = {
                                 if (!isLoggingOut) {
                                     isLoggingOut = true
                                     onLoggedOut()
                                 }
                             },
-                            onShowAvatarOptions = { showAvatarOptions = true }
+                            onShowAvatarOptions = { showAvatarOptions = true },
+                            onViewAvatarFull = { profileForFullView = it }
                         )
                     }
                 }
@@ -290,6 +316,99 @@ fun WhisperMainScreen(
             }
         )
     }
+
+    // Material 3 Expressive Full Screen Avatar Dialog
+    profileForFullView?.let { p ->
+        val isSelf = p.id == uiState.currentProfile?.id
+        FullScreenAvatarDialog(
+            profile = p,
+            isSelf = isSelf,
+            onDismiss = { profileForFullView = null },
+            onMessage = {
+                if (!isSelf) {
+                    val pId = p.id
+                    profileForFullView = null
+                    onNavigateToChat(pId)
+                }
+            }
+        )
+    }
+
+    // Material 3 Expressive Unsaved Profile Changes Dialog
+    if (showUnsavedChangesDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showUnsavedChangesDialog = false
+                pendingTabSwitchIndex = null
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Save, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = {
+                Text("Unsaved Changes", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            },
+            text = {
+                Text(
+                    "You have unsaved changes in your profile. Would you like to save them before switching tabs?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        showUnsavedChangesDialog = false
+                        triggerProfileSaveFromDialog++
+                        hasUnsavedProfileChanges = false
+                        pendingTabSwitchIndex?.let { target ->
+                            scope.launch { pagerState.animateScrollToPage(target) }
+                        }
+                        pendingTabSwitchIndex = null
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Save & Switch", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = {
+                            showUnsavedChangesDialog = false
+                            triggerProfileDiscardFromDialog++
+                            hasUnsavedProfileChanges = false
+                            pendingTabSwitchIndex?.let { target ->
+                                scope.launch { pagerState.animateScrollToPage(target) }
+                            }
+                            pendingTabSwitchIndex = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Discard")
+                    }
+                    ToolzOutlinedExpressiveButton(
+                        onClick = {
+                            showUnsavedChangesDialog = false
+                            pendingTabSwitchIndex = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -305,6 +424,7 @@ private fun MergedChatsAndFriendsTab(
     onNavigateToProfile: (String) -> Unit,
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,
+    onViewAvatarFull: (WhisperProfile) -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
 
@@ -379,7 +499,11 @@ private fun MergedChatsAndFriendsTab(
                                 )
                                 .padding(vertical = 4.dp)
                         ) {
-                            WhisperAvatar(friend, 48.dp)
+                            WhisperAvatar(
+                                profile = friend,
+                                size = 48.dp,
+                                onLongClick = { haptic.longClick(); onViewAvatarFull(friend) }
+                            )
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 text = friend.effectiveName,
@@ -579,6 +703,7 @@ private fun DiscoverTab(
     viewModel: WhisperViewModel,
     onNavigateToChat: (String) -> Unit,
     onNavigateToProfile: (String) -> Unit,
+    onViewAvatarFull: (WhisperProfile) -> Unit,
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val haptic = rememberToolzHapticFeedback()
@@ -620,6 +745,7 @@ private fun DiscoverTab(
                             onChat = { haptic.click(); onNavigateToChat(profile.id) },
                             onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
                             onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                            onViewAvatarFull = { onViewAvatarFull(profile) },
                         )
                     }
                 }
@@ -652,6 +778,7 @@ private fun DiscoverTab(
                             onChat = { haptic.click(); onNavigateToChat(profile.id) },
                             onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
                             onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                            onViewAvatarFull = { onViewAvatarFull(profile) },
                         )
                     }
                 } else {
@@ -676,6 +803,7 @@ private fun DiscoverUserCard(
     onChat: () -> Unit,
     onViewProfile: () -> Unit,
     onAddFriend: () -> Unit,
+    onViewAvatarFull: () -> Unit,
 ) {
     ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -683,7 +811,12 @@ private fun DiscoverUserCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            WhisperAvatar(profile, 48.dp, onClick = if (!profile.isPrivate) onViewProfile else null)
+            WhisperAvatar(
+                profile = profile,
+                size = 48.dp,
+                onClick = if (!profile.isPrivate) onViewProfile else null,
+                onLongClick = onViewAvatarFull,
+            )
 
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
@@ -751,7 +884,7 @@ private fun DiscoverUserCard(
 }
 
 // ─────────────────────────────────────────────────────────────
-// PROFILE TAB
+// MATERIAL 3 EXPRESSIVE PROFILE TAB
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
@@ -759,18 +892,66 @@ private fun DiscoverUserCard(
 private fun ProfileTab(
     uiState: WhisperUiState,
     viewModel: WhisperViewModel,
+    toastState: WhisperToastState,
+    saveTrigger: Int,
+    discardTrigger: Int,
+    onUnsavedChangesChanged: (Boolean) -> Unit,
     onLoggedOut: () -> Unit,
     onShowAvatarOptions: () -> Unit,
+    onViewAvatarFull: (WhisperProfile) -> Unit,
 ) {
     val profile = uiState.currentProfile ?: return
     val haptic = rememberToolzHapticFeedback()
     val context = LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
-    val username = profile.username
-    var displayName by remember(profile) { mutableStateOf(profile.displayName ?: "") }
-    var bio by remember(profile) { mutableStateOf(profile.bio ?: "") }
-    var isPrivate by remember(profile) { mutableStateOf(profile.isPrivate) }
+    val initialDisplayName = profile.displayName ?: ""
+    val initialBio = profile.bio ?: ""
+    val initialIsPrivate = profile.isPrivate
+
+    var displayName by remember(profile.id) { mutableStateOf(initialDisplayName) }
+    var bio by remember(profile.id) { mutableStateOf(initialBio) }
+    var isPrivate by remember(profile.id) { mutableStateOf(initialIsPrivate) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+
+    // Track unsaved changes and notify parent
+    val hasUnsaved = displayName != initialDisplayName || bio != initialBio || isPrivate != initialIsPrivate
+    LaunchedEffect(hasUnsaved) {
+        onUnsavedChangesChanged(hasUnsaved)
+    }
+
+    // Save trigger from UnsavedChangesDialog
+    LaunchedEffect(saveTrigger) {
+        if (saveTrigger > 0) {
+            viewModel.updateProfile(displayName, bio, isPrivate) {
+                toastState.show("Profile saved", WhisperToastType.SUCCESS)
+            }
+        }
+    }
+
+    // Discard trigger from UnsavedChangesDialog
+    LaunchedEffect(discardTrigger) {
+        if (discardTrigger > 0) {
+            displayName = initialDisplayName
+            bio = initialBio
+            isPrivate = initialIsPrivate
+        }
+    }
+
+    fun doSave() {
+        val prevName = initialDisplayName
+        val prevBio = initialBio
+        val prevPrivate = initialIsPrivate
+        viewModel.updateProfile(displayName, bio, isPrivate) {
+            val toasts = mutableListOf<String>()
+            if (displayName != prevName) toasts.add("Display name updated")
+            if (bio != prevBio) toasts.add("Bio updated")
+            if (isPrivate != prevPrivate) toasts.add(if (isPrivate) "Profile set to Private" else "Profile set to Public")
+            if (toasts.isEmpty()) toasts.add("Profile saved")
+            toastState.show(toasts.joinToString(" · "), WhisperToastType.SUCCESS)
+        }
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -795,39 +976,127 @@ private fun ProfileTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        // Avatar
+        // Hero Avatar Section
         Box(contentAlignment = Alignment.BottomEnd) {
-            WhisperAvatar(profile, 96.dp, onClick = onShowAvatarOptions)
-            Box(
+            WhisperAvatar(
+                profile = profile,
+                size = 104.dp,
+                onClick = onShowAvatarOptions,
+                onLongClick = { onViewAvatarFull(profile) },
+            )
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                tonalElevation = 4.dp,
+                shadowElevation = 3.dp,
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .bouncyClick(onClick = onShowAvatarOptions),
-                contentAlignment = Alignment.Center,
+                    .size(36.dp)
+                    .bouncyClick(onClick = onShowAvatarOptions)
             ) {
-                Icon(Icons.Rounded.CameraAlt, stringResource(R.string.cd_ChangePhoto), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.CameraAlt,
+                        stringResource(R.string.cd_ChangePhoto),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
 
-        // Profile form
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = username,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text(stringResource(R.string.st_Whisper_Profile_Username)) },
-                leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
-                trailingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp)) },
-                supportingText = { Text(stringResource(R.string.st_Whisper_Profile_UsernameCannotChange), style = MaterialTheme.typography.labelSmall) },
-                singleLine = true,
-                shape = MediumExpressiveShape,
-                modifier = Modifier.fillMaxWidth(),
+        // Header Title & Username
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                profile.effectiveName,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
             )
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.clickable {
+                    haptic.click()
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString("@${profile.effectiveUsername}"))
+                }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "@${profile.effectiveUsername}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy username", modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        // Status Badges
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        if (isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        if (isPrivate) "Private" else "Public",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (profile.publicKey != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Key,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (profile.publicKey != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "E2EE (P-256)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (profile.publicKey != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Profile Form Fields
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 value = displayName,
                 onValueChange = { displayName = it },
@@ -850,10 +1119,10 @@ private fun ProfileTab(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            // Privacy toggle
+            // Privacy Toggle Card
             ExpressiveCard(onClick = { isPrivate = !isPrivate }, modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
@@ -878,25 +1147,44 @@ private fun ProfileTab(
             }
         }
 
-        // Save button
+        // Save Button
+        val saveButtonAnim by animateFloatAsState(
+            targetValue = if (hasUnsaved) 1f else 0.7f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+        )
         ToolzExpressiveButton(
             onClick = {
                 haptic.success()
-                viewModel.updateProfile(displayName, bio, isPrivate)
+                doSave()
             },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(54.dp).graphicsLayer { alpha = saveButtonAnim },
+            enabled = hasUnsaved,
         ) {
             Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.st_Whisper_Profile_SaveChanges), fontWeight = FontWeight.Bold)
+            Text(
+                if (hasUnsaved) stringResource(R.string.st_Whisper_Profile_SaveChanges) else "No changes",
+                fontWeight = FontWeight.Bold
+            )
         }
 
-        HorizontalDivider()
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+        // Delete Account
+        ToolzOutlinedExpressiveButton(
+            onClick = { haptic.click(); showDeleteAccountDialog = true },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) {
+            Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Delete Account", fontWeight = FontWeight.Bold)
+        }
 
         // Logout
         ToolzOutlinedExpressiveButton(
             onClick = { haptic.click(); showLogoutDialog = true },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
+            modifier = Modifier.fillMaxWidth().height(50.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) {
             Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
@@ -904,7 +1192,7 @@ private fun ProfileTab(
             Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
     }
 
     // Material 3 Expressive Logout Confirmation Dialog
@@ -942,6 +1230,95 @@ private fun ProfileTab(
             },
             dismissButton = {
                 ToolzOutlinedExpressiveButton(onClick = { showLogoutDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    // M3 Expressive Account Deletion Dialog
+    if (showDeleteAccountDialog) {
+        val isTokenUser = viewModel.isAnonymousTokenUser
+        var passwordInput by remember { mutableStateOf("") }
+        var passwordVisible by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = {
+                Text(
+                    "Delete Account",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (isTokenUser)
+                            "This will permanently delete your account and all your messages. This cannot be undone."
+                        else
+                            "This will permanently delete your account and all your messages. Enter your password to confirm.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (!isTokenUser) {
+                        OutlinedTextField(
+                            value = passwordInput,
+                            onValueChange = { passwordInput = it },
+                            label = { Text("Password") },
+                            leadingIcon = { Icon(Icons.Rounded.Lock, null) },
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                                    )
+                                }
+                            },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        viewModel.deleteAccount(
+                            password = if (isTokenUser) null else passwordInput.ifBlank { null }
+                        ) {
+                            onLoggedOut()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    enabled = isTokenUser || passwordInput.isNotBlank(),
+                ) {
+                    Text("Delete Account", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(
+                    onClick = { showDeleteAccountDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
                 }
             }
@@ -1153,19 +1530,167 @@ private fun ConversationOptionsSheet(
     }
 }
 
+// ─────────────────────────────────────────────────────────────
+// M3 EXPRESSIVE FULL-SCREEN AVATAR DIALOG
+// ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FullScreenAvatarDialog(
+    profile: WhisperProfile,
+    isSelf: Boolean = false,
+    onDismiss: () -> Unit,
+    onMessage: () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val scale = remember { androidx.compose.animation.core.Animatable(0.85f) }
+    LaunchedEffect(Unit) {
+        scale.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.88f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale.value
+                        scaleY = scale.value
+                    }
+                    .clickable(enabled = false, onClick = {}) // consume clicks so outer dismiss works
+                    .padding(horizontal = 32.dp)
+            ) {
+                // Avatar display
+                var isImageError by remember(profile.avatarUrl) { mutableStateOf(false) }
+                if (!profile.avatarUrl.isNullOrBlank() && !isImageError) {
+                    AsyncImage(
+                        model = profile.avatarUrl,
+                        contentDescription = profile.effectiveName,
+                        contentScale = ContentScale.Fit,
+                        onError = { isImageError = true },
+                        modifier = Modifier
+                            .size(240.dp)
+                            .clip(RoundedCornerShape(28.dp)),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(240.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        MaterialTheme.colorScheme.secondaryContainer,
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            profile.avatarInitial,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 96.sp,
+                        )
+                    }
+                }
+
+                // Name & username
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        profile.effectiveName,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                    )
+                    Text(
+                        "@${profile.effectiveUsername}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                    if (!profile.bio.isNullOrBlank()) {
+                        Text(
+                            profile.bio,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.6f),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                // Actions
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ToolzOutlinedExpressiveButton(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) {
+                        Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Close", fontWeight = FontWeight.SemiBold)
+                    }
+                    if (!isSelf) {
+                        ToolzExpressiveButton(
+                            onClick = { haptic.click(); onMessage() }
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Message", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WhisperAvatar(
     profile: WhisperProfile,
     size: Dp,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
     var isImageError by remember(profile.avatarUrl) { mutableStateOf(false) }
 
     val baseModifier = modifier
         .size(size)
         .clip(CircleShape)
-        .then(if (onClick != null) Modifier.bouncyClick(onClick = onClick) else Modifier)
+        .then(
+            when {
+                onClick != null && onLongClick != null -> Modifier.combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+                onClick != null -> Modifier.bouncyClick(onClick = onClick)
+                onLongClick != null -> Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongClick
+                )
+                else -> Modifier
+            }
+        )
 
     if (!profile.avatarUrl.isNullOrBlank() && !isImageError) {
         AsyncImage(

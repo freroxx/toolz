@@ -82,21 +82,26 @@ object WhisperErrorMapper {
                 "Can't reach Whisper servers. Check your connection."
 
             // Permission / database errors
+            msg.contains("blocked", ignoreCase = true) ->
+                "Action unavailable: user is blocked."
+            msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true) || msg.contains("23505") ->
+                "Already completed or connected."
+            msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
+                "Action not permitted by security rules."
+            throwable is RestException && throwable.statusCode == 404 ->
+                "Item not found."
+            throwable is RestException && throwable.statusCode == 409 ->
+                "Already up to date."
             throwable is RestException && throwable.statusCode in 400..499 ->
-                "Request failed. Please try again."
+                "Unable to complete request. Please verify and try again."
             throwable is RestException && throwable.statusCode in 500..599 ->
-                "Server error. Please try again in a moment."
-
-            // Duplicate / constraint
-            msg.contains("duplicate", ignoreCase = true) ||
-            msg.contains("unique", ignoreCase = true) ->
-                "This already exists. Please choose something different."
+                "Server is temporarily busy. Please try again shortly."
 
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->
                 "⚠️ Could not decrypt this message."
 
-            else -> "Something went wrong. Please try again."
+            else -> "Unable to complete request. Please try again."
         }
     }
 

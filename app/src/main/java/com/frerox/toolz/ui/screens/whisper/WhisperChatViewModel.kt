@@ -157,13 +157,53 @@ class WhisperChatViewModel @Inject constructor(
 
     // ── EMOJI REACTIONS ──
     fun toggleReaction(message: WhisperMessage, emoji: String) {
+        if (message.id.isBlank()) return
+        // Optimistic local state update
+        _uiState.update { state ->
+            val updatedMsgs = state.messages.map { msg ->
+                if (msg.id == message.id) {
+                    val currentReactions = msg.reactions.toMutableList()
+                    val existingIndex = currentReactions.indexOfFirst { it.emoji == emoji }
+                    if (existingIndex >= 0) {
+                        val existing = currentReactions[existingIndex]
+                        if (existing.reactedByMe) {
+                            if (existing.count <= 1) {
+                                currentReactions.removeAt(existingIndex)
+                            } else {
+                                currentReactions[existingIndex] = existing.copy(
+                                    count = existing.count - 1,
+                                    reactedByMe = false,
+                                    userIds = existing.userIds.filter { it != myUserId }
+                                )
+                            }
+                        } else {
+                            currentReactions[existingIndex] = existing.copy(
+                                count = existing.count + 1,
+                                reactedByMe = true,
+                                userIds = existing.userIds + myUserId
+                            )
+                        }
+                    } else {
+                        currentReactions.add(
+                            WhisperReactionSummary(
+                                emoji = emoji,
+                                count = 1,
+                                userIds = listOf(myUserId),
+                                reactedByMe = true
+                            )
+                        )
+                    }
+                    msg.copy(reactions = currentReactions)
+                } else msg
+            }
+            state.copy(messages = updatedMsgs)
+        }
+
         viewModelScope.launch {
-            repository.toggleReaction(message.id, emoji)
-                .onSuccess {
-                    loadMessages()
-                }
+            repository.toggleReaction(message.id, emoji, otherUserId = otherUserId)
                 .onFailure { err ->
                     handleError(err, "toggleReaction")
+                    loadMessages()
                 }
         }
     }
@@ -277,7 +317,7 @@ class WhisperChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            repository.deleteMessageForEveryone(message.id, myDisplayName)
+            repository.deleteMessageForEveryone(message.id, otherUserId, myDisplayName)
                 .onFailure { err ->
                     handleError(err, "deleteMessage")
                     loadMessages()
@@ -464,26 +504,94 @@ class WhisperChatViewModel @Inject constructor(
 
         realtimeJob = viewModelScope.launch {
             try {
-                repository.subscribeToChat(otherUserId).collect { newMsg ->
-                    _uiState.update { state ->
-                        val existingIndex = state.messages.indexOfFirst { it.id == newMsg.id }
-                        if (existingIndex >= 0) {
-                            // Update existing message (e.g. deletion tombstone, read status)
-                            val mutableList = state.messages.toMutableList()
-                            mutableList[existingIndex] = newMsg
-                            state.copy(messages = mutableList)
-                        } else {
-                            val filtered = state.messages.filter { !it.id.startsWith("pending_") || it.content != newMsg.content }
-                            state.copy(messages = filtered + newMsg)
+                repository.subscribeToChat(otherUserId).collect { event ->
+                    when (event) {
+                        is WhisperChatEvent.MessageEvent -> {
+                            val newMsg = event.message
+                            _uiState.update { state ->
+                                val existingIndex = state.messages.indexOfFirst { it.id == newMsg.id }
+                                if (existingIndex >= 0) {
+                                    val mutableList = state.messages.toMutableList()
+                                    val current = mutableList[existingIndex]
+                                    mutableList[existingIndex] = current.copy(
+                                        content = newMsg.content,
+                                        contentIv = newMsg.contentIv,
+                                        reactions = if (newMsg.reactions.isNotEmpty()) newMsg.reactions else current.reactions,
+                                        isRead = newMsg.isRead || current.isRead
+                                    )
+                                    state.copy(messages = mutableList)
+                                } else {
+                                    val filtered = state.messages.filter { !it.id.startsWith("pending_") || it.content != newMsg.content }
+                                    state.copy(messages = filtered + newMsg)
+                                }
+                            }
+                            if (newMsg.senderId == otherUserId) {
+                                repository.markMessagesAsRead(otherUserId)
+                                notificationManager.cancelMessageNotification(otherUserId)
+                            }
                         }
-                    }
-                    if (newMsg.senderId == otherUserId) {
-                        repository.markMessagesAsRead(otherUserId)
-                        notificationManager.cancelMessageNotification(otherUserId)
+                        is WhisperChatEvent.ReactionEvent -> {
+                            // 1. Optimistic local update from the instant broadcast event
+                            _uiState.update { state ->
+                                val updated = state.messages.map { msg ->
+                                    if (msg.id == event.messageId) {
+                                        val curReactions = msg.reactions.toMutableList()
+                                        val idx = curReactions.indexOfFirst { it.emoji == event.emoji }
+                                        if (idx >= 0) {
+                                            val existing = curReactions[idx]
+                                            val containsUser = existing.userIds.contains(event.userId)
+                                            if (containsUser) {
+                                                val newUserIds = existing.userIds.filter { it != event.userId }
+                                                if (newUserIds.isEmpty()) {
+                                                    curReactions.removeAt(idx)
+                                                } else {
+                                                    curReactions[idx] = existing.copy(
+                                                        count = newUserIds.size,
+                                                        userIds = newUserIds,
+                                                        reactedByMe = if (event.userId == myUserId) false else existing.reactedByMe
+                                                    )
+                                                }
+                                            } else {
+                                                val newUserIds = existing.userIds + event.userId
+                                                curReactions[idx] = existing.copy(
+                                                    count = newUserIds.size,
+                                                    userIds = newUserIds,
+                                                    reactedByMe = if (event.userId == myUserId) true else existing.reactedByMe
+                                                )
+                                            }
+                                        } else {
+                                            curReactions.add(
+                                                WhisperReactionSummary(
+                                                    emoji = event.emoji,
+                                                    count = 1,
+                                                    userIds = listOf(event.userId),
+                                                    reactedByMe = event.userId == myUserId
+                                                )
+                                            )
+                                        }
+                                        msg.copy(reactions = curReactions)
+                                    } else msg
+                                }
+                                state.copy(messages = updated)
+                            }
+                            // 2. Authoritative sync with DB
+                            viewModelScope.launch {
+                                val reactionMap = repository.getReactionsForMessages(listOf(event.messageId)).getOrNull()
+                                if (reactionMap != null) {
+                                    val updatedList = reactionMap[event.messageId] ?: emptyList()
+                                    _uiState.update { state ->
+                                        val updated = state.messages.map { msg ->
+                                            if (msg.id == event.messageId) msg.copy(reactions = updatedList) else msg
+                                        }
+                                        state.copy(messages = updated)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("WhisperChatVM", "Chat realtime collect error", e)
+                android.util.Log.e("WhisperChatVM", "Chat realtime collect error: ${e.message}", e)
             }
         }
     }

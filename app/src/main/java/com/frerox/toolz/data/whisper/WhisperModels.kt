@@ -109,6 +109,11 @@ data class WhisperReactionSummary(
     val reactedByMe: Boolean = false,
 )
 
+sealed interface WhisperChatEvent {
+    data class MessageEvent(val message: WhisperMessage) : WhisperChatEvent
+    data class ReactionEvent(val messageId: String, val userId: String, val emoji: String) : WhisperChatEvent
+}
+
 @Serializable
 data class WhisperMessage(
     val id: String = "",

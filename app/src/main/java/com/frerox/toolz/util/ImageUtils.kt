@@ -104,13 +104,34 @@ object ImageUtils {
         return rotated
     }
 
+    private fun getRotationDegreesFromBytes(imageBytes: ByteArray): Int {
+        return try {
+            val exif = ExifInterface(java.io.ByteArrayInputStream(imageBytes))
+            when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+        } catch (_: Exception) {
+            0
+        }
+    }
+
     /**
      * Downscales an image to fit within maxDimension and compresses it.
+     * Automatically fixes EXIF rotation from camera captures.
      */
     fun downscaleAndCompress(imageBytes: ByteArray, maxDimension: Int = 1024, quality: Int = 80): ByteArray {
         val options = BitmapFactory.Options().apply { inMutable = true }
-        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options) ?: return imageBytes
+        var bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options) ?: return imageBytes
         
+        // Correct EXIF rotation (e.g. camera orientation)
+        val rotation = getRotationDegreesFromBytes(imageBytes)
+        if (rotation != 0) {
+            bitmap = rotateBitmap(bitmap, rotation)
+        }
+
         val width = bitmap.width
         val height = bitmap.height
         

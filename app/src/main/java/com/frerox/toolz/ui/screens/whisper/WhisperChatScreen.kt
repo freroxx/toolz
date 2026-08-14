@@ -107,8 +107,21 @@ fun WhisperChatScreen(
 
     // Auto scroll to bottom on new message
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+        if (messages.isNotEmpty() && !uiState.isSearchActive) {
             listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    // Auto scroll to active search match
+    val matchingIndices = remember(uiState.matchingMessageIds, messages) {
+        messages.mapIndexedNotNull { index, msg ->
+            if (uiState.matchingMessageIds.contains(msg.id)) index else null
+        }
+    }
+    LaunchedEffect(uiState.activeSearchMatchIndex, matchingIndices) {
+        if (uiState.isSearchActive && uiState.activeSearchMatchIndex in matchingIndices.indices) {
+            val targetIdx = matchingIndices[uiState.activeSearchMatchIndex]
+            listState.animateScrollToItem(targetIdx)
         }
     }
 
@@ -118,47 +131,21 @@ fun WhisperChatScreen(
                 ExpressiveTopAppBar(
                     title = {
                         if (uiState.isSearchActive) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                OutlinedTextField(
-                                    value = uiState.searchQuery,
-                                    onValueChange = { viewModel.updateSearchQuery(it) },
-                                    placeholder = { Text("Search in chat…", style = MaterialTheme.typography.bodyMedium) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(20.dp),
-                                    modifier = Modifier.weight(1f),
-                                    trailingIcon = {
-                                        if (uiState.searchQuery.isNotEmpty()) {
-                                            IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                                Icon(Icons.Rounded.Close, "Clear search", modifier = Modifier.size(18.dp))
-                                            }
+                            OutlinedTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.updateSearchQuery(it) },
+                                placeholder = { Text("Search messages…", style = MaterialTheme.typography.bodyMedium) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
+                                trailingIcon = {
+                                    if (uiState.searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                            Icon(Icons.Rounded.Close, "Clear search", modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                )
-                                if (uiState.matchingMessageIds.isNotEmpty()) {
-                                    Text(
-                                        "${uiState.activeSearchMatchIndex + 1}/${uiState.matchingMessageIds.size}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    IconButton(onClick = {
-                                        haptic.click()
-                                        viewModel.navigateSearchMatch(-1)
-                                    }) {
-                                        Icon(Icons.Rounded.KeyboardArrowUp, "Previous")
-                                    }
-                                    IconButton(onClick = {
-                                        haptic.click()
-                                        viewModel.navigateSearchMatch(1)
-                                    }) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, "Next")
-                                    }
                                 }
-                            }
+                            )
                         } else {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -228,7 +215,35 @@ fun WhisperChatScreen(
                         }
                     },
                     actions = {
-                        if (!uiState.isSearchActive) {
+                        if (uiState.isSearchActive) {
+                            if (uiState.matchingMessageIds.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    Text(
+                                        "${uiState.activeSearchMatchIndex + 1}/${uiState.matchingMessageIds.size}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                                ToolzExpressiveIconButton(onClick = {
+                                    haptic.click()
+                                    viewModel.navigateSearchMatch(-1)
+                                }) {
+                                    Icon(Icons.Rounded.KeyboardArrowUp, "Previous match")
+                                }
+                                ToolzExpressiveIconButton(onClick = {
+                                    haptic.click()
+                                    viewModel.navigateSearchMatch(1)
+                                }) {
+                                    Icon(Icons.Rounded.KeyboardArrowDown, "Next match")
+                                }
+                            }
+                        } else {
                             val status = uiState.friendStatus
                             if (status == FriendStatus.ACCEPTED) {
                                 Icon(
@@ -362,6 +377,15 @@ fun WhisperChatScreen(
                                         haptic.click()
                                         viewModel.setReplyTarget(message)
                                     },
+                                    onQuotedClick = { targetId ->
+                                        val targetIndex = messages.indexOfFirst { it.id == targetId }
+                                        if (targetIndex >= 0) {
+                                            haptic.click()
+                                            scope.launch {
+                                                listState.animateScrollToItem(targetIndex)
+                                            }
+                                        }
+                                    },
                                     onDoubleTap = {
                                         haptic.click()
                                         quickReactionTargetMessage = message
@@ -381,10 +405,14 @@ fun WhisperChatScreen(
                         }
                     }
 
-                    // Scroll to bottom FAB
+                    // Scroll to bottom FAB: visible when last message is NOT visible
                     val isScrolledUp = remember {
                         derivedStateOf {
-                            listState.firstVisibleItemIndex < (messages.size - 5).coerceAtLeast(0)
+                            val layoutInfo = listState.layoutInfo
+                            val lastIndex = messages.lastIndex
+                            if (lastIndex < 0) return@derivedStateOf false
+                            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            lastVisibleIndex < lastIndex
                         }
                     }
 
@@ -1289,6 +1317,7 @@ private fun MessageBubble(
     isHighlighted: Boolean = false,
     partnerName: String = "User",
     onReply: () -> Unit = {},
+    onQuotedClick: (String) -> Unit = {},
     onDoubleTap: () -> Unit = {},
     onReactionClick: (String) -> Unit = {},
     onLongClick: () -> Unit = {},
@@ -1380,6 +1409,11 @@ private fun MessageBubble(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp)
+                                .then(
+                                    if (message.replyToId != null) {
+                                        Modifier.clickable { onQuotedClick(message.replyToId) }
+                                    } else Modifier
+                                )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),

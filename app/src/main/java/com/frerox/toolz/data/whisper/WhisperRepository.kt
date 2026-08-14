@@ -26,6 +26,7 @@ import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.broadcast.BroadcastPayload
 import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeOldRecord
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
@@ -58,6 +59,31 @@ class WhisperRepository @Inject constructor(
     val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
     private val profileCache = mutableMapOf<String, WhisperProfile>()
+    // Cache conversations list to avoid full reload on every new message in the chats hub
+    private var conversationsCache: List<WhisperConversation>? = null
+    private var conversationsCacheTime: Long = 0L
+    private val CONVERSATIONS_CACHE_TTL = 30_000L // 30 seconds
+
+    // Persistent broadcast channels keyed by channel name — shared across send/react/delete
+    // so we don't subscribe to a brand-new channel object for each outgoing event.
+    private val broadcastChannelCache = mutableMapOf<String, io.github.jan.supabase.realtime.RealtimeChannel>()
+
+    private suspend fun getOrJoinBroadcastChannel(name: String): io.github.jan.supabase.realtime.RealtimeChannel {
+        broadcastChannelCache[name]?.let {
+            // Re-join only if it somehow disconnected
+            try {
+                if (it.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) return it
+            } catch (_: Exception) {}
+        }
+        val ch = supabase.channel(name)
+        ch.subscribe()
+        broadcastChannelCache[name] = ch
+        return ch
+    }
+
+    fun invalidateConversationsCache() {
+        conversationsCache = null
+    }
 
     // PROFILES
     suspend fun getMyProfile(forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
@@ -281,11 +307,10 @@ class WhisperRepository @Inject constructor(
         val insertedMsg = db.from("messages").insert(insert) { select() }.decodeSingle<WhisperMessage>()
         val clearMsg = insertedMsg.copy(content = content)
 
-        // Instant Realtime Peer-to-Peer Broadcast
+        // Instant Realtime Peer-to-Peer Broadcast & Instant Notification
         runCatching {
             val convoKey = conversationKey(myId, receiverId)
-            val chatChannel = supabase.channel("chat_$convoKey")
-            chatChannel.subscribe()
+            val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
             chatChannel.broadcast(
                 event = "new_message",
                 payload = BroadcastPayload.Json(
@@ -300,7 +325,26 @@ class WhisperRepository @Inject constructor(
                     }
                 )
             )
+
+            // Direct instant notification broadcast to receiver's dedicated channel
+            val notifChannel = getOrJoinBroadcastChannel("whisper-notifs-$receiverId")
+            val myProfile = getMyProfile().getOrNull()
+            notifChannel.broadcast(
+                event = "incoming_notification",
+                payload = BroadcastPayload.Json(
+                    buildJsonObject {
+                        put("id", insertedMsg.id)
+                        put("sender_id", myId)
+                        put("sender_name", myProfile?.effectiveName ?: "Someone")
+                        put("content", content)
+                        put("created_at", insertedMsg.createdAt)
+                    }
+                )
+            )
         }
+
+        // Invalidate conversation cache so the chats list refreshes
+        invalidateConversationsCache()
 
         clearMsg
     }
@@ -309,7 +353,8 @@ class WhisperRepository @Inject constructor(
     // REACTIONS
     // ─────────────────────────────────────────────────────────────
 
-    suspend fun toggleReaction(messageId: String, emoji: String): Result<Unit> = runCatching {
+    suspend fun toggleReaction(messageId: String, emoji: String, otherUserId: String? = null): Result<Unit> = runCatching {
+        if (messageId.isBlank()) return@runCatching
         val existing = db.from("message_reactions").select {
             filter {
                 eq("message_id", messageId)
@@ -326,6 +371,23 @@ class WhisperRepository @Inject constructor(
             db.from("message_reactions").insert(
                 WhisperMessageReactionInsert(messageId = messageId, userId = myId, emoji = emoji)
             )
+        }
+
+        if (!otherUserId.isNullOrBlank()) {
+            runCatching {
+                val convoKey = conversationKey(myId, otherUserId)
+                val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
+                chatChannel.broadcast(
+                    event = "reaction_update",
+                    payload = BroadcastPayload.Json(
+                        buildJsonObject {
+                            put("message_id", messageId)
+                            put("user_id", myId)
+                            put("emoji", emoji)
+                        }
+                    )
+                )
+            }
         }
     }
 
@@ -354,7 +416,7 @@ class WhisperRepository @Inject constructor(
         result
     }
 
-    suspend fun deleteMessageForEveryone(messageId: String, senderDisplayName: String): Result<Unit> = runCatching {
+    suspend fun deleteMessageForEveryone(messageId: String, otherUserId: String, senderDisplayName: String): Result<Unit> = runCatching {
         val tombstone = "[deleted_by_sender:$senderDisplayName]"
         db.from("messages").update(
             buildJsonObject {
@@ -366,6 +428,22 @@ class WhisperRepository @Inject constructor(
                 eq("id", messageId)
                 eq("sender_id", myId)
             }
+        }
+
+        // Broadcast instant delete event so the other user's chat screen updates without
+        // waiting for Postgres realtime (which may be slow or require replica identity FULL)
+        runCatching {
+            val convoKey = conversationKey(myId, otherUserId)
+            val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
+            chatChannel.broadcast(
+                event = "delete_message",
+                payload = BroadcastPayload.Json(
+                    buildJsonObject {
+                        put("message_id", messageId)
+                        put("tombstone", tombstone)
+                    }
+                )
+            )
         }
     }
 
@@ -387,9 +465,9 @@ class WhisperRepository @Inject constructor(
 
     /**
      * Dual-Channel Realtime Chat Flow:
-     * Combines Supabase Realtime Broadcast (<50ms) + Postgres Changes.
+     * Combines Supabase Realtime Broadcast (<50ms) + Postgres Changes for messages and reactions.
      */
-    fun subscribeToChat(otherUserId: String): Flow<WhisperMessage> = callbackFlow {
+    fun subscribeToChat(otherUserId: String): Flow<WhisperChatEvent> = callbackFlow {
         if (myId.isEmpty() || otherUserId.isEmpty()) {
             close()
             return@callbackFlow
@@ -398,16 +476,17 @@ class WhisperRepository @Inject constructor(
         val convoKey = conversationKey(myId, otherUserId)
         val channel = supabase.channel("chat_$convoKey")
 
-        // 1. Listen for Instant Realtime Broadcasts
-        val broadcastFlow = channel.broadcastFlow<JsonObject>("new_message")
-        val bJob = launch {
-            broadcastFlow.collect { json ->
+        // 1. Listen for Instant Realtime Message Broadcasts
+        val messageBroadcastFlow = channel.broadcastFlow<JsonObject>("new_message")
+        val bMsgJob = launch {
+            messageBroadcastFlow.collect { json ->
                 try {
                     val id = json["id"]?.jsonPrimitive?.content ?: return@collect
                     val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
                     val receiverId = json["receiver_id"]?.jsonPrimitive?.content ?: return@collect
                     val rawContent = json["content"]?.jsonPrimitive?.content ?: ""
                     val contentIv = json["content_iv"]?.jsonPrimitive?.content
+                    val replyToId = json["reply_to_id"]?.jsonPrimitive?.content
                     val createdAt = json["created_at"]?.jsonPrimitive?.content ?: ""
 
                     if (isUserBlockedByMe(senderId)) return@collect
@@ -427,21 +506,60 @@ class WhisperRepository @Inject constructor(
                         receiverId = receiverId,
                         content = decrypted,
                         contentIv = contentIv,
+                        replyToId = replyToId,
                         createdAt = createdAt
                     )
-                    trySend(msg)
+                    trySend(WhisperChatEvent.MessageEvent(msg))
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Broadcast parse error", e)
+                    android.util.Log.e("WhisperRepo", "Broadcast message parse error: ${e.message}")
                 }
             }
         }
 
-        // 2. Listen for Postgres Changes (Inserts and Updates for deletions/reads)
-        val postgresChanges = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+        // 2. Listen for Instant Realtime Reaction Broadcasts
+        val reactionBroadcastFlow = channel.broadcastFlow<JsonObject>("reaction_update")
+        val bReactionJob = launch {
+            reactionBroadcastFlow.collect { json ->
+                try {
+                    val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
+                    val userId = json["user_id"]?.jsonPrimitive?.content ?: return@collect
+                    val emoji = json["emoji"]?.jsonPrimitive?.content ?: return@collect
+                    trySend(WhisperChatEvent.ReactionEvent(messageId, userId, emoji))
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Broadcast reaction parse error: ${e.message}")
+                }
+            }
+        }
+
+        // 3. Listen for Instant Delete-for-Everyone Broadcasts
+        val deleteBroadcastFlow = channel.broadcastFlow<JsonObject>("delete_message")
+        val bDeleteJob = launch {
+            deleteBroadcastFlow.collect { json ->
+                try {
+                    val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
+                    val tombstone = json["tombstone"]?.jsonPrimitive?.content ?: return@collect
+                    // Synthesize a tombstoned WhisperMessage so the ViewModel can handle it
+                    val syntheticMsg = WhisperMessage(
+                        id = messageId,
+                        senderId = otherUserId,
+                        receiverId = myId,
+                        content = tombstone,
+                        contentIv = null,
+                        createdAt = "",
+                    )
+                    trySend(WhisperChatEvent.MessageEvent(syntheticMsg))
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Broadcast delete parse error: ${e.message}")
+                }
+            }
+        }
+
+        // 3. Listen for Postgres Changes on messages
+        val postgresMessageChanges = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "messages"
         }
-        val pJob = launch {
-            postgresChanges.collect { action ->
+        val pMsgJob = launch {
+            postgresMessageChanges.collect { action ->
                 try {
                     val msg = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperMessage>()
@@ -463,19 +581,47 @@ class WhisperRepository @Inject constructor(
                             crypto.decryptMessage(msg.content, msg.contentIv, otherKey)
                         } else msg.content
 
-                        trySend(msg.copy(content = decrypted))
+                        trySend(WhisperChatEvent.MessageEvent(msg.copy(content = decrypted)))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Postgres realtime collect error", e)
+                    android.util.Log.e("WhisperRepo", "Postgres message realtime error: ${e.message}")
+                }
+            }
+        }
+
+        // 4. Listen for Postgres Changes on message_reactions
+        val postgresReactionChanges = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = "message_reactions"
+        }
+        val pReactionJob = launch {
+            postgresReactionChanges.collect { action ->
+                try {
+                    val row = when (action) {
+                        is PostgresAction.Insert -> action.decodeRecord<WhisperMessageReactionRow>()
+                        is PostgresAction.Update -> action.decodeRecord<WhisperMessageReactionRow>()
+                        is PostgresAction.Delete -> action.decodeOldRecord<WhisperMessageReactionRow>()
+                        else -> null
+                    }
+                    if (row != null) {
+                        trySend(WhisperChatEvent.ReactionEvent(row.messageId, row.userId, row.emoji))
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Postgres reaction realtime error: ${e.message}")
                 }
             }
         }
 
         channel.subscribe()
+        // Register channel in cache so outgoing broadcasts reuse this connection
+        broadcastChannelCache["chat_$convoKey"] = channel
 
         awaitClose {
-            bJob.cancel()
-            pJob.cancel()
+            bMsgJob.cancel()
+            bReactionJob.cancel()
+            bDeleteJob.cancel()
+            pMsgJob.cancel()
+            pReactionJob.cancel()
+            broadcastChannelCache.remove("chat_$convoKey")
             launch {
                 try { realtime.removeChannel(channel) } catch (_: Exception) {}
             }
@@ -488,14 +634,42 @@ class WhisperRepository @Inject constructor(
             return@callbackFlow
         }
 
-        val channelName = "whisper-messages-$userId"
-        val channel = supabase.channel(channelName)
+        // Listen for direct instant push broadcast notifications (<50ms)
+        val notifChannel = supabase.channel("whisper-notifs-$userId")
+        val notifBroadcastFlow = notifChannel.broadcastFlow<JsonObject>("incoming_notification")
+        val notifJob = launch {
+            notifBroadcastFlow.collect { json ->
+                try {
+                    val id = json["id"]?.jsonPrimitive?.content ?: ""
+                    val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
+                    val content = json["content"]?.jsonPrimitive?.content ?: ""
+                    val createdAt = json["created_at"]?.jsonPrimitive?.content ?: ""
 
-        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                    if (isUserBlockedByMe(senderId)) return@collect
+
+                    val msg = WhisperMessage(
+                        id = id,
+                        senderId = senderId,
+                        receiverId = userId,
+                        content = content,
+                        createdAt = createdAt
+                    )
+                    trySend(msg)
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Notif broadcast parse error: ${e.message}")
+                }
+            }
+        }
+        notifChannel.subscribe()
+        // Register so outgoing broadcasts can reuse this
+        broadcastChannelCache["whisper-notifs-$userId"] = notifChannel
+
+        // Also listen to database messages table changes
+        val dbChannel = supabase.channel("whisper-messages-$userId")
+        val changes = dbChannel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "messages"
         }
-
-        val job = launch {
+        val dbJob = launch {
             changes.collect { action ->
                 try {
                     val msg = when (action) {
@@ -519,17 +693,21 @@ class WhisperRepository @Inject constructor(
                         trySend(msg.copy(content = decrypted))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Realtime collect error", e)
+                    android.util.Log.e("WhisperRepo", "Realtime collect error: ${e.message}")
                 }
             }
         }
-
-        channel.subscribe()
+        dbChannel.subscribe()
 
         awaitClose {
-            job.cancel()
+            notifJob.cancel()
+            dbJob.cancel()
+            broadcastChannelCache.remove("whisper-notifs-$userId")
             launch {
-                try { realtime.removeChannel(channel) } catch (_: Exception) {}
+                try {
+                    realtime.removeChannel(notifChannel)
+                    realtime.removeChannel(dbChannel)
+                } catch (_: Exception) {}
             }
         }
     }
@@ -577,7 +755,12 @@ class WhisperRepository @Inject constructor(
         db.from("messages").insert(inserts)
     }
 
-    suspend fun getConversations(): Result<List<WhisperConversation>> = runCatching {
+    suspend fun getConversations(forceRefresh: Boolean = false): Result<List<WhisperConversation>> = runCatching {
+        // Return cached result if fresh enough and not forcing a refresh
+        val now = System.currentTimeMillis()
+        if (!forceRefresh && conversationsCache != null && (now - conversationsCacheTime) < CONVERSATIONS_CACHE_TTL) {
+            return Result.success(conversationsCache!!)
+        }
         @Serializable
         data class ConvRow(
             @SerialName("partner_id") val partnerId: String = "",
@@ -615,7 +798,10 @@ class WhisperRepository @Inject constructor(
                 )
                 conversations.add(WhisperConversation(profile, fakeMsg, row.unreadCount.toInt()))
             }
-            conversations
+            conversations.also { result ->
+                conversationsCache = result
+                conversationsCacheTime = System.currentTimeMillis()
+            }
         } else {
             val allMessages = db.from("messages")
                 .select {
@@ -650,6 +836,10 @@ class WhisperRepository @Inject constructor(
                 conversations.add(WhisperConversation(profile, lastMsg.copy(content = decryptedContent), unread))
             }
             conversations.sortedByDescending { it.lastMessage.createdAt }
+        }.also { result ->
+            // Update cache
+            conversationsCache = result
+            conversationsCacheTime = System.currentTimeMillis()
         }
     }
 
@@ -689,6 +879,7 @@ class WhisperRepository @Inject constructor(
      * If the other user already sent a request to me, automatically accept it!
      */
     suspend fun sendFriendRequest(targetUserId: String): Result<Unit> = runCatching {
+        if (targetUserId == myId) return@runCatching
         val existingPair = getFriendshipStatus(targetUserId).getOrNull()
         val (status, record) = existingPair ?: Pair(FriendStatus.NONE, null)
 
@@ -707,7 +898,9 @@ class WhisperRepository @Inject constructor(
             }
         }
 
-        db.from("friends").insert(WhisperFriendshipInsert(userA = myId, userB = targetUserId))
+        runCatching {
+            db.from("friends").insert(WhisperFriendshipInsert(userA = myId, userB = targetUserId))
+        }
     }
 
     suspend fun acceptFriendRequest(friendshipId: String): Result<Unit> = runCatching {

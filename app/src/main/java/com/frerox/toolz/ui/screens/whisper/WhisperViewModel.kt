@@ -87,7 +87,7 @@ class WhisperViewModel @Inject constructor(
                         .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
                         .onFailure { err -> handleError(err, "getMyProfile") }
                 }
-                val convosDeferred = async { loadConversationsInternal() }
+                val convosDeferred = async { loadConversationsInternal(forceRefresh = isRefresh) }
                 val friendsDeferred = async { loadFriendsInternal() }
                 val recommendedDeferred = async { loadRecommendationsInternal() }
 
@@ -101,12 +101,22 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadConversationsInternal() {
-        repository.getConversations()
+    val isAnonymousTokenUser: Boolean
+        get() = authManager.isAnonymousTokenUser
+
+    private suspend fun loadConversationsInternal(forceRefresh: Boolean = false) {
+        repository.getConversations(forceRefresh = forceRefresh)
             .onSuccess { convos ->
                 val muted = mutePrefs.mutedUsers.value
                 val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
                 _uiState.update { it.copy(conversations = mapped) }
+
+                // Clear notifications for any conversations that have been read (read receipts)
+                for (convo in convos) {
+                    if (convo.unreadCount == 0) {
+                        notificationManager.cancelMessageNotification(convo.otherUser.id)
+                    }
+                }
             }
             .onFailure { err ->
                 handleError(err, "getConversations")
@@ -192,7 +202,12 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    fun updateProfile(displayName: String, bio: String, isPrivate: Boolean) {
+    fun updateProfile(
+        displayName: String,
+        bio: String,
+        isPrivate: Boolean,
+        onSuccess: (() -> Unit)? = null,
+    ) {
         viewModelScope.launch {
             val update = WhisperProfileUpdate(
                 displayName = displayName.takeIf { it.isNotBlank() },
@@ -204,8 +219,19 @@ class WhisperViewModel @Inject constructor(
                     repository.getMyProfile(forceRefresh = true).onSuccess { p ->
                         _uiState.update { it.copy(currentProfile = p) }
                     }
+                    onSuccess?.invoke()
                 }
                 .onFailure { handleError(it, "updateProfile") }
+        }
+    }
+
+    fun deleteAccount(password: String? = null, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            authManager.deleteAccount(password)
+                .onSuccess {
+                    onComplete()
+                }
+                .onFailure { handleError(it, "deleteAccount") }
         }
     }
 
@@ -251,7 +277,8 @@ class WhisperViewModel @Inject constructor(
         messagesJob = viewModelScope.launch {
             try {
                 repository.subscribeToIncomingMessages(myId).collect { msg ->
-                    loadConversationsInternal()
+                    // Force refresh conversations from server on new incoming message
+                    loadConversationsInternal(forceRefresh = true)
                     if (msg.senderId != myId) {
                         val senderProfile = repository.getProfile(msg.senderId).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
