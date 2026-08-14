@@ -24,10 +24,7 @@ import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -52,10 +49,14 @@ class WhisperChatViewModel @Inject constructor(
     private val _draftText = MutableStateFlow("")
     val draftText: StateFlow<String> = _draftText.asStateFlow()
 
+    private val _sessionExpired = MutableSharedFlow<Unit>(replay = 0)
+    val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
+
     private var partnerPublicKey: String? = null
     private var realtimeJob: Job? = null
     private var typingSubscriptionJob: Job? = null
     private var typingDebounceJob: Job? = null
+    private var presenceJob: Job? = null
     private var undoTimerJob: Job? = null
     private var isCurrentlyTyping = false
 
@@ -68,6 +69,20 @@ class WhisperChatViewModel @Inject constructor(
         loadInitialData()
         subscribeToChat()
         subscribeToTyping()
+        subscribeToPresence()
+        sendPresenceSignal(true)
+    }
+
+    private fun handleError(err: Throwable, context: String) {
+        val mapped = WhisperErrorMapper.map(err, context)
+        if (mapped == WhisperErrorMapper.SESSION_EXPIRED_SENTINEL || WhisperErrorMapper.isSessionExpired(err)) {
+            viewModelScope.launch {
+                authManager.signOut()
+                _sessionExpired.emit(Unit)
+            }
+        } else {
+            _uiState.update { it.copy(error = mapped) }
+        }
     }
 
     private fun loadInitialData() {
@@ -81,7 +96,7 @@ class WhisperChatViewModel @Inject constructor(
                     _uiState.update { it.copy(otherUser = profile) }
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getProfile")) }
+                    handleError(err, "getProfile")
                 }
 
             // 2. Load friendship status
@@ -96,17 +111,13 @@ class WhisperChatViewModel @Inject constructor(
                     }
                 }
                 .onFailure { err ->
-                    _uiState.update {
-                        it.copy(
-                            error = WhisperErrorMapper.map(err, "getFriendshipStatus"),
-                            isFriendStatusLoaded = true,
-                        )
-                    }
+                    handleError(err, "getFriendshipStatus")
+                    _uiState.update { it.copy(isFriendStatusLoaded = true) }
                 }
 
-            // 3. Load block status (Only check if blocked by me)
-            val blockedByMe = repository.isBlockedByMe(otherUserId)
-            _uiState.update { it.copy(isBlockedByMe = blockedByMe) }
+            // 3. Load block status
+            val (blockedByMe, blockedByOther) = repository.getBlockStatus(otherUserId)
+            _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
 
             // 4. Load messages
             loadMessages()
@@ -117,31 +128,112 @@ class WhisperChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getMessages(otherUserId)
                 .onSuccess { messages ->
-                    _uiState.update { it.copy(messages = messages, isLoading = false) }
+                    _uiState.update { state ->
+                        state.copy(
+                            messages = messages,
+                            isLoading = false,
+                            matchingMessageIds = if (state.searchQuery.isNotBlank()) {
+                                messages.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                            } else emptySet()
+                        )
+                    }
                     repository.markMessagesAsRead(otherUserId)
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getMessages"), isLoading = false) }
+                    handleError(err, "getMessages")
+                    _uiState.update { it.copy(isLoading = false) }
                 }
+        }
+    }
+
+    // ── REPLY-TO MESSAGE ──
+    fun setReplyTarget(message: WhisperMessage) {
+        _uiState.update { it.copy(replyingToMessage = message) }
+    }
+
+    fun clearReplyTarget() {
+        _uiState.update { it.copy(replyingToMessage = null) }
+    }
+
+    // ── EMOJI REACTIONS ──
+    fun toggleReaction(message: WhisperMessage, emoji: String) {
+        viewModelScope.launch {
+            repository.toggleReaction(message.id, emoji)
+                .onSuccess {
+                    loadMessages()
+                }
+                .onFailure { err ->
+                    handleError(err, "toggleReaction")
+                }
+        }
+    }
+
+    // ── IN-CHAT MESSAGE SEARCH ──
+    fun toggleSearch(active: Boolean? = null) {
+        _uiState.update { state ->
+            val newActive = active ?: !state.isSearchActive
+            state.copy(
+                isSearchActive = newActive,
+                searchQuery = if (newActive) state.searchQuery else "",
+                matchingMessageIds = if (newActive) state.matchingMessageIds else emptySet(),
+                activeSearchMatchIndex = if (newActive) state.activeSearchMatchIndex else -1
+            )
+        }
+    }
+
+    fun updateSearchQuery(query: String) {
+        _uiState.update { state ->
+            val matchedIds = if (query.isBlank()) {
+                emptySet()
+            } else {
+                state.messages
+                    .filter { !it.isDeletedForEveryone && it.content.contains(query, ignoreCase = true) }
+                    .map { it.id }
+                    .toSet()
+            }
+            state.copy(
+                searchQuery = query,
+                matchingMessageIds = matchedIds,
+                activeSearchMatchIndex = if (matchedIds.isNotEmpty()) 0 else -1
+            )
+        }
+    }
+
+    fun navigateSearchMatch(direction: Int) {
+        _uiState.update { state ->
+            val size = state.matchingMessageIds.size
+            if (size == 0) return@update state
+            val next = (state.activeSearchMatchIndex + direction).mod(size)
+            state.copy(activeSearchMatchIndex = next)
         }
     }
 
     fun sendMessage(content: String) {
         if (content.isBlank()) return
+        if (uiState.value.isBlockedByOther) {
+            _uiState.update { it.copy(error = "You have been blocked by this user.") }
+            return
+        }
         if (uiState.value.isBlockedByMe) {
             _uiState.update { it.copy(error = "Unblock user to send messages.") }
             return
         }
 
         val originalText = content
+        val replyTarget = uiState.value.replyingToMessage
         _draftText.value = ""
+        clearReplyTarget()
         sendTypingSignal(false)
         val trimmedContent = content.trim()
         val optimisticMsg = WhisperMessage(
             id = "pending_${System.currentTimeMillis()}",
             senderId = myUserId,
             receiverId = otherUserId,
-            content = trimmedContent
+            content = trimmedContent,
+            replyToId = replyTarget?.id,
+            replyToContent = replyTarget?.content?.take(100),
+            replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User",
+            isPending = true
         )
 
         _uiState.update { state ->
@@ -149,26 +241,30 @@ class WhisperChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            repository.sendMessage(otherUserId, trimmedContent)
+            repository.sendMessage(otherUserId, trimmedContent, replyTarget?.id)
                 .onSuccess { newMsg ->
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id && it.id != newMsg.id }
-                        state.copy(messages = filtered + newMsg)
+                        val enrichedMsg = newMsg.copy(
+                            replyToContent = replyTarget?.content?.take(100),
+                            replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User"
+                        )
+                        state.copy(messages = filtered + enrichedMsg)
                     }
                 }
                 .onFailure { err ->
                     _draftText.value = originalText
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id }
-                        state.copy(error = WhisperErrorMapper.map(err, "sendMessage"), messages = filtered)
+                        state.copy(messages = filtered)
                     }
+                    handleError(err, "sendMessage")
                 }
         }
     }
 
     // ── MESSAGE DELETION ──
     fun deleteMessageForEveryone(message: WhisperMessage) {
-        val myProfile = uiState.value.otherUser
         val myDisplayName = authManager.currentUserId?.let { "You" } ?: "User"
 
         // Optimistic local update
@@ -183,7 +279,7 @@ class WhisperChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteMessageForEveryone(message.id, myDisplayName)
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "deleteMessage")) }
+                    handleError(err, "deleteMessage")
                     loadMessages()
                 }
         }
@@ -214,11 +310,11 @@ class WhisperChatViewModel @Inject constructor(
                         }
                     }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
+                .onFailure { handleError(it, "sendFriendRequest") }
         }
     }
 
-    // ── CLEAR CHAT WITH 60s UNDO ──
+    // ── CLEAR CHAT WITH 30s LIVE COUNTDOWN UNDO ──
     fun clearChat(range: ClearChatTimeRange, customStartIso: String? = null, customEndIso: String? = null) {
         viewModelScope.launch {
             val now = Instant.now()
@@ -238,19 +334,23 @@ class WhisperChatViewModel @Inject constructor(
                         val deletedIds = deletedList.map { it.id }.toSet()
                         state.copy(
                             messages = state.messages.filter { it.id !in deletedIds },
-                            clearedUndoMessagesCount = deletedList.size
+                            clearedUndoMessagesCount = deletedList.size,
+                            undoSecondsRemaining = 30
                         )
                     }
 
                     undoTimerJob?.cancel()
                     undoTimerJob = viewModelScope.launch {
-                        delay(60_000)
+                        for (sec in 30 downTo 1) {
+                            _uiState.update { it.copy(undoSecondsRemaining = sec) }
+                            delay(1_000)
+                        }
                         deletedMessagesUndoBuffer.clear()
-                        _uiState.update { it.copy(clearedUndoMessagesCount = 0) }
+                        _uiState.update { it.copy(clearedUndoMessagesCount = 0, undoSecondsRemaining = 0) }
                     }
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "clearChat")) }
+                    handleError(err, "clearChat")
                 }
         }
     }
@@ -259,7 +359,7 @@ class WhisperChatViewModel @Inject constructor(
         if (deletedMessagesUndoBuffer.isEmpty()) return
         val toRestore = deletedMessagesUndoBuffer.toList()
         undoTimerJob?.cancel()
-        _uiState.update { it.copy(clearedUndoMessagesCount = 0) }
+        _uiState.update { it.copy(clearedUndoMessagesCount = 0, undoSecondsRemaining = 0) }
 
         viewModelScope.launch {
             repository.restoreMessages(toRestore)
@@ -268,7 +368,7 @@ class WhisperChatViewModel @Inject constructor(
                     loadMessages()
                 }
                 .onFailure { err ->
-                    _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "restoreMessages")) }
+                    handleError(err, "restoreMessages")
                 }
         }
     }
@@ -286,7 +386,7 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    // ── BLOCK / UNBLOCK (ROBUST: USER2 NEVER TOLD THEY ARE BLOCKED) ──
+    // ── BLOCK / UNBLOCK ──
     fun toggleBlock() {
         val isBlocked = uiState.value.isBlockedByMe
         viewModelScope.launch {
@@ -296,7 +396,7 @@ class WhisperChatViewModel @Inject constructor(
                         _uiState.update { it.copy(isBlockedByMe = false) }
                     }
                     .onFailure { err ->
-                        _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "unblockUser")) }
+                        handleError(err, "unblockUser")
                     }
             } else {
                 repository.blockUser(otherUserId)
@@ -304,7 +404,7 @@ class WhisperChatViewModel @Inject constructor(
                         _uiState.update { it.copy(isBlockedByMe = true) }
                     }
                     .onFailure { err ->
-                        _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "blockUser")) }
+                        handleError(err, "blockUser")
                     }
             }
         }
@@ -339,6 +439,22 @@ class WhisperChatViewModel @Inject constructor(
     private fun sendTypingSignal(isTyping: Boolean) {
         viewModelScope.launch {
             repository.sendTypingStatus(otherUserId, isTyping)
+        }
+    }
+
+    private fun sendPresenceSignal(isOnline: Boolean) {
+        viewModelScope.launch {
+            repository.sendPresence(otherUserId, isOnline)
+        }
+    }
+
+    private fun subscribeToPresence() {
+        presenceJob = viewModelScope.launch {
+            try {
+                repository.subscribeToPresence(otherUserId).collect { (isOnline, ts) ->
+                    _uiState.update { it.copy(isPartnerOnline = isOnline, partnerLastSeen = ts) }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -382,12 +498,22 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    fun onScrolledUp() {
+        _uiState.update { it.copy(unreadMessagesScrolledUp = it.unreadMessagesScrolledUp + 1) }
+    }
+
+    fun onScrolledToBottom() {
+        _uiState.update { it.copy(unreadMessagesScrolledUp = 0) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         notificationManager.currentChatId = null
+        sendPresenceSignal(false)
         realtimeJob?.cancel()
         typingSubscriptionJob?.cancel()
         typingDebounceJob?.cancel()
+        presenceJob?.cancel()
         undoTimerJob?.cancel()
     }
 }

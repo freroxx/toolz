@@ -75,8 +75,39 @@ data class WhisperProfileInsert(
 )
 
 // ─────────────────────────────────────────────────────────────
-// Messages
+// Messages & Reactions
 // ─────────────────────────────────────────────────────────────
+
+enum class WhisperMessageStatus {
+    PENDING,
+    SENT,
+    DELIVERED,
+    READ
+}
+
+@Serializable
+data class WhisperMessageReactionRow(
+    val id: String = "",
+    @SerialName("message_id") val messageId: String = "",
+    @SerialName("user_id") val userId: String = "",
+    val emoji: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class WhisperMessageReactionInsert(
+    @SerialName("message_id") val messageId: String,
+    @SerialName("user_id") val userId: String,
+    val emoji: String,
+)
+
+@Serializable
+data class WhisperReactionSummary(
+    val emoji: String = "",
+    val count: Int = 0,
+    val userIds: List<String> = emptyList(),
+    val reactedByMe: Boolean = false,
+)
 
 @Serializable
 data class WhisperMessage(
@@ -85,10 +116,23 @@ data class WhisperMessage(
     @SerialName("receiver_id") val receiverId: String = "",
     val content: String = "",
     @SerialName("content_iv") val contentIv: String? = null,
+    @SerialName("reply_to_id") val replyToId: String? = null,
     @SerialName("is_read") val isRead: Boolean = false,
     @SerialName("created_at") val createdAt: String = "",
+    // In-memory / enriched fields
+    @kotlinx.serialization.Transient val replyToContent: String? = null,
+    @kotlinx.serialization.Transient val replyToSenderName: String? = null,
+    @kotlinx.serialization.Transient val reactions: List<WhisperReactionSummary> = emptyList(),
+    @kotlinx.serialization.Transient val isPending: Boolean = false,
 ) {
     fun isSentByMe(myUserId: String) = senderId == myUserId
+
+    /** Delivery & read receipt status */
+    fun status(myUserId: String): WhisperMessageStatus = when {
+        isPending -> WhisperMessageStatus.PENDING
+        isRead -> WhisperMessageStatus.READ
+        else -> WhisperMessageStatus.SENT
+    }
 
     /** Whether this message was deleted for everyone */
     val isDeletedForEveryone: Boolean get() =
@@ -112,6 +156,7 @@ data class WhisperMessageInsert(
     @SerialName("receiver_id") val receiverId: String,
     val content: String,
     @SerialName("content_iv") val contentIv: String? = null,
+    @SerialName("reply_to_id") val replyToId: String? = null,
     @SerialName("is_read") val isRead: Boolean = false,
     @SerialName("created_at") val createdAt: String? = null,
 )
@@ -199,7 +244,7 @@ enum class ClearChatTimeRange {
 
 data class WhisperAnonToken(
     val token: String,          // 64-char hex string — user must save this!
-    val virtualEmail: String,   // SHA-256(token) + "@anon.toolz"
+    val virtualEmail: String,   // SHA-256(token) + "@whisper.toolz.app"
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -226,7 +271,9 @@ data class WhisperUiState(
     val recommendedProfiles: List<WhisperProfile> = emptyList(),
     val mutedUserIds: Set<String> = emptySet(),
     val error: String? = null,
-)
+) {
+    val totalUnreadCount: Int get() = conversations.sumOf { it.unreadCount }
+}
 
 data class WhisperChatUiState(
     val isLoading: Boolean = false,
@@ -236,8 +283,18 @@ data class WhisperChatUiState(
     val friendStatus: FriendStatus = FriendStatus.NONE,
     val iAmRequester: Boolean = false,
     val isPartnerTyping: Boolean = false,
+    val isPartnerOnline: Boolean = false,
+    val partnerLastSeen: String? = null,
     val isMuted: Boolean = false,
     val isBlockedByMe: Boolean = false,
+    val isBlockedByOther: Boolean = false,
     val clearedUndoMessagesCount: Int = 0,
+    val undoSecondsRemaining: Int = 0,
+    val replyingToMessage: WhisperMessage? = null,
+    val isSearchActive: Boolean = false,
+    val searchQuery: String = "",
+    val matchingMessageIds: Set<String> = emptySet(),
+    val activeSearchMatchIndex: Int = -1,
+    val unreadMessagesScrolledUp: Int = 0,
     val error: String? = null,
 )

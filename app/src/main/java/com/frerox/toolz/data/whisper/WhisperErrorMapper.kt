@@ -28,6 +28,19 @@ object WhisperErrorMapper {
 
     private const val TAG = "WhisperError"
 
+    const val SESSION_EXPIRED_SENTINEL = "%%SESSION_EXPIRED%%"
+
+    fun isSessionExpired(throwable: Throwable): Boolean {
+        if (throwable is RestException && (throwable.statusCode in 401..403 || throwable.error == "invalid_jwt" || throwable.error == "JWT expired")) {
+            return true
+        }
+        val msg = throwable.message.orEmpty()
+        return msg.contains("JWT expired", ignoreCase = true) ||
+            msg.contains("invalid claim", ignoreCase = true) ||
+            msg.contains("session expired", ignoreCase = true) ||
+            msg.contains("user_not_found", ignoreCase = true)
+    }
+
     /**
      * Maps a [Throwable] to a short, user-friendly string.
      * Always logs the technical message to Logcat first.
@@ -35,6 +48,10 @@ object WhisperErrorMapper {
     fun map(throwable: Throwable, context: String = ""): String {
         val prefix = if (context.isNotBlank()) "[$context] " else ""
         Log.e(TAG, "$prefix${throwable.javaClass.simpleName}: ${throwable.message}", throwable)
+
+        if (isSessionExpired(throwable)) {
+            return SESSION_EXPIRED_SENTINEL
+        }
 
         val msg = throwable.message ?: return "Something went wrong. Try again."
 
@@ -66,7 +83,7 @@ object WhisperErrorMapper {
 
             // Permission / database errors
             throwable is RestException && throwable.statusCode in 400..499 ->
-                "Request failed. Your session may have expired — try signing in again."
+                "Request failed. Please try again."
             throwable is RestException && throwable.statusCode in 500..599 ->
                 "Server error. Please try again in a moment."
 

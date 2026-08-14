@@ -52,6 +52,17 @@ class WhisperViewModel @Inject constructor(
         subscribeToFriends()
     }
 
+    private fun handleError(err: Throwable, context: String) {
+        val mapped = WhisperErrorMapper.map(err, context)
+        if (mapped == WhisperErrorMapper.SESSION_EXPIRED_SENTINEL || WhisperErrorMapper.isSessionExpired(err)) {
+            viewModelScope.launch {
+                authManager.signOut()
+            }
+        } else {
+            _uiState.update { it.copy(error = mapped) }
+        }
+    }
+
     private fun observeMutes() {
         muteJob = viewModelScope.launch {
             mutePrefs.mutedUsers.collect { mutedSet ->
@@ -74,7 +85,7 @@ class WhisperViewModel @Inject constructor(
                 val profileDeferred = async {
                     repository.getMyProfile(forceRefresh = isRefresh)
                         .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
-                        .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getMyProfile")) } }
+                        .onFailure { err -> handleError(err, "getMyProfile") }
                 }
                 val convosDeferred = async { loadConversationsInternal() }
                 val friendsDeferred = async { loadFriendsInternal() }
@@ -98,7 +109,7 @@ class WhisperViewModel @Inject constructor(
                 _uiState.update { it.copy(conversations = mapped) }
             }
             .onFailure { err ->
-                _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "getConversations")) }
+                handleError(err, "getConversations")
             }
     }
 
@@ -131,7 +142,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.searchProfiles(query)
                 .onSuccess { results -> _uiState.update { it.copy(searchResults = results) } }
-                .onFailure { err -> _uiState.update { it.copy(error = WhisperErrorMapper.map(err, "searchProfiles")) } }
+                .onFailure { err -> handleError(err, "searchProfiles") }
         }
     }
 
@@ -139,7 +150,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.sendFriendRequest(targetUserId)
                 .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "sendFriendRequest")) } }
+                .onFailure { handleError(it, "sendFriendRequest") }
         }
     }
 
@@ -147,7 +158,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.acceptFriendRequest(friendshipId)
                 .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "acceptFriendRequest")) } }
+                .onFailure { handleError(it, "acceptFriendRequest") }
         }
     }
 
@@ -155,7 +166,7 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             repository.deleteFriendship(friendshipId)
                 .onSuccess { loadFriendsInternal() }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "declineFriendRequest")) } }
+                .onFailure { handleError(it, "declineFriendRequest") }
         }
     }
 
@@ -166,10 +177,10 @@ class WhisperViewModel @Inject constructor(
                     if (friendship != null) {
                         repository.deleteFriendship(friendship.id)
                             .onSuccess { loadFriendsInternal(); loadRecommendationsInternal() }
-                            .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "unfriend")) } }
+                            .onFailure { err -> handleError(err, "unfriend") }
                     }
                 }
-                .onFailure { err -> _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(err, "getFriendshipStatus")) } }
+                .onFailure { err -> handleError(err, "getFriendshipStatus") }
         }
     }
 
@@ -194,7 +205,7 @@ class WhisperViewModel @Inject constructor(
                         _uiState.update { it.copy(currentProfile = p) }
                     }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "updateProfile")) } }
+                .onFailure { handleError(it, "updateProfile") }
         }
     }
 
@@ -207,7 +218,7 @@ class WhisperViewModel @Inject constructor(
                         _uiState.update { it.copy(currentProfile = p) }
                     }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "uploadAvatar")) } }
+                .onFailure { handleError(it, "uploadAvatar") }
         }
     }
 
@@ -219,7 +230,7 @@ class WhisperViewModel @Inject constructor(
                         _uiState.update { it.copy(currentProfile = p) }
                     }
                 }
-                .onFailure { _uiState.update { s -> s.copy(error = WhisperErrorMapper.map(it, "deleteAvatar")) } }
+                .onFailure { handleError(it, "deleteAvatar") }
         }
     }
 
