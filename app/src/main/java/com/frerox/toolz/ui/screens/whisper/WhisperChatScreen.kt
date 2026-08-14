@@ -61,6 +61,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -105,10 +106,27 @@ fun WhisperChatScreen(
     val listState = rememberLazyListState()
     val messages = uiState.messages
 
-    // Auto scroll to bottom on new message
+    // Jump to the newest message when entering the chat, once the list is laid out
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.layoutInfo.totalItemsCount }
+            .first { it > 0 }
+        if (!uiState.isSearchActive) {
+            listState.scrollToItem(uiState.messages.lastIndex.coerceAtLeast(0))
+        }
+    }
+
+    // Stay pinned to the newest message when I send one (optimistic pending bubble),
+    // or when I'm already at/near the bottom and a new message arrives.
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && !uiState.isSearchActive) {
-            listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isEmpty() || uiState.isSearchActive) return@LaunchedEffect
+
+        val lastIndex = messages.lastIndex
+        val lastMsg = messages[lastIndex]
+        val visibleLastIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val isNearBottom = visibleLastIndex >= lastIndex - 2
+
+        if (lastMsg.isSentByMe(viewModel.myUserId) || isNearBottom) {
+            listState.scrollToItem(lastIndex)
         }
     }
 
@@ -378,12 +396,7 @@ fun WhisperChatScreen(
 
                                 val isHighlighted = uiState.matchingMessageIds.contains(message.id)
 
-                                StaggeredEntrance(
-                                    index = index,
-                                    modifier = Modifier.animateItem(
-                                        placementSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)
-                                    ),
-                                ) {
+                                StaggeredEntrance(index = index) {
                                     MessageBubble(
                                         message = message,
                                         isMine = isMine,
@@ -424,7 +437,7 @@ fun WhisperChatScreen(
                     }
 
                     // Scroll to bottom FAB: visible when last message is NOT visible
-                    val isScrolledUp = remember {
+                    val isScrolledUp = remember(messages) {
                         derivedStateOf {
                             val layoutInfo = listState.layoutInfo
                             val lastIndex = messages.lastIndex
@@ -582,9 +595,9 @@ fun WhisperChatScreen(
         )
     }
 
-    // Material 3 Expressive Chat Options Bottom Sheet
+    // Material 3 Expressive Conversation Options Bottom Sheet
     if (showOptionsSheet) {
-        ChatOptionsSheet(
+        ConversationOptionsSheet(
             isMuted = uiState.isMuted,
             isBlocked = uiState.isBlockedByMe,
             hasClearedUndo = uiState.clearedUndoMessagesCount > 0,
@@ -837,12 +850,12 @@ private fun QuickReactionDialog(
 }
 
 // ─────────────────────────────────────────────────────────────
-// CHAT OPTIONS BOTTOM SHEET (Replacing DropdownMenu)
+// CONVERSATION OPTIONS BOTTOM SHEET (Replacing DropdownMenu)
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChatOptionsSheet(
+private fun ConversationOptionsSheet(
     isMuted: Boolean,
     isBlocked: Boolean,
     hasClearedUndo: Boolean,

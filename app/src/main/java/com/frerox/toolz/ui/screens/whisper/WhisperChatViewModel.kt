@@ -37,6 +37,7 @@ class WhisperChatViewModel @Inject constructor(
     private val crypto: WhisperCrypto,
     private val notificationManager: WhisperNotificationManager,
     private val mutePrefs: WhisperMutePreferences,
+    private val hiddenChatsStore: WhisperHiddenChatsStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -65,6 +66,7 @@ class WhisperChatViewModel @Inject constructor(
     init {
         notificationManager.currentChatId = otherUserId
         notificationManager.cancelMessageNotification(otherUserId)
+        hiddenChatsStore.unhideChat(otherUserId)
         _uiState.update { it.copy(isMuted = mutePrefs.isMuted(otherUserId)) }
         loadInitialData()
         subscribeToChat()

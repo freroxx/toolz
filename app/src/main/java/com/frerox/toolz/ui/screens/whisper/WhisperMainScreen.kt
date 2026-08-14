@@ -293,26 +293,47 @@ fun WhisperMainScreen(
         )
     }
 
-    // Material 3 Expressive Conversation Options Bottom Sheet
+    // Material 3 Expressive Chat Options Bottom Sheet
     selectedConvoForOptions?.let { convo ->
-        ConversationOptionsSheet(
+        var isBlocked by remember(convo.otherUser.id) { mutableStateOf(false) }
+        LaunchedEffect(convo.otherUser.id) {
+            isBlocked = viewModel.isBlockedByMe(convo.otherUser.id)
+        }
+        ChatOptionsSheet(
             convo = convo,
+            isBlocked = isBlocked,
             onDismiss = { selectedConvoForOptions = null },
-            onOpenChat = {
-                val uId = convo.otherUser.id
-                selectedConvoForOptions = null
-                onNavigateToChat(uId)
-            },
             onViewProfile = {
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 onNavigateToProfile(uId)
+            },
+            onClearChat = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                haptic.click()
+                viewModel.clearChatHistory(uId)
+                toastState.show("Chat history cleared", WhisperToastType.INFO)
             },
             onToggleMute = {
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 viewModel.toggleMuteUser(uId)
                 toastState.show(if (convo.isMuted) "Unmuted notifications" else "Muted notifications", WhisperToastType.INFO)
+            },
+            onToggleBlock = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                haptic.click()
+                viewModel.toggleBlockUser(uId)
+                toastState.show(if (isBlocked) "User unblocked" else "User blocked", WhisperToastType.INFO)
+            },
+            onDeleteChat = {
+                val uId = convo.otherUser.id
+                selectedConvoForOptions = null
+                haptic.click()
+                viewModel.hideChat(uId)
+                toastState.show("Chat hidden", WhisperToastType.INFO)
             }
         )
     }
@@ -980,8 +1001,8 @@ private fun ProfileTab(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp)
-            .fadingEdges(top = 16.dp, bottom = 16.dp),
+            .fadingEdges(top = 20.dp, bottom = 32.dp)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -1471,66 +1492,94 @@ private fun FriendOptionsSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConversationOptionsSheet(
+private fun ChatOptionsSheet(
     convo: WhisperConversation,
+    isBlocked: Boolean,
     onDismiss: () -> Unit,
-    onOpenChat: () -> Unit,
     onViewProfile: () -> Unit,
+    onClearChat: () -> Unit,
     onToggleMute: () -> Unit,
+    onToggleBlock: () -> Unit,
+    onDeleteChat: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 6.dp,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                WhisperAvatar(convo.otherUser, 52.dp)
-                Column {
-                    Text(convo.otherUser.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("@${convo.otherUser.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            Text(
+                "Chat Options",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+
+            // View Profile
+            ListItem(
+                headlineContent = { Text("View Profile", fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
+            )
+
+            // Clear Chat
+            ListItem(
+                headlineContent = { Text("Clear chat history", fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
+            )
+
+            // Mute / Unmute
+            ListItem(
+                headlineContent = { Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.Medium) },
+                leadingContent = {
+                    Icon(
+                        if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                        null,
+                        tint = if (convo.isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            ToolzExpressiveButton(
-                onClick = onOpenChat,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Open Chat", fontWeight = FontWeight.Bold)
-            }
+            // Block / Unblock
+            ListItem(
+                headlineContent = {
+                    Text(
+                        if (isBlocked) "Unblock user" else "Block user",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
+                        null,
+                        tint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
+            )
 
-            ToolzTonalExpressiveButton(
-                onClick = onViewProfile,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) {
-                Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("View Profile", fontWeight = FontWeight.SemiBold)
-            }
+            // Delete chat (hides from the chats tab)
+            ListItem(
+                headlineContent = {
+                    Text("Delete chat", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                },
+                leadingContent = {
+                    Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
+                },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteChat() }
+            )
 
-            ToolzOutlinedExpressiveButton(
-                onClick = onToggleMute,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) {
-                Icon(if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.SemiBold)
-            }
-
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

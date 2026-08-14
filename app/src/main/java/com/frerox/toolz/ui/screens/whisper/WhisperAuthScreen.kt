@@ -164,8 +164,8 @@ private fun WhisperAuthContent(
             .fillMaxSize()
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp)
-            .fadingEdges(top = 16.dp, bottom = 16.dp),
+            .fadingEdges(top = 16.dp, bottom = 24.dp)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         WhisperAuthHeader()

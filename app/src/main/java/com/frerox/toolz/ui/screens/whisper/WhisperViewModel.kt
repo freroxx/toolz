@@ -26,6 +26,7 @@ class WhisperViewModel @Inject constructor(
     private val authManager: WhisperAuthManager,
     private val notificationManager: WhisperNotificationManager,
     private val mutePrefs: WhisperMutePreferences,
+    private val hiddenChatsStore: WhisperHiddenChatsStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WhisperUiState())
@@ -44,9 +45,11 @@ class WhisperViewModel @Inject constructor(
     private var messagesJob: Job? = null
     private var friendsJob: Job? = null
     private var muteJob: Job? = null
+    private var hiddenJob: Job? = null
 
     init {
         observeMutes()
+        observeHiddenChats()
         loadAll()
         subscribeToMessages()
         subscribeToFriends()
@@ -108,7 +111,22 @@ class WhisperViewModel @Inject constructor(
         repository.getConversations(forceRefresh = forceRefresh)
             .onSuccess { convos ->
                 val muted = mutePrefs.mutedUsers.value
-                val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
+                val hidden = hiddenChatsStore.hiddenChats.value
+                val mapped = convos
+                    .map { it.copy(isMuted = it.otherUser.id in muted) }
+                    .filter { convo ->
+                        val hideTime = hidden[convo.otherUser.id] ?: return@filter true
+                        val lastEpoch = runCatching {
+                            java.time.OffsetDateTime.parse(convo.lastMessage.createdAt).toInstant().toEpochMilli()
+                        }.getOrNull()
+                        if (lastEpoch != null && lastEpoch > hideTime) {
+                            // Partner sent a new message after the chat was hidden → bring it back
+                            viewModelScope.launch { hiddenChatsStore.unhideChat(convo.otherUser.id) }
+                            true
+                        } else {
+                            false
+                        }
+                    }
                 _uiState.update { it.copy(conversations = mapped) }
 
                 // Clear notifications for any conversations that have been read (read receipts)
@@ -122,6 +140,54 @@ class WhisperViewModel @Inject constructor(
                 handleError(err, "getConversations")
             }
     }
+
+    private fun observeHiddenChats() {
+        hiddenJob = viewModelScope.launch {
+            hiddenChatsStore.hiddenChats.collect { hiddenMap ->
+                _uiState.update { state ->
+                    state.copy(
+                        conversations = state.conversations.filter { convo ->
+                            val hideTime = hiddenMap[convo.otherUser.id]
+                            if (hideTime == null) return@filter true
+                            val lastEpoch = runCatching {
+                                java.time.OffsetDateTime.parse(convo.lastMessage.createdAt).toInstant().toEpochMilli()
+                            }.getOrNull()
+                            lastEpoch != null && lastEpoch > hideTime
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    fun hideChat(userId: String) {
+        hiddenChatsStore.hideChat(userId)
+    }
+
+    fun clearChatHistory(userId: String) {
+        viewModelScope.launch {
+            repository.clearMessagesForRange(userId, null, null)
+                .onSuccess { loadConversationsInternal(forceRefresh = true) }
+                .onFailure { handleError(it, "clearMessagesForRange") }
+        }
+    }
+
+    fun toggleBlockUser(userId: String) {
+        viewModelScope.launch {
+            val isBlocked = repository.isBlockedByMe(userId)
+            if (isBlocked) {
+                repository.unblockUser(userId)
+                    .onSuccess { loadConversationsInternal(forceRefresh = true) }
+                    .onFailure { handleError(it, "unblockUser") }
+            } else {
+                repository.blockUser(userId)
+                    .onSuccess { loadConversationsInternal(forceRefresh = true) }
+                    .onFailure { handleError(it, "blockUser") }
+            }
+        }
+    }
+
+    suspend fun isBlockedByMe(userId: String): Boolean = repository.isBlockedByMe(userId)
 
     private suspend fun loadFriendsInternal() {
         repository.getFriends()
