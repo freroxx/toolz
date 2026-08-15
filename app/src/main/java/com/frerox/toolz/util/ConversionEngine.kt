@@ -20,6 +20,7 @@ package com.frerox.toolz.util
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import com.frerox.toolz.util.converters.ArchiveHandler
 import com.frerox.toolz.util.converters.ConversionHandler
 import com.frerox.toolz.util.converters.DocumentHandler
 import com.frerox.toolz.util.converters.ImageDocumentHandler
@@ -39,6 +40,7 @@ class ConversionEngine @Inject constructor(
     private val vectorHandler: VectorHandler,
     private val documentHandler: DocumentHandler,
     private val imageDocumentHandler: ImageDocumentHandler,
+    private val archiveHandler: ArchiveHandler,
 ) {
 
     enum class ConversionType(
@@ -76,8 +78,9 @@ class ConversionEngine @Inject constructor(
         VIDEO_TO_FLAC("flac", "Audio", "Video → FLAC", true, listOf("video")),
         VIDEO_TO_M4A("m4a", "Audio", "Video → M4A", true, listOf("video")),
         VIDEO_TO_OGG("ogg", "Audio", "Video → OGG", false, listOf("video")),
-        VIDEO_TO_AIFF("aiff", "Audio", "Video → AIFF", false, listOf("video")),
         VIDEO_TO_OPUS("opus", "Audio", "Video → Opus", false, listOf("video")),
+        VIDEO_TO_WMA("wma", "Audio", "Video → WMA", false, listOf("video")),
+        VIDEO_TO_AIFF("aiff", "Audio", "Video → AIFF", false, listOf("video")),
 
         // ── Audio → Audio ─────────────────────────────────────────────────────
         AUDIO_TO_MP3("mp3", "Audio", "Audio → MP3", true, listOf("audio")),
@@ -87,6 +90,7 @@ class ConversionEngine @Inject constructor(
         AUDIO_TO_FLAC("flac", "Audio", "Audio → FLAC", true, listOf("audio")),
         AUDIO_TO_OGG("ogg", "Audio", "Audio → OGG", true, listOf("audio")),
         AUDIO_TO_OPUS("opus", "Audio", "Audio → Opus", false, listOf("audio")),
+        AUDIO_TO_WMA("wma", "Audio", "Audio → WMA", false, listOf("audio")),
         AUDIO_TO_AMR("amr", "Audio", "Audio → AMR", false, listOf("audio")),
         AUDIO_TO_AIFF("aiff", "Audio", "Audio → AIFF", false, listOf("audio")),
         AUDIO_TO_MKA("mka", "Audio", "Audio → MKA", false, listOf("audio")),
@@ -112,15 +116,20 @@ class ConversionEngine @Inject constructor(
         PDF_TO_JPG("jpg", "Images", "PDF → JPG", true, listOf("application/pdf")),
         PDF_TO_WEBP("webp", "Images", "PDF → WebP", false, listOf("application/pdf")),
 
-        // ── Text / Document → PDF ─────────────────────────────────────────────
+        // ── Text / Document → PDF / HTML / TXT ────────────────────────────────
         TEXT_TO_PDF("pdf", "Documents", "Text → PDF", true, listOf("text/plain")),
         MD_TO_PDF("pdf", "Documents", "Markdown → PDF", true, listOf("text/markdown", "text/plain", "text/x-markdown")),
         MD_TO_HTML("html", "Documents", "Markdown → HTML", true, listOf("text/markdown", "text/plain", "text/x-markdown")),
         MD_TO_TXT("txt", "Documents", "Markdown → TXT", false, listOf("text/markdown", "text/plain", "text/x-markdown")),
         HTML_TO_PDF("pdf", "Documents", "HTML → PDF", false, listOf("text/html")),
+        HTML_TO_TXT("txt", "Documents", "HTML → TXT", false, listOf("text/html")),
+        TXT_TO_HTML("html", "Documents", "Text → HTML", false, listOf("text/plain")),
 
         // ── Archives ──────────────────────────────────────────────────────────
         XAPK_TO_APK("apk", "Archives", "XAPK → APK", true, listOf("application/x-xapk", "application/xapk", "application/zip", "application/vnd.android.package-archive")),
+        APK_TO_ZIP("zip", "Archives", "APK → ZIP", false, listOf("application/vnd.android.package-archive")),
+        ZIP_TO_APK("apk", "Archives", "ZIP → APK", false, listOf("application/zip", "application/x-zip-compressed")),
+        XAPK_TO_ZIP("zip", "Archives", "XAPK → ZIP", false, listOf("application/x-xapk", "application/xapk")),
 
         // ── Vector ────────────────────────────────────────────────────────────
         SVG_TO_PNG("png", "Images", "SVG → PNG", true, listOf("image/svg+xml")),
@@ -146,9 +155,7 @@ class ConversionEngine @Inject constructor(
         highQuality: Boolean = true,
         batchIndex: Int = -1,
     ): Flow<ConversionStatus> {
-        val inputMime = context.contentResolver.getType(inputUri)
-            ?.let { normalizeHeicMime(it) } ?: ""
-        val tempExt = mimeToExtension(inputMime)
+        val tempExt = resolveInputExtension(inputUri)
         val tempFile = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}.$tempExt")
 
         return flow {
@@ -193,11 +200,8 @@ class ConversionEngine @Inject constructor(
         val tempFiles = mutableListOf<File>()
         return flow {
             try {
-                val inputMime = context.contentResolver.getType(inputUris.first())
-                    ?.let { normalizeHeicMime(it) } ?: ""
-                val tempExt = mimeToExtension(inputMime)
-
                 for ((i, uri) in inputUris.withIndex()) {
+                    val tempExt = resolveInputExtension(uri)
                     val tempFile = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}_$i.$tempExt")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         tempFile.outputStream().use { output -> input.copyTo(output) }
@@ -230,8 +234,10 @@ class ConversionEngine @Inject constructor(
         type == ConversionType.MD_TO_PDF ||
         type == ConversionType.MD_TO_HTML ||
         type == ConversionType.MD_TO_TXT ||
-        type == ConversionType.HTML_TO_PDF -> documentHandler
-        type == ConversionType.XAPK_TO_APK -> com.frerox.toolz.util.converters.ArchiveHandler(context)
+        type == ConversionType.HTML_TO_PDF ||
+        type == ConversionType.HTML_TO_TXT ||
+        type == ConversionType.TXT_TO_HTML -> documentHandler
+        type.category == "Archives" -> archiveHandler
         else -> mediaHandler
     }
 
@@ -246,6 +252,25 @@ class ConversionEngine @Inject constructor(
     private fun normalizeHeicMime(mime: String) =
         if (mime == "image/heic") "image/heif" else mime
 
+    fun resolveInputExtension(uri: Uri): String {
+        val mime = context.contentResolver.getType(uri)?.let { normalizeHeicMime(it) } ?: ""
+        if (mime.isNotBlank()) {
+            val ext = mimeToExtension(mime)
+            if (ext != "bin") return ext
+        }
+        val displayName = try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                cursor.moveToFirst()
+                if (idx >= 0) cursor.getString(idx) else null
+            }
+        } catch (_: Exception) { null }
+        if (displayName != null && displayName.contains(".")) {
+            return displayName.substringAfterLast(".").lowercase()
+        }
+        return uri.lastPathSegment?.substringAfterLast(".")?.lowercase() ?: "tmp"
+    }
+
     fun mimeToExtension(mime: String): String = when {
         mime.startsWith("video/mp4") -> "mp4"
         mime.startsWith("video/x-matroska") -> "mkv"
@@ -253,11 +278,15 @@ class ConversionEngine @Inject constructor(
         mime.startsWith("video/x-msvideo") -> "avi"
         mime.startsWith("video/webm") -> "webm"
         mime.startsWith("video/") -> "mp4"
-        mime.startsWith("audio/mpeg") -> "mp3"
+        mime.startsWith("audio/mpeg") || mime == "audio/mp3" -> "mp3"
         mime == "audio/wav" || mime == "audio/x-wav" -> "wav"
         mime.startsWith("audio/aac") -> "aac"
-        mime.startsWith("audio/flac") -> "flac"
-        mime.startsWith("audio/ogg") -> "ogg"
+        mime.startsWith("audio/flac") || mime == "audio/x-flac" -> "flac"
+        mime.startsWith("audio/ogg") || mime == "application/ogg" -> "ogg"
+        mime.startsWith("audio/opus") || mime == "audio/x-opus" -> "opus"
+        mime.startsWith("audio/amr") || mime == "audio/3gpp" -> "amr"
+        mime.startsWith("audio/aiff") || mime == "audio/x-aiff" -> "aiff"
+        mime.startsWith("audio/mp4") || mime.startsWith("audio/x-m4a") || mime.startsWith("audio/m4a") -> "m4a"
         mime.startsWith("audio/") -> "mp3"
         mime == "image/jpeg" || mime == "image/jpg" -> "jpg"
         mime == "image/png" -> "png"

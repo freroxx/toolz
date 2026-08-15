@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -1279,160 +1280,550 @@ private fun ConversionSummaryCard(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val oa38 = stringResource(R.string.st_FileConverterScreen_oa38)
+    val sf30 = stringResource(R.string.st_FileConverterScreen_sf30)
 
     val totalInputSize  = remember(selectedFiles) { selectedFiles.sumOf { it.size } }
     val totalOutputSize = remember(outputPaths) { outputPaths.sumOf { File(it).length() } }
     val sizeDiff = totalOutputSize - totalInputSize
     val sizeDiffPercent = if (totalInputSize > 0) (sizeDiff.toFloat() / totalInputSize * 100).toInt() else 0
+    val catColor = categoryColor(conversionType?.category ?: "")
 
     ExpressiveCard(
         onClick = {},
         modifier = Modifier.fillMaxWidth(),
-        shape = LargeExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-        elevation = 0.dp,
+        shape = ExtraLargeExpressiveShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        elevation = 2.dp,
     ) {
-        Column(modifier = Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            // Input → Output
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // ── Top Bar: Formats & Quality ────────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(
-                        stringResource(R.string.st_FileConverterScreen_f33),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = if (selectedFiles.size == 1) selectedFiles.first().name.substringAfterLast(".", "?").uppercase() else "${selectedFiles.size} FILES",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
+                // Category & Flow
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(catColor.copy(alpha = 0.12f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            categoryIcon(conversionType?.category ?: ""),
+                            contentDescription = null,
+                            tint = catColor,
+                            modifier = Modifier.size(20.dp)
                         )
-                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.outline)
+                    }
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val inLabel = if (selectedFiles.size == 1)
+                                selectedFiles.first().name.substringAfterLast(".", "?").uppercase()
+                            else
+                                "${selectedFiles.size} FILES"
+                            Text(
+                                text = inLabel,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black
+                            )
+                            Icon(
+                                Icons.AutoMirrored.Rounded.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary
+                            ) {
+                                Text(
+                                    text = (conversionType?.extension ?: "???").uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Text(
-                            text = conversionType?.extension?.uppercase() ?: "???",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
+                            text = conversionType?.category ?: "Conversion",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        stringResource(R.string.st_FileConverterScreen_q34),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 1.sp,
+
+                // Quality Badge
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (highQuality) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                            else MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (highQuality) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        else MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
                     )
-                    Text(
-                        text = if (highQuality) stringResource(R.string.st_FileConverterScreen_eq9).uppercase()
-                               else stringResource(R.string.st_FileConverterScreen_pm10).uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = if (highQuality) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            if (highQuality) Icons.Rounded.HighQuality else Icons.Rounded.Speed,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (highQuality) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = if (highQuality) "HQ" else "Fast",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Black,
+                            color = if (highQuality) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
 
-            // Size stats
+            // ── Metric Comparison Bar ─────────────────────────────────────────
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MediumExpressiveShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(stringResource(R.string.st_FileConverterScreen_ts35), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
-                    Text(formatFileSize(totalOutputSize), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                // Metric 1: Output Size
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        stringResource(R.string.st_FileConverterScreen_ts35).uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        fontSize = 9.sp,
+                        letterSpacing = 0.5.sp,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        formatFileSize(totalOutputSize),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black
+                    )
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(stringResource(R.string.st_FileConverterScreen_ch36), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.outline)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+
+                Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)))
+
+                // Metric 2: Difference
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "SIZE DIFF",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        fontSize = 9.sp,
+                        letterSpacing = 0.5.sp,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        val isSmaller = sizeDiff <= 0
                         Icon(
-                            imageVector = if (sizeDiff <= 0) Icons.Rounded.TrendingDown else Icons.Rounded.TrendingUp,
+                            imageVector = if (isSmaller) Icons.Rounded.TrendingDown else Icons.Rounded.TrendingUp,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (sizeDiff <= 0) Color(0xFF4CAF50) else Color(0xFFF44336),
+                            tint = if (isSmaller) Color(0xFF388E3C) else Color(0xFFD32F2F),
                         )
                         Text(
                             text = "${if (sizeDiff > 0) "+" else ""}$sizeDiffPercent%",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
-                            color = if (sizeDiff <= 0) Color(0xFF4CAF50) else Color(0xFFF44336),
+                            color = if (isSmaller) Color(0xFF388E3C) else Color(0xFFD32F2F),
                         )
                     }
                 }
+
+                Box(modifier = Modifier.width(1.dp).height(24.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)))
+
+                // Metric 3: File Count
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "OUTPUT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        fontSize = 9.sp,
+                        letterSpacing = 0.5.sp,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${outputPaths.size} ${if (outputPaths.size == 1) "File" else "Files"}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
-            // Output file thumbnails
+            // ── Output Files Showcase with Thumbnails ───────────────────────────
             if (outputPaths.isNotEmpty()) {
                 Text(
-                    stringResource(R.string.st_FileConverterScreen_fls37),
+                    text = if (outputPaths.size > 1) "CONVERTED FILES (${outputPaths.size})" else "OUTPUT FILE",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
                     letterSpacing = 1.sp,
                 )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(outputPaths) { path ->
-                        val file = File(path)
-                        val ext = file.extension.lowercase()
-                        val isImage = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
-                        ExpressiveCard(
-                            onClick = {
-                                vibrationManager?.vibrateClick()
-                                try {
-                                    val uri = FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, oa38))
-                                } catch (_: Exception) {}
-                            },
-                            modifier = Modifier.size(72.dp),
-                            shape = MediumExpressiveShape,
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            elevation = 2.dp,
+
+                if (outputPaths.size == 1) {
+                    // Single File Hero Card
+                    val path = outputPaths.first()
+                    val file = remember(path) { File(path) }
+
+                    ExpressiveCard(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            try {
+                                val uri = FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(intent, oa38))
+                            } catch (_: Exception) {}
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = LargeExpressiveShape,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                        elevation = 0.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                if (isImage && file.exists()) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context).data(file).build(),
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop,
+                            // Thumbnail
+                            ConvertedMediaThumbnail(
+                                file = file,
+                                category = conversionType?.category ?: "",
+                                modifier = Modifier.size(68.dp),
+                            )
+
+                            // Title & Size
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = file.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(
+                                        text = formatFileSize(file.length()),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Black,
                                     )
-                                } else {
-                                    Icon(
-                                        imageVector = categoryIcon(conversionType?.category ?: ""),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(28.dp),
-                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                    Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                                    Text(
+                                        text = "Tap to open",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(3.dp)
-                                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                        .padding(horizontal = 5.dp, vertical = 2.dp),
-                                ) {
-                                    Text(ext.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimary, fontSize = 7.sp)
+                            }
+
+                            // Action: Open Icon Button
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.OpenInNew,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Batch Files: Horizontal Scroll with Rich Thumbnail Cards
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (!performanceMode) Modifier.horizontalFadingEdges(left = 12.dp, right = 12.dp) else Modifier)
+                    ) {
+                        items(outputPaths) { path ->
+                            val file = remember(path) { File(path) }
+
+                            ExpressiveCard(
+                                onClick = {
+                                    vibrationManager?.vibrateClick()
+                                    try {
+                                        val uri = FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", file)
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(uri, context.contentResolver.getType(uri) ?: "*/*")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, oa38))
+                                    } catch (_: Exception) {}
+                                },
+                                modifier = Modifier.width(160.dp),
+                                shape = LargeExpressiveShape,
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                                elevation = 1.dp,
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    // Thumbnail preview
+                                    ConvertedMediaThumbnail(
+                                        file = file,
+                                        category = conversionType?.category ?: "",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(90.dp),
+                                    )
+
+                                    Spacer(Modifier.height(8.dp))
+
+                                    Text(
+                                        text = file.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = formatFileSize(file.length()),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp,
+                                    )
                                 }
                             }
                         }
                     }
                 }
             }
+
+            // ── Saved Location Footer ─────────────────────────────────────────
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = "Saved in Downloads/Toolz/${conversionType?.category ?: ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders an expressive, high-polish thumbnail for any converted media type:
+ * Images, Videos (with extracted frame & play badge), Audio (with equalizer waveform visual),
+ * Documents (with PDF/doc sheets), and Archives.
+ */
+@Composable
+fun ConvertedMediaThumbnail(
+    file: File,
+    category: String,
+    modifier: Modifier = Modifier,
+) {
+    val ext = file.extension.lowercase()
+    val isImage = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heif", "heic", "avif")
+    val isVideo = ext in listOf("mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "3gp", "m4v", "ts")
+    val isAudio = ext in listOf("mp3", "wav", "aac", "flac", "m4a", "ogg", "opus", "amr", "aiff", "mka")
+    val isDoc = ext in listOf("pdf", "txt", "md", "html", "htm")
+    val isArchive = ext in listOf("zip", "apk", "xapk")
+    val context = LocalContext.current
+    val color = categoryColor(category)
+
+    val videoBitmap by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = file.path) {
+        if (isVideo && file.exists()) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    retriever.setDataSource(file.path)
+                    val frame = retriever.getFrameAtTime(1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        ?: retriever.frameAtTime
+                    retriever.release()
+                    frame
+                } catch (_: Exception) { null }
+            }
+        }
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .clip(MediumExpressiveShape)
+            .background(color.copy(alpha = 0.08f))
+    ) {
+        when {
+            isImage && file.exists() -> {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(file).build(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            isVideo && videoBitmap != null -> {
+                Image(
+                    bitmap = videoBitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.28f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.5f),
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            isAudio -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(color.copy(alpha = 0.2f), color.copy(alpha = 0.04f))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.GraphicEq,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
+            isDoc -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFFFBC02D).copy(alpha = 0.2f), Color(0xFFFBC02D).copy(alpha = 0.05f))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (ext == "pdf") Icons.Rounded.PictureAsPdf else Icons.Rounded.Description,
+                        contentDescription = null,
+                        tint = Color(0xFFF57F17),
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
+            isArchive -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(color.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.FolderZip,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
+            else -> {
+                Icon(
+                    categoryIcon(category),
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+
+        // Extension Badge
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(3.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f))
+                .padding(horizontal = 5.dp, vertical = 2.dp),
+        ) {
+            Text(
+                text = ext.uppercase().take(4),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                color = color,
+                fontSize = 8.sp,
+            )
         }
     }
 }
@@ -1521,7 +1912,13 @@ fun EngineInfoSheet(onDismiss: () -> Unit) {
             Text(stringResource(R.string.st_FileConverterScreen_tfc44), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text(stringResource(R.string.st_FileConverterScreen_aw45), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
             Spacer(Modifier.height(28.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.weight(1f)) {
+            val performanceMode = LocalPerformanceMode.current
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .then(if (!performanceMode) Modifier.fadingEdges(top = 16.dp, bottom = 20.dp) else Modifier)
+            ) {
                 item { InfoSection(Icons.Rounded.Code,     stringResource(R.string.st_FileConverterScreen_ca46),  stringResource(R.string.st_FileConverterScreen_ca_desc47)) }
                 item { InfoSection(Icons.Rounded.Speed,    stringResource(R.string.st_FileConverterScreen_pq48),  stringResource(R.string.st_FileConverterScreen_pq_desc49)) }
                 item { InfoSection(Icons.Rounded.Security, stringResource(R.string.st_FileConverterScreen_pf50),  stringResource(R.string.st_FileConverterScreen_pf_desc51)) }
@@ -1598,6 +1995,8 @@ fun ConversionTypeSheet(
             .sortedByDescending { it.isPopular }
     }
 
+    val performanceMode = LocalPerformanceMode.current
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -1642,7 +2041,11 @@ fun ConversionTypeSheet(
             if (categories.size > 1) {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .then(if (!performanceMode) Modifier.horizontalFadingEdges(left = 8.dp, right = 16.dp) else Modifier),
                 ) {
                     items(categories) { cat ->
                         val selected = cat == selectedCategory
@@ -1658,7 +2061,12 @@ fun ConversionTypeSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(if (!performanceMode) Modifier.fadingEdges(top = 12.dp, bottom = 24.dp) else Modifier),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 items(filteredTypes, key = { it.name }) { type ->
                     TypeOptionItem(type = type, onClick = { onTypeSelected(type) })
                 }
@@ -1707,8 +2115,12 @@ fun AllFormatsSheet(onDismiss: () -> Unit) {
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
             )
-            Spacer(Modifier.height(16.dp))
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            val performanceMode = LocalPerformanceMode.current
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(if (!performanceMode) Modifier.fadingEdges(top = 12.dp, bottom = 24.dp) else Modifier)
+            ) {
                 filteredTypes.forEach { (cat, types) ->
                     item {
                         Text(

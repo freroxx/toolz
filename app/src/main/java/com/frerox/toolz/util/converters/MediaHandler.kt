@@ -35,19 +35,16 @@ import javax.inject.Singleton
 /**
  * FFmpeg-based handler for Video → Video, Video → Audio, Audio → Audio, and Image → Image.
  *
- * Key fixes:
- *  - Uses `-b:a` (not `-ab`) for audio bitrate — correct across all codecs
- *  - FLAC/AIFF/PCM: no bitrate parameter — codec-specific flags only
- *  - Opus: force libopus encoder
- *  - OGG: force libvorbis encoder
- *  - AMR: force 8 kHz mono + amr_nb encoder
- *  - H.265/HEVC for MKV, WEBM uses VP9
- *  - IMAGE_TO_TIFF: fixed using correct `-vf format=rgb24` approach
- *  - IMAGE_TO_ICO: proper scale and ico pixel format
- *  - IMAGE_TO_TGA: explicit targa format flag
- *  - IMAGE formats: progress emitted as 0→50→100 (no time-based stat)
- *  - Removed broken encoder types (J2K, PCX, SGI, EXR, XBM, HDR)
- *    — AVIF and HEIF now routed to ImageDocumentHandler instead
+ * Key audio reliability fixes:
+ *  - Strips video/embedded cover art streams (`-vn -map 0:a:0?`) so audio containers (M4A, MP3, WAV, etc.)
+ *    never crash on embedded album art (e.g., MP3 with ID3 cover art).
+ *  - Audio bitrate uses standard `-b:a` with sensible fallbacks.
+ *  - FLAC/AIFF/PCM: no bitrate parameter — codec-specific flags only.
+ *  - AAC / M4A: uses `-c:a aac` with `-movflags +faststart` for clean streaming/seeking.
+ *  - Opus: forces `-c:a libopus -ar 48000` (standard Opus sample rate).
+ *  - OGG: uses `-c:a libvorbis`.
+ *  - AMR: forces `-c:a amr_nb -ar 8000 -ac 1` (AMR-NB strictly requires 8 kHz, 1 channel).
+ *  - Captures full FFmpeg output logs so error details are always surfaced clearly.
  */
 @Singleton
 class MediaHandler @Inject constructor(
@@ -80,39 +77,55 @@ class MediaHandler @Inject constructor(
         }
 
         val isImageConversion = type.category == "Images" || type.category == "Animations"
-        val totalDurationMs = if (!isImageConversion) getVideoDuration(inputPath) else 0L
+        val totalDurationMs = if (!isImageConversion) getMediaDuration(inputPath) else 0L
 
         trySend(ConversionEngine.ConversionStatus.Progress(0))
 
         val command = buildFFmpegCommand(inputPath, outputPath, type, highQuality)
+        val logBuffer = StringBuilder()
 
-        val session = FFmpegKit.executeAsync(command, { session ->
-            when {
-                ReturnCode.isSuccess(session.returnCode) -> {
-                    trySend(ConversionEngine.ConversionStatus.Success(outputPath))
+        val session = FFmpegKit.executeAsync(
+            command,
+            { session ->
+                when {
+                    ReturnCode.isSuccess(session.returnCode) -> {
+                        trySend(ConversionEngine.ConversionStatus.Success(outputPath))
+                    }
+                    ReturnCode.isCancel(session.returnCode) -> {
+                        trySend(ConversionEngine.ConversionStatus.Error("Conversion cancelled"))
+                    }
+                    else -> {
+                        val fullLog = logBuffer.toString().trim()
+                        val errorLines = fullLog.lines().filter { line ->
+                            line.contains("Error", ignoreCase = true) ||
+                            line.contains("Invalid", ignoreCase = true) ||
+                            line.contains("Could not", ignoreCase = true) ||
+                            line.contains("failed", ignoreCase = true) ||
+                            line.contains("unsupported", ignoreCase = true)
+                        }
+                        val errMsg = errorLines.lastOrNull()?.trim()
+                            ?: session.failStackTrace
+                            ?: if (fullLog.isNotBlank()) fullLog.lines().takeLast(3).joinToString("\n")
+                            else "FFmpeg failed with exit code ${session.returnCode?.value ?: -1}"
+                        trySend(ConversionEngine.ConversionStatus.Error(errMsg))
+                    }
                 }
-                ReturnCode.isCancel(session.returnCode) -> {
-                    trySend(ConversionEngine.ConversionStatus.Error("Conversion cancelled"))
+                close()
+            },
+            { log ->
+                if (log != null && log.message != null) {
+                    logBuffer.appendLine(log.message)
                 }
-                else -> {
-                    val logs = session.logs
-                    val errMsg = logs
-                        .filter { it.level.name == "ERROR" || it.level.name == "FATAL" }
-                        .lastOrNull()?.message?.trim()
-                        ?: session.failStackTrace
-                        ?: "Unknown FFmpeg error"
-                    trySend(ConversionEngine.ConversionStatus.Error(errMsg))
+            },
+            { stats: Statistics ->
+                if (isImageConversion) {
+                    trySend(ConversionEngine.ConversionStatus.Progress(50))
+                } else if (totalDurationMs > 0) {
+                    val pct = (stats.time.toDouble() / totalDurationMs * 100).toInt().coerceIn(1, 99)
+                    trySend(ConversionEngine.ConversionStatus.Progress(pct))
                 }
             }
-            close()
-        }, { _ -> /* log callback — intentionally empty */ }) { stats: Statistics ->
-            if (isImageConversion) {
-                trySend(ConversionEngine.ConversionStatus.Progress(50))
-            } else if (totalDurationMs > 0) {
-                val pct = (stats.time.toDouble() / totalDurationMs * 100).toInt().coerceIn(1, 99)
-                trySend(ConversionEngine.ConversionStatus.Progress(pct))
-            }
-        }
+        )
 
         awaitClose { FFmpegKit.cancel(session.sessionId) }
     }
@@ -147,65 +160,67 @@ class MediaHandler @Inject constructor(
 
             // ── Video → Audio ────────────────────────────────────────────────
             ConversionEngine.ConversionType.VIDEO_TO_MP3 ->
-                "-i $i -vn -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_WAV ->
-                "-i $i -vn -c:a pcm_s16le -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a pcm_s16le -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_AAC ->
-                "-i $i -vn -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_FLAC ->
-                "-i $i -vn -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_M4A ->
-                "-i $i -vn -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
+                "-i $i -vn -map 0:a:0? -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_OGG ->
-                "-i $i -vn -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_AIFF ->
-                "-i $i -vn -c:a pcm_s16be -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a pcm_s16be -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.VIDEO_TO_OPUS ->
-                "-i $i -vn -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
 
             // ── Audio → Audio ────────────────────────────────────────────────
+            // Crucial: -vn -map 0:a:0? strips embedded cover art video streams
+            // that cause FFmpeg to fail when muxing into audio-only containers.
             ConversionEngine.ConversionType.AUDIO_TO_MP3 ->
-                "-i $i -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libmp3lame ${audioBitrate("320k", "128k", hq)} -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_WAV ->
-                "-i $i -c:a pcm_s16le -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a pcm_s16le -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_AAC ->
-                "-i $i -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_M4A ->
-                "-i $i -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
+                "-i $i -vn -map 0:a:0? -c:a aac ${audioBitrate("256k", "128k", hq)} -ar 44100 -movflags +faststart -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_FLAC ->
-                "-i $i -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a flac -compression_level ${if (hq) "8" else "5"} -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_OGG ->
-                "-i $i -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libvorbis ${audioBitrate("192k", "96k", hq)} -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_OPUS ->
-                "-i $i -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libopus ${audioBitrate("128k", "64k", hq)} -ar 48000 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_AMR ->
-                "-i $i -c:a amr_nb -ar 8000 -ac 1 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a amr_nb -ar 8000 -ac 1 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_AIFF ->
-                "-i $i -c:a pcm_s16be -ar 44100 -y $o"
+                "-i $i -vn -map 0:a:0? -c:a pcm_s16be -ar 44100 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_MKA ->
-                "-i $i -c:a libopus ${audioBitrate("192k", "96k", hq)} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a libopus ${audioBitrate("192k", "96k", hq)} -ar 48000 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_AC3 ->
-                "-i $i -c:a ac3 ${audioBitrate("448k", "192k", hq)} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a ac3 ${audioBitrate("448k", "192k", hq)} -ar 48000 -y $o"
 
             ConversionEngine.ConversionType.AUDIO_TO_MP2 ->
-                "-i $i -c:a mp2 ${audioBitrate("192k", "128k", hq)} -y $o"
+                "-i $i -vn -map 0:a:0? -c:a mp2 ${audioBitrate("192k", "128k", hq)} -ar 44100 -y $o"
 
             // ── Image → Image ────────────────────────────────────────────────
             ConversionEngine.ConversionType.IMAGE_TO_JPG -> {
@@ -228,11 +243,9 @@ class MediaHandler @Inject constructor(
                 "-i $i -pix_fmt bgr24 -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_TIFF ->
-                // Use standard tiff muxer with deflate compression via codec flag
                 "-i $i -vf format=rgb24 -compression_level 6 -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_ICO ->
-                // ICO supports 16, 32, 48, 64, 128, 256 px sizes; use 256 as master
                 "-i $i -vf scale=256:256:flags=lanczos -vcodec png -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_HEIF ->
@@ -268,7 +281,7 @@ class MediaHandler @Inject constructor(
     private fun audioBitrate(hqRate: String, lqRate: String, hq: Boolean) =
         "-b:a ${if (hq) hqRate else lqRate}"
 
-    private fun getVideoDuration(path: String): Long {
+    private fun getMediaDuration(path: String): Long {
         return try {
             val retriever = MediaMetadataRetriever()
             retriever.setDataSource(path)
