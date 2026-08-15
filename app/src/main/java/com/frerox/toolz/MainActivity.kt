@@ -740,10 +740,10 @@ fun ToolzNavHost(
 
             if (uri != null) {
                 val mimeType = context.contentResolver.getType(uri)
-                val isPdf = latestIntent.type == "application/pdf" || 
+                val isPdf = latestIntent.type == "application/pdf" ||
                             mimeType == "application/pdf" ||
                             uri.toString().lowercase().endsWith(".pdf")
-                
+
                 if (isPdf) {
                     var title = context.getString(R.string.st_MainActivity_2b8a)
                     try {
@@ -759,17 +759,9 @@ fun ToolzNavHost(
                     pendingExternalRoute = Screen.PdfReader.route
                     return@LaunchedEffect
                 }
-
-                val isEnc = latestIntent.type == "application/octet-stream" || 
-                             uri.toString().lowercase().endsWith(".enc")
-                
-                if (isEnc) {
-                    pendingExternalRoute = Screen.SmartEncrypter.route
-                    return@LaunchedEffect
-                }
             }
         }
-        
+
         pendingExternalRoute = resolveExternalNavigationRoute(latestIntent)
     }
 
@@ -846,9 +838,14 @@ fun ToolzNavHost(
             )
         }
 
-        composable(Screen.BackupRestore.route) {
+        composable(
+            route = Screen.BackupRestore.route,
+            arguments = listOf(navArgument("initialUri") { type = NavType.StringType; nullable = true; defaultValue = null })
+        ) { backStackEntry ->
+            val initialUri = backStackEntry.arguments?.getString("initialUri")
             BackupRestoreScreen(
                 viewModel = hiltViewModel<BackupRestoreViewModel>(),
+                initialRestoreUri = initialUri,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -978,35 +975,50 @@ fun ToolzNavHost(
 
         composable(
             route = Screen.MusicPlayer.route,
-            arguments = listOf(navArgument("tab") { defaultValue = 0; type = NavType.IntType })
+            arguments = listOf(
+                navArgument("tab") { defaultValue = 0; type = NavType.IntType },
+                navArgument("initialUri") { type = NavType.StringType; nullable = true; defaultValue = null }
+            )
         ) { backStackEntry ->
             val initialTab = backStackEntry.arguments?.getInt("tab") ?: 0
+            val initialUri = backStackEntry.arguments?.getString("initialUri")
             MusicPlayerScreen(
                 viewModel = hiltViewModel(),
                 initialTab = initialTab,
+                initialUri = initialUri,
                 onBack = { navController.popBackStack() }
             )
         }
         composable(
-            route = "file_converter?uri={uri}&title={title}",
+            route = Screen.FileConverter.route,
             arguments = listOf(
                 navArgument("uri") { type = NavType.StringType; nullable = true; defaultValue = null },
-                navArgument("title") { type = NavType.StringType; nullable = true; defaultValue = null }
+                navArgument("title") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("initialUris") { type = NavType.StringType; nullable = true; defaultValue = null }
             )
         ) { backStackEntry ->
             val uriString = backStackEntry.arguments?.getString("uri")
             val title = backStackEntry.arguments?.getString("title") ?: "Document"
+            val initialUris = backStackEntry.arguments?.getString("initialUris")
             val uri = uriString?.let { Uri.parse(it) }
-            
+
             FileConverterScreen(
                 viewModel = hiltViewModel(),
                 onBack = { navController.popBackStack() },
                 initialUri = uri,
-                initialTitle = title
+                initialTitle = title,
+                initialUris = initialUris
             )
         }
-        composable(Screen.BackgroundRemover.route) {
-            BackgroundRemoverScreen(onNavigateBack = { navController.popBackStack() })
+        composable(
+            route = Screen.BackgroundRemover.route,
+            arguments = listOf(navArgument("initialUri") { type = NavType.StringType; nullable = true; defaultValue = null })
+        ) { backStackEntry ->
+            val initialUri = backStackEntry.arguments?.getString("initialUri")
+            BackgroundRemoverScreen(
+                initialUri = initialUri,
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.Flashlight.route) {
             FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -1018,8 +1030,13 @@ fun ToolzNavHost(
             val vm: MagnifierViewModel = hiltViewModel()
             MagnifierScreen(onBack = { navController.popBackStack() }, settingsRepository = vm.repository)
         }
-        composable(Screen.Scanner.route) {
+        composable(
+            route = Screen.Scanner.route,
+            arguments = listOf(navArgument("initialImageUri") { type = NavType.StringType; nullable = true; defaultValue = null })
+        ) { backStackEntry ->
+            val initialUri = backStackEntry.arguments?.getString("initialImageUri")
             ScannerScreen(
+                initialImageUri = initialUri,
                 onBack = { navController.popBackStack() },
                 onNavigateToGenerator = {
                     navController.navigate(Screen.QrGenerator.route) {
@@ -1095,8 +1112,20 @@ fun ToolzNavHost(
         composable(Screen.Ruler.route) {
             RulerScreen(onBack = { navController.popBackStack() })
         }
-        composable(Screen.SmartEncrypter.route) {
-            SmartEncrypterScreen(onBack = { navController.popBackStack() })
+        composable(
+            route = Screen.SmartEncrypter.route,
+            arguments = listOf(
+                navArgument("initialUri") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("mode") { type = NavType.StringType; nullable = true; defaultValue = null }
+            )
+        ) { backStackEntry ->
+            val initialUri = backStackEntry.arguments?.getString("initialUri")
+            val mode = backStackEntry.arguments?.getString("mode")
+            SmartEncrypterScreen(
+                initialUri = initialUri,
+                mode = mode,
+                onBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.SoundMeter.route) {
             SoundMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
@@ -1236,13 +1265,56 @@ fun ToolzNavHost(
     }
 }
 private fun resolveExternalNavigationRoute(intent: Intent): String? {
+    val componentName = intent.component?.className
+    val action = intent.action
+    val data = intent.data
+
+    // Handle Activity Aliases
+    when {
+        componentName?.endsWith(".MusicPlayer") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.MusicPlayer.createRoute(0, uri?.toString())
+        }
+        componentName?.endsWith(".PdfViewer") == true -> {
+            val uri = getUriFromIntent(intent)
+            return if (uri != null) Screen.PdfReader.route else null
+        }
+        componentName?.endsWith(".FileConverter") == true -> {
+            val uris = getUrisFromIntent(intent)
+            return Screen.FileConverter.createRoute(initialUris = uris.map { it.toString() })
+        }
+        componentName?.endsWith(".BackgroundRemover") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.BackgroundRemover.createRoute(uri?.toString())
+        }
+        componentName?.endsWith(".QrScanner") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.Scanner.createRoute(uri?.toString())
+        }
+        componentName?.endsWith(".BackupRestore") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.BackupRestore.createRoute(uri?.toString())
+        }
+        componentName?.endsWith(".Encrypter") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.SmartEncrypter.createRoute(uri?.toString(), mode = "encrypt")
+        }
+        componentName?.endsWith(".Decrypter") == true -> {
+            val uri = getUriFromIntent(intent)
+            return Screen.SmartEncrypter.createRoute(uri?.toString(), mode = "decrypt")
+        }
+    }
+
     if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
         val uri = intent.data!!
         if (intent.type == "application/pdf" || uri.toString().lowercase().endsWith(".pdf")) {
             return Screen.PdfReader.route
         }
         if (uri.toString().lowercase().endsWith(".enc")) {
-            return Screen.SmartEncrypter.route
+            return Screen.SmartEncrypter.createRoute(uri.toString(), mode = "decrypt")
+        }
+        if (uri.toString().lowercase().endsWith(".tzbk")) {
+            return Screen.BackupRestore.createRoute(uri.toString())
         }
     }
 
@@ -1265,4 +1337,28 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
     }
 
     return route
+}
+
+private fun getUriFromIntent(intent: Intent): Uri? {
+    return if (intent.action == Intent.ACTION_SEND) {
+        IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+    } else {
+        intent.data
+    }
+}
+
+private fun getUrisFromIntent(intent: Intent): List<Uri> {
+    val uris = mutableListOf<Uri>()
+    when (intent.action) {
+        Intent.ACTION_SEND -> {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris.add(it) }
+        }
+        Intent.ACTION_SEND_MULTIPLE -> {
+            IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris.addAll(it) }
+        }
+        Intent.ACTION_VIEW -> {
+            intent.data?.let { uris.add(it) }
+        }
+    }
+    return uris
 }

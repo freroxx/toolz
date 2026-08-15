@@ -56,11 +56,22 @@ import java.io.File
 @Composable
 fun BackgroundRemoverScreen(
     onNavigateBack: () -> Unit,
+    initialUri: String? = null,
     viewModel: BackgroundRemoverViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val haptic = rememberToolzHapticFeedback()
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(initialUri) {
+        if (!initialUri.isNullOrEmpty()) {
+            try {
+                viewModel.onImageSelected(android.net.Uri.parse(initialUri))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()

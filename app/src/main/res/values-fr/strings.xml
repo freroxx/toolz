@@ -455,6 +455,16 @@
     <string name="st_MainActivity_5f6e">ME LE RAPPELER PLUS TARD</string>
     <string name="st_MainActivity_2b8a">Document</string>
 
+    <!-- File Linking Engine -->
+    <string name="st_Intent_MusicPlayer">Ouvrir avec Lecteur de Musique</string>
+    <string name="st_Intent_PdfViewer">Ouvrir avec Visionneuse PDF</string>
+    <string name="st_Intent_FileConverter">Ouvrir avec Convertisseur de Fichiers</string>
+    <string name="st_Intent_BackgroundRemover">Ouvrir avec Supprimer le Fond</string>
+    <string name="st_Intent_QrScanner">Ouvrir avec Scanner QR</string>
+    <string name="st_Intent_BackupRestore">Ouvrir avec Sauvegarde et Restauration</string>
+    <string name="st_Intent_Encrypter">Ouvrir avec Encrypteur</string>
+    <string name="st_Intent_Decrypter">Ouvrir avec Décrypteur</string>
+
     <!-- AiAssistantScreen -->
     <string name="st_AiAssistantScreen_8f1a">QUOTA DÉPASSÉ</string>
     <string name="st_AiAssistantScreen_3d5b">COACH FITNESS IA</string>

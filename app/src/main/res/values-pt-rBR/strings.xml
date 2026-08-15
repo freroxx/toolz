@@ -431,6 +431,16 @@
     <string name="st_MainActivity_7c4d">ATUALIZAR AGORA</string>
     <string name="st_MainActivity_5f6e">LEMBRE-ME MAIS TARDE</string>
     <string name="st_MainActivity_2b8a">Documento</string>
+
+    <!-- File Linking Engine -->
+    <string name="st_Intent_MusicPlayer">Abrir com Reprodutor de Música</string>
+    <string name="st_Intent_PdfViewer">Abrir com Visualizador de PDF</string>
+    <string name="st_Intent_FileConverter">Abrir com Conversor de Arquivos</string>
+    <string name="st_Intent_BackgroundRemover">Abrir com Removedor de Fundo</string>
+    <string name="st_Intent_QrScanner">Abrir com Scanner QR</string>
+    <string name="st_Intent_BackupRestore">Abrir com Backup e Restauração</string>
+    <string name="st_Intent_Encrypter">Abrir com Encriptador</string>
+    <string name="st_Intent_Decrypter">Abrir com Decriptador</string>
     <!-- AiAssistantScreen -->
     <string name="st_AiAssistantScreen_8f1a">COTA EXCEDIDA</string>
     <string name="st_AiAssistantScreen_3d5b">IA COACH DE FITNESS</string>

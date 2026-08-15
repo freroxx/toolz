@@ -82,14 +82,31 @@ import java.util.Locale
 fun FileConverterScreen(
     viewModel: FileConverterViewModel,
     onBack: () -> Unit,
-    initialUri: Uri? = null,
+    initialUri: android.net.Uri? = null,
     initialTitle: String? = null,
+    initialUris: String? = null,
 ) {
     val uiState         by viewModel.uiState.collectAsState()
     val context          = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
     val hapticEnabled    = LocalHapticEnabled.current
     val performanceMode  = LocalPerformanceMode.current
+
+    LaunchedEffect(initialUri, initialUris) {
+        if (initialUri != null) {
+            viewModel.onFilesSelected(listOf(initialUri))
+        } else if (!initialUris.isNullOrEmpty()) {
+            try {
+                val uris = initialUris.split(",").map { android.net.Uri.parse(it) }
+                viewModel.onFilesSelected(uris)
+                if (uris.size > 1) {
+                    viewModel.switchMode(ConversionMode.BATCH)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     var highQuality         by remember { mutableStateOf(true) }
     var showFormatSheet     by remember { mutableStateOf(false) }

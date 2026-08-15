@@ -82,10 +82,21 @@ class OpenDocumentWithInitial(private val initialUri: Uri?) : ActivityResultCont
 @Composable
 fun BackupRestoreScreen(
     viewModel: BackupRestoreViewModel,
+    initialRestoreUri: String? = null,
     onBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
+
+    LaunchedEffect(initialRestoreUri) {
+        if (!initialRestoreUri.isNullOrEmpty()) {
+            try {
+                viewModel.restoreBackup(android.net.Uri.parse(initialRestoreUri))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
     var showCustomIntervalDialog by remember { mutableStateOf(false) }
 
     // Directory hint: points the picker at Documents/Toolz_Backups.

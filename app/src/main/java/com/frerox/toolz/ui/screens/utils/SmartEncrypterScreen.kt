@@ -96,12 +96,34 @@ import java.util.Date
 @Composable
 fun SmartEncrypterScreen(
     onBack: () -> Unit,
+    initialUri: String? = null,
+    mode: String? = null,
     viewModel: SmartEncrypterViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(initialUri, mode) {
+        if (!initialUri.isNullOrEmpty()) {
+            try {
+                if (!uiState.isFileMode) {
+                    viewModel.toggleFileMode()
+                }
+
+                val operationIntent = when (mode) {
+                    "encrypt" -> CryptoOperation.ENCRYPT
+                    "decrypt" -> CryptoOperation.DECRYPT
+                    else -> null
+                }
+                viewModel.setFileOperationIntent(operationIntent)
+                viewModel.onFileSelected(context, android.net.Uri.parse(initialUri))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
     val vibrationManager = LocalVibrationManager.current
     val snackbarHostState = remember { SnackbarHostState() }
 

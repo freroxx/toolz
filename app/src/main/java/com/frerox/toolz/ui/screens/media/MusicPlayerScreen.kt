@@ -181,6 +181,7 @@ fun MusicPlayerScreen(
     aiViewModel: NowPlayingAiViewModel = hiltViewModel(),
     catalogViewModel: CatalogViewModel = hiltViewModel(),
     initialTab: Int = 0,
+    initialUri: String? = null,
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -189,6 +190,16 @@ fun MusicPlayerScreen(
     val duration by viewModel.duration.collectAsState()
     val sliderPos by viewModel.sliderPosition.collectAsState()
     val context = LocalContext.current
+
+    LaunchedEffect(initialUri) {
+        if (!initialUri.isNullOrEmpty()) {
+            try {
+                viewModel.playUri(android.net.Uri.parse(initialUri))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     // Download Popup (Moved from CatalogScreen for persistence)
     if (catalogState.showDownloadPopup && catalogState.activeDownload != null) {

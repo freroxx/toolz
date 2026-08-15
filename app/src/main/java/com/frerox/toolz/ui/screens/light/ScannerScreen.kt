@@ -75,6 +75,7 @@ import com.google.mlkit.vision.barcode.common.Barcode
 @Composable
 fun ScannerScreen(
     onBack: () -> Unit,
+    initialImageUri: String? = null,
     onNavigateToGenerator: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -100,6 +101,24 @@ fun ScannerScreen(
 
     var scanResult by remember { mutableStateOf("") }
     var isFlashOn by remember { mutableStateOf(false) }
+
+    LaunchedEffect(initialImageUri) {
+        if (!initialImageUri.isNullOrEmpty()) {
+            try {
+                val uri = android.net.Uri.parse(initialImageUri)
+                val image = com.google.mlkit.vision.common.InputImage.fromFilePath(context, uri)
+                val scanner = BarcodeScanning.getClient()
+                scanner.process(image)
+                    .addOnSuccessListener { barcodes ->
+                        if (barcodes.isNotEmpty()) {
+                            scanResult = barcodes[0].rawValue ?: ""
+                        }
+                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     val cameraController = remember {
         LifecycleCameraController(context).apply {

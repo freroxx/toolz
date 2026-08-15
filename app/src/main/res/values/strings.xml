@@ -464,6 +464,16 @@
     <string name="st_MainActivity_5f6e">REMIND ME LATER</string>
     <string name="st_MainActivity_2b8a">Document</string>
 
+    <!-- File Linking Engine -->
+    <string name="st_Intent_MusicPlayer">Open with Music Player</string>
+    <string name="st_Intent_PdfViewer">Open with PDF Viewer</string>
+    <string name="st_Intent_FileConverter">Open with File Converter</string>
+    <string name="st_Intent_BackgroundRemover">Open with Background Remover</string>
+    <string name="st_Intent_QrScanner">Open with QR Scanner</string>
+    <string name="st_Intent_BackupRestore">Open with Backup Restore</string>
+    <string name="st_Intent_Encrypter">Open with Encrypter</string>
+    <string name="st_Intent_Decrypter">Open with Decrypter</string>
+
     <!-- AiAssistantScreen -->
     <string name="st_AiAssistantScreen_8f1a">QUOTA EXCEEDED</string>
     <string name="st_AiAssistantScreen_3d5b">AI FITNESS COACH</string>

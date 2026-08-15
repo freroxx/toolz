@@ -345,6 +345,16 @@
     <string name="st_MainActivity_5f6e">RECORDAR MÁS TARDE</string>
     <string name="st_MainActivity_2b8a">Documento</string>
 
+    <!-- File Linking Engine -->
+    <string name="st_Intent_MusicPlayer">Abrir con Reproductor de Música</string>
+    <string name="st_Intent_PdfViewer">Abrir con Visor de PDF</string>
+    <string name="st_Intent_FileConverter">Abrir con Convertidor de Archivos</string>
+    <string name="st_Intent_BackgroundRemover">Abrir con Quitar Fondo</string>
+    <string name="st_Intent_QrScanner">Abrir con Escáner QR</string>
+    <string name="st_Intent_BackupRestore">Abrir con Copia y Restauración</string>
+    <string name="st_Intent_Encrypter">Abrir con Encryptador</string>
+    <string name="st_Intent_Decrypter">Abrir con Decryptador</string>
+
     <!-- AiAssistantScreen -->
     <string name="st_AiAssistantScreen_8f1a">CUOTA EXCEDIDA</string>
     <string name="st_AiAssistantScreen_3d5b">ENTRENADOR DE FITNESS IA</string>

@@ -22,7 +22,10 @@ sealed class Screen(val route: String) {
     object Dashboard : Screen("dashboard")
     object Settings : Screen("settings")
     object Update : Screen("update")
-    object BackupRestore : Screen("backup_restore")
+    object BackupRestore : Screen("backup_restore?initialUri={initialUri}") {
+        fun createRoute(initialUri: String? = null) =
+            "backup_restore" + (initialUri?.let { "?initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")
+    }
     
     // AI
     object AiAssistant : Screen("ai_assistant?chatId={chatId}&isCoachMode={isCoachMode}") {
@@ -45,7 +48,10 @@ sealed class Screen(val route: String) {
     object Flashlight : Screen("flashlight")
     object ScreenLight : Screen("screen_light")
     object Magnifier : Screen("magnifier")
-    object Scanner : Screen("scanner")
+    object Scanner : Screen("scanner?initialImageUri={initialImageUri}") {
+        fun createRoute(initialImageUri: String? = null) =
+            "scanner" + (initialImageUri?.let { "?initialImageUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")
+    }
     object QrGenerator : Screen("qr_generator")
     object LightMeter : Screen("light_meter")
     
@@ -78,7 +84,18 @@ sealed class Screen(val route: String) {
     object PdfReader : Screen("pdf_reader")
     object NotificationVault : Screen("notification_vault")
     object Clipboard : Screen("clipboard")
-    object SmartEncrypter : Screen("smart_encrypter")
+    object SmartEncrypter : Screen("smart_encrypter?initialUri={initialUri}&mode={mode}") {
+        fun createRoute(initialUri: String? = null, mode: String? = null): String {
+            var route = "smart_encrypter"
+            val params = mutableListOf<String>()
+            initialUri?.let { params.add("initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}") }
+            mode?.let { params.add("mode=$it") }
+            if (params.isNotEmpty()) {
+                route += "?" + params.joinToString("&")
+            }
+            return route
+        }
+    }
     object DeviceInfo : Screen("device_info")
     object NetworkPowerSuite : Screen("network_power_suite")
     object WifiTweaks : Screen("wifi_tweaks")
@@ -93,16 +110,22 @@ sealed class Screen(val route: String) {
     }
     
     // Media
-    object BackgroundRemover : Screen("background_remover")
-    object MusicPlayer : Screen("music_player?tab={tab}") {
-        fun createRoute(tab: Int) = "music_player?tab=$tab"
+    object BackgroundRemover : Screen("background_remover?initialUri={initialUri}") {
+        fun createRoute(initialUri: String? = null) =
+            "background_remover" + (initialUri?.let { "?initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")
     }
-    object FileConverter : Screen("file_converter?uri={uri}&title={title}") {
-        fun createRoute(uri: String? = null, title: String? = null): String {
-            if (uri == null) return "file_converter"
-            val encodedUri = java.net.URLEncoder.encode(uri, "UTF-8")
-            val encodedTitle = title?.let { java.net.URLEncoder.encode(it, "UTF-8") } ?: "Document"
-            return "file_converter?uri=$encodedUri&title=$encodedTitle"
+    object MusicPlayer : Screen("music_player?tab={tab}&initialUri={initialUri}") {
+        fun createRoute(tab: Int, initialUri: String? = null) =
+            "music_player?tab=$tab" + (initialUri?.let { "&initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")
+    }
+    object FileConverter : Screen("file_converter?uri={uri}&title={title}&initialUris={initialUris}") {
+        fun createRoute(uri: String? = null, title: String? = null, initialUris: List<String>? = null): String {
+            val params = mutableListOf<String>()
+            uri?.let { params.add("uri=${java.net.URLEncoder.encode(it, "UTF-8")}") }
+            title?.let { params.add("title=${java.net.URLEncoder.encode(it, "UTF-8")}") }
+            initialUris?.let { params.add("initialUris=${java.net.URLEncoder.encode(it.joinToString(","), "UTF-8")}") }
+
+            return if (params.isEmpty()) "file_converter" else "file_converter?" + params.joinToString("&")
         }
     }
 

@@ -463,6 +463,121 @@
                 tools:node="remove" />
         </provider>
 
+        <!-- ══════════════════════════════════════════════════════ -->
+        <!--  FILE LINKING ENGINE (Activity Aliases)                -->
+        <!-- ══════════════════════════════════════════════════════ -->
+
+        <activity-alias
+            android:name=".MusicPlayer"
+            android:exported="true"
+            android:label="@string/st_Intent_MusicPlayer"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".PdfViewer"
+            android:exported="true"
+            android:label="@string/st_Intent_PdfViewer"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".FileConverter"
+            android:exported="true"
+            android:label="@string/st_Intent_FileConverter"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".BackgroundRemover"
+            android:exported="true"
+            android:label="@string/st_Intent_BackgroundRemover"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".QrScanner"
+            android:exported="true"
+            android:label="@string/st_Intent_QrScanner"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".BackupRestore"
+            android:exported="true"
+            android:label="@string/st_Intent_BackupRestore"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.tzbk" />
+                <data android:pathPattern=".*\\.TZBK" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".Encrypter"
+            android:exported="true"
+            android:label="@string/st_Intent_Encrypter"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".Decrypter"
+            android:exported="true"
+            android:label="@string/st_Intent_Decrypter"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.enc" />
+                <data android:pathPattern=".*\\.ENC" />
+            </intent-filter>
+        </activity-alias>
+
     </application>
 
 </manifest>
