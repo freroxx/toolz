@@ -235,6 +235,12 @@ class MediaHandler @Inject constructor(
                 // ICO supports 16, 32, 48, 64, 128, 256 px sizes; use 256 as master
                 "-i $i -vf scale=256:256:flags=lanczos -vcodec png -y $o"
 
+            ConversionEngine.ConversionType.IMAGE_TO_HEIF ->
+                "-i $i -c:v libx265 -crf ${if (hq) "18" else "28"} -tag:v hvc1 -y $o"
+
+            ConversionEngine.ConversionType.IMAGE_TO_AVIF ->
+                "-i $i -c:v libaom-av1 -crf ${if (hq) "23" else "35"} -b:v 0 -y $o"
+
             ConversionEngine.ConversionType.IMAGE_TO_TGA ->
                 "-i $i -f targa -y $o"
 

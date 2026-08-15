@@ -39,8 +39,6 @@ import javax.inject.Singleton
  * Handles all Image ↔ PDF conversions natively via Android SDK:
  *
  *  - IMAGE_TO_PDF  — one or more bitmaps → single PDF (A4 portrait, images scaled to fit)
- *  - IMAGE_TO_AVIF — Android 12+ AVIF, falls back to WebP on older devices
- *  - IMAGE_TO_HEIF — Android 10+ HEIF, falls back to JPEG
  *  - PDF_TO_PNG    — each page of a PDF → individual PNG files
  *  - PDF_TO_JPG    — each page of a PDF → individual JPEG files
  *  - PDF_TO_WEBP   — each page of a PDF → individual WebP files
@@ -61,37 +59,6 @@ class ImageDocumentHandler @Inject constructor(
             when (type) {
                 ConversionEngine.ConversionType.IMAGE_TO_PDF -> {
                     imagesToPdf(inputUris, outputPath, highQuality)
-                    emit(ConversionEngine.ConversionStatus.Progress(100))
-                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
-                }
-
-                ConversionEngine.ConversionType.IMAGE_TO_AVIF,
-                ConversionEngine.ConversionType.IMAGE_TO_HEIF -> {
-                    val bitmap = decodeBitmap(inputUris.first())
-                        ?: throw Exception("Could not decode input image")
-                    emit(ConversionEngine.ConversionStatus.Progress(40))
-                    val (format, quality) = when (type) {
-                        ConversionEngine.ConversionType.IMAGE_TO_AVIF -> {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Bitmap.CompressFormat.AVIF to (if (highQuality) 90 else 70)
-                            } else {
-                                // Fallback to lossless WebP on older devices
-                                @Suppress("DEPRECATION")
-                                Bitmap.CompressFormat.WEBP to (if (highQuality) 90 else 70)
-                            }
-                        }
-                        else -> { // IMAGE_TO_HEIF
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                Bitmap.CompressFormat.HEIF to (if (highQuality) 90 else 70)
-                            } else {
-                                Bitmap.CompressFormat.JPEG to (if (highQuality) 95 else 80)
-                            }
-                        }
-                    }
-                    File(outputPath).outputStream().use { out ->
-                        bitmap.compress(format, quality, out)
-                    }
-                    bitmap.recycle()
                     emit(ConversionEngine.ConversionStatus.Progress(100))
                     emit(ConversionEngine.ConversionStatus.Success(outputPath))
                 }

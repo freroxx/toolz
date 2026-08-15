@@ -223,8 +223,6 @@ class ConversionEngine @Inject constructor(
     private fun pickHandler(type: ConversionType): ConversionHandler = when {
         type.name.startsWith("SVG_") -> vectorHandler
         type == ConversionType.IMAGE_TO_PDF ||
-        type == ConversionType.IMAGE_TO_AVIF ||
-        type == ConversionType.IMAGE_TO_HEIF ||
         type == ConversionType.PDF_TO_PNG ||
         type == ConversionType.PDF_TO_JPG ||
         type == ConversionType.PDF_TO_WEBP -> imageDocumentHandler
