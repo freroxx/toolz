@@ -5,40 +5,55 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Chat
-import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.rounded.EnhancedEncryption
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.graphics.shapes.Morph
+import androidx.graphics.shapes.RoundedPolygon
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.milliseconds
 
+/**
+ * Onboarding flow for Whisper, built around M3 Expressive shape morphing.
+ * The icon container physically morphs from one MaterialShapes shape to the
+ * next as the user swipes. The background carries a small constellation of
+ * softly floating, independently morphing shapes that recolor with the
+ * active step, giving the screen continuous, layered motion rather than a
+ * single static glow.
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WhisperOnboardingScreen(
@@ -51,33 +66,37 @@ fun WhisperOnboardingScreen(
 
     val onboardingSteps = listOf(
         OnboardingStep(
+            kicker = "WELCOME TO WHISPER",
             title = stringResource(R.string.st_Whisper_Onboarding_Title1),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc1),
             icon = Icons.AutoMirrored.Rounded.Chat,
             color = MaterialTheme.colorScheme.primary,
-            shape = StarExpressiveShape
+            shape = MaterialShapes.Cookie9Sided,
         ),
         OnboardingStep(
+            kicker = "WHISPER IS FRIENDLY",
             title = stringResource(R.string.st_Whisper_Onboarding_Title2),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc2),
             icon = Icons.Rounded.Explore,
             color = MaterialTheme.colorScheme.secondary,
-            shape = PebbleExpressiveShape
+            shape = MaterialShapes.Pill,
         ),
         OnboardingStep(
+            kicker = "WHISPER IS SECURE",
             title = stringResource(R.string.st_Whisper_Onboarding_Title3),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc3),
             icon = Icons.Rounded.EnhancedEncryption,
             color = MaterialTheme.colorScheme.tertiary,
-            shape = DiamondExpressiveShape
+            shape = MaterialShapes.Clover4Leaf,
         ),
         OnboardingStep(
+            kicker = "WHISPER IS ALL YOURS",
             title = stringResource(R.string.st_Whisper_Onboarding_Title4),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc4),
             icon = Icons.Rounded.VerifiedUser,
             color = MaterialTheme.colorScheme.primary,
-            shape = OvalExpressiveShape
-        )
+            shape = MaterialShapes.Sunny,
+        ),
     )
 
     Box(
@@ -85,16 +104,14 @@ fun WhisperOnboardingScreen(
             .fillMaxSize()
             .toolzBackground()
     ) {
-        // Background Decorations
-        OnboardingDecorations(
-            page = pagerState.currentPage,
-            offset = { pagerState.currentPageOffsetFraction },
-            steps = onboardingSteps
+        OnboardingExpressiveBackground(
+            pagerState = pagerState,
+            steps = onboardingSteps,
         )
 
         Column(
             modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(48.dp))
 
@@ -103,45 +120,53 @@ fun WhisperOnboardingScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) { page ->
-                OnboardingPage(onboardingSteps[page], isVisible = pagerState.currentPage == page)
+                OnboardingPage(
+                    step = onboardingSteps[page],
+                    isVisible = pagerState.currentPage == page,
+                    pagerState = pagerState,
+                    steps = onboardingSteps,
+                )
             }
 
-            // Bottom Navigation
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                // Indicator
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    repeat(4) { index ->
+                    repeat(onboardingSteps.size) { index ->
                         val active = pagerState.currentPage == index
                         val width by animateDpAsState(
-                            targetValue = if (active) 24.dp else 8.dp,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                            targetValue = if (active) 28.dp else 8.dp,
+                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+                            label = "indicatorWidth",
+                        )
+                        val indicatorColor by animateColorAsState(
+                            targetValue = if (active) {
+                                onboardingSteps[index].color
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                            },
+                            label = "indicatorColor",
                         )
                         Box(
                             modifier = Modifier
                                 .height(8.dp)
                                 .width(width)
                                 .clip(CircleShape)
-                                .background(
-                                    if (active) MaterialTheme.colorScheme.primary 
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                )
+                                .background(indicatorColor)
                         )
                     }
                 }
 
-                // Buttons
-                val isLastPage = pagerState.currentPage == 3
+                val isLastPage = pagerState.currentPage == onboardingSteps.lastIndex
                 ToolzExpressiveButton(
                     onClick = {
                         haptic.click()
@@ -155,54 +180,108 @@ fun WhisperOnboardingScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp)
+                        .height(64.dp),
                 ) {
                     AnimatedContent(
                         targetState = isLastPage,
                         transitionSpec = { fadeIn() togetherWith fadeOut() },
-                        label = "btnContent"
+                        label = "btnContent",
                     ) { last ->
                         Text(
-                            text = if (last) stringResource(R.string.st_Whisper_Onboarding_GetStarted) 
-                                   else stringResource(R.string.st_Whisper_Onboarding_Next),
+                            text = if (last) {
+                                stringResource(R.string.st_Whisper_Onboarding_GetStarted)
+                            } else {
+                                stringResource(R.string.st_Whisper_Onboarding_Next)
+                            },
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                 }
 
-                if (!isLastPage) {
-                    TextButton(
-                        onClick = {
-                            haptic.click()
-                            viewModel.markOnboardingAsShown { onComplete() }
-                        }
+                Box(
+                    modifier = Modifier.height(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isLastPage,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
                     ) {
-                        Text(
-                            "Skip",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        TextButton(
+                            onClick = {
+                                haptic.click()
+                                viewModel.markOnboardingAsShown { onComplete() }
+                            }
+                        ) {
+                            Text(
+                                "Skip", // TODO: swap for your localized skip string resource if one exists
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                } else {
-                    Spacer(Modifier.height(48.dp))
                 }
             }
         }
     }
 }
 
+/**
+ * A single onboarding page. The icon container's shape is derived from the
+ * pager's live scroll position, so it continuously morphs between the
+ * current and next step's shape as the user drags — rather than jump-cutting.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun OnboardingPage(step: OnboardingStep, isVisible: Boolean) {
-    val contentScale by animateFloatAsState(
-        targetValue = if (isVisible) 1f else 0.85f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "contentScale"
-    )
+private fun OnboardingPage(
+    step: OnboardingStep,
+    isVisible: Boolean,
+    pagerState: PagerState,
+    steps: List<OnboardingStep>,
+) {
+    val pageIndex = steps.indexOf(step)
+
+    val morphProgress by remember {
+        derivedStateOf {
+            val diff = pagerState.currentPage - pageIndex
+            (diff + pagerState.currentPageOffsetFraction).coerceIn(-1f, 1f)
+        }
+    }
+
+    val nextShape = when {
+        morphProgress > 0f && pageIndex < steps.lastIndex -> steps[pageIndex + 1].shape
+        morphProgress < 0f && pageIndex > 0 -> steps[pageIndex - 1].shape
+        else -> step.shape
+    }
+
+    val morph = remember(step.shape, nextShape) { Morph(step.shape, nextShape) }
+    val morphShape = remember(morph) {
+        MorphPolygonShape(morph, progress = { kotlin.math.abs(morphProgress) })
+    }
+
     val contentAlpha by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
-        animationSpec = tween(600),
-        label = "contentAlpha"
+        animationSpec = tween(500),
+        label = "contentAlpha",
+    )
+    val contentTranslation by animateFloatAsState(
+        targetValue = if (isVisible) 0f else 24f,
+        animationSpec = MaterialTheme.motionScheme.slowSpatialSpec(),
+        label = "contentTranslation",
+    )
+
+    // Gentle continuous bob so the hero shape never sits perfectly still,
+    // even when the pager is idle.
+    val infiniteTransition = rememberInfiniteTransition(label = "iconBob")
+    val bob by infiniteTransition.animateFloat(
+        initialValue = -6f,
+        targetValue = 6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2600, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "bobOffset",
     )
 
     Column(
@@ -210,204 +289,276 @@ private fun OnboardingPage(step: OnboardingStep, isVisible: Boolean) {
             .fillMaxWidth()
             .padding(horizontal = 32.dp)
             .graphicsLayer {
-                scaleX = contentScale
-                scaleY = contentScale
                 alpha = contentAlpha
+                translationY = contentTranslation
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Center,
     ) {
-        // Icon with expressive shape background
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(200.dp)
-                .graphicsLayer {
-                    shadowElevation = 32f
-                    shape = step.shape
-                    clip = true
-                }
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            step.color.copy(alpha = 0.85f),
-                            step.color
+            modifier = Modifier.size(240.dp),
+        ) {
+            // Soft halo directly behind the icon shape — separate from the
+            // page background so the icon always reads with clear contrast
+            // no matter what's floating behind it.
+            Box(
+                modifier = Modifier
+                    .size(220.dp)
+                    .graphicsLayer {
+                        translationY = bob * 0.6f
+                        alpha = 0.35f
+                    }
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(step.color.copy(alpha = 0.55f), Color.Transparent)
                         )
                     )
-                )
-        ) {
-            Icon(
-                step.icon,
-                contentDescription = null,
-                modifier = Modifier.size(96.dp),
-                tint = Color.White
             )
+
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(196.dp)
+                    .graphicsLayer { translationY = bob }
+                    .clip(morphShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                step.color,
+                                step.color.copy(alpha = 0.82f),
+                            )
+                        )
+                    ),
+            ) {
+                Icon(
+                    imageVector = step.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(96.dp),
+                    tint = MaterialTheme.colorScheme.surface,
+                )
+            }
         }
 
-        Spacer(Modifier.height(64.dp))
+        Spacer(Modifier.height(40.dp))
+
+        Text(
+            text = step.kicker,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp,
+            color = step.color,
+        )
+
+        Spacer(Modifier.height(12.dp))
 
         Text(
             text = step.title,
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Black,
+            letterSpacing = (-0.5).sp,
+            lineHeight = 38.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface,
-            letterSpacing = (-1).sp
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(14.dp))
 
-        TypewriterText(
+        Text(
             text = step.description,
-            isVisible = isVisible,
-            modifier = Modifier.fillMaxWidth()
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Normal,
+            lineHeight = 24.sp,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
         )
     }
 }
 
+/**
+ * A small constellation of decorative shapes drifting behind the content.
+ * Each shape morphs independently between two MaterialShapes, floats along
+ * a slow orbit, and recolors toward the active step — so the background
+ * feels alive at every point in the flow instead of only reacting to swipes.
+ * Kept low-alpha and out of the content's horizontal center band so it never
+ * competes with the title, description, or icon for attention.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun TypewriterText(
-    text: String,
-    isVisible: Boolean,
-    modifier: Modifier = Modifier
+private fun OnboardingExpressiveBackground(
+    pagerState: PagerState,
+    steps: List<OnboardingStep>,
 ) {
-    var displayedText by remember { mutableStateOf("") }
-    
-    LaunchedEffect(isVisible, text) {
-        if (isVisible) {
-            displayedText = ""
-            val words = text.split(" ")
-            for (i in words.indices) {
-                displayedText = words.take(i + 1).joinToString(" ")
-                delay(30.milliseconds) // Fast smooth typewriter
-            }
-        } else {
-            displayedText = ""
-        }
-    }
-
-    val alpha by animateFloatAsState(
-        targetValue = if (displayedText.isNotEmpty()) 1f else 0f,
-        animationSpec = tween(600),
-        label = "typewriterAlpha"
+    val density = LocalDensity.current
+    val activeColor by animateColorAsState(
+        targetValue = steps[pagerState.currentPage].color,
+        animationSpec = tween(900),
+        label = "activeColor",
     )
 
-    Text(
-        text = displayedText,
-        style = MaterialTheme.typography.bodyLarge,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        lineHeight = 30.sp,
-        modifier = modifier.alpha(alpha)
-    )
-}
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val widthPx = with(density) { maxWidth.toPx() }
+        val heightPx = with(density) { maxHeight.toPx() }
 
-@Composable
-private fun OnboardingDecorations(
-    page: Int, 
-    offset: () -> Float,
-    steps: List<OnboardingStep>
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "decor")
-    
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(30000, easing = LinearEasing)
-        ),
-        label = "rotation"
-    )
-
-    val currentStep = steps[page]
-    val color by animateColorAsState(
-        targetValue = currentStep.color,
-        animationSpec = tween(1000),
-        label = "color"
-    )
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Large background shape
+        // Broad, very soft wash that recolors with the active step, giving
+        // the whole screen a tint shift instead of one hard-edged glow.
         Box(
             modifier = Modifier
-                .size(500.dp)
-                .offset(x = (-150).dp, y = (-150).dp)
-                .graphicsLayer {
-                    rotationZ = rotation
-                    val s = 1.2f + (offset() * 0.3f)
-                    scaleX = s
-                    scaleY = s
-                    alpha = 0.08f
-                }
-                .clip(currentStep.shape)
-                .background(color)
+                .fillMaxSize()
+                .graphicsLayer { alpha = 0.16f }
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(activeColor, Color.Transparent),
+                        center = Offset(widthPx * 0.5f, heightPx * 0.28f),
+                        radius = maxOf(widthPx, heightPx) * 0.75f,
+                    )
+                )
         )
 
-        // Floating shapes with varied M3 geometry
-        ExpressiveFloatingDecoration(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 60.dp, y = 120.dp)
-                .graphicsLayer {
-                    rotationZ = -rotation * 0.4f
-                    val s = 1f + (offset() * 0.15f)
-                    scaleX = s
-                    scaleY = s
-                },
-            color = color,
-            alpha = 0.12f,
-            shape = steps[(page + 1) % steps.size].shape
-        )
+        val orbitSpecs = remember {
+            listOf(
+                FloatingShapeSpec(
+                    baseShapeIndex = 1,
+                    anchor = Alignment.TopStart,
+                    offsetX = (-64).dp,
+                    offsetY = 96.dp,
+                    size = 150.dp,
+                    alpha = 0.14f,
+                    period = 5200,
+                    driftAmplitude = 26f,
+                    rotationRange = 20f,
+                ),
+                FloatingShapeSpec(
+                    baseShapeIndex = 2,
+                    anchor = Alignment.TopEnd,
+                    offsetX = 56.dp,
+                    offsetY = 180.dp,
+                    size = 110.dp,
+                    alpha = 0.16f,
+                    period = 4300,
+                    driftAmplitude = 18f,
+                    rotationRange = -28f,
+                ),
+                FloatingShapeSpec(
+                    baseShapeIndex = 3,
+                    anchor = Alignment.BottomStart,
+                    offsetX = (-40).dp,
+                    offsetY = (-220).dp,
+                    size = 96.dp,
+                    alpha = 0.15f,
+                    period = 3700,
+                    driftAmplitude = 22f,
+                    rotationRange = 24f,
+                ),
+                FloatingShapeSpec(
+                    baseShapeIndex = 0,
+                    anchor = Alignment.BottomEnd,
+                    offsetX = 40.dp,
+                    offsetY = (-140).dp,
+                    size = 168.dp,
+                    alpha = 0.13f,
+                    period = 6000,
+                    driftAmplitude = 30f,
+                    rotationRange = -18f,
+                ),
+            )
+        }
 
-        ExpressiveFloatingDecoration(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .offset(x = (-40).dp, y = (-200).dp)
-                .graphicsLayer {
-                    rotationZ = rotation * 0.6f
-                    val s = 1f - (offset() * 0.15f)
-                    scaleX = s
-                    scaleY = s
-                },
-            color = color,
-            alpha = 0.12f,
-            shape = steps[(page + 2) % steps.size].shape
-        )
-        
-        ExpressiveFloatingDecoration(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .offset(x = 80.dp, y = 0.dp)
-                .rotate(rotation * 0.3f),
-            color = color,
-            alpha = 0.08f,
-            shape = steps[(page + 3) % steps.size].shape
-        )
+        orbitSpecs.forEach { spec ->
+            FloatingMorphShape(
+                spec = spec,
+                steps = steps,
+                currentPage = pagerState.currentPage,
+            )
+        }
     }
 }
 
+private data class FloatingShapeSpec(
+    val baseShapeIndex: Int,
+    val anchor: Alignment,
+    val offsetX: androidx.compose.ui.unit.Dp,
+    val offsetY: androidx.compose.ui.unit.Dp,
+    val size: androidx.compose.ui.unit.Dp,
+    val alpha: Float,
+    val period: Int,
+    val driftAmplitude: Float,
+    val rotationRange: Float,
+)
+
+/**
+ * One decorative background shape. It morphs endlessly between its own base
+ * shape and the shape belonging to the currently active step, so the whole
+ * constellation visually "agrees" with whichever page is showing, while each
+ * shape drifts and rotates on its own independent, offset timing so they
+ * never move in lockstep.
+ */
 @Composable
-private fun ExpressiveFloatingDecoration(
-    modifier: Modifier,
-    color: Color,
-    alpha: Float,
-    shape: androidx.compose.ui.graphics.Shape
+private fun BoxScope.FloatingMorphShape(
+    spec: FloatingShapeSpec,
+    steps: List<OnboardingStep>,
+    currentPage: Int,
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "floatingShape")
+
+    val drift by infiniteTransition.animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(spec.period, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "drift",
+    )
+    val morphCycle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(spec.period * 2, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "morphCycle",
+    )
+
+    val baseStep = steps[spec.baseShapeIndex % steps.size]
+    val targetStep = steps[currentPage]
+
+    val morph = remember(baseStep.shape, targetStep.shape) {
+        Morph(baseStep.shape, targetStep.shape)
+    }
+    val morphShape = remember(morph) {
+        MorphPolygonShape(morph, progress = { morphCycle })
+    }
+
+    val color by animateColorAsState(
+        targetValue = targetStep.color,
+        animationSpec = tween(900),
+        label = "floatingShapeColor",
+    )
+
     Box(
-        modifier = modifier
-            .size(140.dp)
-            .graphicsLayer { 
-                this.shape = shape
-                this.clip = true
+        modifier = Modifier
+            .align(spec.anchor)
+            .offset(x = spec.offsetX, y = spec.offsetY)
+            .size(spec.size)
+            .graphicsLayer {
+                translationX = drift * spec.driftAmplitude
+                translationY = -drift * spec.driftAmplitude * 0.6f
+                rotationZ = drift * spec.rotationRange
+                alpha = spec.alpha
             }
-            .background(color.copy(alpha = alpha))
+            .clip(morphShape)
+            .background(color)
     )
 }
 
 data class OnboardingStep(
+    val kicker: String,
     val title: String,
     val description: String,
     val icon: ImageVector,
     val color: Color,
-    val shape: androidx.compose.ui.graphics.Shape
+    val shape: RoundedPolygon,
 )

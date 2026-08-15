@@ -154,14 +154,14 @@
     <string name="st_Whisper_Beta_Warning_Desc">Whisper is an experimental encrypted tool. You are participating in an early access program and may encounter bugs or performance issues. Please share your feedback to help us improve!</string>
     <string name="st_Whisper_Beta_Warning_Confirm">I Understand</string>
     <!-- Whisper: Onboarding -->
-    <string name="st_Whisper_Onboarding_Title1">Chat Freely</string>
-    <string name="st_Whisper_Onboarding_Desc1">Privacy that just works. No trackers, no data collection, a privacy-focused tool just for you and your friends.</string>
-    <string name="st_Whisper_Onboarding_Title2">Find Your People</string>
-    <string name="st_Whisper_Onboarding_Desc2">Connect without the noise. Discover friends through mutual circles without sharing your contacts or phone number.</string>
-    <string name="st_Whisper_Onboarding_Title3">Secure</string>
-    <string name="st_Whisper_Onboarding_Desc3">Unbreakable encryption. Your messages are locked with P-256 keys that never leave your phone.</string>
-    <string name="st_Whisper_Onboarding_Title4">Own Your Identity</string>
-    <string name="st_Whisper_Onboarding_Desc4">No passwords, no leaks. You are your own key. With Token authentification you get locally generated tokens which mean we have nothing to lose and you have nothing to worry about.</string>
+    <string name="st_Whisper_Onboarding_Title1">Chat Without Limits</string>
+    <string name="st_Whisper_Onboarding_Desc1">Experience a new era of messaging where your privacy isn\'t an option—it\'s the foundation. Whisper is a stealthy, decentralized communication layer designed for those who value absolute discretion and modern aesthetics.</string>
+    <string name="st_Whisper_Onboarding_Title2">Intuitive Discovery</string>
+    <string name="st_Whisper_Onboarding_Desc2">Grow your network organically through "Mutual Connection" mapping. Whisper identifies potential friends through shared circles, allowing you to connect with your community without ever touching your contact list or exposing your personal metadata.</string>
+    <string name="st_Whisper_Onboarding_Title3">Unbreakable Shield</string>
+    <string name="st_Whisper_Onboarding_Desc3">Every syllable is guarded by industrial-grade P-256 Elliptic Curve cryptography. Your encryption keys are generated locally and never transmitted, ensuring that your conversations remain mathematically impossible for anyone else to intercept.</string>
+    <string name="st_Whisper_Onboarding_Title4">You Own Your Identity</string>
+    <string name="st_Whisper_Onboarding_Desc4">Break free from the password era. Whisper uses locally hashed, one-way security tokens. No email, no trackers, and no central database to leak. In Whisper, you aren\'t the product—you are the architect of your own digital identity.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Begin Your Journey</string>
     <string name="st_Whisper_Onboarding_Next">Continue</string>
     <!-- Whisper: Auth - Registration -->

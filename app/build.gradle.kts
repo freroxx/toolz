@@ -147,6 +147,7 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.foundation)
+    implementation(libs.androidx.foundation.layout)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     
     implementation(libs.androidx.core.ktx)
