@@ -42,6 +42,14 @@ val MediumExpressiveShape = RoundedCornerShape(28.dp)
 val SmallExpressiveShape = RoundedCornerShape(20.dp)
 
 /**
+ * Organic, asymmetrical Material 3 Expressive shapes.
+ */
+val StarExpressiveShape = RoundedCornerShape(topStart = 60.dp, topEnd = 16.dp, bottomEnd = 60.dp, bottomStart = 16.dp)
+val PebbleExpressiveShape = RoundedCornerShape(topStart = 24.dp, topEnd = 48.dp, bottomEnd = 24.dp, bottomStart = 48.dp)
+val DiamondExpressiveShape = RoundedCornerShape(topStart = 48.dp, topEnd = 24.dp, bottomEnd = 48.dp, bottomStart = 24.dp)
+val OvalExpressiveShape = RoundedCornerShape(topStart = 80.dp, topEnd = 80.dp, bottomEnd = 20.dp, bottomStart = 20.dp)
+
+/**
  * Applies a morphing effect to the shape based on interaction.
  */
 @Composable

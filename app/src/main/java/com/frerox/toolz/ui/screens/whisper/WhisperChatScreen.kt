@@ -262,16 +262,6 @@ fun WhisperChatScreen(
                                 }
                             }
                         } else {
-                            val status = uiState.friendStatus
-                            if (status == FriendStatus.ACCEPTED) {
-                                Icon(
-                                    Icons.Rounded.VerifiedUser,
-                                    contentDescription = stringResource(R.string.st_Whisper_Friends_Accept),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-
                             // Search button
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()

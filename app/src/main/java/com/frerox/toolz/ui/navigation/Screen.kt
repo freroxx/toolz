@@ -133,6 +133,7 @@ sealed class Screen(val route: String) {
     object FileCleaner : Screen("file_cleaner")
 
     // Whisper — Privacy Messaging
+    object WhisperOnboarding : Screen("whisper_onboarding")
     object WhisperAuth : Screen("whisper_auth")
     object Whisper : Screen("whisper")
     object WhisperChat : Screen("whisper_chat/{otherUserId}") {

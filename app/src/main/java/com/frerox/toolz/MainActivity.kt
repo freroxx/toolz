@@ -113,6 +113,7 @@ import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
 import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
 import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
 import com.frerox.toolz.ui.screens.whisper.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.ui.components.MarkdownContent
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
@@ -1233,30 +1234,62 @@ fun ToolzNavHost(
                 }
             )
         }
-        composable(Screen.WhisperAuth.route) {
-            WhisperAuthScreen(
-                onAuthenticated = {
+        composable(Screen.WhisperOnboarding.route) {
+            WhisperOnboardingScreen(
+                onComplete = {
                     navController.navigate(Screen.Whisper.route) {
-                        popUpTo(Screen.WhisperAuth.route) { inclusive = true }
-                    }
-                },
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-        composable(Screen.Whisper.route) {
-            WhisperMainScreen(
-                onNavigateToChat = { otherUserId ->
-                    navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
-                },
-                onNavigateToProfile = { userId ->
-                    navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
-                },
-                onLoggedOut = {
-                    navController.navigate(Screen.WhisperAuth.route) {
-                        popUpTo(Screen.Whisper.route) { inclusive = true }
+                        popUpTo(Screen.WhisperOnboarding.route) { inclusive = true }
                     }
                 }
             )
+        }
+        composable(Screen.WhisperAuth.route) {
+            val whisperViewModel: WhisperViewModel = hiltViewModel()
+            val onboardingShown by whisperViewModel.onboardingShown.collectAsStateWithLifecycle()
+            
+            LaunchedEffect(onboardingShown) {
+                if (onboardingShown == false) {
+                    navController.navigate(Screen.WhisperOnboarding.route)
+                }
+            }
+
+            if (onboardingShown == true) {
+                WhisperAuthScreen(
+                    onAuthenticated = {
+                        navController.navigate(Screen.Whisper.route) {
+                            popUpTo(Screen.WhisperAuth.route) { inclusive = true }
+                        }
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+        }
+        composable(Screen.Whisper.route) {
+            val whisperViewModel: WhisperViewModel = hiltViewModel()
+            val onboardingShown by whisperViewModel.onboardingShown.collectAsStateWithLifecycle()
+
+            LaunchedEffect(onboardingShown) {
+                if (onboardingShown == false) {
+                    navController.navigate(Screen.WhisperOnboarding.route)
+                }
+            }
+
+            if (onboardingShown == true) {
+                WhisperMainScreen(
+                    onNavigateToChat = { otherUserId ->
+                        navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
+                    },
+                    onNavigateToProfile = { userId ->
+                        navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
+                    },
+                    onLoggedOut = {
+                        navController.navigate(Screen.WhisperAuth.route) {
+                            popUpTo(Screen.Whisper.route) { inclusive = true }
+                        }
+                    },
+                    viewModel = whisperViewModel
+                )
+            }
         }
         composable(Screen.WhisperChat.route) {
             WhisperChatScreen(

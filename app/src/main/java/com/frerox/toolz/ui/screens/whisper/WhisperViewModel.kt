@@ -6,6 +6,7 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -27,10 +28,36 @@ class WhisperViewModel @Inject constructor(
     private val notificationManager: WhisperNotificationManager,
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WhisperUiState())
     val uiState: StateFlow<WhisperUiState> = _uiState.asStateFlow()
+
+    val betaWarningShown: StateFlow<Boolean> = settingsRepository.whisperBetaWarningShown
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val onboardingShown: StateFlow<Boolean?> = settingsRepository.whisperOnboardingShown
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun markBetaWarningAsShown() {
+        viewModelScope.launch {
+            settingsRepository.setWhisperBetaWarningShown(true)
+        }
+    }
+
+    fun markOnboardingAsShown(onDone: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            settingsRepository.setWhisperOnboardingShown(true)
+            onDone?.invoke()
+        }
+    }
+
+    fun resetOnboarding() {
+        viewModelScope.launch {
+            settingsRepository.setWhisperOnboardingShown(false)
+        }
+    }
 
     private val _pickPhotoTrigger = MutableStateFlow(0)
     val pickPhotoTrigger: StateFlow<Int> = _pickPhotoTrigger.asStateFlow()

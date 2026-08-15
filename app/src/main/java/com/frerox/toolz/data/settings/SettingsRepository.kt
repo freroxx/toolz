@@ -346,6 +346,8 @@ class SettingsRepository @Inject constructor(
     private val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
     private val APP_LANGUAGE = stringPreferencesKey("app_language")
     private val CATALOG_ONBOARDING_COMPLETED = booleanPreferencesKey("catalog_onboarding_completed")
+    private val WHISPER_BETA_WARNING_SHOWN = booleanPreferencesKey("whisper_beta_warning_shown")
+    private val WHISPER_ONBOARDING_SHOWN = booleanPreferencesKey("whisper_onboarding_shown")
     private val SHOW_CATALOG_BETA_CARD = booleanPreferencesKey("show_catalog_beta_card")
     private val ACTIVE_DOWNLOAD_JSON = stringPreferencesKey("active_download_json")
 
@@ -718,6 +720,8 @@ class SettingsRepository @Inject constructor(
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
     val appLanguage: Flow<String> = dataStore.data.map { it[APP_LANGUAGE] ?: "en" }
     val catalogOnboardingCompleted: Flow<Boolean> = dataStore.data.map { it[CATALOG_ONBOARDING_COMPLETED] ?: false }
+    val whisperBetaWarningShown: Flow<Boolean> = dataStore.data.map { it[WHISPER_BETA_WARNING_SHOWN] ?: false }
+    val whisperOnboardingShown: Flow<Boolean> = dataStore.data.map { it[WHISPER_ONBOARDING_SHOWN] ?: false }
     val showCatalogBetaCard: Flow<Boolean> = dataStore.data.map { it[SHOW_CATALOG_BETA_CARD] ?: true }
     val activeDownloadJson: Flow<String?> = dataStore.data.map { it[ACTIVE_DOWNLOAD_JSON] }
 
@@ -1020,6 +1024,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setOnboardingCompleted(completed: Boolean) { dataStore.edit { it[ONBOARDING_COMPLETED] = completed } }
     suspend fun setAppLanguage(lang: String) { dataStore.edit { it[APP_LANGUAGE] = lang } }
     suspend fun setCatalogOnboardingCompleted(completed: Boolean) { dataStore.edit { it[CATALOG_ONBOARDING_COMPLETED] = completed } }
+    suspend fun setWhisperBetaWarningShown(shown: Boolean) { dataStore.edit { it[WHISPER_BETA_WARNING_SHOWN] = shown } }
+    suspend fun setWhisperOnboardingShown(shown: Boolean) { dataStore.edit { it[WHISPER_ONBOARDING_SHOWN] = shown } }
     suspend fun setShowCatalogBetaCard(show: Boolean) { dataStore.edit { it[SHOW_CATALOG_BETA_CARD] = show } }
     suspend fun setActiveDownloadJson(json: String?) {
         dataStore.edit {

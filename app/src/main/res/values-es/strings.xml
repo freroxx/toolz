@@ -81,7 +81,9 @@
 
     <!-- Whisper Tool Strings -->
     <string name="st_Whisper_Title">Whisper</string>
-    <string name="st_Whisper_Auth_Subtitle">Mensajería enfocada en privacidad y confianza.</string>
+    <string name="st_Whisper_Auth_Headline">Mensajería Segura</string>
+    <string name="st_Whisper_Auth_Subtitle">Mensajería centrada en la privacidad, diseñada para la confianza.</string>
+    <string name="st_Whisper_Auth_Mode_Email">Correo electrónico</string>
     <string name="st_Whisper_Auth_Mode_Login">Iniciar sesión</string>
     <string name="st_Whisper_Auth_Mode_Register">Registrarse</string>
     <string name="st_Whisper_Auth_Mode_Token">Token</string>
@@ -91,15 +93,21 @@
     <string name="st_Whisper_Auth_PasswordsDoNotMatch">Las contraseñas no coinciden</string>
     <string name="st_Whisper_Auth_SignIn">Iniciar sesión</string>
     <string name="st_Whisper_Auth_CreateAccount">Crear cuenta</string>
+    <string name="st_Whisper_Auth_PasswordWeak">Débil</string>
+    <string name="st_Whisper_Auth_PasswordMedium">Media</string>
+    <string name="st_Whisper_Auth_PasswordStrong">Fuerte</string>
     <string name="st_Whisper_Auth_ZeroKnowledgeTitle">Autenticación de conocimiento cero</string>
-    <string name="st_Whisper_Auth_ZeroKnowledgeDesc">Tu token se procesa antes de llegar al servidor. Sin correo ni datos personales.</string>
+    <string name="st_Whisper_Auth_ZeroKnowledgeDesc">Tu token se procesa antes de llegar al servidor. Sin correos ni información personal.</string>
     <string name="st_Whisper_Auth_NewAccount">Nueva cuenta</string>
     <string name="st_Whisper_Auth_IHaveAToken">Tengo un token</string>
     <string name="st_Whisper_Auth_PasteToken">Pega tu token de 64 caracteres</string>
+    <string name="st_Whisper_Auth_TokenInvalidChars">El token contiene caracteres no válidos</string>
     <string name="st_Whisper_Auth_GenerateMyToken">Generar mi token</string>
     <string name="st_Whisper_Auth_YourToken">Tu token</string>
     <string name="st_Whisper_Auth_SaveTokenWarning">¡Guarda este token! No se puede recuperar.</string>
-    <string name="st_Whisper_Auth_Phase2Note">Cifrado de extremo a extremo próximamente. Tus mensajes están protegidos por RLS de Supabase.</string>
+    <string name="st_Whisper_Auth_CopyToContinue">Copia el token para continuar</string>
+    <string name="st_Whisper_Auth_ChooseDisplayName">Elige un nombre visible</string>
+    <string name="st_Whisper_Auth_Phase2Note">Cifrado de extremo a extremo próximamente en la Fase 2. Tus mensajes están protegidos por RLS de Supabase.</string>
     <string name="st_Whisper_Tab_Chats">Chats</string>
     <string name="st_Whisper_Tab_Friends">Amigos</string>
     <string name="st_Whisper_Tab_Discover">Descubrir</string>
@@ -131,15 +139,44 @@
     <string name="st_Whisper_Profile_SaveChanges">Guardar cambios</string>
     <string name="st_Whisper_Profile_LogOut">Cerrar sesión</string>
     <string name="st_Whisper_Profile_LogOutTitle">¿Cerrar sesión?</string>
-    <string name="st_Whisper_Profile_LogOutDesc">Necesitarás tus credenciales o token para volver a ingresar.</string>
+    <string name="st_Whisper_Profile_LogOutDesc">Necesitarás tus credenciales o token para volver a entrar.</string>
     <string name="st_Whisper_Chat_FriendGateSent">Solicitud enviada — esperando respuesta. Podrán chatear cuando la acepte.</string>
-    <string name="st_Whisper_Chat_FriendGateReceived">Tienes una solicitud pendiente. Acéptala en la pestaña Amigos para responder.</string>
-    <string name="st_Whisper_Chat_FriendGateNone">Envía una solicitud de amistad para chatear.</string>
+    <string name="st_Whisper_Chat_FriendGateReceived">Tienes una solicitud pendiente de esta persona. Acéptala en la pestaña Amigos para responder.</string>
+    <string name="st_Whisper_Chat_FriendGateNone">Envía una solicitud de amistad para chatear. Podrán leer tu mensaje cuando sean amigos.</string>
     <string name="st_Whisper_Chat_FriendGateBlocked">Estás bloqueado o no puedes enviar mensajes a este usuario.</string>
     <string name="st_Whisper_Chat_AddFriend">Añadir amigo</string>
     <string name="st_Whisper_Chat_InputPlaceholder">Mensaje…</string>
     <string name="st_Whisper_Chat_InputPlaceholderDisabled">Hazte amigo para responder</string>
     <string name="st_Whisper_Chat_Yesterday">Ayer</string>
+    <string name="st_Whisper_Beta_Badge">BETA</string>
+    <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
+    <string name="st_Whisper_Beta_Warning_Desc">Whisper es una herramienta cifrada experimental. Estás participando en un programa de acceso anticipado y podrías encontrar errores o problemas de rendimiento. ¡Comparte tus comentarios para ayudarnos a mejorar!</string>
+    <string name="st_Whisper_Beta_Warning_Confirm">Entiendo</string>
+    <!-- Whisper: Onboarding -->
+    <string name="st_Whisper_Onboarding_Title1">Chatea libremente</string>
+    <string name="st_Whisper_Onboarding_Desc1">Privacidad que simplemente funciona. Sin rastreadores, sin recolección de datos, una herramienta centrada en la privacidad solo para ti y tus amigos.</string>
+    <string name="st_Whisper_Onboarding_Title2">Encuentra a tu gente</string>
+    <string name="st_Whisper_Onboarding_Desc2">Conéctate sin el ruido. Descubre amigos a través de círculos mutuos sin compartir tus contactos o número de teléfono.</string>
+    <string name="st_Whisper_Onboarding_Title3">Seguro</string>
+    <string name="st_Whisper_Onboarding_Desc3">Cifrado inquebrantable. Tus mensajes se bloquean con llaves P-256 que nunca salen de tu teléfono.</string>
+    <string name="st_Whisper_Onboarding_Title4">Eres dueño de tu identidad</string>
+    <string name="st_Whisper_Onboarding_Desc4">Sin contraseñas, sin filtraciones. Tú eres tu propia llave. Con la autenticación por Token obtienes tokens generados localmente, lo que significa que no tenemos nada que perder y tú no tienes nada de qué preocuparte.</string>
+    <string name="st_Whisper_Onboarding_GetStarted">Comienza tu viaje</string>
+    <string name="st_Whisper_Onboarding_Next">Continuar</string>
+    <!-- Whisper: Auth - Registration -->
+    <string name="st_Whisper_Auth_ChooseUsername">\@ Nombre de usuario</string>
+    <string name="st_Whisper_Auth_UsernameAvailable">Disponible ✓</string>
+    <string name="st_Whisper_Auth_UsernameTaken">El nombre de usuario ya está en uso</string>
+    <string name="st_Whisper_Auth_UsernameInvalid">3–20 caracteres, solo letras/números/_</string>
+    <string name="st_Whisper_Auth_UsernameChecking">Comprobando…</string>
+    <string name="st_Whisper_Auth_DisplayName">Nombre visible</string>
+    <!-- Whisper: Profile -->
+    <string name="st_Whisper_Profile_UsernameCannotChange">Elegido al registrarse · No se puede cambiar</string>
+    <string name="st_Whisper_Profile_RemoveFriend">Eliminar amigo</string>
+    <string name="st_Whisper_Profile_NotFound">Perfil no encontrado</string>
+    <string name="st_Whisper_Profile_E2EEBadge">Cifrado E2E</string>
+    <!-- Whisper: Chat -->
+    <string name="st_Whisper_Chat_DecryptionFailed">⚠ El mensaje no pudo ser descifrado</string>
     <string name="st_Tool_Calendar">Calendario</string>
     <string name="st_Tool_Calendar_Desc">Agenda</string>
     <string name="st_Tool_Timer">Temporizador</string>
