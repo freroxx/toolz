@@ -135,11 +135,11 @@ fun ToolzOutlinedExpressiveButton(
     shape: Shape? = null,
     border: BorderStroke? = ButtonDefaults.outlinedButtonBorder(enabled),
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
     content: @Composable RowScope.() -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
     val currentOnClick by rememberUpdatedState(onClick)
-    val interactionSource = remember { MutableInteractionSource() }
 
     OutlinedButton(
         onClick = {

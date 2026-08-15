@@ -19,12 +19,15 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -44,21 +47,17 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.input.pointer.pointerInput
-import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -1270,23 +1269,21 @@ private fun ProfileTab(
         }
 
         // Logout
+        val logoutInteractionSource = remember { MutableInteractionSource() }
+        val isLogoutPressed by logoutInteractionSource.collectIsPressedAsState()
+
+        LaunchedEffect(isLogoutPressed) {
+            if (isLogoutPressed) {
+                delay(3000.milliseconds)
+                haptic.success()
+                viewModel.resetOnboarding()
+            }
+        }
+
         ToolzOutlinedExpressiveButton(
             onClick = { haptic.click(); showLogoutDialog = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown()
-                        val job = scope.launch {
-                            delay(3000.milliseconds)
-                            haptic.success()
-                            viewModel.resetOnboarding()
-                        }
-                        waitForUpOrCancellation()
-                        job.cancel()
-                    }
-                },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            interactionSource = logoutInteractionSource,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) {
             Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
