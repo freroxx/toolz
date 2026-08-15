@@ -101,21 +101,38 @@ fun ScannerScreen(
 
     var scanResult by remember { mutableStateOf("") }
     var isFlashOn by remember { mutableStateOf(false) }
+    var isScanningInitialImage by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialImageUri) {
         if (!initialImageUri.isNullOrEmpty()) {
+            isScanningInitialImage = true
             try {
                 val uri = android.net.Uri.parse(initialImageUri)
                 val image = com.google.mlkit.vision.common.InputImage.fromFilePath(context, uri)
-                val scanner = BarcodeScanning.getClient()
+                val options = BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                    .build()
+                val scanner = BarcodeScanning.getClient(options)
+                
                 scanner.process(image)
                     .addOnSuccessListener { barcodes ->
                         if (barcodes.isNotEmpty()) {
-                            scanResult = barcodes[0].rawValue ?: ""
+                            val result = barcodes[0].rawValue ?: ""
+                            if (result.isNotEmpty()) {
+                                scanResult = result
+                            }
+                        } else {
+                            android.widget.Toast.makeText(context, "No QR code detected in image", android.widget.Toast.LENGTH_LONG).show()
                         }
+                        isScanningInitialImage = false
+                    }
+                    .addOnFailureListener { e ->
+                        android.widget.Toast.makeText(context, "Failed to scan image: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        isScanningInitialImage = false
                     }
             } catch (e: Exception) {
                 e.printStackTrace()
+                isScanningInitialImage = false
             }
         }
     }
@@ -205,6 +222,15 @@ fun ScannerScreen(
                 )
 
                 ScannerOverlay(performanceMode)
+
+                if (isScanningInitialImage) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
 
                 AnimatedVisibility(
                     visible = scanResult.isNotEmpty(),

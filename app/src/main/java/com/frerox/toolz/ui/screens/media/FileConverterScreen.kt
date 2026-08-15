@@ -92,9 +92,15 @@ fun FileConverterScreen(
     val hapticEnabled    = LocalHapticEnabled.current
     val performanceMode  = LocalPerformanceMode.current
 
+    var highQuality         by remember { mutableStateOf(true) }
+    var showFormatSheet     by remember { mutableStateOf(false) }
+    var showAllFormatsSheet by remember { mutableStateOf(false) }
+    var showInfoSheet       by remember { mutableStateOf(false) }
+
     LaunchedEffect(initialUri, initialUris) {
         if (initialUri != null) {
             viewModel.onFilesSelected(listOf(initialUri))
+            showFormatSheet = true
         } else if (!initialUris.isNullOrEmpty()) {
             try {
                 val uris = initialUris.split(",").map { android.net.Uri.parse(it) }
@@ -102,21 +108,11 @@ fun FileConverterScreen(
                 if (uris.size > 1) {
                     viewModel.switchMode(ConversionMode.BATCH)
                 }
+                // Always show format sheet for auto-opened files
+                showFormatSheet = true
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        }
-    }
-
-    var highQuality         by remember { mutableStateOf(true) }
-    var showFormatSheet     by remember { mutableStateOf(false) }
-    var showAllFormatsSheet by remember { mutableStateOf(false) }
-    var showInfoSheet       by remember { mutableStateOf(false) }
-
-    // Handle incoming URI from deep-link / share intent
-    LaunchedEffect(initialUri) {
-        if (initialUri != null && uiState.selectedFiles.isEmpty()) {
-            viewModel.onFilesSelected(listOf(initialUri))
         }
     }
 

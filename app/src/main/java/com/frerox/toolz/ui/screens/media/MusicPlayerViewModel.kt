@@ -1125,31 +1125,40 @@ class MusicPlayerViewModel @Inject constructor(
         }
         hapticClick()
 
-        var displayTitle = title ?: "External Audio"
-        if (title == null) {
-            runCatching {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (idx != -1 && cursor.moveToFirst()) displayTitle = cursor.getString(idx)
+        viewModelScope.launch {
+            var displayTitle = title ?: "External Audio"
+            if (title == null) {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx != -1 && cursor.moveToFirst()) displayTitle = cursor.getString(idx)
+                        }
+                    }
                 }
             }
+
+            val metaBuilder = MediaMetadata.Builder()
+                .setTitle(displayTitle).setDisplayTitle(displayTitle)
+                .setArtist(artist ?: "Unknown Artist")
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
+            thumbUrl?.let { metaBuilder.setArtworkUri(Uri.parse(it)) }
+            sourceUrl?.let {
+                metaBuilder.setExtras(android.os.Bundle().apply { putString("source_url", it) })
+            }
+
+            val item = MediaItem.Builder()
+                .setMediaId(uri.toString()).setUri(uri)
+                .setMediaMetadata(metaBuilder.build()).build()
+
+            withContext(Dispatchers.Main) {
+                val p: Player = controller ?: player
+                p.stop()
+                p.setMediaItem(item)
+                p.prepare()
+                p.play()
+            }
         }
-
-        val metaBuilder = MediaMetadata.Builder()
-            .setTitle(displayTitle).setDisplayTitle(displayTitle)
-            .setArtist(artist ?: "Unknown Artist")
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
-        thumbUrl?.let { metaBuilder.setArtworkUri(Uri.parse(it)) }
-        sourceUrl?.let {
-            metaBuilder.setExtras(android.os.Bundle().apply { putString("source_url", it) })
-        }
-
-        val item = MediaItem.Builder()
-            .setMediaId(uri.toString()).setUri(uri)
-            .setMediaMetadata(metaBuilder.build()).build()
-
-        val p: Player = controller ?: player
-        p.stop(); p.setMediaItem(item); p.prepare(); p.play()
     }
 
     fun addToQueue(track: MusicTrack) {

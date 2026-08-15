@@ -512,6 +512,7 @@ object CryptoManager {
         totalSize: Long,
         onProgress: (Float) -> Unit
     ): Boolean {
+        var cipherInputStream: CipherInputStream? = null
         return try {
             onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE)
@@ -526,23 +527,41 @@ object CryptoManager {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
-            CipherInputStream(countingInput, cipher).use { cipherInputStream ->
-                val buffer = ByteArray(64 * 1024)
-                var bytesRead: Int
+            cipherInputStream = CipherInputStream(countingInput, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
 
-                while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+            while (true) {
+                try {
+                    bytesRead = cipherInputStream.read(buffer)
+                    if (bytesRead == -1) break
                     output.write(buffer, 0, bytesRead)
                     if (totalSize > 0) {
-                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                        // Use countingInput.bytesRead for more accurate progress of the encrypted stream
+                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 0.99f))
                     }
+                } catch (e: Exception) {
+                    if (e is AEADBadTagException || e.cause is AEADBadTagException) {
+                        throw Exception("AUTH_FAILURE")
+                    }
+                    throw e
                 }
-                output.flush()
             }
+            
+            // Closing might throw AEADBadTagException if it hasn't been thrown yet
+            try {
+                cipherInputStream.close()
+            } catch (e: Exception) {
+                if (e is AEADBadTagException || e.cause is AEADBadTagException) {
+                    throw Exception("AUTH_FAILURE")
+                }
+                throw e
+            }
+            
             onProgress(1f)
             true
-        } catch (e: AEADBadTagException) {
-            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
+            if (e.message == "AUTH_FAILURE") throw e
             e.printStackTrace()
             false
         }
@@ -603,6 +622,7 @@ object CryptoManager {
         totalSize: Long,
         onProgress: (Float) -> Unit
     ): Boolean {
+        var cipherInputStream: CipherInputStream? = null
         return try {
             onProgress(0.01f)
             val salt = ByteArray(SALT_SIZE)
@@ -617,23 +637,39 @@ object CryptoManager {
             val cipher = Cipher.getInstance("ChaCha20-Poly1305/None/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(nonce))
 
-            CipherInputStream(countingInput, cipher).use { cipherInputStream ->
-                val buffer = ByteArray(64 * 1024)
-                var bytesRead: Int
+            cipherInputStream = CipherInputStream(countingInput, cipher)
+            val buffer = ByteArray(64 * 1024)
+            var bytesRead: Int
 
-                while (cipherInputStream.read(buffer).also { bytesRead = it } != -1) {
+            while (true) {
+                try {
+                    bytesRead = cipherInputStream.read(buffer)
+                    if (bytesRead == -1) break
                     output.write(buffer, 0, bytesRead)
                     if (totalSize > 0) {
-                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 1f))
+                        onProgress((countingInput.bytesRead.toFloat() / totalSize).coerceIn(0.01f, 0.99f))
                     }
+                } catch (e: Exception) {
+                    if (e is AEADBadTagException || e.cause is AEADBadTagException) {
+                        throw Exception("AUTH_FAILURE")
+                    }
+                    throw e
                 }
-                output.flush()
             }
+
+            try {
+                cipherInputStream.close()
+            } catch (e: Exception) {
+                if (e is AEADBadTagException || e.cause is AEADBadTagException) {
+                    throw Exception("AUTH_FAILURE")
+                }
+                throw e
+            }
+
             onProgress(1f)
             true
-        } catch (e: AEADBadTagException) {
-            throw Exception("AUTH_FAILURE")
         } catch (e: Exception) {
+            if (e.message == "AUTH_FAILURE") throw e
             e.printStackTrace()
             false
         }

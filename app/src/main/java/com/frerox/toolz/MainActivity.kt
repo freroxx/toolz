@@ -463,6 +463,18 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     }
 
     private fun isQuickOpenIntent(intent: Intent): Boolean {
+        val componentName = intent.component?.className ?: ""
+        if (componentName.endsWith(".MusicPlayer") ||
+            componentName.endsWith(".PdfViewer") ||
+            componentName.endsWith(".FileConverter") ||
+            componentName.endsWith(".BackgroundRemover") ||
+            componentName.endsWith(".QrScanner") ||
+            componentName.endsWith(".BackupRestore") ||
+            componentName.endsWith(".Encrypter") ||
+            componentName.endsWith(".Decrypter")) {
+            return true
+        }
+
         // PDF View/Send
         if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_SEND) {
             val uri = if (intent.action == Intent.ACTION_SEND) {
@@ -721,7 +733,10 @@ fun ToolzNavHost(
     LaunchedEffect(incomingIntentVersion) {
         val latestIntent = incomingIntent ?: return@LaunchedEffect
         
-        // Handle Whisper Chat Deep Link
+        // 1. Resolve route first (handles aliases specifically)
+        val resolvedRoute = resolveExternalNavigationRoute(latestIntent)
+        
+        // 2. Handle Whisper Chat Deep Link
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_CHAT") {
             val otherUserId = latestIntent.getStringExtra("otherUserId")
             if (otherUserId != null) {
@@ -730,14 +745,12 @@ fun ToolzNavHost(
             }
         }
 
-        // Handle PDF View/Send Intent explicitly
-        if (latestIntent.action == Intent.ACTION_VIEW || latestIntent.action == Intent.ACTION_SEND) {
-            val uri = if (latestIntent.action == Intent.ACTION_SEND) {
-                IntentCompat.getParcelableExtra(latestIntent, Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                latestIntent.data
-            }
-
+        // 3. Handle PDF if NOT handled by a specific alias already
+        // (If resolvedRoute is PdfReader, we'll handle it here to call openPdf)
+        if (resolvedRoute == Screen.PdfReader.route || 
+            (resolvedRoute == null && (latestIntent.action == Intent.ACTION_VIEW || latestIntent.action == Intent.ACTION_SEND))) {
+            
+            val uri = getUriFromIntent(latestIntent)
             if (uri != null) {
                 val mimeType = context.contentResolver.getType(uri)
                 val isPdf = latestIntent.type == "application/pdf" ||
@@ -762,7 +775,7 @@ fun ToolzNavHost(
             }
         }
 
-        pendingExternalRoute = resolveExternalNavigationRoute(latestIntent)
+        pendingExternalRoute = resolvedRoute
     }
 
     LaunchedEffect(pendingExternalRoute, onboardingCompleted, currentRoute) {
