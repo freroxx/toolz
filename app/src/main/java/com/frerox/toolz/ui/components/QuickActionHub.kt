@@ -64,7 +64,7 @@ fun QuickActionHub(
                 ToolzExpressiveIconButton(
                     onClick = { 
                         vibrationManager?.vibrateClick()
-                        onNavigate(Screen.AiAssistant.route) 
+                        onNavigate(Screen.AiAssistant.createRoute()) 
                     },
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer

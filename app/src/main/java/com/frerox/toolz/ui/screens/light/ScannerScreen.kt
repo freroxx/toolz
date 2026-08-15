@@ -104,7 +104,7 @@ fun ScannerScreen(
     var isScanningInitialImage by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialImageUri) {
-        if (!initialImageUri.isNullOrEmpty()) {
+        if (!initialImageUri.isNullOrEmpty() && initialImageUri != "{initialImageUri}") {
             isScanningInitialImage = true
             try {
                 val uri = android.net.Uri.parse(initialImageUri)

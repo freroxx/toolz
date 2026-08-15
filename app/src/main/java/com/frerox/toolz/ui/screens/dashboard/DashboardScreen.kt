@@ -243,7 +243,7 @@ fun DashboardScreen(
             aiResponse          = aiResponse,
             aiSuggestedRoutes   = aiRoutes,
             onSearchChange      = viewModel::updateSearchQuery,
-            onTransferToAi      = { viewModel.transferToAiAssistant { onNavigate(Screen.AiAssistant.route + "?chatId=$it") } },
+            onTransferToAi      = { viewModel.transferToAiAssistant { onNavigate(Screen.AiAssistant.createRoute(chatId = it)) } },
             updateVersion       = updateVersion,
             onDismissUpdate     = viewModel::dismissUpdate,
             notes               = notes,

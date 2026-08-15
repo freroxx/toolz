@@ -465,7 +465,7 @@ class DashboardViewModel @Inject constructor(
         ToolCategory(
             com.frerox.toolz.R.string.st_Dashboard_Cat_SmartFlow,
             listOf(
-                ToolItem(com.frerox.toolz.R.string.st_Tool_AiAssistant, Icons.Rounded.AutoAwesome, Screen.AiAssistant.route, com.frerox.toolz.R.string.st_Tool_AiAssistant_Desc, Color(0xFF8E24AA)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_AiAssistant, Icons.Rounded.AutoAwesome, Screen.AiAssistant.createRoute(), com.frerox.toolz.R.string.st_Tool_AiAssistant_Desc, Color(0xFF8E24AA)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Whisper, Icons.AutoMirrored.Rounded.Chat, Screen.Whisper.route, com.frerox.toolz.R.string.st_Tool_Whisper_Desc, Color(0xFF00B0FF)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Search, Icons.Rounded.Search, Screen.Search.route, com.frerox.toolz.R.string.st_Tool_Search_Desc, Color(0xFF3F51B5)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_FocusFlow, Icons.Rounded.Toll, Screen.FocusFlow.route, com.frerox.toolz.R.string.st_Tool_FocusFlow_Desc, Color(0xFF1976D2)),
@@ -486,11 +486,11 @@ class DashboardViewModel @Inject constructor(
         ToolCategory(
             com.frerox.toolz.R.string.st_Dashboard_Cat_Media,
             listOf(
-                ToolItem(com.frerox.toolz.R.string.st_Tool_MusicPlayer, Icons.Rounded.MusicNote, Screen.MusicPlayer.route, com.frerox.toolz.R.string.st_Tool_MusicPlayer_Desc, Color(0xFFD81B60)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_MusicPlayer, Icons.Rounded.MusicNote, Screen.MusicPlayer.createRoute(0), com.frerox.toolz.R.string.st_Tool_MusicPlayer_Desc, Color(0xFFD81B60)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_VoiceRecorder, Icons.Rounded.Mic, Screen.VoiceRecorder.route, com.frerox.toolz.R.string.st_Tool_VoiceRecorder_Desc, Color(0xFFE53935)),
-                ToolItem(com.frerox.toolz.R.string.st_Tool_FileConverter, Icons.Rounded.Transform, Screen.FileConverter.route, com.frerox.toolz.R.string.st_Tool_FileConverter_Desc, Color(0xFFFB8C00)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_FileConverter, Icons.Rounded.Transform, Screen.FileConverter.createRoute(), com.frerox.toolz.R.string.st_Tool_FileConverter_Desc, Color(0xFFFB8C00)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_SoundMeter, Icons.Rounded.GraphicEq, Screen.SoundMeter.route, com.frerox.toolz.R.string.st_Tool_SoundMeter_Desc, Color(0xFF00B0FF)),
-                ToolItem(com.frerox.toolz.R.string.st_Tool_BackgroundRemover, Icons.Rounded.Portrait, Screen.BackgroundRemover.route, com.frerox.toolz.R.string.st_Tool_BackgroundRemover_Desc, Color(0xFF673AB7)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_BackgroundRemover, Icons.Rounded.Portrait, Screen.BackgroundRemover.createRoute(), com.frerox.toolz.R.string.st_Tool_BackgroundRemover_Desc, Color(0xFF673AB7)),
             ),
         ),
         ToolCategory(
@@ -498,7 +498,7 @@ class DashboardViewModel @Inject constructor(
             listOf(
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Calculator, Icons.Rounded.Calculate, Screen.Calculator.route, com.frerox.toolz.R.string.st_Tool_Calculator_Desc, Color(0xFF00ACC1)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_UnitConverter, Icons.Rounded.SyncAlt, Screen.UnitConverter.route, com.frerox.toolz.R.string.st_Tool_UnitConverter_Desc, Color(0xFF3949AB)),
-                ToolItem(com.frerox.toolz.R.string.st_Tool_Encrypter, Icons.Rounded.EnhancedEncryption, Screen.SmartEncrypter.route, com.frerox.toolz.R.string.st_Tool_Encrypter_Desc, Color(0xFF2E7D32)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_Encrypter, Icons.Rounded.EnhancedEncryption, Screen.SmartEncrypter.createRoute(), com.frerox.toolz.R.string.st_Tool_Encrypter_Desc, Color(0xFF2E7D32)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_EquationSolver, Icons.Rounded.Functions, Screen.EquationSolver.route, com.frerox.toolz.R.string.st_Tool_EquationSolver_Desc, Color(0xFF5E35B1)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_PdfReader, Icons.Rounded.PictureAsPdf, Screen.PdfReader.route, com.frerox.toolz.R.string.st_Tool_PdfReader_Desc, Color(0xFFE53935)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_TipCalc, Icons.AutoMirrored.Rounded.ReceiptLong, Screen.TipCalculator.route, com.frerox.toolz.R.string.st_Tool_TipCalc_Desc, Color(0xFFD81B60)),
@@ -509,7 +509,7 @@ class DashboardViewModel @Inject constructor(
         ToolCategory(
             com.frerox.toolz.R.string.st_Dashboard_Cat_Sensors,
             listOf(
-                ToolItem(com.frerox.toolz.R.string.st_Tool_Scanner, Icons.Rounded.QrCodeScanner, Screen.Scanner.route, com.frerox.toolz.R.string.st_Tool_Scanner_Desc, Color(0xFF546E7A)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_Scanner, Icons.Rounded.QrCodeScanner, Screen.Scanner.createRoute(), com.frerox.toolz.R.string.st_Tool_Scanner_Desc, Color(0xFF546E7A)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_QrGenerator, Icons.Rounded.QrCode, Screen.QrGenerator.route, com.frerox.toolz.R.string.st_Tool_QrGenerator_Desc, Color(0xFF26A69A)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Flashlight, Icons.Rounded.FlashlightOn, Screen.Flashlight.route, com.frerox.toolz.R.string.st_Tool_Flashlight_Desc, Color(0xFFFFD600)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_ScreenLight, Icons.Rounded.Laptop, Screen.ScreenLight.route, com.frerox.toolz.R.string.st_Tool_ScreenLight_Desc, Color(0xFF81D4FA)),

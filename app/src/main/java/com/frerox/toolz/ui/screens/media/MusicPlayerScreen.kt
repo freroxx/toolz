@@ -192,7 +192,7 @@ fun MusicPlayerScreen(
     val context = LocalContext.current
 
     LaunchedEffect(initialUri) {
-        if (!initialUri.isNullOrEmpty()) {
+        if (!initialUri.isNullOrEmpty() && initialUri != "{initialUri}") {
             try {
                 viewModel.playUri(android.net.Uri.parse(initialUri))
             } catch (e: Exception) {

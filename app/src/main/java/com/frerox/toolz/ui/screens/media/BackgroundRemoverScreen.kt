@@ -64,7 +64,7 @@ fun BackgroundRemoverScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(initialUri) {
-        if (!initialUri.isNullOrEmpty()) {
+        if (!initialUri.isNullOrEmpty() && initialUri != "{initialUri}") {
             try {
                 viewModel.onImageSelected(android.net.Uri.parse(initialUri))
             } catch (e: Exception) {

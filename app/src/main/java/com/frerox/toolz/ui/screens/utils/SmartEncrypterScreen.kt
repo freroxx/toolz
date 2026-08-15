@@ -106,7 +106,7 @@ fun SmartEncrypterScreen(
     val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(initialUri, mode) {
-        if (!initialUri.isNullOrEmpty()) {
+        if (!initialUri.isNullOrEmpty() && initialUri != "{initialUri}") {
             try {
                 if (!uiState.isFileMode) {
                     viewModel.toggleFileMode()

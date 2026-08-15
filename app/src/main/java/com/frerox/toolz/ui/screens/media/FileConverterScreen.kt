@@ -98,10 +98,10 @@ fun FileConverterScreen(
     var showInfoSheet       by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialUri, initialUris) {
-        if (initialUri != null) {
+        if (initialUri != null && initialUri.toString() != "{uri}") {
             viewModel.onFilesSelected(listOf(initialUri))
             showFormatSheet = true
-        } else if (!initialUris.isNullOrEmpty()) {
+        } else if (!initialUris.isNullOrEmpty() && initialUris != "{initialUris}") {
             try {
                 val uris = initialUris.split(",").map { android.net.Uri.parse(it) }
                 viewModel.onFilesSelected(uris)
