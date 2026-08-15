@@ -32,16 +32,39 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import javax.inject.Inject
+
+/** Which mode the converter is currently in. */
+enum class ConversionMode { SINGLE, BATCH }
 
 @HiltViewModel
 class FileConverterViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(FileConverterUiState())
+    private val prefs = context.getSharedPreferences("file_converter_prefs", Context.MODE_PRIVATE)
+
+    private val _uiState = MutableStateFlow(
+        FileConverterUiState(recentConversions = loadHistory())
+    )
     val uiState: StateFlow<FileConverterUiState> = _uiState.asStateFlow()
+
+    // ── Mode switching ────────────────────────────────────────────────────────
+
+    fun switchMode(mode: ConversionMode) {
+        _uiState.update {
+            it.copy(
+                conversionMode = mode,
+                selectedFiles = emptyList(),
+                batchStagedFiles = emptyList(),
+                conversionType = null,
+                error = null,
+            )
+        }
+    }
 
     // ── File selection ────────────────────────────────────────────────────────
 
@@ -53,13 +76,50 @@ class FileConverterViewModel @Inject constructor(
                 val mime = context.contentResolver.getType(uri) ?: ""
                 FileInfo(uri = uri, name = name, size = size, mimeType = mime)
             }
-            _uiState.update { it.copy(selectedFiles = infos, error = null) }
+            val mode = _uiState.value.conversionMode
+            if (mode == ConversionMode.BATCH) {
+                // In BATCH mode: append to staged list
+                val current = _uiState.value.batchStagedFiles
+                _uiState.update { it.copy(batchStagedFiles = current + infos, error = null) }
+            } else {
+                // In SINGLE mode: replace selection
+                _uiState.update { it.copy(selectedFiles = infos, error = null) }
+            }
+        }
+    }
+
+    fun removeFromBatch(file: FileInfo) {
+        _uiState.update {
+            it.copy(batchStagedFiles = it.batchStagedFiles - file)
         }
     }
 
     fun clearSelection() {
         _uiState.update {
-            it.copy(selectedFiles = emptyList(), conversionType = null, error = null)
+            it.copy(
+                selectedFiles = emptyList(),
+                batchStagedFiles = emptyList(),
+                conversionType = null,
+                error = null,
+            )
+        }
+    }
+
+    fun clearFormatSelection() {
+        _uiState.update {
+            it.copy(
+                selectedFiles = if (it.conversionMode == ConversionMode.BATCH) emptyList() else emptyList(),
+                conversionType = null,
+                error = null,
+            )
+        }
+    }
+
+    fun prepareBatchForConversion() {
+        _uiState.update {
+            it.copy(
+                selectedFiles = it.batchStagedFiles
+            )
         }
     }
 
@@ -72,6 +132,8 @@ class FileConverterViewModel @Inject constructor(
     ) {
         _uiState.update {
             it.copy(
+                selectedFiles     = if (it.conversionMode == ConversionMode.SINGLE) it.selectedFiles
+                                    else it.batchStagedFiles,
                 conversionType    = type,
                 isConverting      = true,
                 conversionSuccess = false,
@@ -80,6 +142,8 @@ class FileConverterViewModel @Inject constructor(
                 queueTotal        = uris.size,
                 outputFiles       = emptyList(),
                 error             = null,
+                lastErrorMessage  = null,
+                filesErrored      = 0,
             )
         }
 
@@ -94,6 +158,16 @@ class FileConverterViewModel @Inject constructor(
         } else {
             context.startService(intent)
         }
+    }
+
+    /** Start batch conversion using all staged files. */
+    fun startBatchConversion(
+        type: ConversionEngine.ConversionType,
+        highQuality: Boolean,
+    ) {
+        val uris = _uiState.value.batchStagedFiles.map { it.uri }
+        if (uris.isEmpty()) return
+        startConversion(uris, type, highQuality)
     }
 
     fun cancelConversion() {
@@ -113,9 +187,8 @@ class FileConverterViewModel @Inject constructor(
 
     fun onConversionSuccess(outputPath: String, queuePos: Int, queueTotal: Int) {
         val updatedOutputs = _uiState.value.outputFiles + outputPath
-        val isComplete = queuePos >= queueTotal
+        val isComplete = queuePos >= queueTotal && _uiState.value.filesErrored + updatedOutputs.size >= queueTotal
 
-        // Add to recent conversions
         val type = _uiState.value.conversionType
         val recent = if (type != null) {
             val entry = RecentConversion(
@@ -124,7 +197,7 @@ class FileConverterViewModel @Inject constructor(
                 extension  = type.extension,
                 category   = type.category,
             )
-            (_uiState.value.recentConversions + entry).takeLast(5)
+            (_uiState.value.recentConversions + entry).takeLast(10)
         } else {
             _uiState.value.recentConversions
         }
@@ -141,11 +214,25 @@ class FileConverterViewModel @Inject constructor(
                 error             = null,
             )
         }
+
+        if (isComplete) saveHistory(recent)
     }
 
-    fun onConversionError(error: String) {
+    fun onConversionError(error: String, queuePos: Int, queueTotal: Int) {
+        val newErrored = _uiState.value.filesErrored + 1
+        val totalDone = _uiState.value.outputFiles.size + newErrored
+        val isComplete = totalDone >= queueTotal
+
         _uiState.update {
-            it.copy(isConverting = false, conversionSuccess = false, error = error, progress = 0)
+            it.copy(
+                isConverting      = !isComplete,
+                conversionSuccess = isComplete && _uiState.value.outputFiles.isNotEmpty(),
+                filesErrored      = newErrored,
+                lastErrorMessage  = error,
+                error             = if (isComplete && _uiState.value.outputFiles.isEmpty()) error else null,
+                queuePos          = queuePos,
+                queueTotal        = queueTotal,
+            )
         }
     }
 
@@ -153,12 +240,59 @@ class FileConverterViewModel @Inject constructor(
 
     fun reset() {
         _uiState.update { current ->
-            FileConverterUiState(recentConversions = current.recentConversions)
+            FileConverterUiState(
+                conversionMode    = current.conversionMode,
+                recentConversions = current.recentConversions,
+            )
         }
     }
 
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun clearHistory() {
+        prefs.edit().remove("recent_conversions").apply()
+        _uiState.update { it.copy(recentConversions = emptyList()) }
+    }
+
+    fun removeHistoryItem(recent: RecentConversion) {
+        val updated = _uiState.value.recentConversions - recent
+        _uiState.update { it.copy(recentConversions = updated) }
+        saveHistory(updated)
+    }
+
+    // ── Persistence ───────────────────────────────────────────────────────────
+
+    private fun saveHistory(history: List<RecentConversion>) {
+        val json = JSONArray()
+        history.forEach { item ->
+            json.put(JSONObject().apply {
+                put("outputPath", item.outputPath)
+                put("label", item.label)
+                put("extension", item.extension)
+                put("category", item.category)
+                put("timestampMs", item.timestampMs)
+            })
+        }
+        prefs.edit().putString("recent_conversions", json.toString()).apply()
+    }
+
+    private fun loadHistory(): List<RecentConversion> {
+        return try {
+            val json = prefs.getString("recent_conversions", null) ?: return emptyList()
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                RecentConversion(
+                    outputPath  = obj.getString("outputPath"),
+                    label       = obj.getString("label"),
+                    extension   = obj.getString("extension"),
+                    category    = obj.getString("category"),
+                    timestampMs = obj.getLong("timestampMs"),
+                )
+            }
+        } catch (_: Exception) { emptyList() }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -189,16 +323,23 @@ class FileConverterViewModel @Inject constructor(
 // ── State models ──────────────────────────────────────────────────────────────
 
 data class FileConverterUiState(
-    val selectedFiles: List<FileInfo>           = emptyList(),
+    val conversionMode: ConversionMode              = ConversionMode.SINGLE,
+    val selectedFiles: List<FileInfo>               = emptyList(),
+    /** Files staged for batch conversion (populated in BATCH mode). */
+    val batchStagedFiles: List<FileInfo>            = emptyList(),
     val conversionType: ConversionEngine.ConversionType? = null,
-    val isConverting: Boolean                   = false,
-    val conversionSuccess: Boolean              = false,
-    val progress: Int                           = 0,
-    val queuePos: Int                           = 1,
-    val queueTotal: Int                         = 1,
-    val outputFiles: List<String>               = emptyList(),
-    val error: String?                          = null,
-    val recentConversions: List<RecentConversion> = emptyList(),
+    val isConverting: Boolean                       = false,
+    val conversionSuccess: Boolean                  = false,
+    val progress: Int                               = 0,
+    val queuePos: Int                               = 1,
+    val queueTotal: Int                             = 1,
+    val outputFiles: List<String>                   = emptyList(),
+    val error: String?                              = null,
+    /** The last error message (used in success+partial-error state). */
+    val lastErrorMessage: String?                   = null,
+    /** How many files in a batch errored. */
+    val filesErrored: Int                           = 0,
+    val recentConversions: List<RecentConversion>   = emptyList(),
 )
 
 data class FileInfo(

@@ -47,10 +47,13 @@ import javax.inject.Inject
  * Accepts a batch of URIs via the intent extra "input_uris" (ArrayList<Uri>).
  * Processes them sequentially and broadcasts per-file and overall progress.
  *
+ * Key improvement: a single file error no longer aborts the whole queue.
+ * The error is broadcast for that file and processing continues.
+ *
  * Broadcast actions:
  *  - COM_FREROX_TOOLZ_CONVERSION_PROGRESS  (extra: "progress" Int, "queue_pos" Int, "queue_total" Int)
  *  - COM_FREROX_TOOLZ_CONVERSION_SUCCESS   (extra: "output_path" String, "queue_pos" Int, "queue_total" Int)
- *  - COM_FREROX_TOOLZ_CONVERSION_ERROR     (extra: "error_message" String)
+ *  - COM_FREROX_TOOLZ_CONVERSION_ERROR     (extra: "error_message" String, "queue_pos" Int, "queue_total" Int)
  */
 @AndroidEntryPoint
 class FileConversionService : Service() {
@@ -89,17 +92,24 @@ class FileConversionService : Service() {
     ) {
         serviceScope.launch {
             val total = uris.size
+            var successCount = 0
+            var errorCount = 0
+
             for ((idx, uri) in uris.withIndex()) {
                 val pos = idx + 1
-                updateNotification("Converting file $pos / $total → .${type.extension.uppercase()}", 0, pos, total)
+                val fileName = resolveFileName(uri)
+                updateNotification(
+                    "[$pos/$total] Converting: $fileName → .${type.extension.uppercase()}",
+                    0, pos, total,
+                )
 
-                conversionEngine.routeConversion(uri, type, highQuality)
+                conversionEngine.routeConversion(uri, type, highQuality, batchIndex = if (total > 1) idx else -1)
                     .onEach { status ->
                         when (status) {
                             is ConversionEngine.ConversionStatus.Progress -> {
                                 val pct = status.percentage
                                 updateNotification(
-                                    "[$pos/$total] Converting → .${type.extension.uppercase()}… ${if (pct > 0) "$pct%" else ""}",
+                                    "[$pos/$total] $fileName → .${type.extension.uppercase()}${if (pct > 0) " ($pct%)" else ""}",
                                     pct, pos, total,
                                 )
                                 broadcast("COM_FREROX_TOOLZ_CONVERSION_PROGRESS") {
@@ -109,9 +119,12 @@ class FileConversionService : Service() {
                                 }
                             }
                             is ConversionEngine.ConversionStatus.Success -> {
+                                successCount++
                                 val isLast = pos == total
                                 updateNotification(
-                                    if (isLast) "Conversion complete! ✓" else "File $pos done, continuing…",
+                                    if (isLast && errorCount == 0) "✓ All $total file(s) converted!"
+                                    else if (isLast) "Done! $successCount ok, $errorCount failed"
+                                    else "[$pos/$total] Done, continuing…",
                                     100, pos, total, finished = isLast,
                                 )
                                 broadcast("COM_FREROX_TOOLZ_CONVERSION_SUCCESS") {
@@ -121,16 +134,18 @@ class FileConversionService : Service() {
                                 }
                             }
                             is ConversionEngine.ConversionStatus.Error -> {
-                                updateNotification("Error: ${status.message}", 0, pos, total, finished = true)
+                                errorCount++
+                                // Do NOT stop queue — broadcast error and continue
+                                val isLast = pos == total
+                                updateNotification(
+                                    "[$pos/$total] Error: ${status.message}",
+                                    0, pos, total, finished = isLast,
+                                )
                                 broadcast("COM_FREROX_TOOLZ_CONVERSION_ERROR") {
                                     putExtra("error_message", status.message)
                                     putExtra("queue_pos", pos)
                                     putExtra("queue_total", total)
                                 }
-                                // Stop processing queue on error
-                                stopForeground(STOP_FOREGROUND_DETACH)
-                                stopSelf()
-                                return@onEach
                             }
                         }
                     }
@@ -204,6 +219,17 @@ class FileConversionService : Service() {
             setPackage(packageName)
             block()
         })
+    }
+
+    private fun resolveFileName(uri: Uri): String {
+        if (uri.scheme == "file") return java.io.File(uri.path!!).name
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                cursor.moveToFirst()
+                if (idx >= 0) cursor.getString(idx) else uri.lastPathSegment ?: "file"
+            } ?: uri.lastPathSegment ?: "file"
+        } catch (_: Exception) { uri.lastPathSegment ?: "file" }
     }
 
     override fun onDestroy() {

@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.commonmark.parser.Parser
 import org.commonmark.renderer.html.HtmlRenderer
+import org.commonmark.renderer.text.TextContentRenderer
 import org.jsoup.Jsoup
 import java.io.File
 import java.io.FileOutputStream
@@ -39,10 +40,12 @@ import javax.inject.Singleton
 import kotlin.math.ceil
 
 /**
- * Handles text / markup → PDF conversions using Android's PdfDocument API:
+ * Handles text / markup → PDF / HTML / TXT conversions:
  *
  *  - TEXT_TO_PDF  — plain text → A4 PDF
  *  - MD_TO_PDF    — Markdown → HTML → A4 PDF
+ *  - MD_TO_HTML   — Markdown → HTML file
+ *  - MD_TO_TXT    — Markdown → plain text (stripped markdown syntax)
  *  - HTML_TO_PDF  — HTML (Jsoup-cleaned) → A4 PDF
  */
 @Singleton
@@ -61,16 +64,62 @@ class DocumentHandler @Inject constructor(
             val inputUri = inputUris.first()
             val rawContent = readText(inputUri)
 
-            val htmlContent = when (type) {
-                ConversionEngine.ConversionType.MD_TO_PDF -> markdownToHtml(rawContent)
-                ConversionEngine.ConversionType.HTML_TO_PDF -> cleanHtml(rawContent)
-                else -> rawContent.replace("\n", "<br>")  // TEXT_TO_PDF
-            }
+            emit(ConversionEngine.ConversionStatus.Progress(20))
 
-            emit(ConversionEngine.ConversionStatus.Progress(30))
-            renderHtmlToPdf(htmlContent, outputPath, highQuality)
-            emit(ConversionEngine.ConversionStatus.Progress(100))
-            emit(ConversionEngine.ConversionStatus.Success(outputPath))
+            when (type) {
+                ConversionEngine.ConversionType.MD_TO_TXT -> {
+                    // Use commonmark's TextContentRenderer to strip markdown syntax cleanly
+                    val parser = Parser.builder().build()
+                    val document = parser.parse(rawContent)
+                    val renderer = TextContentRenderer.builder().build()
+                    val plainText = renderer.render(document)
+                    File(outputPath).writeText(plainText)
+                    emit(ConversionEngine.ConversionStatus.Progress(100))
+                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
+                    return@flow
+                }
+
+                ConversionEngine.ConversionType.MD_TO_HTML -> {
+                    val html = markdownToHtml(rawContent)
+                    // Wrap in a full HTML document with basic styling
+                    val fullHtml = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+           max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+    pre { background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; }
+    blockquote { border-left: 4px solid #ccc; margin: 0; padding-left: 16px; color: #666; }
+    img { max-width: 100%; }
+  </style>
+</head>
+<body>
+$html
+</body>
+</html>"""
+                    File(outputPath).writeText(fullHtml)
+                    emit(ConversionEngine.ConversionStatus.Progress(100))
+                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
+                    return@flow
+                }
+
+                else -> {
+                    // PDF paths
+                    val htmlContent = when (type) {
+                        ConversionEngine.ConversionType.MD_TO_PDF -> markdownToHtml(rawContent)
+                        ConversionEngine.ConversionType.HTML_TO_PDF -> cleanHtml(rawContent)
+                        else -> rawContent.replace("\n", "<br>")  // TEXT_TO_PDF
+                    }
+
+                    emit(ConversionEngine.ConversionStatus.Progress(40))
+                    renderHtmlToPdf(htmlContent, outputPath, highQuality)
+                    emit(ConversionEngine.ConversionStatus.Progress(100))
+                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
+                }
+            }
         } catch (e: Exception) {
             emit(ConversionEngine.ConversionStatus.Error("Document conversion failed: ${e.localizedMessage}"))
         }
@@ -97,7 +146,6 @@ class DocumentHandler @Inject constructor(
     }
 
     private fun cleanHtml(html: String): String {
-        // Use Jsoup to strip scripts/styles and return clean body text
         val doc = Jsoup.parse(html)
         doc.select("script, style, noscript").remove()
         return doc.body().html()
@@ -106,19 +154,11 @@ class DocumentHandler @Inject constructor(
     private fun renderHtmlToPdf(html: String, outputPath: String, highQuality: Boolean) {
         val pdfDocument = PdfDocument()
 
-        // A4 page in points (72dpi)
         val pageW = 595
         val pageH = 842
         val margin = 48
         val textWidth = pageW - 2 * margin
         val usableH = pageH - 2 * margin
-
-        val titlePaint = TextPaint().apply {
-            textSize = if (highQuality) 16f else 14f
-            color = Color.BLACK
-            isAntiAlias = true
-            isFakeBoldText = true
-        }
 
         val bodyPaint = TextPaint().apply {
             textSize = if (highQuality) 13f else 11f
@@ -126,10 +166,8 @@ class DocumentHandler @Inject constructor(
             isAntiAlias = true
         }
 
-        // Convert HTML spans to Spanned
         val spanned = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY)
 
-        // Use bodyPaint for general text
         val staticLayout = StaticLayout.Builder
             .obtain(spanned, 0, spanned.length, bodyPaint, textWidth)
             .setLineSpacing(2f, 1.15f)
@@ -144,7 +182,6 @@ class DocumentHandler @Inject constructor(
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
-                // White background
                 canvas.drawColor(Color.WHITE)
 
                 canvas.save()
@@ -154,7 +191,6 @@ class DocumentHandler @Inject constructor(
                 staticLayout.draw(canvas)
                 canvas.restore()
 
-                // Draw page number
                 val pageNumPaint = Paint().apply {
                     textSize = 9f
                     color = Color.LTGRAY

@@ -105,12 +105,6 @@ class ConversionEngine @Inject constructor(
         IMAGE_TO_AVIF("avif", "Images", "Image → AVIF", true, listOf("image")),
         IMAGE_TO_TGA("tga", "Images", "Image → TGA", false, listOf("image")),
         IMAGE_TO_PPM("ppm", "Images", "Image → PPM", false, listOf("image")),
-        IMAGE_TO_J2K("j2k", "Images", "Image → J2K", false, listOf("image")),
-        IMAGE_TO_PCX("pcx", "Images", "Image → PCX", false, listOf("image")),
-        IMAGE_TO_SGI("sgi", "Images", "Image → SGI", false, listOf("image")),
-        IMAGE_TO_EXR("exr", "Images", "Image → EXR", false, listOf("image")),
-        IMAGE_TO_XBM("xbm", "Images", "Image → XBM", false, listOf("image")),
-        IMAGE_TO_HDR("hdr", "Images", "Image → HDR", false, listOf("image")),
 
         // ── Image / PDF ───────────────────────────────────────────────────────
         IMAGE_TO_PDF("pdf", "Documents", "Image → PDF", true, listOf("image")),
@@ -150,15 +144,15 @@ class ConversionEngine @Inject constructor(
         inputUri: Uri,
         type: ConversionType,
         highQuality: Boolean = true,
+        batchIndex: Int = -1,
     ): Flow<ConversionStatus> {
-        // Copy content:// URI to a temp file with proper extension so FFmpeg/libraries can open it
-        val inputMime = context.contentResolver.getType(inputUri) ?: ""
+        val inputMime = context.contentResolver.getType(inputUri)
+            ?.let { normalizeHeicMime(it) } ?: ""
         val tempExt = mimeToExtension(inputMime)
         val tempFile = File(context.cacheDir, "input_temp_${System.currentTimeMillis()}.$tempExt")
 
         return flow {
             try {
-                // Copy to temp
                 val copied = try {
                     context.contentResolver.openInputStream(inputUri)?.use { input ->
                         tempFile.outputStream().use { output -> input.copyTo(output) }
@@ -173,7 +167,7 @@ class ConversionEngine @Inject constructor(
                     return@flow
                 }
 
-                val outputFile = buildOutputFile(type)
+                val outputFile = buildOutputFile(type, batchIndex)
                 val handler: ConversionHandler = pickHandler(type)
 
                 handler.convert(
@@ -181,9 +175,7 @@ class ConversionEngine @Inject constructor(
                     type = type,
                     outputPath = outputFile.absolutePath,
                     highQuality = highQuality,
-                ).collect { status ->
-                    emit(status)
-                }
+                ).collect { status -> emit(status) }
             } finally {
                 if (tempFile.exists()) tempFile.delete()
             }
@@ -201,7 +193,8 @@ class ConversionEngine @Inject constructor(
         val tempFiles = mutableListOf<File>()
         return flow {
             try {
-                val inputMime = context.contentResolver.getType(inputUris.first()) ?: ""
+                val inputMime = context.contentResolver.getType(inputUris.first())
+                    ?.let { normalizeHeicMime(it) } ?: ""
                 val tempExt = mimeToExtension(inputMime)
 
                 for ((i, uri) in inputUris.withIndex()) {
@@ -220,9 +213,7 @@ class ConversionEngine @Inject constructor(
                     type = type,
                     outputPath = outputFile.absolutePath,
                     highQuality = highQuality,
-                ).collect { status ->
-                    emit(status)
-                }
+                ).collect { status -> emit(status) }
             } finally {
                 tempFiles.forEach { if (it.exists()) it.delete() }
             }
@@ -232,6 +223,8 @@ class ConversionEngine @Inject constructor(
     private fun pickHandler(type: ConversionType): ConversionHandler = when {
         type.name.startsWith("SVG_") -> vectorHandler
         type == ConversionType.IMAGE_TO_PDF ||
+        type == ConversionType.IMAGE_TO_AVIF ||
+        type == ConversionType.IMAGE_TO_HEIF ||
         type == ConversionType.PDF_TO_PNG ||
         type == ConversionType.PDF_TO_JPG ||
         type == ConversionType.PDF_TO_WEBP -> imageDocumentHandler
@@ -244,13 +237,18 @@ class ConversionEngine @Inject constructor(
         else -> mediaHandler
     }
 
-    private fun buildOutputFile(type: ConversionType): File {
+    private fun buildOutputFile(type: ConversionType, batchIndex: Int = -1): File {
         val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val dir = File(File(base, "Toolz"), type.category).also { it.mkdirs() }
-        return File(dir, "TOOLZ_${System.currentTimeMillis()}.${type.extension}")
+        val suffix = if (batchIndex >= 0) "_${batchIndex + 1}" else ""
+        return File(dir, "TOOLZ_${System.currentTimeMillis()}$suffix.${type.extension}")
     }
 
-    private fun mimeToExtension(mime: String): String = when {
+    /** Normalises HEIC → HEIF so our MIME matching works uniformly. */
+    private fun normalizeHeicMime(mime: String) =
+        if (mime == "image/heic") "image/heif" else mime
+
+    fun mimeToExtension(mime: String): String = when {
         mime.startsWith("video/mp4") -> "mp4"
         mime.startsWith("video/x-matroska") -> "mkv"
         mime.startsWith("video/quicktime") -> "mov"
@@ -258,7 +256,7 @@ class ConversionEngine @Inject constructor(
         mime.startsWith("video/webm") -> "webm"
         mime.startsWith("video/") -> "mp4"
         mime.startsWith("audio/mpeg") -> "mp3"
-        mime.startsWith("audio/wav") || mime == "audio/x-wav" -> "wav"
+        mime == "audio/wav" || mime == "audio/x-wav" -> "wav"
         mime.startsWith("audio/aac") -> "aac"
         mime.startsWith("audio/flac") -> "flac"
         mime.startsWith("audio/ogg") -> "ogg"
@@ -271,7 +269,7 @@ class ConversionEngine @Inject constructor(
         mime == "image/heif" || mime == "image/heic" -> "heif"
         mime == "image/svg+xml" -> "svg"
         mime == "image/avif" -> "avif"
-        mime == "image/" -> "jpg"
+        mime.startsWith("image/") -> "jpg"
         mime == "application/pdf" -> "pdf"
         mime == "application/xapk" || mime == "application/x-xapk" -> "xapk"
         mime == "text/html" -> "html"

@@ -24,6 +24,8 @@ import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.Build
+import android.os.ParcelFileDescriptor
 import com.frerox.toolz.util.ConversionEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +39,8 @@ import javax.inject.Singleton
  * Handles all Image ↔ PDF conversions natively via Android SDK:
  *
  *  - IMAGE_TO_PDF  — one or more bitmaps → single PDF (A4 portrait, images scaled to fit)
+ *  - IMAGE_TO_AVIF — Android 12+ AVIF, falls back to WebP on older devices
+ *  - IMAGE_TO_HEIF — Android 10+ HEIF, falls back to JPEG
  *  - PDF_TO_PNG    — each page of a PDF → individual PNG files
  *  - PDF_TO_JPG    — each page of a PDF → individual JPEG files
  *  - PDF_TO_WEBP   — each page of a PDF → individual WebP files
@@ -55,25 +59,60 @@ class ImageDocumentHandler @Inject constructor(
         emit(ConversionEngine.ConversionStatus.Progress(0))
         try {
             when (type) {
-                ConversionEngine.ConversionType.IMAGE_TO_PDF ->
+                ConversionEngine.ConversionType.IMAGE_TO_PDF -> {
                     imagesToPdf(inputUris, outputPath, highQuality)
+                    emit(ConversionEngine.ConversionStatus.Progress(100))
+                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
+                }
+
+                ConversionEngine.ConversionType.IMAGE_TO_AVIF,
+                ConversionEngine.ConversionType.IMAGE_TO_HEIF -> {
+                    val bitmap = decodeBitmap(inputUris.first())
+                        ?: throw Exception("Could not decode input image")
+                    emit(ConversionEngine.ConversionStatus.Progress(40))
+                    val (format, quality) = when (type) {
+                        ConversionEngine.ConversionType.IMAGE_TO_AVIF -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Bitmap.CompressFormat.AVIF to (if (highQuality) 90 else 70)
+                            } else {
+                                // Fallback to lossless WebP on older devices
+                                @Suppress("DEPRECATION")
+                                Bitmap.CompressFormat.WEBP to (if (highQuality) 90 else 70)
+                            }
+                        }
+                        else -> { // IMAGE_TO_HEIF
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                Bitmap.CompressFormat.HEIF to (if (highQuality) 90 else 70)
+                            } else {
+                                Bitmap.CompressFormat.JPEG to (if (highQuality) 95 else 80)
+                            }
+                        }
+                    }
+                    File(outputPath).outputStream().use { out ->
+                        bitmap.compress(format, quality, out)
+                    }
+                    bitmap.recycle()
+                    emit(ConversionEngine.ConversionStatus.Progress(100))
+                    emit(ConversionEngine.ConversionStatus.Success(outputPath))
+                }
 
                 ConversionEngine.ConversionType.PDF_TO_PNG,
                 ConversionEngine.ConversionType.PDF_TO_JPG,
                 ConversionEngine.ConversionType.PDF_TO_WEBP -> {
                     val uriToProcess = inputUris.first()
-                    val finalPath = pdfToImages(uriToProcess, outputPath, type, highQuality) { progress ->
-                        // We can't emit inside a lambda but we model it through a collect
-                    }
+                    val finalPath = pdfToImages(
+                        inputUri = uriToProcess,
+                        outputPath = outputPath,
+                        type = type,
+                        highQuality = highQuality,
+                        onProgress = { pct -> emit(ConversionEngine.ConversionStatus.Progress(pct)) },
+                    )
                     emit(ConversionEngine.ConversionStatus.Progress(100))
                     emit(ConversionEngine.ConversionStatus.Success(finalPath))
-                    return@flow
                 }
 
                 else -> throw IllegalArgumentException("Unsupported type: $type")
             }
-            emit(ConversionEngine.ConversionStatus.Progress(100))
-            emit(ConversionEngine.ConversionStatus.Success(outputPath))
         } catch (e: Exception) {
             emit(ConversionEngine.ConversionStatus.Error("Conversion failed: ${e.localizedMessage}"))
         }
@@ -95,7 +134,6 @@ class ImageDocumentHandler @Inject constructor(
             for ((index, uri) in inputUris.withIndex()) {
                 val bitmap = decodeBitmap(uri) ?: continue
 
-                // Scale bitmap to fit A4 with margins
                 val availW = (a4Width - 2 * margin).toFloat()
                 val availH = (a4Height - 2 * margin).toFloat()
                 val scaleW = availW / bitmap.width
@@ -111,10 +149,8 @@ class ImageDocumentHandler @Inject constructor(
                 val page = pdfDocument.startPage(pageInfo)
                 val canvas = page.canvas
 
-                // White background
                 canvas.drawColor(android.graphics.Color.WHITE)
 
-                // Centre on page
                 val left = (a4Width - scaledW) / 2f
                 val top = (a4Height - scaledH) / 2f
                 canvas.drawBitmap(scaledBitmap, left, top, Paint(Paint.ANTI_ALIAS_FLAG))
@@ -133,20 +169,17 @@ class ImageDocumentHandler @Inject constructor(
 
     // ── PDF → IMAGE ──────────────────────────────────────────────────────────
 
-    private fun pdfToImages(
+    private suspend fun pdfToImages(
         inputUri: Uri,
         outputPath: String,
         type: ConversionEngine.ConversionType,
         highQuality: Boolean,
-        onProgress: (Int) -> Unit,
+        onProgress: suspend (Int) -> Unit,
     ): String {
         val inputFile = File(inputUri.path ?: throw Exception("Invalid input file path"))
         if (!inputFile.exists()) throw Exception("Input file not found: ${inputFile.absolutePath}")
 
-        val fd = android.os.ParcelFileDescriptor.open(
-            inputFile,
-            android.os.ParcelFileDescriptor.MODE_READ_ONLY
-        )
+        val fd = ParcelFileDescriptor.open(inputFile, ParcelFileDescriptor.MODE_READ_ONLY)
         val renderer = PdfRenderer(fd)
         val pageCount = renderer.pageCount
         val scale = if (highQuality) 3f else 1.5f
@@ -186,7 +219,7 @@ class ImageDocumentHandler @Inject constructor(
                         Bitmap.CompressFormat.PNG to 100
 
                     ConversionEngine.ConversionType.PDF_TO_WEBP ->
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
                             Bitmap.CompressFormat.WEBP_LOSSLESS to 100
                         else
                             @Suppress("DEPRECATION")
@@ -202,7 +235,6 @@ class ImageDocumentHandler @Inject constructor(
                 bitmap.recycle()
                 generatedFiles.add(pageFile)
 
-                // Half progress for rendering if zipping is required, full if single page
                 val progressWeight = if (pageCount > 1) 0.5f else 1.0f
                 onProgress((((i + 1).toFloat() / pageCount) * 100 * progressWeight).toInt())
             }
@@ -214,13 +246,12 @@ class ImageDocumentHandler @Inject constructor(
                         zos.putNextEntry(entry)
                         file.inputStream().use { it.copyTo(zos) }
                         zos.closeEntry()
-                        file.delete() // Clean up individual image file
-                        
+                        file.delete()
                         onProgress(50 + (((index + 1).toFloat() / pageCount) * 50).toInt())
                     }
                 }
             }
-            
+
             return actualOutputPath
         } finally {
             renderer.close()

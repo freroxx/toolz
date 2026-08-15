@@ -35,15 +35,19 @@ import javax.inject.Singleton
 /**
  * FFmpeg-based handler for Video → Video, Video → Audio, Audio → Audio, and Image → Image.
  *
- * Key fixes vs. original:
+ * Key fixes:
  *  - Uses `-b:a` (not `-ab`) for audio bitrate — correct across all codecs
- *  - FLAC/AIFF/PCM: no bitrate parameter — use codec-specific flags only
+ *  - FLAC/AIFF/PCM: no bitrate parameter — codec-specific flags only
  *  - Opus: force libopus encoder
  *  - OGG: force libvorbis encoder
  *  - AMR: force 8 kHz mono + amr_nb encoder
- *  - Removed WMA/CAF (not supported in standard ffmpeg-kit build)
  *  - H.265/HEVC for MKV, WEBM uses VP9
- *  - Image formats: progress emitted as 0→50→100 (no time-based stat)
+ *  - IMAGE_TO_TIFF: fixed using correct `-vf format=rgb24` approach
+ *  - IMAGE_TO_ICO: proper scale and ico pixel format
+ *  - IMAGE_TO_TGA: explicit targa format flag
+ *  - IMAGE formats: progress emitted as 0→50→100 (no time-based stat)
+ *  - Removed broken encoder types (J2K, PCX, SGI, EXR, XBM, HDR)
+ *    — AVIF and HEIF now routed to ImageDocumentHandler instead
  */
 @Singleton
 class MediaHandler @Inject constructor(
@@ -63,7 +67,6 @@ class MediaHandler @Inject constructor(
         }
 
         val inputUri = inputUris.first()
-        // Accept file:// URIs directly (already copied by ConversionEngine)
         val inputPath = if (inputUri.scheme == "file") {
             inputUri.path ?: run {
                 trySend(ConversionEngine.ConversionStatus.Error("Invalid input path"))
@@ -104,7 +107,6 @@ class MediaHandler @Inject constructor(
             close()
         }, { _ -> /* log callback — intentionally empty */ }) { stats: Statistics ->
             if (isImageConversion) {
-                // Image conversions don't have time-based stats; emit a half-way progress
                 trySend(ConversionEngine.ConversionStatus.Progress(50))
             } else if (totalDurationMs > 0) {
                 val pct = (stats.time.toDouble() / totalDurationMs * 100).toInt().coerceIn(1, 99)
@@ -226,19 +228,15 @@ class MediaHandler @Inject constructor(
                 "-i $i -pix_fmt bgr24 -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_TIFF ->
-                "-i $i -compression_algo deflate -y $o"
+                // Use standard tiff muxer with deflate compression via codec flag
+                "-i $i -vf format=rgb24 -compression_level 6 -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_ICO ->
-                "-i $i -vf scale=256:256 -y $o"
-
-            ConversionEngine.ConversionType.IMAGE_TO_HEIF ->
-                "-i $i -c:v libx265 -crf ${if (hq) "18" else "28"} -tag:v hvc1 -y $o"
-
-            ConversionEngine.ConversionType.IMAGE_TO_AVIF ->
-                "-i $i -c:v libaom-av1 -crf ${if (hq) "23" else "35"} -b:v 0 -y $o"
+                // ICO supports 16, 32, 48, 64, 128, 256 px sizes; use 256 as master
+                "-i $i -vf scale=256:256:flags=lanczos -vcodec png -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_TGA ->
-                "-i $i -y $o"
+                "-i $i -f targa -y $o"
 
             ConversionEngine.ConversionType.IMAGE_TO_PPM ->
                 "-i $i -pix_fmt rgb24 -y $o"
