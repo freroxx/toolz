@@ -34,8 +34,8 @@ import javax.inject.Inject
 
 private const val TAG          = "AiAssistantVM"
 private const val GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-private const val GROQ_MODEL_HARD = "llama-3.3-70b-versatile"
-private const val GROQ_MODEL_EASY = "llama-3.1-8b-instant"
+private const val GROQ_MODEL_HARD = "openai/gpt-oss-120b"
+private const val GROQ_MODEL_EASY = "openai/gpt-oss-20b"
 
 // ─────────────────────────────────────────────────────────────
 //  UI State
@@ -70,7 +70,7 @@ data class AiAssistantUiState(
 data class AiSettingsUiState(
     val provider             : String    = "Groq",
     val apiKey               : String    = "",
-    val selectedModel        : String    = "llama-3.3-70b-versatile",
+    val selectedModel        : String    = "openai/gpt-oss-120b",
     val isTesting            : Boolean   = false,
     val testResult           : String?   = null,
     val isKeyValid           : Boolean   = true,

@@ -1266,7 +1266,7 @@ fun OcrTextBottomSheet(
                                         }
                                         Spacer(Modifier.height(10.dp))
                                         Text(
-                                            "Groq · llama-3.3-70b-versatile",
+                                            "Groq · openai/gpt-oss-120b",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                                             fontWeight = FontWeight.Black,
@@ -1297,7 +1297,7 @@ fun OcrTextBottomSheet(
                                         }
                                         Column(Modifier.weight(1f)) {
                                             Text("Summarise with AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                            Text("Key points via Groq llama-3.3-70b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
+                                            Text("Key points via Groq openai/gpt-oss-120b", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
                                         }
                                         Icon(Icons.Rounded.ChevronRight, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.55f))
                                     }

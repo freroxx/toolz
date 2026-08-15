@@ -233,7 +233,7 @@ class ClipboardViewModel @Inject constructor(
                     Respond in JSON format: {"category": "CATEGORY_NAME", "summary": "Short summary"}
                 """.trimIndent()
 
-                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.1-8b-instant").collect { result ->
+                aiRepository.getChatResponse(prompt, emptyList(), null, "openai/gpt-oss-20b").collect { result ->
                     result.onSuccess { chunk ->
                         val response = chunk.text
                         val category = Regex("\"category\":\\s*\"([^\"]+)\"").find(response)?.groupValues?.get(1) ?: entry.type

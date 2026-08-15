@@ -263,7 +263,7 @@ class CalendarViewModel @Inject constructor(
                         prompt        = fullPrompt,
                         history       = emptyList(),
                         image         = _uiState.value.attachedImage,
-                        modelOverride = "llama-3.3-70b-versatile"
+                        modelOverride = "openai/gpt-oss-120b"
                     )
                     .first()
 

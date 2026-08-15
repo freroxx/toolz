@@ -176,7 +176,7 @@ class ClipboardService : Service() {
                     Respond ONLY in JSON format: {"category": "CATEGORY_NAME", "summary": "optional summary string or null"}
                 """.trimIndent()
 
-                aiRepository.getChatResponse(prompt, emptyList(), null, "llama-3.3-70b-versatile").collect { result ->
+                aiRepository.getChatResponse(prompt, emptyList(), null, "openai/gpt-oss-120b").collect { result ->
                     result.onSuccess { responseChunk ->
                         try {
                             val response = responseChunk.text

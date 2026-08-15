@@ -86,7 +86,7 @@ class TipCalculatorViewModel @Inject constructor(
             _uiState.update { it.copy(isAiDetecting = true) }
             val prompt = "Based on the device location (Country: $country, Language: $language), what is the official currency code (ISO 4217) and symbol? Respond ONLY in this JSON format: {\"code\": \"USD\", \"symbol\": \"$\"}"
             
-            chatRepository.getChatResponse(prompt, emptyList(), modelOverride = "llama-3.3-70b-versatile")
+            chatRepository.getChatResponse(prompt, emptyList(), modelOverride = "openai/gpt-oss-120b")
                 .collect { result ->
                     result.onSuccess { chunk ->
                         try {

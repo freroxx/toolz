@@ -104,8 +104,8 @@ class FocusFlowViewModel @Inject constructor(
 
     companion object {
         private const val TAG               = "FocusFlowViewModel"
-        private const val AI_MODEL_PRIMARY  = "llama-3.3-70b-versatile"
-        private const val AI_MODEL_FALLBACK = "llama-3.1-8b-instant"
+        private const val AI_MODEL_PRIMARY  = "openai/gpt-oss-120b"
+        private const val AI_MODEL_FALLBACK = "openai/gpt-oss-20b"
         private const val GROQ_URL          = "https://api.groq.com/openai/v1/chat/completions"
         // SharedPreferences file + key for persisting AI-generated categories
         private const val PREFS_AI_CACHE    = "focus_ai_category_cache"

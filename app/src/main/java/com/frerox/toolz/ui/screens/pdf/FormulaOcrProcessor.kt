@@ -46,7 +46,7 @@ import kotlin.math.abs
 
 private const val TAG         = "FormulaOcrProcessor"
 private const val GROQ_URL    = "https://api.groq.com/openai/v1/chat/completions"
-private const val GROQ_MODEL  = "llama-3.3-70b-versatile"
+private const val GROQ_MODEL  = "openai/gpt-oss-120b"
 private const val MIN_SIDE_PX = 1000
 private const val MAX_SIDE_PX = 4000
 

@@ -1339,7 +1339,7 @@
     <string name="st_NowPlayingAiScreen_s7">SYNCHRO</string>
     <string name="st_NowPlayingAiScreen_m8">MANUAL</string>
     <string name="st_NowPlayingAiScreen_an9">Analyse de la note…</string>
-    <string name="st_NowPlayingAiScreen_gbg10">Généré par Groq · llama-3.3-70b-versatile</string>
+    <string name="st_NowPlayingAiScreen_gbg10">Généré par Groq · openai/gpt-oss-120b</string>
     <string name="st_NowPlayingAiScreen_ec11">COULEUR ÉDITEUR</string>
     <string name="st_NowPlayingAiScreen_ass12">SUGGESTION DE STYLE IA</string>
     <string name="st_NowPlayingAiScreen_a13">APPLIQUER</string>
@@ -1653,7 +1653,7 @@
     <string name="st_ToolzPdfScreen_s3a4">Résumé avec l\'IA en cours…</string>
     <string name="st_ToolzPdfScreen_a5s6">RÉSUMÉ IA</string>
     <string name="st_ToolzPdfScreen_d7i8">Ignorer</string>
-    <string name="st_ToolzPdfScreen_g9l0">Groq · llama-3.3-70b-versatile</string>
+    <string name="st_ToolzPdfScreen_g9l0">Groq · openai/gpt-oss-120b</string>
     <string name="st_ToolzPdfScreen_s1a2">Résumer avec l\'IA</string>
     <string name="st_ToolzPdfScreen_k3p4">Points clés via Groq llama-3.3-70b</string>
     <string name="st_ToolzPdfScreen_e5c6">CONTENU EXTRAIT</string>

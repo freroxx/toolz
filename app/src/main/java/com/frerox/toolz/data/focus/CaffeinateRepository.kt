@@ -76,7 +76,7 @@ class CaffeinateRepository @Inject constructor(
             prompt = prompt,
             history = emptyList(),
             image = null,
-            modelOverride = "llama-3.3-70b-versatile"
+            modelOverride = "openai/gpt-oss-120b"
         ).collect { result ->
             result.onSuccess { response ->
                 try {

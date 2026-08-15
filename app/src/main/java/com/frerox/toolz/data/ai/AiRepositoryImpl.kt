@@ -243,7 +243,7 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private suspend fun extractSearchQuery(apiKey: String, prompt: String): String? {
-        val models = listOf("openai/gpt-oss-20b", "llama-3.1-8b-instant")
+        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
         for (modelName in models) {
             try {
                 val request = OpenAiRequest(
@@ -267,7 +267,7 @@ class AiRepositoryImpl @Inject constructor(
 
     private suspend fun selectBestSources(apiKey: String, prompt: String, results: List<SearchResult>): List<SearchResult> {
         if (results.size <= 5) return results
-        val models = listOf("openai/gpt-oss-20b", "llama-3.1-8b-instant")
+        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
         for (modelName in models) {
             try {
                 val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" + 
@@ -333,7 +333,7 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private suspend fun structureWebsiteContent(apiKey: String, title: String, content: String): String {
-        val models = listOf("openai/gpt-oss-20b", "llama-3.1-8b-instant")
+        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
         for (modelName in models) {
             try {
                 val request = OpenAiRequest(
@@ -457,8 +457,8 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     private fun getFallbackModel(model: String): String? = when (model) {
-        "llama-3.3-70b-versatile" -> "openai/gpt-oss-120b"
-        "llama-3.1-8b-instant" -> "openai/gpt-oss-20b"
+        "meta-llama/llama-3.3-70b-instruct" -> "openai/gpt-oss-120b"
+        "meta-llama/llama-3.1-8b-instruct" -> "openai/gpt-oss-20b"
         else -> null
     }
 

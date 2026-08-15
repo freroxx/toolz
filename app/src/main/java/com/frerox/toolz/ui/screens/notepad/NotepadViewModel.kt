@@ -46,7 +46,7 @@ import javax.inject.Inject
 
 private const val TAG = "NotepadViewModel"
 private const val GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-private const val DEFAULT_AI_MODEL = "llama-3.1-8b-instant"
+private const val DEFAULT_AI_MODEL = "openai/gpt-oss-20b"
 
 // ─────────────────────────────────────────────────────────────
 //  AI models and structured responses

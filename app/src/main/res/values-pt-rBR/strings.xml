@@ -1328,7 +1328,7 @@
     <string name="st_NowPlayingAiScreen_s7">SINCRONIZADO</string>
     <string name="st_NowPlayingAiScreen_m8">MANUAL</string>
     <string name="st_NowPlayingAiScreen_an9">Analisando nota…</string>
-    <string name="st_NowPlayingAiScreen_gbg10">Gerado por Groq · llama-3.3-70b-versatile</string>
+    <string name="st_NowPlayingAiScreen_gbg10">Gerado por Groq · openai/gpt-oss-120b</string>
     <string name="st_NowPlayingAiScreen_ec11">COR DO EDITOR</string>
     <string name="st_NowPlayingAiScreen_ass12">SUGESTÃO DE ESTILO POR IA</string>
     <string name="st_NowPlayingAiScreen_a13">APLICAR</string>
@@ -1663,7 +1663,7 @@
     <string name="st_ToolzPdfScreen_s3a4">Resumindo com IA…</string>
     <string name="st_ToolzPdfScreen_a5s6">RESUMO POR IA</string>
     <string name="st_ToolzPdfScreen_d7i8">Descartar</string>
-    <string name="st_ToolzPdfScreen_g9l0">Groq · llama-3.3-70b-versatile</string>
+    <string name="st_ToolzPdfScreen_g9l0">Groq · openai/gpt-oss-120b</string>
     <string name="st_ToolzPdfScreen_s1a2">Resumir com IA</string>
     <string name="st_ToolzPdfScreen_k3p4">Pontos-chave via Groq llama-3.3-70b</string>
     <string name="st_ToolzPdfScreen_e5c6">CONTEÚDO EXTRAÍDO</string>

@@ -144,7 +144,7 @@ class NotificationVaultService : NotificationListenerService() {
         val groqKey = aiSettingsManager.resolveApiKey("Groq").value
         if (groqKey.isBlank()) return "General"
 
-        val models = listOf("openai/gpt-oss-20b", "llama-3.1-8b-instant")
+        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
         for (modelName in models) {
             try {
                 val prompt = "Identify the most fitting category for the Android app '$appName' ($packageName). " +
