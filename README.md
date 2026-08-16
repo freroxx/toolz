@@ -126,7 +126,7 @@ The short version: you sign in with a username + password or a random 64-charact
 - **Mute & block** — silence a conversation or block a user entirely
 - **In-app notifications** — grouped per conversation, suppressed while you're inside that chat or when muted
 
-Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom*, but not what's in the messages.
+Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom* using usernames, but not what's in the messages, it's all end-to-end encrypted!
 
 ---
 
