@@ -34,6 +34,7 @@ data class WhisperUserProfileUiState(
     val profile: WhisperProfile? = null,
     val friendshipStatus: FriendStatus = FriendStatus.NONE,
     val friendshipRecord: WhisperFriendship? = null,
+    val keyTrust: KeyTrustInfo? = null,
     val error: String? = null,
 )
 
@@ -76,6 +77,9 @@ class WhisperUserProfileViewModel @Inject constructor(
                     handleError(err, "getProfile")
                 }
 
+            val info = repository.getKeyTrustInfo(targetUserId)
+                _uiState.update { it.copy(keyTrust = info) }
+
             repository.getFriendshipStatus(targetUserId)
                 .onSuccess { (status, record) ->
                     _uiState.update { it.copy(friendshipStatus = status, friendshipRecord = record, isLoading = false) }
@@ -110,6 +114,20 @@ class WhisperUserProfileViewModel @Inject constructor(
             repository.deleteFriendship(recordId)
                 .onSuccess { loadData() }
                 .onFailure { err -> handleError(err, "deleteFriendship") }
+        }
+    }
+
+    fun verifyKey() {
+        viewModelScope.launch {
+            repository.verifyUserKey(targetUserId)
+            loadData()
+        }
+    }
+
+    fun acceptNewKey() {
+        viewModelScope.launch {
+            repository.acceptNewKey(targetUserId)
+            loadData()
         }
     }
 

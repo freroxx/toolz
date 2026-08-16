@@ -121,8 +121,32 @@ class WhisperChatViewModel @Inject constructor(
             val (blockedByMe, blockedByOther) = repository.getBlockStatus(otherUserId)
             _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
 
-            // 4. Load messages
+            // 4. Load key trust status (fingerprints + key-change detection)
+            loadKeyTrust()
+
+            // 5. Load messages
             loadMessages()
+        }
+    }
+
+    fun loadKeyTrust() {
+        viewModelScope.launch {
+            val info = repository.getKeyTrustInfo(otherUserId)
+            _uiState.update { it.copy(keyTrust = info) }
+        }
+    }
+
+    fun verifyKey() {
+        viewModelScope.launch {
+            repository.verifyUserKey(otherUserId)
+            loadKeyTrust()
+        }
+    }
+
+    fun acceptNewKey() {
+        viewModelScope.launch {
+            repository.acceptNewKey(otherUserId)
+            loadKeyTrust()
         }
     }
 

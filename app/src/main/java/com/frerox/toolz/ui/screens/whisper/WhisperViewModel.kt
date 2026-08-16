@@ -30,6 +30,7 @@ class WhisperViewModel @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val settingsRepository: SettingsRepository,
+    private val crypto: WhisperCrypto,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WhisperUiState())
@@ -392,6 +393,10 @@ class WhisperViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
+
+    /** Fingerprint of my own public key, for sharing with friends to verify in person. */
+    val myFingerprint: String?
+        get() = crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) }
 
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return

@@ -88,6 +88,23 @@ class WhisperAuthManager @Inject constructor(
             }
         } catch (_: Exception) {}
 
+        // Delete all messages the user sent, plus their reactions and blocks
+        try {
+            supabase.postgrest.from("messages").delete { filter { eq("sender_id", user.id) } }
+        } catch (_: Exception) {}
+
+        try {
+            supabase.postgrest.from("message_reactions").delete { filter { eq("user_id", user.id) } }
+        } catch (_: Exception) {}
+
+        try {
+            supabase.postgrest.from("whisper_blocks").delete { filter { eq("blocker_id", user.id) } }
+        } catch (_: Exception) {}
+
+        try {
+            supabase.postgrest.from("whisper_blocks").delete { filter { eq("blocked_id", user.id) } }
+        } catch (_: Exception) {}
+
         // Sign out
         supabase.auth.signOut()
     }

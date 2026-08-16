@@ -47,9 +47,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -92,6 +94,7 @@ fun WhisperChatScreen(
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
     var selectedMessageForDelete by remember { mutableStateOf<WhisperMessage?>(null) }
     var quickReactionTargetMessage by remember { mutableStateOf<WhisperMessage?>(null) }
+    var showKeyVerifyDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val messages = uiState.messages
@@ -330,6 +333,24 @@ fun WhisperChatScreen(
                     }
                 }
 
+                // Key changed banner
+                if (uiState.keyTrust?.status == KeyTrustStatus.CHANGED) {
+                    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                            Text(
+                                "Encryption key changed — verify before trusting this conversation.",
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
+                                Text("Review", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 // Messages list
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (uiState.isLoading && messages.isEmpty()) {
@@ -500,6 +521,17 @@ fun WhisperChatScreen(
     if (showBlockConfirmDialog) {
         BlockConfirmDialog(partnerName = uiState.otherUser?.effectiveName ?: "User", onDismiss = { showBlockConfirmDialog = false }, onConfirmBlock = { viewModel.toggleBlock(); showBlockConfirmDialog = false })
     }
+
+    if (showKeyVerifyDialog) {
+        KeyVerifyDialog(
+            partnerName = uiState.otherUser?.effectiveName ?: "This user",
+            partnerFingerprint = uiState.keyTrust?.partnerFingerprint,
+            myFingerprint = uiState.keyTrust?.myFingerprint,
+            onVerify = { showKeyVerifyDialog = false; viewModel.verifyKey() },
+            onAccept = { showKeyVerifyDialog = false; viewModel.acceptNewKey() },
+            onDismiss = { showKeyVerifyDialog = false },
+        )
+    }
     
     quickReactionTargetMessage?.let { targetMsg ->
         QuickReactionDialog(onDismiss = { quickReactionTargetMessage = null }, onEmojiSelected = { quickReactionTargetMessage = null; viewModel.toggleReaction(targetMsg, it) })
@@ -618,6 +650,89 @@ private fun BlockConfirmDialog(partnerName: String, onDismiss: () -> Unit, onCon
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Block $partnerName?") }, text = { Text("They won't be able to message you.") },
         confirmButton = { TextButton(onClick = onConfirmBlock) { Text("Block", color = Color.Red) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun KeyVerifyDialog(
+    partnerName: String,
+    partnerFingerprint: String?,
+    myFingerprint: String?,
+    onVerify: () -> Unit,
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Encryption key changed") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "$partnerName's encryption key is different from the one you last used together. Compare the fingerprint below with the one shown on their device before continuing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (partnerFingerprint != null) {
+                    Text(
+                        "$partnerName's fingerprint",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            partnerFingerprint,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+                if (myFingerprint != null) {
+                    Text(
+                        "Your fingerprint",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            myFingerprint,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+                Text(
+                    "Only continue if the fingerprint matches the one on their device. If it doesn't, the person may be impersonated.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onVerify) { Text("Verify", fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onAccept) { Text("Accept anyway") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
 }
 
 @Composable

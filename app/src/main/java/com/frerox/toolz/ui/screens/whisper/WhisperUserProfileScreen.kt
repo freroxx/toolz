@@ -44,6 +44,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
+import com.frerox.toolz.data.whisper.KeyTrustStatus
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.security.MessageDigest
@@ -206,8 +207,9 @@ fun WhisperUserProfileScreen(
                             }
                         }
 
-                        // E2EE Security Verification Card (Feature 7)
+                        // E2EE Security Verification Card
                         if (profile.publicKey != null) {
+                            val keyTrust = uiState.keyTrust
                             ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
                                 Column(
                                     modifier = Modifier.padding(16.dp),
@@ -218,20 +220,27 @@ fun WhisperUserProfileScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
-                                            Icons.Rounded.VerifiedUser,
+                                            if (keyTrust?.isVerified == true) Icons.Rounded.VerifiedUser else Icons.Rounded.Shield,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = if (keyTrust?.isVerified == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Text(
-                                            "E2EE Security Fingerprint",
+                                            if (keyTrust?.isVerified == true) "Encryption Verified" else "E2EE Security Fingerprint",
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
 
                                     Text(
-                                        "Compare this key fingerprint with ${profile.effectiveName} to verify your end-to-end encrypted session is secure.",
+                                        when {
+                                            keyTrust?.isVerified == true ->
+                                                "You verified this key by comparing fingerprints. This conversation is protected from impersonation."
+                                            keyTrust?.status == KeyTrustStatus.CHANGED ->
+                                                "This key changed since your last conversation. Compare the fingerprint below before trusting it again."
+                                            else ->
+                                                "Compare this key fingerprint with ${profile.effectiveName} to verify your end-to-end encrypted session is secure."
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -242,7 +251,7 @@ fun WhisperUserProfileScreen(
                                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                                     ) {
                                         Text(
-                                            text = computeFingerprint(profile.publicKey),
+                                            text = uiState.keyTrust?.partnerFingerprint ?: profile.publicKey?.let { computeFingerprint(it) } ?: "UNVERIFIED",
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
@@ -250,6 +259,35 @@ fun WhisperUserProfileScreen(
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.padding(12.dp)
                                         )
+                                    }
+
+                                    when {
+                                        keyTrust?.status == KeyTrustStatus.CHANGED -> {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                ToolzTonalExpressiveButton(
+                                                    onClick = { haptic.success(); viewModel.verifyKey() },
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text("Verify", fontWeight = FontWeight.Bold)
+                                                }
+                                                ToolzOutlinedExpressiveButton(
+                                                    onClick = { haptic.click(); viewModel.acceptNewKey() },
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Text("Accept new key", fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                        keyTrust != null && !keyTrust.isVerified -> {
+                                            Text(
+                                                "Not verified yet — compare fingerprints in person to confirm this key.",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }

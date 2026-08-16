@@ -23,6 +23,7 @@ import android.util.Base64
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.SecureRandom
@@ -75,6 +76,22 @@ class WhisperCrypto @Inject constructor() {
             val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
             val publicKey = entry?.certificate?.publicKey ?: return null
             Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * SHA-256 fingerprint of a base64 public key, rendered as 4 groups of 4
+     * uppercase hex chars ("A1B2-C3D4-E5F6-7890"). Hashes the trimmed base64
+     * string to stay byte-for-byte consistent with the fingerprint shown in
+     * the user profile screen.
+     */
+    fun fingerprint(base64PublicKey: String?): String? {
+        if (base64PublicKey.isNullOrBlank()) return null
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(base64PublicKey.trim().toByteArray(Charsets.UTF_8))
+            val hex = digest.joinToString("") { "%02X".format(it) }
+            hex.chunked(4).take(4).joinToString("-")
         } catch (_: Exception) { null }
     }
 

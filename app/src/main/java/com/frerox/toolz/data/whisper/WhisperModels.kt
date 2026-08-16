@@ -322,6 +322,26 @@ data class WhisperUiState(
     val totalUnreadCount: Int get() = conversations.sumOf { it.unreadCount }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Key Trust & Verification
+// ─────────────────────────────────────────────────────────────
+
+enum class KeyTrustStatus { NO_KEY, MATCH, CHANGED }
+
+/**
+ * Snapshot of how much we trust the current encryption key of a conversation
+ * partner, together with the fingerprints needed to verify it in person.
+ */
+data class KeyTrustInfo(
+    val status: KeyTrustStatus = KeyTrustStatus.NO_KEY,
+    /** Fingerprint of the partner's current public key. */
+    val partnerFingerprint: String? = null,
+    /** Fingerprint of my own public key, so the partner can compare theirs. */
+    val myFingerprint: String? = null,
+    /** True only if this exact key was verified by the user (compared in person). */
+    val isVerified: Boolean = false,
+)
+
 data class WhisperChatUiState(
     val isLoading: Boolean = false,
     val isFriendStatusLoaded: Boolean = false,
@@ -343,5 +363,6 @@ data class WhisperChatUiState(
     val matchingMessageIds: Set<String> = emptySet(),
     val activeSearchMatchIndex: Int = -1,
     val unreadMessagesScrolledUp: Int = 0,
+    val keyTrust: KeyTrustInfo? = null,
     val error: String? = null,
 )

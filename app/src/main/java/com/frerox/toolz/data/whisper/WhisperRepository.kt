@@ -62,6 +62,7 @@ class WhisperRepository @Inject constructor(
     private val deliveryScheduler: WhisperDeliveryScheduler,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val messageDao: WhisperMessageDao,
+    private val keyTrustStore: WhisperKeyTrustStore,
 ) {
     private companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -1350,5 +1351,53 @@ class WhisperRepository @Inject constructor(
             } catch (_: Exception) { }
         } }
         awaitClose { job.cancel(); launch { removeCachedChannel(name, channel) } }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // KEY TRUST & VERIFICATION
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Builds a [KeyTrustInfo] for a conversation partner. On first encounter the
+     * key is silently remembered as known (keeps existing behavior), so only a
+     * *change* of a previously known key ever surfaces as [KeyTrustStatus.CHANGED].
+     */
+    suspend fun getKeyTrustInfo(otherUserId: String): KeyTrustInfo {
+        val myFingerprint = crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) }
+        val profile = getProfile(otherUserId).getOrNull() ?: return KeyTrustInfo(myFingerprint = myFingerprint)
+        val currentKey = profile.publicKey
+        if (currentKey.isNullOrBlank()) return KeyTrustInfo(myFingerprint = myFingerprint)
+
+        val known = keyTrustStore.knownKey(otherUserId)
+        val status = when {
+            known == null -> {
+                keyTrustStore.rememberKey(otherUserId, currentKey)
+                KeyTrustStatus.MATCH
+            }
+            known == currentKey -> KeyTrustStatus.MATCH
+            else -> KeyTrustStatus.CHANGED
+        }
+        return KeyTrustInfo(
+            status = status,
+            partnerFingerprint = crypto.fingerprint(currentKey),
+            myFingerprint = myFingerprint,
+            isVerified = keyTrustStore.verifiedKey(otherUserId) == currentKey,
+        )
+    }
+
+    /** Mark the partner's current key as verified (fingerprint compared in person). */
+    suspend fun verifyUserKey(otherUserId: String): Boolean {
+        val profile = getProfile(otherUserId).getOrNull() ?: return false
+        val currentKey = profile.publicKey ?: return false
+        keyTrustStore.markVerified(otherUserId, currentKey)
+        return true
+    }
+
+    /** Accept the partner's new key without verifying it in person. */
+    suspend fun acceptNewKey(otherUserId: String): Boolean {
+        val profile = getProfile(otherUserId).getOrNull() ?: return false
+        val currentKey = profile.publicKey ?: return false
+        keyTrustStore.rememberKey(otherUserId, currentKey)
+        return true
     }
 }
