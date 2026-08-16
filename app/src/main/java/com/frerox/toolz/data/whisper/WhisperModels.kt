@@ -33,6 +33,7 @@ data class WhisperProfile(
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean = false,
     @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean = false,
+    @SerialName("last_seen_at") val lastSeenAt: String? = null,
     @SerialName("public_key") val publicKey: String? = null,
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
@@ -49,6 +50,25 @@ data class WhisperProfile(
     /** Display name with username fallback */
     val effectiveName: String get() = displayName?.takeIf { it.isNotBlank() } ?: effectiveUsername
 
+    /** Formatted online status / last seen */
+    val onlineStatus: String get() {
+        val lastSeen = lastSeenAt ?: return "Offline"
+        return try {
+            val dt = java.time.OffsetDateTime.parse(lastSeen)
+            val now = java.time.OffsetDateTime.now()
+            val diffMinutes = java.time.Duration.between(dt, now).toMinutes()
+            
+            when {
+                diffMinutes < 2 -> "Online"
+                diffMinutes < 60 -> "Online ${diffMinutes}m ago"
+                diffMinutes < 120 -> "Online 1h ago"
+                else -> "Offline"
+            }
+        } catch (_: Exception) {
+            "Offline"
+        }
+    }
+
     /** First letter of effective name for avatar initials */
     val avatarInitial: String get() = effectiveName.firstOrNull()?.uppercase() ?: "?"
 }
@@ -61,6 +81,7 @@ data class WhisperProfileUpdate(
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean? = null,
     @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean? = null,
+    @SerialName("last_seen_at") val lastSeenAt: String? = null,
     @SerialName("public_key") val publicKey: String? = null,
 )
 
@@ -74,6 +95,7 @@ data class WhisperProfileInsert(
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean = false,
     @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean = false,
+    @SerialName("last_seen_at") val lastSeenAt: String? = null,
     @SerialName("public_key") val publicKey: String? = null,
 )
 
@@ -115,6 +137,7 @@ data class WhisperReactionSummary(
 sealed interface WhisperChatEvent {
     data class MessageEvent(val message: WhisperMessage) : WhisperChatEvent
     data class ReactionEvent(val messageId: String, val userId: String, val emoji: String) : WhisperChatEvent
+    data class DeleteEvent(val messageId: String) : WhisperChatEvent
 }
 
 @Serializable

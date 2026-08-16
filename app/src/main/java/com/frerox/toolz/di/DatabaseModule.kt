@@ -37,6 +37,7 @@ import com.frerox.toolz.data.crypto.CryptoDao
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
+import com.frerox.toolz.data.whisper.WhisperMessageDao
 import com.frerox.toolz.util.security.KeyManager
 import dagger.Module
 import dagger.Provides
@@ -168,5 +169,10 @@ object DatabaseModule {
     @Provides
     fun provideDeviceSpecsDao(database: AppDatabase): DeviceSpecsDao {
         return database.deviceSpecsDao()
+    }
+
+    @Provides
+    fun provideWhisperMessageDao(database: AppDatabase): WhisperMessageDao {
+        return database.whisperMessageDao()
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -54,6 +55,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -455,7 +457,7 @@ fun WhisperMainScreen(
     }
 
     // Whisper Beta Warning Dialog
-    if (!betaWarningShown) {
+    if (betaWarningShown == false) {
         AlertDialog(
             onDismissRequest = { /* Must accept to enter */ },
             shape = RoundedCornerShape(28.dp),
@@ -520,6 +522,13 @@ private fun MergedChatsAndFriendsTab(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { SectionHeader("Friends") }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items(5) { FriendSkeleton() }
+                }
+            }
+            item { SectionHeader("Messages") }
             items(5) { ConversationSkeleton() }
         }
         return
@@ -587,11 +596,23 @@ private fun MergedChatsAndFriendsTab(
                                 )
                                 .padding(vertical = 4.dp)
                         ) {
-                            WhisperAvatar(
-                                profile = friend,
-                                size = 48.dp,
-                                onLongClick = { haptic.longClick(); onViewAvatarFull(friend) }
-                            )
+                            Box {
+                                WhisperAvatar(
+                                    profile = friend,
+                                    size = 48.dp,
+                                    onLongClick = { haptic.longClick(); onViewAvatarFull(friend) }
+                                )
+                                if (friend.onlineStatus == "Online") {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .align(Alignment.BottomEnd)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF4CAF50))
+                                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                    )
+                                }
+                            }
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 text = friend.effectiveName,
@@ -669,6 +690,13 @@ private fun ConversationCard(
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
+                        Text(
+                            conversation.otherUser.onlineStatus,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (conversation.otherUser.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
                         )
                         if (conversation.isMuted) {
                             Icon(
@@ -811,7 +839,14 @@ private fun DiscoverTab(
         }
 
         if (searchQuery.isNotBlank()) {
-            if (uiState.searchResults.isEmpty()) {
+            if (uiState.isLoading && uiState.searchResults.isEmpty()) {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(5) { DiscoverSkeleton() }
+                }
+            } else if (uiState.searchResults.isEmpty()) {
                 WhisperEmptyState(
                     icon = Icons.Rounded.PersonSearch,
                     title = stringResource(R.string.st_Whisper_Discover_NoResultsTitle),
@@ -840,44 +875,54 @@ private fun DiscoverTab(
                 }
             }
         } else {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
-            ) {
-                if (uiState.recommendedProfiles.isNotEmpty()) {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            SectionHeader("Suggested For You")
+            if (uiState.isLoading && uiState.recommendedProfiles.isEmpty()) {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { SectionHeader("Suggested For You") }
+                    items(3) { DiscoverSkeleton() }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
+                ) {
+                    if (uiState.recommendedProfiles.isNotEmpty()) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                SectionHeader("Suggested For You")
+                            }
                         }
-                    }
 
-                    items(uiState.recommendedProfiles, key = { "rec_${it.id}" }) { profile ->
-                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
-                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+                        items(uiState.recommendedProfiles, key = { "rec_${it.id}" }) { profile ->
+                            val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
+                            val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
 
-                        DiscoverUserCard(
-                            profile = profile,
-                            isAlreadyFriend = isAlreadyFriend,
-                            isPendingOutgoing = isPendingOutgoing,
-                            onChat = { haptic.click(); onNavigateToChat(profile.id) },
-                            onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
-                            onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
-                            onViewAvatarFull = { onViewAvatarFull(profile) },
-                        )
-                    }
-                } else {
-                    item {
-                        WhisperEmptyState(
-                            icon = Icons.Rounded.Search,
-                            title = stringResource(R.string.st_Whisper_Discover_EmptyTitle),
-                            subtitle = stringResource(R.string.st_Whisper_Discover_EmptySubtitle),
-                        )
+                            DiscoverUserCard(
+                                profile = profile,
+                                isAlreadyFriend = isAlreadyFriend,
+                                isPendingOutgoing = isPendingOutgoing,
+                                onChat = { haptic.click(); onNavigateToChat(profile.id) },
+                                onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
+                                onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                                onViewAvatarFull = { onViewAvatarFull(profile) },
+                            )
+                        }
+                    } else {
+                        item {
+                            WhisperEmptyState(
+                                icon = Icons.Rounded.Search,
+                                title = stringResource(R.string.st_Whisper_Discover_EmptyTitle),
+                                subtitle = stringResource(R.string.st_Whisper_Discover_EmptySubtitle),
+                            )
+                        }
                     }
                 }
             }
@@ -921,7 +966,14 @@ private fun DiscoverUserCard(
                         Icon(Icons.Rounded.VerifiedUser, "Friend", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 }
-                Text("@${profile.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("@${profile.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
+                    Text(profile.onlineStatus, style = MaterialTheme.typography.labelSmall, color = if (profile.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (!profile.isPrivate && !profile.bio.isNullOrBlank()) {
                     Text(
                         profile.bio,
@@ -1992,36 +2044,149 @@ private fun ConversationSkeleton() {
         ),
         label = "shimmerAlpha",
     )
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha))
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Box(
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(14.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(10.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.3f))
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(10.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.3f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FriendSkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmerAlpha",
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(68.dp).padding(vertical = 4.dp).alpha(shimmerAlpha)
     ) {
         Box(
             modifier = Modifier
-                .size(50.dp)
+                .size(48.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
         )
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.55f)
-                    .height(14.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .height(10.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.3f))
-            )
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .width(40.dp)
+                .height(8.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        )
+    }
+}
+
+@Composable
+private fun DiscoverSkeleton() {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val shimmerAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmerAlpha",
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = shimmerAlpha),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .width(120.dp)
+                            .height(14.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.5f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(80.dp)
+                            .height(10.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.outline.copy(alpha = shimmerAlpha * 0.3f))
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                )
+            }
         }
     }
 }

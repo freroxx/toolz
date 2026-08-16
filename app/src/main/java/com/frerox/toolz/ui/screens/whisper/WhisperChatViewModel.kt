@@ -127,23 +127,29 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     fun loadMessages() {
+        // 1. Instant loading from Room cache
         viewModelScope.launch {
-            repository.getMessages(otherUserId)
-                .onSuccess { messages ->
-                    _uiState.update { state ->
-                        state.copy(
-                            messages = messages,
-                            isLoading = false,
-                            matchingMessageIds = if (state.searchQuery.isNotBlank()) {
-                                messages.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
-                            } else emptySet()
-                        )
-                    }
+            repository.getMessagesFlow(otherUserId).collect { messages ->
+                _uiState.update { state ->
+                    state.copy(
+                        messages = messages,
+                        isLoading = false,
+                        matchingMessageIds = if (state.searchQuery.isNotBlank()) {
+                            messages.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                        } else emptySet()
+                    )
+                }
+                if (messages.any { it.senderId == otherUserId && !it.isRead }) {
                     repository.markMessagesAsRead(otherUserId)
                 }
+            }
+        }
+
+        // 2. Background sync with Supabase
+        viewModelScope.launch {
+            repository.getMessages(otherUserId)
                 .onFailure { err ->
-                    handleError(err, "getMessages")
-                    _uiState.update { it.copy(isLoading = false) }
+                    handleError(err, "getMessagesSync")
                 }
         }
     }
@@ -589,6 +595,11 @@ class WhisperChatViewModel @Inject constructor(
                                         state.copy(messages = updated)
                                     }
                                 }
+                            }
+                        }
+                        is WhisperChatEvent.DeleteEvent -> {
+                            _uiState.update { state ->
+                                state.copy(messages = state.messages.filter { it.id != event.messageId })
                             }
                         }
                     }

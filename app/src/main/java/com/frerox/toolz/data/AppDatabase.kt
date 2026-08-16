@@ -60,6 +60,8 @@ import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.search.SearchHistoryEntry
+import com.frerox.toolz.data.whisper.WhisperMessageEntity
+import com.frerox.toolz.data.whisper.WhisperMessageDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -87,9 +89,10 @@ import com.frerox.toolz.data.device.cache.DeviceSpecConverters
         QuickLinkEntry::class,
         CryptoHistoryEntry::class,
         DeviceSpecCacheEntity::class,
-        CatalogSearchEntry::class
+        CatalogSearchEntry::class,
+        WhisperMessageEntity::class
     ], 
-    version = 44,
+    version = 45,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
@@ -112,4 +115,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun cryptoDao(): CryptoDao
     abstract fun deviceSpecsDao(): DeviceSpecsDao
     abstract fun catalogSearchDao(): CatalogSearchDao
+    abstract fun whisperMessageDao(): WhisperMessageDao
 }

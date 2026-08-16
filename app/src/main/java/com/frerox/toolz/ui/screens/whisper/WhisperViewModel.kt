@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,8 +35,8 @@ class WhisperViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(WhisperUiState())
     val uiState: StateFlow<WhisperUiState> = _uiState.asStateFlow()
 
-    val betaWarningShown: StateFlow<Boolean> = settingsRepository.whisperBetaWarningShown
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val betaWarningShown: StateFlow<Boolean?> = settingsRepository.whisperBetaWarningShown
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val onboardingShown: StateFlow<Boolean?> = settingsRepository.whisperOnboardingShown
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -73,6 +74,7 @@ class WhisperViewModel @Inject constructor(
     private var friendsJob: Job? = null
     private var muteJob: Job? = null
     private var hiddenJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     init {
         observeMutes()
@@ -84,9 +86,27 @@ class WhisperViewModel @Inject constructor(
                     loadAll()
                     subscribeToMessages()
                     subscribeToFriends()
+                    startHeartbeat()
+                } else {
+                    stopHeartbeat()
                 }
             }
         }
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = viewModelScope.launch {
+            while (true) {
+                repository.updateLastSeen()
+                delay(60_000) // Update every minute
+            }
+        }
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
 
     private fun handleError(err: Throwable, context: String) {

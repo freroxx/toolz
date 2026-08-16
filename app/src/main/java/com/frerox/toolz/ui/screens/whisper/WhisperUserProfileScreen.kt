@@ -127,6 +127,13 @@ fun WhisperUserProfileScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            
+                            Text(
+                                profile.onlineStatus,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (profile.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
 
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
