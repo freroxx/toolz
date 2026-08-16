@@ -530,7 +530,15 @@ class WhisperChatViewModel @Inject constructor(
                                     )
                                     state.copy(messages = mutableList)
                                 } else {
-                                    val filtered = state.messages.filter { !it.id.startsWith("pending_") || it.content != newMsg.content }
+                                    // Robust matching: filter out pending messages that match content or ID
+                                    val filtered = state.messages.filter { 
+                                        val isThisPending = it.id.startsWith("pending_")
+                                        if (isThisPending) {
+                                            it.content.trim() != newMsg.content.trim()
+                                        } else {
+                                            it.id != newMsg.id
+                                        }
+                                    }
                                     state.copy(messages = filtered + newMsg)
                                 }
                             }

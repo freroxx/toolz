@@ -671,9 +671,9 @@ class WhisperRepository @Inject constructor(
         // subscribed, calling postgresChangeFlow will crash. We MUST remove any existing channel
         // first to ensure we start with a clean, unsubscribed channel object.
         channelMutex.withLock {
-            broadcastChannelCache[convoKey]?.let {
+            broadcastChannelCache[channelName]?.let {
                 runCatching { realtime.removeChannel(it) }
-                broadcastChannelCache.remove(convoKey)
+                broadcastChannelCache.remove(channelName)
             }
         }
         
@@ -713,10 +713,12 @@ class WhisperRepository @Inject constructor(
                         createdAt = createdAt
                     )
                     
-                    // Cache incoming message
-                    messageDao.insertMessage(msg.toEntity())
+                    // Cache incoming message in background
+                    launch { messageDao.insertMessage(msg.toEntity()) }
                     
-                    if (shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.MessageEvent(msg))
+                    if (shouldEmitMessage(msg.id)) {
+                        trySend(WhisperChatEvent.MessageEvent(msg))
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("WhisperRepo", "Broadcast message parse error: ${e.message}")
                 }
@@ -746,7 +748,7 @@ class WhisperRepository @Inject constructor(
                     val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
                     
                     // Remove from cache immediately
-                    messageDao.deleteMessage(messageId)
+                    launch { messageDao.deleteMessage(messageId) }
                     
                     // Notify ViewModel to remove from UI
                     trySend(WhisperChatEvent.DeleteEvent(messageId))
@@ -785,11 +787,13 @@ class WhisperRepository @Inject constructor(
                         
                         val finalMsg = msg.copy(content = decrypted)
                         
-                        // Sync to cache
-                        if (msg.isDeletedForEveryone) {
-                            messageDao.deleteMessage(msg.id)
-                        } else {
-                            messageDao.insertMessage(finalMsg.toEntity())
+                        // Sync to cache in background
+                        launch {
+                            if (msg.isDeletedForEveryone) {
+                                messageDao.deleteMessage(msg.id)
+                            } else {
+                                messageDao.insertMessage(finalMsg.toEntity())
+                            }
                         }
 
                         if (shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.MessageEvent(finalMsg))
@@ -823,7 +827,9 @@ class WhisperRepository @Inject constructor(
         }
 
         channel.subscribe()
-        broadcastChannelCache[convoKey] = channel
+        channelMutex.withLock {
+            broadcastChannelCache[channelName] = channel
+        }
 
         awaitClose {
             bMsgJob.cancel()
@@ -832,7 +838,7 @@ class WhisperRepository @Inject constructor(
             pMsgJob.cancel()
             pReactionJob.cancel()
             launch {
-                removeCachedChannel(convoKey, channel)
+                removeCachedChannel(channelName, channel)
             }
         }
     }

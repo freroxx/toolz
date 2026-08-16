@@ -39,7 +39,7 @@ class WhisperAuthViewModel @Inject constructor(
     private val passwordDao: PasswordDao,
 ) : ViewModel() {
 
-    private val _authState = MutableStateFlow<WhisperAuthState>(WhisperAuthState.Idle)
+    private val _authState = MutableStateFlow<WhisperAuthState>(WhisperAuthState.Loading)
     val authState: StateFlow<WhisperAuthState> = _authState.asStateFlow()
     private val _generatedToken = MutableStateFlow<WhisperAnonToken?>(null)
     val generatedToken: StateFlow<WhisperAnonToken?> = _generatedToken.asStateFlow()

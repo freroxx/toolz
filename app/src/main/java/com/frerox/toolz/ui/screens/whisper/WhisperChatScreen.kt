@@ -102,7 +102,25 @@ fun WhisperChatScreen(
 
     val isAtBottom by remember {
         derivedStateOf {
-            listState.firstVisibleItemIndex == 0
+            // In reverseLayout, firstVisibleItemIndex is the index from the BOTTOM.
+            // Index 0 is the newest message.
+            listState.firstVisibleItemIndex <= 1
+        }
+    }
+
+    // Auto-scroll when new messages arrive
+    val newestMessageId = remember(messages) { messages.lastOrNull()?.id }
+    LaunchedEffect(newestMessageId) {
+        if (newestMessageId == null || uiState.isSearchActive) return@LaunchedEffect
+        
+        val lastMsg = messages.last()
+        val isMine = lastMsg.senderId == viewModel.myUserId
+        
+        // In reverse layout, item 0 is the newest (bottom).
+        // We scroll to 0 if we sent the message or were already at the bottom.
+        if (isMine || isAtBottom) {
+            delay(100.milliseconds)
+            listState.animateScrollToItem(0)
         }
     }
 
