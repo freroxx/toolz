@@ -61,6 +61,7 @@ import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -95,40 +96,13 @@ fun WhisperChatScreen(
     val listState = rememberLazyListState()
     val messages = uiState.messages
 
-    // ── ROBUST AUTO-SCROLL LOGIC ──
+    // ── REVERSE LAYOUT (The standard chat pattern) ──
+    // Index 0 is now the BOTTOM (newest message).
+    val reversedMessages = remember(messages) { messages.asReversed() }
+
     val isAtBottom by remember {
         derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val totalItems = layoutInfo.totalItemsCount
-            if (totalItems == 0) true
-            else {
-                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
-                lastVisibleItem != null && lastVisibleItem.index >= totalItems - 1
-            }
-        }
-    }
-
-    // 1. Initial Scroll on Enter (Instant jump)
-    var hasPerformedInitialScroll by remember { mutableStateOf(false) }
-    LaunchedEffect(messages.isNotEmpty()) {
-        if (messages.isNotEmpty() && !hasPerformedInitialScroll) {
-            listState.scrollToItem(messages.lastIndex)
-            hasPerformedInitialScroll = true
-        }
-    }
-
-    // 2. Auto-scroll on new messages (Animated)
-    LaunchedEffect(messages.size) {
-        if (!hasPerformedInitialScroll || messages.isEmpty() || uiState.isSearchActive) return@LaunchedEffect
-        
-        val lastIndex = messages.lastIndex
-        val lastMsg = messages[lastIndex]
-        val isMine = lastMsg.senderId == viewModel.myUserId
-        
-        // If I sent it or we are already at the bottom, follow the flow
-        if (isMine || isAtBottom) {
-            delay(100.milliseconds) // Give Compose a frame to measure the new item
-            listState.animateScrollToItem(lastIndex)
+            listState.firstVisibleItemIndex == 0
         }
     }
 
@@ -155,7 +129,9 @@ fun WhisperChatScreen(
     LaunchedEffect(uiState.activeSearchMatchIndex, matchingIndices) {
         if (uiState.isSearchActive && uiState.activeSearchMatchIndex in matchingIndices.indices) {
             val targetIdx = matchingIndices[uiState.activeSearchMatchIndex]
-            listState.animateScrollToItem(targetIdx)
+            // In reverse layout, we need to map the index
+            val reverseIdx = messages.size - 1 - targetIdx
+            listState.animateScrollToItem(reverseIdx)
         }
     }
 
@@ -343,20 +319,17 @@ fun WhisperChatScreen(
                     } else {
                         LazyColumn(
                             state = listState,
+                            reverseLayout = true,
                             modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 32.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                         ) {
-                            itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                            itemsIndexed(reversedMessages, key = { _, m -> m.id }) { index, message ->
                                 val isMine = message.isSentByMe(viewModel.myUserId)
                                 val isPending = message.id.startsWith("pending_")
-                                val showDateSeparator = index == 0 || messages[index - 1].createdAt.extractDate() != message.createdAt.extractDate()
-
-                                if (showDateSeparator) {
-                                    StaggeredEntrance(index = index) {
-                                        DateSeparator(message.createdAt.extractDate())
-                                    }
-                                }
+                                
+                                val showDateSeparator = index == reversedMessages.lastIndex ||
+                                    reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
 
                                 StaggeredEntrance(index = index) {
                                     MessageBubble(
@@ -367,7 +340,7 @@ fun WhisperChatScreen(
                                         partnerName = uiState.otherUser?.effectiveName ?: "User",
                                         onReply = { haptic.click(); viewModel.setReplyTarget(message) },
                                         onQuotedClick = { targetId ->
-                                            val targetIndex = messages.indexOfFirst { it.id == targetId }
+                                            val targetIndex = reversedMessages.indexOfFirst { it.id == targetId }
                                             if (targetIndex >= 0) {
                                                 haptic.click()
                                                 scope.launch { listState.animateScrollToItem(targetIndex) }
@@ -377,6 +350,12 @@ fun WhisperChatScreen(
                                         onReactionClick = { emoji -> haptic.click(); viewModel.toggleReaction(message, emoji) },
                                         onLongClick = { if (!message.isDeletedForEveryone && !isPending) { haptic.longClick(); selectedMessageForDelete = message } }
                                     )
+                                }
+
+                                if (showDateSeparator) {
+                                    StaggeredEntrance(index = index + 100) {
+                                        DateSeparator(message.createdAt.extractDate())
+                                    }
                                 }
                             }
                         }
@@ -393,9 +372,7 @@ fun WhisperChatScreen(
                             onClick = {
                                 haptic.click()
                                 scope.launch {
-                                    if (messages.isNotEmpty()) {
-                                        listState.animateScrollToItem(messages.lastIndex)
-                                    }
+                                    listState.animateScrollToItem(0)
                                 }
                             },
                             containerColor = MaterialTheme.colorScheme.primaryContainer,

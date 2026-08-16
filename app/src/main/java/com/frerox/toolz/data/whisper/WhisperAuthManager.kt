@@ -31,9 +31,13 @@ class WhisperAuthManager @Inject constructor(
     }
     val sessionStatus: Flow<SessionStatus>
         get() = supabase.auth.sessionStatus
-    val isAuthenticated: Flow<Boolean>
+    val isAuthenticated: Flow<Boolean?>
         get() = sessionStatus.map { status ->
-            status is SessionStatus.Authenticated
+            when (status) {
+                is SessionStatus.Initializing -> null
+                is SessionStatus.Authenticated -> true
+                else -> false
+            }
         }
     val isInitializing: Flow<Boolean>
         get() = sessionStatus.map { it is SessionStatus.Initializing }

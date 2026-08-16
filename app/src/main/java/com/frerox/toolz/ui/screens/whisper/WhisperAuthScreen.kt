@@ -139,20 +139,25 @@ fun WhisperAuthScreen(
             containerColor = Color.Transparent,
             modifier = Modifier.toolzBackground(),
         ) { paddingValues ->
-
-            WhisperAuthContent(
-                authState = authState,
-                generatedToken = generatedToken?.token,
-                usernameAvailability = usernameAvailability,
-                onCheckUsername = viewModel::checkUsernameAvailable,
-                onLoginUsername = viewModel::loginWithUsername,
-                onRegisterUsername = viewModel::registerWithUsername,
-                onGenerateToken = viewModel::generateToken,
-                onRegisterToken = viewModel::registerWithGeneratedToken,
-                onLoginToken = viewModel::loginWithToken,
-                onNormalizeToken = viewModel::normalizeToken,
-                modifier = Modifier.padding(paddingValues),
-            )
+            if (authState is WhisperAuthState.Loading) {
+                Box(Modifier.fillMaxSize().toolzBackground(), contentAlignment = Alignment.Center) {
+                    ToolzLoadingIndicator()
+                }
+            } else {
+                WhisperAuthContent(
+                    authState = authState,
+                    generatedToken = generatedToken?.token,
+                    usernameAvailability = usernameAvailability,
+                    onCheckUsername = viewModel::checkUsernameAvailable,
+                    onLoginUsername = viewModel::loginWithUsername,
+                    onRegisterUsername = viewModel::registerWithUsername,
+                    onGenerateToken = viewModel::generateToken,
+                    onRegisterToken = viewModel::registerWithGeneratedToken,
+                    onLoginToken = viewModel::loginWithToken,
+                    onNormalizeToken = viewModel::normalizeToken,
+                    modifier = Modifier.padding(paddingValues),
+                )
+            }
         }
 
         WhisperToastHost(
