@@ -6,10 +6,13 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.password.PasswordDao
+import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.whisper.WhisperAuthManager
 import com.frerox.toolz.data.whisper.WhisperAnonToken
 import com.frerox.toolz.data.whisper.WhisperAuthState
 import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.util.password.PasswordGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.auth.status.SessionStatus
 import kotlinx.coroutines.Job
@@ -33,6 +36,7 @@ sealed class UsernameAvailability {
 class WhisperAuthViewModel @Inject constructor(
     private val authManager: WhisperAuthManager,
     private val repository: WhisperRepository,
+    private val passwordDao: PasswordDao,
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<WhisperAuthState>(WhisperAuthState.Idle)
@@ -42,42 +46,16 @@ class WhisperAuthViewModel @Inject constructor(
 
     private val _usernameAvailability = MutableStateFlow<UsernameAvailability>(UsernameAvailability.Idle)
     val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
-    private var verificationEmail: String? = null
 
     init {
         viewModelScope.launch {
             authManager.sessionStatus.collectLatest { status ->
                 when (status) {
                     is SessionStatus.Initializing -> _authState.value = WhisperAuthState.Loading
-                    is SessionStatus.Authenticated -> {
-                        if (authManager.isCurrentEmailVerified) {
-                            verificationEmail = null
-                            _authState.value = WhisperAuthState.Authenticated
-                        } else {
-                            _authState.value = WhisperAuthState.EmailVerificationRequired(
-                                verificationEmail ?: authManager.currentUserEmail ?: "your email"
-                            )
-                        }
-                    }
-                    is SessionStatus.NotAuthenticated -> {
-                        if (verificationEmail != null) {
-                            _authState.value = WhisperAuthState.EmailVerificationRequired(verificationEmail!!)
-                        } else {
-                            _authState.value = WhisperAuthState.Idle
-                        }
-                    }
+                    is SessionStatus.Authenticated -> _authState.value = WhisperAuthState.Authenticated
                     else -> _authState.value = WhisperAuthState.Idle
                 }
             }
-        }
-    }
-
-    fun refreshVerificationStatus() {
-        viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
-            authManager.refreshUser()
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
-                // combine in init will handle the success case if verified
         }
     }
 
@@ -106,51 +84,39 @@ class WhisperAuthViewModel @Inject constructor(
         return null
     }
 
-    fun loginWithEmail(email: String, password: String) {
+    fun loginWithUsername(username: String, password: String) {
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
-            authManager.loginWithEmail(email, password)
+            authManager.loginWithUsername(username, password)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
-    fun registerWithEmail(email: String, password: String, username: String, displayName: String) {
+    fun registerWithUsername(username: String, password: String, displayName: String) {
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
-            authManager.registerWithEmail(email, password, username, displayName)
-                .onSuccess { outcome ->
-                    when (outcome) {
-                        WhisperAuthManager.EmailRegistrationResult.SignedIn -> _authState.value = WhisperAuthState.Authenticated
-                        is WhisperAuthManager.EmailRegistrationResult.VerificationRequired -> {
-                            verificationEmail = outcome.email
-                            _authState.value = WhisperAuthState.EmailVerificationRequired(outcome.email)
-                        }
-                    }
-                }
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
-        }
-    }
-
-    fun resendEmailVerification(email: String) {
-        viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
-            authManager.resendEmailVerification(email)
+            val cleanUser = username.trim().lowercase()
+            authManager.registerWithUsername(cleanUser, password, displayName)
                 .onSuccess {
-                    verificationEmail = email
-                    _authState.value = WhisperAuthState.EmailVerificationRequired(email)
+                    _authState.value = WhisperAuthState.Authenticated
+                    saveToVault("Whisper: $cleanUser", cleanUser, password)
                 }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
 
-    fun requestPasswordReset(email: String) {
+    private fun saveToVault(name: String, user: String, pass: String) {
         viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
-            authManager.requestPasswordReset(email)
-                // Keep this generic to prevent account enumeration.
-                .onSuccess { _authState.value = WhisperAuthState.Notice("If that email has an account, a recovery link is on its way.") }
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+            passwordDao.insertPassword(
+                PasswordEntity(
+                    name = name,
+                    url = "whisper.toolz.app",
+                    username = user,
+                    password = pass,
+                    strength = PasswordGenerator.calculateStrength(pass)
+                )
+            )
         }
     }
 
@@ -179,7 +145,10 @@ class WhisperAuthViewModel @Inject constructor(
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
             authManager.registerWithToken(token, username = cleanUsername, displayName = cleanName)
-                .onSuccess { _authState.value = WhisperAuthState.Authenticated }
+                .onSuccess { 
+                    _authState.value = WhisperAuthState.Authenticated
+                    saveToVault("Whisper Anon: $cleanUsername", cleanUsername, token.token)
+                }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
@@ -209,9 +178,8 @@ class WhisperAuthViewModel @Inject constructor(
         return when {
             msg.contains("Token must be", ignoreCase = true) || msg.contains("doesn't look right", ignoreCase = true) ->
                 "That token doesn't look right. Check for missing or extra characters."
-            authManager.isInvalidCredentials(throwable) -> "Invalid email or password"
-            msg.contains("User already registered", ignoreCase = true) -> "An account with this email already exists"
-            msg.contains("Email not confirmed", ignoreCase = true) -> "Please confirm your email before signing in"
+            authManager.isInvalidCredentials(throwable) -> "Invalid username or password"
+            msg.contains("User already registered", ignoreCase = true) -> "An account with this username already exists"
             msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true) -> "Network error — check your connection"
             else -> msg
         }

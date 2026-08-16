@@ -22,6 +22,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -994,15 +999,21 @@ private fun ProfileTab(
     val initialDisplayName = profile.displayName ?: ""
     val initialBio = profile.bio ?: ""
     val initialIsPrivate = profile.isPrivate
+    val initialIsHidden = profile.isHiddenFromDiscover
 
     var displayName by remember(profile.id) { mutableStateOf(initialDisplayName) }
     var bio by remember(profile.id) { mutableStateOf(initialBio) }
     var isPrivate by remember(profile.id) { mutableStateOf(initialIsPrivate) }
+    var isHidden by remember(profile.id) { mutableStateOf(initialIsHidden) }
+    
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var showDiscoveryWarningDialog by remember { mutableStateOf(false) }
 
     // Track unsaved changes and notify parent
-    val hasUnsaved = displayName != initialDisplayName || bio != initialBio || isPrivate != initialIsPrivate
+    val hasUnsaved = displayName != initialDisplayName || bio != initialBio || 
+                    isPrivate != initialIsPrivate || isHidden != initialIsHidden
+    
     LaunchedEffect(hasUnsaved) {
         onUnsavedChangesChanged(hasUnsaved)
     }
@@ -1010,7 +1021,7 @@ private fun ProfileTab(
     // Save trigger from UnsavedChangesDialog
     LaunchedEffect(saveTrigger) {
         if (saveTrigger > 0) {
-            viewModel.updateProfile(displayName, bio, isPrivate) {
+            viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
                 toastState.show("Profile saved", WhisperToastType.SUCCESS)
             }
         }
@@ -1022,6 +1033,7 @@ private fun ProfileTab(
             displayName = initialDisplayName
             bio = initialBio
             isPrivate = initialIsPrivate
+            isHidden = initialIsHidden
         }
     }
 
@@ -1029,11 +1041,14 @@ private fun ProfileTab(
         val prevName = initialDisplayName
         val prevBio = initialBio
         val prevPrivate = initialIsPrivate
-        viewModel.updateProfile(displayName, bio, isPrivate) {
+        val prevHidden = initialIsHidden
+        
+        viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
             val toasts = mutableListOf<String>()
             if (displayName != prevName) toasts.add("Display name updated")
             if (bio != prevBio) toasts.add("Bio updated")
             if (isPrivate != prevPrivate) toasts.add(if (isPrivate) "Profile set to Private" else "Profile set to Public")
+            if (isHidden != prevHidden) toasts.add(if (isHidden) "Hidden from Discover" else "Visible in Discover")
             if (toasts.isEmpty()) toasts.add("Profile saved")
             toastState.show(toasts.joinToString(" · "), WhisperToastType.SUCCESS)
         }
@@ -1206,29 +1221,60 @@ private fun ProfileTab(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            // Privacy Toggle Card
-            ExpressiveCard(onClick = { isPrivate = !isPrivate }, modifier = Modifier.fillMaxWidth()) {
+            SectionHeader("Privacy & Discovery")
+
+            // Profile Visibility: Public vs Private
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Profile Visibility", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                ToolzConnectedButtonGroup(
+                    selectedIndex = if (isPrivate) 1 else 0,
+                    options = listOf("Public", "Private"),
+                    onOptionSelected = { isPrivate = it == 1 },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+
+            // Hide from Discover Toggle
+            ExpressiveCard(
+                onClick = {
+                    if (!isHidden) {
+                        showDiscoveryWarningDialog = true
+                    } else {
+                        isHidden = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     Icon(
-                        if (isPrivate) Icons.Rounded.Lock else Icons.Rounded.Public,
+                        if (isHidden) Icons.Rounded.VisibilityOff else Icons.Rounded.PersonSearch,
                         null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = if (isHidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(if (isPrivate) stringResource(R.string.st_Whisper_Discover_PrivateProfile) else stringResource(R.string.st_Whisper_Discover_PublicProfile), fontWeight = FontWeight.Bold)
+                        Text("Hide from Discover", fontWeight = FontWeight.Bold)
                         Text(
-                            if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
+                            "You won't appear in recommendations or search. People can only find you if you add them first.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     ExpressiveSwitch(
-                        checked = isPrivate,
-                        onCheckedChange = { isPrivate = it },
+                        checked = isHidden,
+                        onCheckedChange = {
+                            if (it) showDiscoveryWarningDialog = true
+                            else isHidden = false
+                        },
                     )
                 }
             }
@@ -1419,6 +1465,56 @@ private fun ProfileTab(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    // Whisper Discovery Warning Dialog
+    if (showDiscoveryWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscoveryWarningDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.VisibilityOff, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = {
+                Text("Hide from Discover?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            },
+            text = {
+                Text(
+                    "Activating this means no one will ever find you on Whisper unless you reach out first. You will be removed from all search results and recommendations.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        haptic.success()
+                        isHidden = true
+                        showDiscoveryWarningDialog = false
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Hide Me", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(
+                    onClick = { showDiscoveryWarningDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Keep Visible")
                 }
             }
         )

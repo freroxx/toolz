@@ -67,12 +67,11 @@ import com.frerox.toolz.ui.theme.toolzBackground
 /**
  * Whisper authentication screen — Material 3 Expressive.
  *
- * Two paths, presented with equal weight and no visual trickery:
- *  - Email + password, for people who want normal account recovery.
- *  - A locally generated token, for people who don't want to give an email at all.
- *    The token IS the account secret — Whisper never sees it, only two one-way hashes
- *    derived from it. Losing the token means losing the account; there is no recovery,
- *    and the UI says so plainly instead of hiding the tradeoff.
+ * Two paths:
+ *  - Username + password, for people who want standard credentials.
+ *  - A locally generated token, for people who want to remain anonymous.
+ *
+ * Credentials are automatically saved to the built-in Toolz Vault.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -146,11 +145,8 @@ fun WhisperAuthScreen(
                 generatedToken = generatedToken?.token,
                 usernameAvailability = usernameAvailability,
                 onCheckUsername = viewModel::checkUsernameAvailable,
-                onLoginEmail = viewModel::loginWithEmail,
-                onRegisterEmail = viewModel::registerWithEmail,
-                onResendVerification = viewModel::resendEmailVerification,
-                onRefreshVerification = viewModel::refreshVerificationStatus,
-                onRequestPasswordReset = viewModel::requestPasswordReset,
+                onLoginUsername = viewModel::loginWithUsername,
+                onRegisterUsername = viewModel::registerWithUsername,
                 onGenerateToken = viewModel::generateToken,
                 onRegisterToken = viewModel::registerWithGeneratedToken,
                 onLoginToken = viewModel::loginWithToken,
@@ -169,7 +165,6 @@ fun WhisperAuthScreen(
     }
 }
 
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun WhisperAuthContent(
@@ -177,18 +172,15 @@ private fun WhisperAuthContent(
     generatedToken: String?,
     usernameAvailability: UsernameAvailability,
     onCheckUsername: (String) -> Unit,
-    onLoginEmail: (String, String) -> Unit,
-    onRegisterEmail: (String, String, String, String) -> Unit,
-    onResendVerification: (String) -> Unit,
-    onRefreshVerification: () -> Unit,
-    onRequestPasswordReset: (String) -> Unit,
+    onLoginUsername: (String, String) -> Unit,
+    onRegisterUsername: (String, String, String) -> Unit,
     onGenerateToken: () -> Unit,
     onRegisterToken: (displayName: String) -> Unit,
     onLoginToken: (String) -> Unit,
     onNormalizeToken: (String) -> String,
     modifier: Modifier = Modifier,
 ) {
-    // 0 = Email, 1 = Token
+    // 0 = Username, 1 = Token
     var selectedMode by remember { mutableIntStateOf(0) }
     val isLoading = authState is WhisperAuthState.Loading
 
@@ -203,26 +195,15 @@ private fun WhisperAuthContent(
     ) {
         WhisperAuthHeader()
 
-        val verification = authState as? WhisperAuthState.EmailVerificationRequired
-        if (verification != null) {
-            EmailVerificationCard(
-                email = verification.email,
-                isLoading = isLoading,
-                onResend = { onResendVerification(verification.email) },
-                onRefresh = onRefreshVerification,
-            )
-            return@Column
-        }
-
-        // Mode Segmented Control — Email vs Token, equal weight
+        // Mode Segmented Control — Username vs Token, equal weight
         ToolzConnectedButtonGroup(
             selectedIndex = selectedMode,
             options = listOf(
-                stringResource(R.string.st_Whisper_Auth_Mode_Email),
+                "Username",
                 stringResource(R.string.st_Whisper_Auth_Mode_Token),
             ),
-            unCheckedIcons = listOf(Icons.Rounded.Email, Icons.Rounded.Key),
-            checkedIcons = listOf(Icons.Rounded.Email, Icons.Rounded.Key),
+            unCheckedIcons = listOf(Icons.Rounded.Person, Icons.Rounded.Key),
+            checkedIcons = listOf(Icons.Rounded.Person, Icons.Rounded.Key),
             onOptionSelected = { selectedMode = it },
             modifier = Modifier.fillMaxWidth(),
         )
@@ -236,13 +217,12 @@ private fun WhisperAuthContent(
             label = "authModeContent",
         ) { mode ->
             when (mode) {
-                0 -> EmailAuthSection(
+                0 -> UsernameAuthSection(
                     isLoading = isLoading,
                     usernameAvailability = usernameAvailability,
                     onCheckUsername = onCheckUsername,
-                    onLogin = onLoginEmail,
-                    onRegister = onRegisterEmail,
-                    onRequestPasswordReset = onRequestPasswordReset,
+                    onLogin = onLoginUsername,
+                    onRegister = onRegisterUsername,
                 )
                 1 -> TokenAuthSection(
                     isLoading = isLoading,
@@ -254,48 +234,49 @@ private fun WhisperAuthContent(
                 )
             }
         }
+        
+        VaultAssuranceCard()
 
         Spacer(Modifier.height(8.dp))
     }
 }
 
 @Composable
-private fun EmailVerificationCard(email: String, isLoading: Boolean, onResend: () -> Unit, onRefresh: () -> Unit) {
+private fun VaultAssuranceCard() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = LargeExpressiveShape,
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MediumExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
-                Icons.Rounded.MarkEmailRead,
+                Icons.Rounded.Lock,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
             )
-            Text("Verify your email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(
-                "We sent a verification link to $email. Open it, then return and check status to unlock Whisper.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            
-            ToolzExpressiveButton(onClick = onRefresh, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                if (isLoading) ToolzLoadingIndicator(modifier = Modifier.size(20.dp)) else Text("Check verification status")
-            }
-            
-            TextButton(onClick = onResend, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
-                Text("Resend verification email", style = MaterialTheme.typography.labelLarge)
+            Column {
+                Text(
+                    "Secured in Vault",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Your credentials will be automatically saved to your Toolz Vault for safe keeping.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
 /**
- * Plain, static header. No animated glow, no pulsing scale, no gradient hero box —
- * the chat glyph and copy do the work. Restraint reads as more trustworthy for a
- * security-focused product than motion for its own sake.
+ * Plain, static header.
  */
 @Composable
 private fun WhisperAuthHeader() {
@@ -325,7 +306,7 @@ private fun WhisperAuthHeader() {
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            stringResource(R.string.st_Whisper_Auth_Subtitle),
+            "Instant messaging with zero configuration. No email required.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -334,13 +315,12 @@ private fun WhisperAuthHeader() {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun EmailAuthSection(
+private fun UsernameAuthSection(
     isLoading: Boolean,
     usernameAvailability: UsernameAvailability,
     onCheckUsername: (String) -> Unit,
     onLogin: (String, String) -> Unit,
-    onRegister: (String, String, String, String) -> Unit,
-    onRequestPasswordReset: (String) -> Unit,
+    onRegister: (String, String, String) -> Unit,
 ) {
     var isRegisterMode by remember { mutableStateOf(false) }
 
@@ -358,9 +338,9 @@ private fun EmailAuthSection(
         AnimatedContent(
             targetState = isRegisterMode,
             transitionSpec = { fadeIn(spring()).togetherWith(fadeOut(spring())) },
-            label = "emailMode",
+            label = "usernameMode",
         ) { registerMode ->
-            EmailAuthForm(
+            UsernameAuthForm(
                 isLoading = isLoading,
                 ctaLabel = if (registerMode) {
                     stringResource(R.string.st_Whisper_Auth_CreateAccount)
@@ -372,7 +352,6 @@ private fun EmailAuthSection(
                 onCheckUsername = onCheckUsername,
                 onLogin = onLogin,
                 onRegister = onRegister,
-                onRequestPasswordReset = onRequestPasswordReset,
             )
         }
     }
@@ -380,20 +359,18 @@ private fun EmailAuthSection(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun EmailAuthForm(
+private fun UsernameAuthForm(
     isLoading: Boolean,
     ctaLabel: String,
     onLogin: (String, String) -> Unit,
-    onRegister: (String, String, String, String) -> Unit,
-    onRequestPasswordReset: (String) -> Unit,
+    onRegister: (String, String, String) -> Unit,
     isRegister: Boolean = false,
     usernameAvailability: UsernameAvailability = UsernameAvailability.Idle,
     onCheckUsername: (String) -> Unit = {},
 ) {
-    var email by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     
     var showPassword by remember { mutableStateOf(false) }
@@ -403,10 +380,10 @@ private fun EmailAuthForm(
 
     val passwordsMatch = !isRegister || password == confirmPassword
     val canSubmit = if (isRegister) {
-        email.isNotBlank() && password.length >= 10 && passwordsMatch && !isLoading &&
+        username.isNotBlank() && password.length >= 10 && passwordsMatch && !isLoading &&
         usernameAvailability is UsernameAvailability.Available && displayName.isNotBlank()
     } else {
-        email.isNotBlank() && password.length >= 10 && !isLoading
+        username.isNotBlank() && password.length >= 10 && !isLoading
     }
 
     fun submit() {
@@ -414,9 +391,9 @@ private fun EmailAuthForm(
             haptic.success()
             focusManager.clearFocus()
             if (isRegister) {
-                onRegister(email.trim(), password, username.trim().lowercase(), displayName.trim())
+                onRegister(username.trim().lowercase(), password, displayName.trim())
             } else {
-                onLogin(email.trim(), password)
+                onLogin(username.trim().lowercase(), password)
             }
         }
     }
@@ -426,14 +403,38 @@ private fun EmailAuthForm(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text(stringResource(R.string.st_Whisper_Auth_Email)) },
-            leadingIcon = { Icon(Icons.Rounded.Email, null) },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Email,
-                imeAction = ImeAction.Next,
-            ),
+            value = username,
+            onValueChange = {
+                val formatted = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '_' }
+                username = formatted
+                if (isRegister) onCheckUsername(formatted)
+            },
+            label = { Text(if (isRegister) "Choose Username" else "Username") },
+            leadingIcon = { Icon(Icons.Rounded.Person, null) },
+            trailingIcon = {
+                if (isRegister) {
+                    when (usernameAvailability) {
+                        is UsernameAvailability.Checking -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        is UsernameAvailability.Available -> Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                        is UsernameAvailability.Taken -> Icon(Icons.Rounded.Cancel, null, tint = MaterialTheme.colorScheme.error)
+                        is UsernameAvailability.Invalid -> Icon(Icons.Rounded.Error, null, tint = MaterialTheme.colorScheme.error)
+                        else -> {}
+                    }
+                }
+            },
+            isError = isRegister && (usernameAvailability is UsernameAvailability.Taken || usernameAvailability is UsernameAvailability.Invalid),
+            supportingText = if (isRegister) {
+                {
+                    when (usernameAvailability) {
+                        is UsernameAvailability.Taken -> Text(stringResource(R.string.st_Whisper_Auth_UsernameTaken))
+                        is UsernameAvailability.Available -> Text(stringResource(R.string.st_Whisper_Auth_UsernameAvailable))
+                        is UsernameAvailability.Checking -> Text(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
+                        is UsernameAvailability.Invalid -> Text(usernameAvailability.reason)
+                        else -> {}
+                    }
+                }
+            } else null,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
             singleLine = true,
             shape = MediumExpressiveShape,
@@ -493,41 +494,6 @@ private fun EmailAuthForm(
             )
             
             OutlinedTextField(
-                value = username,
-                onValueChange = {
-                    val formatted = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '_' }
-                    username = formatted
-                    onCheckUsername(formatted)
-                },
-                label = { Text(stringResource(R.string.st_Whisper_Auth_ChooseUsername)) },
-                leadingIcon = { Icon(Icons.Rounded.AlternateEmail, null) },
-                trailingIcon = {
-                    when (usernameAvailability) {
-                        is UsernameAvailability.Checking -> CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        is UsernameAvailability.Available -> Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-                        is UsernameAvailability.Taken -> Icon(Icons.Rounded.Cancel, null, tint = MaterialTheme.colorScheme.error)
-                        is UsernameAvailability.Invalid -> Icon(Icons.Rounded.Error, null, tint = MaterialTheme.colorScheme.error)
-                        else -> {}
-                    }
-                },
-                isError = usernameAvailability is UsernameAvailability.Taken || usernameAvailability is UsernameAvailability.Invalid,
-                supportingText = {
-                    when (usernameAvailability) {
-                        is UsernameAvailability.Taken -> Text(stringResource(R.string.st_Whisper_Auth_UsernameTaken))
-                        is UsernameAvailability.Available -> Text(stringResource(R.string.st_Whisper_Auth_UsernameAvailable))
-                        is UsernameAvailability.Checking -> Text(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
-                        is UsernameAvailability.Invalid -> Text(usernameAvailability.reason)
-                        else -> {}
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                singleLine = true,
-                shape = MediumExpressiveShape,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            
-            OutlinedTextField(
                 value = displayName,
                 onValueChange = { displayName = it },
                 label = { Text(stringResource(R.string.st_Whisper_Auth_DisplayName)) },
@@ -556,14 +522,6 @@ private fun EmailAuthForm(
                     Text(ctaLabel, fontWeight = FontWeight.Bold)
                 }
             }
-        }
-
-        if (!isRegister) {
-            TextButton(
-                onClick = { onRequestPasswordReset(email) },
-                enabled = email.isNotBlank() && !isLoading,
-                modifier = Modifier.align(Alignment.End),
-            ) { Text("Forgot password?") }
         }
     }
 }
@@ -594,8 +552,7 @@ private fun PasswordStrengthMeter(password: String) {
 }
 
 /**
- * Token auth: create-new or sign-in-with-existing, toggled the same way as email mode
- * for visual consistency rather than a distinct nested-toggle pattern.
+ * Token auth.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -688,7 +645,6 @@ private fun TokenLoginForm(
     val hasInvalidChars = cleanRaw.isNotEmpty() && cleanRaw.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }
     val normalized = onNormalizeToken(tokenInput)
     val isValidLength = normalized.length == 64
-
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
@@ -817,10 +773,6 @@ private fun TokenRegisterForm(
                 }
             }
 
-            // Explicit confirmation gate — registration is blocked until the person has
-            // taken an action (copy) proving they've captured the only credential that
-            // will ever exist for this account. No recovery flow exists, so this gate
-            // matters more than it would for a normal password.
             if (!hasSavedToken) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

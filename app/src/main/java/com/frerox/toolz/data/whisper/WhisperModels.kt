@@ -32,6 +32,7 @@ data class WhisperProfile(
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean = false,
+    @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean = false,
     @SerialName("public_key") val publicKey: String? = null,
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("updated_at") val updatedAt: String = "",
@@ -59,6 +60,7 @@ data class WhisperProfileUpdate(
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean? = null,
+    @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean? = null,
     @SerialName("public_key") val publicKey: String? = null,
 )
 
@@ -71,6 +73,7 @@ data class WhisperProfileInsert(
     val bio: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
     @SerialName("is_private") val isPrivate: Boolean = false,
+    @SerialName("hide_from_discover") val isHiddenFromDiscover: Boolean = false,
     @SerialName("public_key") val publicKey: String? = null,
 )
 

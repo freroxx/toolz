@@ -145,51 +145,68 @@ class WhisperRepository @Inject constructor(
 
     // PROFILES
     suspend fun getMyProfile(forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
-        if (!forceRefresh && profileCache.containsKey(myId)) {
-            val cached = profileCache[myId]
+        val currentId = myId
+        if (currentId.isBlank()) error("User not authenticated")
+        
+        if (!forceRefresh && profileCache.containsKey(currentId)) {
+            val cached = profileCache[currentId]
             if (cached?.publicKey != null) return Result.success(cached)
         }
 
         val existing = db.from("profiles")
-            .select { filter { eq("id", myId) } }
+            .select { filter { eq("id", currentId) } }
             .decodeList<WhisperProfile>()
             .firstOrNull()
 
         val pubKey = crypto.getPublicKeyBase64()
 
         val profile = if (existing == null) {
-            val defaultUsername = "user_${myId.take(8)}"
+            val user = supabase.auth.currentUserOrNull()
+            val metadata = user?.userMetadata
+            val metaUsername = metadata?.get("username")?.toString()?.removeSurrounding("\"")?.takeIf { it != "null" }
+            val metaDisplayName = metadata?.get("display_name")?.toString()?.removeSurrounding("\"")?.takeIf { it != "null" }
+            
+            val initialUsername = metaUsername ?: "user_${currentId.take(8)}"
             val insertData = WhisperProfileInsert(
-                id = myId,
-                username = defaultUsername,
+                id = currentId,
+                username = initialUsername,
+                displayName = metaDisplayName,
                 isPrivate = false,
                 publicKey = pubKey
             )
             db.from("profiles").insert(insertData) { defaultToNull = false }
-            WhisperProfile(id = myId, username = defaultUsername, isPrivate = false, publicKey = pubKey)
+            WhisperProfile(id = currentId, username = initialUsername, displayName = metaDisplayName, isPrivate = false, publicKey = pubKey)
         } else {
+            val user = supabase.auth.currentUserOrNull()
+            val metadata = user?.userMetadata
+            val metaDisplayName = metadata?.get("display_name")?.toString()?.removeSurrounding("\"")?.takeIf { it != "null" }
+
             // Check if username is an ugly 64-char token string and normalize it
             val isUglyHexUsername = existing.username.length >= 32 &&
                 existing.username.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 
             val cleanUsername = if (isUglyHexUsername) "anon_${existing.username.take(6)}" else null
+            
+            val needsDisplayName = existing.displayName.isNullOrBlank() && !metaDisplayName.isNullOrBlank()
             // Never silently replace a published key. A keystore reset otherwise makes every
             // peer encrypt to a key this installation cannot read, and destroys old history.
             val needsKey = existing.publicKey.isNullOrBlank() && pubKey != null
 
-            if (needsKey || cleanUsername != null) {
+            if (needsKey || cleanUsername != null || needsDisplayName) {
                 val update = WhisperProfileUpdate(
                     publicKey = if (needsKey) pubKey else null,
-                    username = cleanUsername
+                    username = cleanUsername,
+                    displayName = if (needsDisplayName) metaDisplayName else null
                 )
-                db.from("profiles").update(update) { filter { eq("id", myId) } }
+                db.from("profiles").update(update) { filter { eq("id", currentId) } }
                 existing.copy(
                     publicKey = if (needsKey) pubKey else existing.publicKey,
-                    username = cleanUsername ?: existing.username
+                    username = cleanUsername ?: existing.username,
+                    displayName = if (needsDisplayName) metaDisplayName else existing.displayName
                 )
             } else existing
         }
-        profileCache[myId] = profile
+        profileCache[currentId] = profile
         profile
     }
 
@@ -217,6 +234,7 @@ class WhisperRepository @Inject constructor(
                         ilike("display_name", "%$q%")
                     }
                     neq("id", myId)
+                    eq("hide_from_discover", false)
                 }
                 limit(30)
             }
@@ -231,10 +249,12 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) error("User not authenticated")
         val pubKey = crypto.getPublicKeyBase64()
         val updateWithKey = if (update.publicKey == null && pubKey != null) update.copy(publicKey = pubKey) else update
-        db.from("profiles").update(updateWithKey) { filter { eq("id", myId) } }
-        profileCache.remove(myId)
+        db.from("profiles").update(updateWithKey) { filter { eq("id", currentId) } }
+        profileCache.remove(currentId)
     }
 
     suspend fun uploadAvatar(imageBytes: ByteArray, mimeType: String): Result<String> = runCatching {
@@ -268,6 +288,9 @@ class WhisperRepository @Inject constructor(
         if (userA < userB) "${userA}_${userB}" else "${userB}_${userA}"
 
     suspend fun getMessages(otherUserId: String, limit: Int = 100, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(emptyList())
+        
         val partnerProfile = getProfile(otherUserId, forceRefresh = true).getOrNull()
         val partnerPubKey = partnerProfile?.publicKey
 
@@ -280,12 +303,12 @@ class WhisperRepository @Inject constructor(
                     filter {
                         or {
                             and {
-                                eq("sender_id", myId)
+                                eq("sender_id", currentId)
                                 eq("receiver_id", otherUserId)
                             }
                             and {
                                 eq("sender_id", otherUserId)
-                                eq("receiver_id", myId)
+                                eq("receiver_id", currentId)
                             }
                         }
                         if (beforeCreatedAt != null) lt("created_at", beforeCreatedAt)
@@ -341,6 +364,9 @@ class WhisperRepository @Inject constructor(
         content: String,
         replyToId: String? = null
     ): Result<WhisperMessage> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) error("User not authenticated")
+        
         if (isUserBlockedByMe(receiverId)) {
             error("You have blocked this user. Unblock to send messages.")
         }
@@ -354,7 +380,7 @@ class WhisperRepository @Inject constructor(
             ?: error("Secure delivery is unavailable because this user has no valid encryption key.")
         val insert = run {
             WhisperMessageInsert(
-                senderId = myId,
+                senderId = currentId,
                 receiverId = receiverId,
                 content = encryptedPair.first,
                 contentIv = encryptedPair.second,
@@ -590,12 +616,13 @@ class WhisperRepository @Inject constructor(
      * Combines Supabase Realtime Broadcast (<50ms) + Postgres Changes for messages and reactions.
      */
     fun subscribeToChat(otherUserId: String): Flow<WhisperChatEvent> = callbackFlow {
-        if (myId.isEmpty() || otherUserId.isEmpty()) {
+        val currentId = myId
+        if (currentId.isEmpty() || otherUserId.isEmpty()) {
             close()
             return@callbackFlow
         }
 
-        val convoKey = conversationKey(myId, otherUserId)
+        val convoKey = conversationKey(currentId, otherUserId)
         val channel = supabase.channel("chat_$convoKey")
 
         // 1. Listen for Instant Realtime Message Broadcasts
@@ -880,6 +907,9 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun getConversations(forceRefresh: Boolean = false): Result<List<WhisperConversation>> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(emptyList())
+
         // Return cached result if fresh enough and not forcing a refresh
         val now = System.currentTimeMillis()
         if (!forceRefresh && conversationsCache != null && (now - conversationsCacheTime) < CONVERSATIONS_CACHE_TTL) {
@@ -895,7 +925,7 @@ class WhisperRepository @Inject constructor(
         )
 
         val rows = runCatching {
-            db.rpc("get_conversations", buildJsonObject { put("p_user_id", myId) })
+            db.rpc("get_conversations", buildJsonObject { put("p_user_id", currentId) })
                 .decodeList<ConvRow>()
         }.getOrNull()
 
@@ -974,8 +1004,10 @@ class WhisperRepository @Inject constructor(
     // ─────────────────────────────────────────────────────────────
 
     suspend fun getFriendships(): Result<List<WhisperFriendship>> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(emptyList())
         db.from("friends").select {
-            filter { or { eq("user_a", myId); eq("user_b", myId) } }
+            filter { or { eq("user_a", currentId); eq("user_b", currentId) } }
         }.decodeList()
     }
 
@@ -985,7 +1017,9 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun getPendingIncoming(): Result<List<WhisperFriendship>> = runCatching {
-        db.from("friends").select { filter { eq("user_b", myId); eq("status", "pending") } }.decodeList()
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(emptyList())
+        db.from("friends").select { filter { eq("user_b", currentId); eq("status", "pending") } }.decodeList()
     }
 
     suspend fun getPendingIncomingWithProfiles(): Result<List<WhisperFriendRequestItem>> = runCatching {
@@ -997,7 +1031,9 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun getPendingOutgoing(): Result<List<WhisperFriendship>> = runCatching {
-        db.from("friends").select { filter { eq("user_a", myId); eq("status", "pending") } }.decodeList()
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(emptyList())
+        db.from("friends").select { filter { eq("user_a", currentId); eq("status", "pending") } }.decodeList()
     }
 
     /**
@@ -1057,11 +1093,13 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun getFriendshipStatus(otherUserId: String): Result<Pair<FriendStatus, WhisperFriendship?>> = runCatching {
+        val currentId = myId
+        if (currentId.isBlank()) return Result.success(Pair(FriendStatus.NONE, null))
         val records = db.from("friends").select {
             filter {
                 or {
-                    and { eq("user_a", myId); eq("user_b", otherUserId) }
-                    and { eq("user_a", otherUserId); eq("user_b", myId) }
+                    and { eq("user_a", currentId); eq("user_b", otherUserId) }
+                    and { eq("user_a", otherUserId); eq("user_b", currentId) }
                 }
             }
         }.decodeList<WhisperFriendship>()
@@ -1076,7 +1114,12 @@ class WhisperRepository @Inject constructor(
     }
 
     fun subscribeToFriendUpdates(): Flow<WhisperFriendship> = callbackFlow {
-        val channel = supabase.channel("whisper-friends-all-$myId")
+        val currentId = myId
+        if (currentId.isBlank()) {
+            close()
+            return@callbackFlow
+        }
+        val channel = supabase.channel("whisper-friends-all-$currentId")
         val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = "friends" }
         channel.subscribe()
         val job = launch { changes.collect { action ->
@@ -1086,7 +1129,7 @@ class WhisperRepository @Inject constructor(
                     is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
                     else -> null
                 }
-                if (record != null && (record.userA == myId || record.userB == myId)) {
+                if (record != null && (record.userA == currentId || record.userB == currentId)) {
                     trySend(record)
                 }
             } catch (_: Exception) { }
@@ -1163,6 +1206,7 @@ class WhisperRepository @Inject constructor(
                 .select {
                     filter {
                         eq("is_private", false)
+                        eq("hide_from_discover", false)
                         neq("id", myId)
                     }
                     limit(15)

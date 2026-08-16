@@ -505,8 +505,9 @@ class WhisperChatViewModel @Inject constructor(
         if (myId.isEmpty()) return
 
         realtimeJob = viewModelScope.launch {
-            try {
-                repository.subscribeToChat(otherUserId).collect { event ->
+            repository.subscribeToChat(otherUserId)
+                .retry(3) { delay(1000); true }
+                .collect { event ->
                     when (event) {
                         is WhisperChatEvent.MessageEvent -> {
                             val newMsg = event.message
@@ -592,9 +593,6 @@ class WhisperChatViewModel @Inject constructor(
                         }
                     }
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("WhisperChatVM", "Chat realtime collect error: ${e.message}", e)
-            }
         }
     }
 

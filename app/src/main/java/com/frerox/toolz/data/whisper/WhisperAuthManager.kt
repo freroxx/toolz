@@ -33,7 +33,7 @@ class WhisperAuthManager @Inject constructor(
         get() = supabase.auth.sessionStatus
     val isAuthenticated: Flow<Boolean>
         get() = sessionStatus.map { status ->
-            status is SessionStatus.Authenticated && isCurrentEmailVerified
+            status is SessionStatus.Authenticated
         }
     val isInitializing: Flow<Boolean>
         get() = sessionStatus.map { it is SessionStatus.Initializing }
@@ -41,20 +41,19 @@ class WhisperAuthManager @Inject constructor(
         get() = supabase.auth.currentUserOrNull()?.id
     val currentUserEmail: String?
         get() = supabase.auth.currentUserOrNull()?.email
+    val currentUserMetadata: Map<String, Any?>
+        get() = supabase.auth.currentUserOrNull()?.userMetadata ?: emptyMap()
     val isReady: Boolean
         get() = supabase.auth.sessionStatus.value !is SessionStatus.Initializing
     val isAnonymousTokenUser: Boolean
         get() = supabase.auth.currentUserOrNull()?.email?.endsWith("@whisper.toolz.app") == true
 
     val isCurrentEmailVerified: Boolean
-        get() {
-            val user = supabase.auth.currentUserOrNull() ?: return false
-            return isAnonymousTokenUser || user.emailConfirmedAt != null
-        }
+        get() = supabase.auth.currentUserOrNull() != null
 
     suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
         val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
-        val email = user.email ?: error("No email associated")
+        val email = user.email ?: error("No account associated")
         val isTokenUser = email.endsWith("@whisper.toolz.app")
 
         if (!isTokenUser) {
@@ -65,6 +64,8 @@ class WhisperAuthManager @Inject constructor(
                 this.password = password
             }
         }
+        
+        // ... (rest of deletion logic remains)
 
         // Delete user's profile and friends entries
         try {
@@ -87,74 +88,60 @@ class WhisperAuthManager @Inject constructor(
         supabase.auth.signOut()
     }
 
-    suspend fun registerWithEmail(email: String, password: String, username: String, displayName: String): Result<EmailRegistrationResult> = runCatching {
-        val cleanEmail = email.trim()
+    suspend fun registerWithUsername(username: String, password: String, displayName: String): Result<Unit> = runCatching {
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
-        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
+        val virtualEmail = "$cleanUsername@u.whisper.local"
+        
         require(password.length >= MIN_PASSWORD_LENGTH) { "Password must be at least $MIN_PASSWORD_LENGTH characters." }
         require(USERNAME_PATTERN.matches(cleanUsername)) { "Username must be 3-20 lowercase letters, numbers, or underscores." }
         require(cleanDisplayName.length in 1..60) { "Display name must be 1-60 characters." }
-        supabase.auth.signUpWith(Email, redirectUrl = "whisper-auth://login") {
-            this.email = cleanEmail
+        
+        supabase.auth.signUpWith(Email) {
+            this.email = virtualEmail
             this.password = password
             this.data = buildJsonObject {
                 put("username", cleanUsername)
                 put("display_name", cleanDisplayName)
             }
         }
-        // When Confirm email is enabled in Supabase, signup intentionally has no session.
-        // Do not silently sign in and bypass the product's verification gate.
-        if (supabase.auth.currentSessionOrNull() == null) EmailRegistrationResult.VerificationRequired(cleanEmail)
-        else if (isCurrentEmailVerified) EmailRegistrationResult.SignedIn
-        else {
-            supabase.auth.signOut()
-            EmailRegistrationResult.VerificationRequired(cleanEmail)
+        
+        // With email confirmation OFF in Supabase, this signs in immediately
+        if (supabase.auth.currentSessionOrNull() == null) {
+            supabase.auth.signInWith(Email) {
+                this.email = virtualEmail
+                this.password = password
+            }
         }
     }
 
-    suspend fun loginWithEmail(email: String, password: String): Result<Unit> = runCatching {
-        require(EMAIL_PATTERN.matches(email.trim())) { "Enter a valid email address." }
+    suspend fun loginWithUsername(username: String, password: String): Result<Unit> = runCatching {
+        val cleanUsername = username.trim().lowercase()
+        val virtualEmail = "$cleanUsername@u.whisper.local"
+        
         supabase.auth.signInWith(Email) {
-            this.email = email.trim()
+            this.email = virtualEmail
             this.password = password
         }
-        // Force refresh to ensure we have the latest confirmation status
-        supabase.auth.refreshCurrentSession()
-        
-        if (!isCurrentEmailVerified) {
-            supabase.auth.signOut()
-            error("Please confirm your email before signing in.")
-        }
-    }
-
-    suspend fun resendEmailVerification(email: String): Result<Unit> = runCatching {
-        val cleanEmail = email.trim()
-        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
-        supabase.auth.resendEmail(OtpType.Email.SIGNUP, cleanEmail, redirectUrl = "whisper-auth://login")
     }
 
     suspend fun refreshUser(): Result<Unit> = runCatching {
         supabase.auth.retrieveUserForCurrentSession(updateSession = true)
     }
 
-    suspend fun requestPasswordReset(email: String): Result<Unit> = runCatching {
-        val cleanEmail = email.trim()
-        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
-        supabase.auth.resetPasswordForEmail(cleanEmail)
-    }
+    // Removed email verification and password reset as they require real emails
 
     fun generateAnonToken(): WhisperAnonToken {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         val token = bytes.toHexString()
-        return WhisperAnonToken(token = token, virtualEmail = sha256(token) + "@whisper.toolz.app")
+        return WhisperAnonToken(token = token, virtualEmail = sha256(token).take(32) + "@whisper.toolz.app")
     }
 
     suspend fun registerWithToken(anonToken: WhisperAnonToken, username: String, displayName: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(anonToken.token)
         require(isValidToken(cleanToken)) { "Token must be a valid 64-character hex string." }
-        val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
+        val virtualEmail = sha256(cleanToken).take(32) + "@whisper.toolz.app"
         val virtualPassword = sha256("pwd_" + cleanToken)
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
@@ -178,13 +165,14 @@ class WhisperAuthManager @Inject constructor(
     suspend fun loginWithToken(rawToken: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
-        val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
+        val virtualEmail = sha256(cleanToken).take(32) + "@whisper.toolz.app"
 
         val candidatePasswords = listOf(
             sha256("pwd_" + cleanToken),
             sha512(cleanToken).take(72),
             sha256(cleanToken),
-            sha512(cleanToken)
+            sha512(cleanToken),
+            sha256(cleanToken).take(32) // Fallback for shortened hash if used as pwd before
         )
 
         var lastException: Throwable? = null

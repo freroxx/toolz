@@ -77,9 +77,16 @@ class WhisperViewModel @Inject constructor(
     init {
         observeMutes()
         observeHiddenChats()
-        loadAll()
-        subscribeToMessages()
-        subscribeToFriends()
+        
+        viewModelScope.launch {
+            isAuthenticated.collect { auth ->
+                if (auth == true) {
+                    loadAll()
+                    subscribeToMessages()
+                    subscribeToFriends()
+                }
+            }
+        }
     }
 
     private fun handleError(err: Throwable, context: String) {
@@ -299,6 +306,7 @@ class WhisperViewModel @Inject constructor(
         displayName: String,
         bio: String,
         isPrivate: Boolean,
+        isHiddenFromDiscover: Boolean = false,
         onSuccess: (() -> Unit)? = null,
     ) {
         viewModelScope.launch {
@@ -306,6 +314,7 @@ class WhisperViewModel @Inject constructor(
                 displayName = displayName.takeIf { it.isNotBlank() },
                 bio = bio.takeIf { it.isNotBlank() },
                 isPrivate = isPrivate,
+                isHiddenFromDiscover = isHiddenFromDiscover,
             )
             repository.updateProfile(update)
                 .onSuccess {
@@ -366,7 +375,7 @@ class WhisperViewModel @Inject constructor(
 
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return
-
+        messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             try {
                 repository.subscribeToIncomingMessages(myId).collect { msg ->
@@ -386,6 +395,7 @@ class WhisperViewModel @Inject constructor(
     }
 
     private fun subscribeToFriends() {
+        friendsJob?.cancel()
         friendsJob = viewModelScope.launch {
             try {
                 repository.subscribeToFriendUpdates().collect { friendship ->
