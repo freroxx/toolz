@@ -32,7 +32,7 @@ Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggli
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **45+ precision instruments** organized across 8 categories:
+Toolz includes **45+ precision instruments** organized across 9 categories:
 
 ### ⏱️ Time & Productivity
 - **Timer** — Precise countdown engine with background persistence and physics-based alarms
@@ -97,9 +97,36 @@ Toolz includes **45+ precision instruments** organized across 8 categories:
 - **Network Tweaks** — Wi-Fi diagnostics and advanced connectivity optimization tools
 - **Network Power Suite** — System-level DNS configuration, ad-blocking, and network monitoring
 
+### 💬 Communication & Messaging
+- **Whisper** — End-to-end encrypted, friends-only messenger with email-free sign-in, offline outbox delivery, and realtime chat (beta)
+
 ### 🏠 Widgets & Quick Settings (Experimental)
 - **Homescreen Widgets** — Flashlight, notes, steps, compass, flip coin, music player
 - **Quick Settings Tiles** — Clipboard and Caffeinate fast access
+
+---
+
+## 💬 Whisper — Encrypted Messaging (Beta)
+
+Whisper is Toolz's built-in messenger: an end-to-end encrypted, friends-only chat layer with its own identity system. It runs on a separate backend, so Whisper accounts and messages live apart from the rest of the app.
+
+The short version: you sign in with a username + password or a random 64-character token — no email involved. Add people as friends, and only then can you message them. Every message is encrypted on your phone before it's sent — the server stores ciphertext, not readable text.
+
+### Key features
+
+- **End-to-end encryption** — P-256 EC keys are generated and kept on your device; messages are sealed with AES-256-GCM before upload, so the server only ever stores ciphertext
+- **No-email sign-in** — two ways in: a username + password (credentials are auto-saved to the Toolz Vault), or a random 64-char hex token, stored one-way hashed. Save your token — lose it, lose the account
+- **Friend-gated chats** — no messaging until the friend request is accepted; both sides know when they're blocked
+- **Realtime delivery** — messages, reactions, typing, and presence arrive over instant broadcast channels, with database changes as the reliable fallback
+- **Read receipts & presence** — read/unread state, unread badges, online status, and last seen
+- **Offline-first messaging** — messages sent offline are encrypted, stored in a local outbox, and auto-delivered when the network returns; chat history stays readable from a local cache
+- **Replies & reactions** — quote-to-reply with snippets and per-message emoji reactions
+- **Delete tools** — delete for everyone (leaves a "Message deleted" tombstone), delete for you, and clear-chat by time range (24h / 7d / 30d / all / custom) with a 30-second undo
+- **Hide chats** — remove a conversation from the chats tab; it comes back automatically when a new message arrives
+- **Mute & block** — silence a conversation or block a user entirely
+- **In-app notifications** — grouped per conversation, suppressed while you're inside that chat or when muted
+
+Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom*, but not what's in the messages.
 
 ---
 
