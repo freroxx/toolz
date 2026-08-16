@@ -20,10 +20,18 @@ package com.frerox.toolz
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.NetworkType
+import com.frerox.toolz.worker.WhisperLocalCleanupWorker
+import com.frerox.toolz.worker.WhisperDeliveryWorker
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
+import java.util.concurrent.TimeUnit
 import com.frerox.toolz.util.network.AdBlockManager
 
 @HiltAndroidApp
@@ -57,6 +65,30 @@ class ToolzApplication : Application(), Configuration.Provider {
         }.onFailure {
             android.util.Log.w("ToolzApplication", "yt-dlp initialization failed; extractor fallback remains available", it)
         }
+        scheduleWhisperLocalCleanup()
+        scheduleWhisperDelivery()
+    }
+
+    private fun scheduleWhisperLocalCleanup() {
+        val request = PeriodicWorkRequestBuilder<WhisperLocalCleanupWorker>(24, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "WhisperLocalCleanup",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    private fun scheduleWhisperDelivery() {
+        val request = PeriodicWorkRequestBuilder<WhisperDeliveryWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "WhisperEncryptedDelivery",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     override val workManagerConfiguration: Configuration

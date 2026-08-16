@@ -166,6 +166,19 @@ data class WhisperMessageInsert(
     @SerialName("created_at") val createdAt: String? = null,
 )
 
+/** Ciphertext-only outbox entry. Plaintext is deliberately never persisted for retry. */
+@Serializable
+data class WhisperQueuedMessage(
+    val clientId: String,
+    val senderId: String,
+    val receiverId: String,
+    val encryptedContent: String,
+    val contentIv: String,
+    val replyToId: String? = null,
+    val createdAt: String,
+    val attempts: Int = 0,
+)
+
 /**
  * A conversation summary — the latest message thread with another user.
  */
@@ -260,6 +273,9 @@ sealed class WhisperAuthState {
     object Idle : WhisperAuthState()
     object Loading : WhisperAuthState()
     data class Error(val message: String) : WhisperAuthState()
+    data class Notice(val message: String) : WhisperAuthState()
+    /** Account exists but is deliberately not allowed into Whisper until Supabase confirms ownership. */
+    data class EmailVerificationRequired(val email: String) : WhisperAuthState()
     object Authenticated : WhisperAuthState()
 }
 

@@ -41,7 +41,8 @@ object SupabaseModule {
         supabaseKey = BuildConfig.SUPABASE_ANON_KEY,
     ) {
         install(Auth) {
-            // Session is automatically persisted to internal storage on Android
+            host = "login"
+            scheme = "whisper-auth"
         }
         install(Postgrest)
         install(Realtime)

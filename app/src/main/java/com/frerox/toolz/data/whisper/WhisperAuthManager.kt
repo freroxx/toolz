@@ -8,6 +8,7 @@ package com.frerox.toolz.data.whisper
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.postgrest
@@ -24,16 +25,32 @@ import javax.inject.Singleton
 class WhisperAuthManager @Inject constructor(
     private val supabase: SupabaseClient,
 ) {
+    sealed interface EmailRegistrationResult {
+        data object SignedIn : EmailRegistrationResult
+        data class VerificationRequired(val email: String) : EmailRegistrationResult
+    }
+    val sessionStatus: Flow<SessionStatus>
+        get() = supabase.auth.sessionStatus
     val isAuthenticated: Flow<Boolean>
-        get() = supabase.auth.sessionStatus.map { it is SessionStatus.Authenticated }
+        get() = sessionStatus.map { status ->
+            status is SessionStatus.Authenticated && isCurrentEmailVerified
+        }
     val isInitializing: Flow<Boolean>
-        get() = supabase.auth.sessionStatus.map { it is SessionStatus.Initializing }
+        get() = sessionStatus.map { it is SessionStatus.Initializing }
     val currentUserId: String?
         get() = supabase.auth.currentUserOrNull()?.id
+    val currentUserEmail: String?
+        get() = supabase.auth.currentUserOrNull()?.email
     val isReady: Boolean
         get() = supabase.auth.sessionStatus.value !is SessionStatus.Initializing
     val isAnonymousTokenUser: Boolean
         get() = supabase.auth.currentUserOrNull()?.email?.endsWith("@whisper.toolz.app") == true
+
+    val isCurrentEmailVerified: Boolean
+        get() {
+            val user = supabase.auth.currentUserOrNull() ?: return false
+            return isAnonymousTokenUser || user.emailConfirmedAt != null
+        }
 
     suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
         val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
@@ -70,11 +87,15 @@ class WhisperAuthManager @Inject constructor(
         supabase.auth.signOut()
     }
 
-    suspend fun registerWithEmail(email: String, password: String, username: String, displayName: String): Result<Unit> = runCatching {
+    suspend fun registerWithEmail(email: String, password: String, username: String, displayName: String): Result<EmailRegistrationResult> = runCatching {
         val cleanEmail = email.trim()
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
-        supabase.auth.signUpWith(Email) {
+        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
+        require(password.length >= MIN_PASSWORD_LENGTH) { "Password must be at least $MIN_PASSWORD_LENGTH characters." }
+        require(USERNAME_PATTERN.matches(cleanUsername)) { "Username must be 3-20 lowercase letters, numbers, or underscores." }
+        require(cleanDisplayName.length in 1..60) { "Display name must be 1-60 characters." }
+        supabase.auth.signUpWith(Email, redirectUrl = "whisper-auth://login") {
             this.email = cleanEmail
             this.password = password
             this.data = buildJsonObject {
@@ -82,19 +103,45 @@ class WhisperAuthManager @Inject constructor(
                 put("display_name", cleanDisplayName)
             }
         }
-        if (supabase.auth.currentSessionOrNull() == null) {
-            supabase.auth.signInWith(Email) {
-                this.email = cleanEmail
-                this.password = password
-            }
+        // When Confirm email is enabled in Supabase, signup intentionally has no session.
+        // Do not silently sign in and bypass the product's verification gate.
+        if (supabase.auth.currentSessionOrNull() == null) EmailRegistrationResult.VerificationRequired(cleanEmail)
+        else if (isCurrentEmailVerified) EmailRegistrationResult.SignedIn
+        else {
+            supabase.auth.signOut()
+            EmailRegistrationResult.VerificationRequired(cleanEmail)
         }
     }
 
     suspend fun loginWithEmail(email: String, password: String): Result<Unit> = runCatching {
+        require(EMAIL_PATTERN.matches(email.trim())) { "Enter a valid email address." }
         supabase.auth.signInWith(Email) {
             this.email = email.trim()
             this.password = password
         }
+        // Force refresh to ensure we have the latest confirmation status
+        supabase.auth.refreshCurrentSession()
+        
+        if (!isCurrentEmailVerified) {
+            supabase.auth.signOut()
+            error("Please confirm your email before signing in.")
+        }
+    }
+
+    suspend fun resendEmailVerification(email: String): Result<Unit> = runCatching {
+        val cleanEmail = email.trim()
+        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
+        supabase.auth.resendEmail(OtpType.Email.SIGNUP, cleanEmail, redirectUrl = "whisper-auth://login")
+    }
+
+    suspend fun refreshUser(): Result<Unit> = runCatching {
+        supabase.auth.retrieveUserForCurrentSession(updateSession = true)
+    }
+
+    suspend fun requestPasswordReset(email: String): Result<Unit> = runCatching {
+        val cleanEmail = email.trim()
+        require(EMAIL_PATTERN.matches(cleanEmail)) { "Enter a valid email address." }
+        supabase.auth.resetPasswordForEmail(cleanEmail)
     }
 
     fun generateAnonToken(): WhisperAnonToken {
@@ -175,4 +222,10 @@ class WhisperAuthManager @Inject constructor(
     private fun sha256(input: String): String = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
     private fun sha512(input: String): String = MessageDigest.getInstance("SHA-512").digest(input.toByteArray(Charsets.UTF_8)).toHexString()
     private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        const val MIN_PASSWORD_LENGTH = 10
+        val EMAIL_PATTERN = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+        val USERNAME_PATTERN = Regex("^[a-z0-9](?:[a-z0-9_]{1,18}[a-z0-9])?$")
+    }
 }

@@ -88,7 +88,6 @@ class WhisperNotificationManager @Inject constructor(
     fun showMessageNotification(
         senderId: String,
         senderName: String,
-        preview: String,
     ) {
         // Skip if muted
         if (mutePrefs.isMuted(senderId)) {
@@ -118,9 +117,10 @@ class WhisperNotificationManager @Inject constructor(
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
-            .setContentTitle(senderName)
-            .setContentText(preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(preview))
+            .setContentTitle("New Whisper message")
+            // Never copy decrypted content to the lock screen or notification history.
+            .setContentText("Open Whisper to read it")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setGroup(GROUP_KEY)
             .setAutoCancel(true)

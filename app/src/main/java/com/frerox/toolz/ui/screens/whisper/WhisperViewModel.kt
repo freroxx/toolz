@@ -378,7 +378,6 @@ class WhisperViewModel @Inject constructor(
                         notificationManager.showMessageNotification(
                             senderId = msg.senderId,
                             senderName = senderName,
-                            preview = msg.content
                         )
                     }
                 }

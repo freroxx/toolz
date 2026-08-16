@@ -44,6 +44,9 @@ class WhisperCrypto @Inject constructor() {
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val AES_GCM_TAG_LEN = 128
         private const val IV_LEN = 12
+        private const val MAX_MESSAGE_CHARS = 8_192
+        private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+        private val ATTACHMENT_AAD = "whisper-attachment-v1".toByteArray(Charsets.UTF_8)
     }
 
     init {
@@ -127,6 +130,7 @@ class WhisperCrypto @Inject constructor() {
     }
 
     fun encryptMessage(plainText: String, recipientPublicKeyBase64: String): Pair<String, String>? {
+        if (plainText.length > MAX_MESSAGE_CHARS) return null
         val secretKey = deriveSharedKey(recipientPublicKeyBase64) ?: return null
         return try {
             val iv = ByteArray(IV_LEN).apply { SecureRandom().nextBytes(this) }
@@ -152,6 +156,7 @@ class WhisperCrypto @Inject constructor() {
         return try {
             val iv = Base64.decode(ivBase64.trim(), Base64.DEFAULT)
             val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.DEFAULT)
+            if (iv.size != IV_LEN || cipherBytes.size < 16) return "🔒 [Encrypted message]"
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
@@ -162,4 +167,39 @@ class WhisperCrypto @Inject constructor() {
             "🔒 [Encrypted message]"
         }
     }
+
+    /** Encrypts binary attachments using the same peer key as messages. The returned IV is stored alongside the blob. */
+    fun encryptAttachment(bytes: ByteArray, recipientPublicKeyBase64: String): Pair<ByteArray, String>? {
+        if (bytes.isEmpty() || bytes.size > MAX_ATTACHMENT_BYTES) return null
+        val secretKey = deriveSharedKey(recipientPublicKeyBase64) ?: return null
+        return try {
+            val iv = ByteArray(IV_LEN).apply { SecureRandom().nextBytes(this) }
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
+            cipher.updateAAD(ATTACHMENT_AAD)
+            cipher.doFinal(bytes) to Base64.encodeToString(iv, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            android.util.Log.e("WhisperCrypto", "Attachment encryption failed", e)
+            null
+        }
+    }
+
+    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?): ByteArray? {
+        if (cipherBytes.size < 16 || ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) return null
+        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
+        return try {
+            val iv = Base64.decode(ivBase64.trim(), Base64.DEFAULT)
+            if (iv.size != IV_LEN) return null
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
+            cipher.updateAAD(ATTACHMENT_AAD)
+            cipher.doFinal(cipherBytes)
+        } catch (e: Exception) {
+            android.util.Log.w("WhisperCrypto", "Attachment decryption failed: ${e.message}")
+            null
+        }
+    }
+
+    fun isCurrentPublicKey(publicKeyBase64: String?): Boolean =
+        !publicKeyBase64.isNullOrBlank() && publicKeyBase64 == getPublicKeyBase64()
 }

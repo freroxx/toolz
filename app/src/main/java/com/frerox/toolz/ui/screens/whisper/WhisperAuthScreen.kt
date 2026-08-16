@@ -99,6 +99,13 @@ fun WhisperAuthScreen(
         }
     }
 
+    LaunchedEffect(authState) {
+        (authState as? WhisperAuthState.Notice)?.let { notice ->
+            toastState.show(notice.message, WhisperToastType.SUCCESS)
+            viewModel.clearError()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
@@ -141,6 +148,9 @@ fun WhisperAuthScreen(
                 onCheckUsername = viewModel::checkUsernameAvailable,
                 onLoginEmail = viewModel::loginWithEmail,
                 onRegisterEmail = viewModel::registerWithEmail,
+                onResendVerification = viewModel::resendEmailVerification,
+                onRefreshVerification = viewModel::refreshVerificationStatus,
+                onRequestPasswordReset = viewModel::requestPasswordReset,
                 onGenerateToken = viewModel::generateToken,
                 onRegisterToken = viewModel::registerWithGeneratedToken,
                 onLoginToken = viewModel::loginWithToken,
@@ -169,6 +179,9 @@ private fun WhisperAuthContent(
     onCheckUsername: (String) -> Unit,
     onLoginEmail: (String, String) -> Unit,
     onRegisterEmail: (String, String, String, String) -> Unit,
+    onResendVerification: (String) -> Unit,
+    onRefreshVerification: () -> Unit,
+    onRequestPasswordReset: (String) -> Unit,
     onGenerateToken: () -> Unit,
     onRegisterToken: (displayName: String) -> Unit,
     onLoginToken: (String) -> Unit,
@@ -189,6 +202,17 @@ private fun WhisperAuthContent(
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         WhisperAuthHeader()
+
+        val verification = authState as? WhisperAuthState.EmailVerificationRequired
+        if (verification != null) {
+            EmailVerificationCard(
+                email = verification.email,
+                isLoading = isLoading,
+                onResend = { onResendVerification(verification.email) },
+                onRefresh = onRefreshVerification,
+            )
+            return@Column
+        }
 
         // Mode Segmented Control — Email vs Token, equal weight
         ToolzConnectedButtonGroup(
@@ -218,6 +242,7 @@ private fun WhisperAuthContent(
                     onCheckUsername = onCheckUsername,
                     onLogin = onLoginEmail,
                     onRegister = onRegisterEmail,
+                    onRequestPasswordReset = onRequestPasswordReset,
                 )
                 1 -> TokenAuthSection(
                     isLoading = isLoading,
@@ -231,6 +256,39 @@ private fun WhisperAuthContent(
         }
 
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun EmailVerificationCard(email: String, isLoading: Boolean, onResend: () -> Unit, onRefresh: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = LargeExpressiveShape,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Rounded.MarkEmailRead,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text("Verify your email", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "We sent a verification link to $email. Open it, then return and check status to unlock Whisper.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            
+            ToolzExpressiveButton(onClick = onRefresh, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
+                if (isLoading) ToolzLoadingIndicator(modifier = Modifier.size(20.dp)) else Text("Check verification status")
+            }
+            
+            TextButton(onClick = onResend, enabled = !isLoading, modifier = Modifier.fillMaxWidth()) {
+                Text("Resend verification email", style = MaterialTheme.typography.labelLarge)
+            }
+        }
     }
 }
 
@@ -282,6 +340,7 @@ private fun EmailAuthSection(
     onCheckUsername: (String) -> Unit,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String, String, String) -> Unit,
+    onRequestPasswordReset: (String) -> Unit,
 ) {
     var isRegisterMode by remember { mutableStateOf(false) }
 
@@ -313,6 +372,7 @@ private fun EmailAuthSection(
                 onCheckUsername = onCheckUsername,
                 onLogin = onLogin,
                 onRegister = onRegister,
+                onRequestPasswordReset = onRequestPasswordReset,
             )
         }
     }
@@ -325,6 +385,7 @@ private fun EmailAuthForm(
     ctaLabel: String,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String, String, String) -> Unit,
+    onRequestPasswordReset: (String) -> Unit,
     isRegister: Boolean = false,
     usernameAvailability: UsernameAvailability = UsernameAvailability.Idle,
     onCheckUsername: (String) -> Unit = {},
@@ -342,10 +403,10 @@ private fun EmailAuthForm(
 
     val passwordsMatch = !isRegister || password == confirmPassword
     val canSubmit = if (isRegister) {
-        email.isNotBlank() && password.length >= 6 && passwordsMatch && !isLoading &&
+        email.isNotBlank() && password.length >= 10 && passwordsMatch && !isLoading &&
         usernameAvailability is UsernameAvailability.Available && displayName.isNotBlank()
     } else {
-        email.isNotBlank() && password.length >= 6 && !isLoading
+        email.isNotBlank() && password.length >= 10 && !isLoading
     }
 
     fun submit() {
@@ -495,6 +556,14 @@ private fun EmailAuthForm(
                     Text(ctaLabel, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+
+        if (!isRegister) {
+            TextButton(
+                onClick = { onRequestPasswordReset(email) },
+                enabled = email.isNotBlank() && !isLoading,
+                modifier = Modifier.align(Alignment.End),
+            ) { Text("Forgot password?") }
         }
     }
 }

@@ -11,12 +11,13 @@ import com.frerox.toolz.data.whisper.WhisperAnonToken
 import com.frerox.toolz.data.whisper.WhisperAuthState
 import com.frerox.toolz.data.whisper.WhisperRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.jan.supabase.auth.status.SessionStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -41,18 +42,42 @@ class WhisperAuthViewModel @Inject constructor(
 
     private val _usernameAvailability = MutableStateFlow<UsernameAvailability>(UsernameAvailability.Idle)
     val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
+    private var verificationEmail: String? = null
 
     init {
         viewModelScope.launch {
-            combine(authManager.isInitializing, authManager.isAuthenticated) { initializing, authenticated ->
-                Pair(initializing, authenticated)
-            }.collect { (initializing, authenticated) ->
-                when {
-                    initializing -> _authState.value = WhisperAuthState.Loading
-                    authenticated -> _authState.value = WhisperAuthState.Authenticated
+            authManager.sessionStatus.collectLatest { status ->
+                when (status) {
+                    is SessionStatus.Initializing -> _authState.value = WhisperAuthState.Loading
+                    is SessionStatus.Authenticated -> {
+                        if (authManager.isCurrentEmailVerified) {
+                            verificationEmail = null
+                            _authState.value = WhisperAuthState.Authenticated
+                        } else {
+                            _authState.value = WhisperAuthState.EmailVerificationRequired(
+                                verificationEmail ?: authManager.currentUserEmail ?: "your email"
+                            )
+                        }
+                    }
+                    is SessionStatus.NotAuthenticated -> {
+                        if (verificationEmail != null) {
+                            _authState.value = WhisperAuthState.EmailVerificationRequired(verificationEmail!!)
+                        } else {
+                            _authState.value = WhisperAuthState.Idle
+                        }
+                    }
                     else -> _authState.value = WhisperAuthState.Idle
                 }
             }
+        }
+    }
+
+    fun refreshVerificationStatus() {
+        viewModelScope.launch {
+            _authState.value = WhisperAuthState.Loading
+            authManager.refreshUser()
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+                // combine in init will handle the success case if verified
         }
     }
 
@@ -94,7 +119,37 @@ class WhisperAuthViewModel @Inject constructor(
         viewModelScope.launch {
             _authState.value = WhisperAuthState.Loading
             authManager.registerWithEmail(email, password, username, displayName)
-                .onSuccess { _authState.value = WhisperAuthState.Authenticated }
+                .onSuccess { outcome ->
+                    when (outcome) {
+                        WhisperAuthManager.EmailRegistrationResult.SignedIn -> _authState.value = WhisperAuthState.Authenticated
+                        is WhisperAuthManager.EmailRegistrationResult.VerificationRequired -> {
+                            verificationEmail = outcome.email
+                            _authState.value = WhisperAuthState.EmailVerificationRequired(outcome.email)
+                        }
+                    }
+                }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+        }
+    }
+
+    fun resendEmailVerification(email: String) {
+        viewModelScope.launch {
+            _authState.value = WhisperAuthState.Loading
+            authManager.resendEmailVerification(email)
+                .onSuccess {
+                    verificationEmail = email
+                    _authState.value = WhisperAuthState.EmailVerificationRequired(email)
+                }
+                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+        }
+    }
+
+    fun requestPasswordReset(email: String) {
+        viewModelScope.launch {
+            _authState.value = WhisperAuthState.Loading
+            authManager.requestPasswordReset(email)
+                // Keep this generic to prevent account enumeration.
+                .onSuccess { _authState.value = WhisperAuthState.Notice("If that email has an account, a recovery link is on its way.") }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
         }
     }
