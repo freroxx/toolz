@@ -153,17 +153,31 @@ class WhisperChatViewModel @Inject constructor(
     fun loadMessages() {
         // 1. Instant loading from Room cache
         viewModelScope.launch {
-            repository.getMessagesFlow(otherUserId).collect { messages ->
+            repository.getMessagesFlow(otherUserId).collect { newMessages ->
                 _uiState.update { state ->
+                    // CRITICAL: Preserve transient metadata (reactions, enriched reply data) 
+                    // that isn't persisted in the basic message entity.
+                    val merged = newMessages.map { newMsg ->
+                        val existing = state.messages.find { it.id == newMsg.id }
+                        if (existing != null) {
+                            newMsg.copy(
+                                reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
+                                replyToContent = newMsg.replyToContent ?: existing.replyToContent,
+                                replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
+                                isPending = newMsg.isPending
+                            )
+                        } else newMsg
+                    }
+
                     state.copy(
-                        messages = messages,
+                        messages = merged,
                         isLoading = false,
                         matchingMessageIds = if (state.searchQuery.isNotBlank()) {
-                            messages.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                            merged.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
                         } else emptySet()
                     )
                 }
-                if (messages.any { it.senderId == otherUserId && !it.isRead }) {
+                if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {
                     repository.markMessagesAsRead(otherUserId)
                 }
             }
@@ -536,7 +550,11 @@ class WhisperChatViewModel @Inject constructor(
 
         realtimeJob = viewModelScope.launch {
             repository.subscribeToChat(otherUserId)
-                .retry(3) { delay(1000); true }
+                .retry { cause ->
+                    android.util.Log.e("WhisperVM", "Realtime subscription error: ${cause.message}. Retrying in 3s...")
+                    delay(3000)
+                    true // Retry indefinitely while screen is active
+                }
                 .collect { event ->
                     when (event) {
                         is WhisperChatEvent.MessageEvent -> {
@@ -554,16 +572,31 @@ class WhisperChatViewModel @Inject constructor(
                                     )
                                     state.copy(messages = mutableList)
                                 } else {
-                                    // Robust matching: filter out pending messages that match content or ID
+                                    // Enrich reply metadata for live message
+                                    val enrichedMsg = if (newMsg.replyToId != null && newMsg.replyToContent == null) {
+                                        val replyTarget = state.messages.find { it.id == newMsg.replyToId }
+                                        if (replyTarget != null) {
+                                            newMsg.copy(
+                                                replyToContent = replyTarget.content.take(100),
+                                                replyToSenderName = if (replyTarget.senderId == myId) "You" else state.otherUser?.effectiveName ?: "User"
+                                            )
+                                        } else newMsg
+                                    } else newMsg
+
+                                    // Deduplicate: remove pending messages that likely match this incoming one
+                                    // Use a stricter match or just let Room handle the cleanup if repository persists it.
+                                    // Repository DOES persist it, so Room will eventually emit the cleaned list.
+                                    // We add it here for ultra-low-latency UI updates.
                                     val filtered = state.messages.filter { 
                                         val isThisPending = it.id.startsWith("pending_")
                                         if (isThisPending) {
-                                            it.content.trim() != newMsg.content.trim()
+                                            // Stricter check: only remove if content is identical and it's mine
+                                            it.content.trim() != enrichedMsg.content.trim() || enrichedMsg.senderId != myUserId
                                         } else {
-                                            it.id != newMsg.id
+                                            it.id != enrichedMsg.id
                                         }
                                     }
-                                    state.copy(messages = filtered + newMsg)
+                                    state.copy(messages = filtered + enrichedMsg)
                                 }
                             }
                             if (newMsg.senderId == otherUserId) {

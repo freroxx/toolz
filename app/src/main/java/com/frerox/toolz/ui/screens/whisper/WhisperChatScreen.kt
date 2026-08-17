@@ -24,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -47,6 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
@@ -165,14 +169,26 @@ fun WhisperChatScreen(
                             OutlinedTextField(
                                 value = uiState.searchQuery,
                                 onValueChange = { viewModel.updateSearchQuery(it) },
-                                placeholder = { Text("Search messages…", style = MaterialTheme.typography.bodyMedium) },
+                                placeholder = { 
+                                    Text(
+                                        "Search messages…", 
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    ) 
+                                },
                                 singleLine = true,
-                                shape = RoundedCornerShape(24.dp),
-                                modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
+                                shape = CircleShape,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
+                                ),
                                 trailingIcon = {
                                     if (uiState.searchQuery.isNotEmpty()) {
                                         IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                            Icon(Icons.Rounded.Close, "Clear search", modifier = Modifier.size(18.dp))
+                                            Icon(Icons.Rounded.Close, "Clear search", modifier = Modifier.size(20.dp))
                                         }
                                     }
                                 }
@@ -236,44 +252,57 @@ fun WhisperChatScreen(
                         }
                     },
                     navigationIcon = {
-                        ToolzExpressiveIconButton(onClick = {
-                            haptic.click()
-                            if (uiState.isSearchActive) {
-                                viewModel.toggleSearch(false)
-                            } else {
-                                onNavigateBack()
+                        if (uiState.isSearchActive) {
+                            FilledIconButton(
+                                onClick = {
+                                    haptic.click()
+                                    viewModel.toggleSearch(false)
+                                },
+                                modifier = Modifier.size(40.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Exit search")
                             }
-                        }) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
+                        } else {
+                            ToolzExpressiveIconButton(onClick = {
+                                haptic.click()
+                                onNavigateBack()
+                            }) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
+                            }
                         }
                     },
                     actions = {
                         if (uiState.isSearchActive) {
                             if (uiState.matchingMessageIds.isNotEmpty()) {
                                 Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                                     modifier = Modifier.padding(end = 4.dp)
                                 ) {
                                     Text(
                                         "${uiState.activeSearchMatchIndex + 1}/${uiState.matchingMessageIds.size}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
                                 }
-                                ToolzExpressiveIconButton(onClick = {
+                                IconButton(onClick = {
                                     haptic.click()
                                     viewModel.navigateSearchMatch(-1)
                                 }) {
-                                    Icon(Icons.Rounded.KeyboardArrowUp, "Previous match")
+                                    Icon(Icons.Rounded.KeyboardArrowUp, "Previous match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                ToolzExpressiveIconButton(onClick = {
+                                IconButton(onClick = {
                                     haptic.click()
                                     viewModel.navigateSearchMatch(1)
                                 }) {
-                                    Icon(Icons.Rounded.KeyboardArrowDown, "Next match")
+                                    Icon(Icons.Rounded.KeyboardArrowDown, "Next match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         } else {
@@ -296,12 +325,13 @@ fun WhisperChatScreen(
             containerColor = Color.Transparent,
             modifier = Modifier.toolzBackground(),
         ) { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .imePadding(),
-            ) {
+            CompositionLocalProvider(LocalPerformanceMode provides (uiState.isSearchActive || LocalPerformanceMode.current)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .imePadding(),
+                ) {
                 // Friend gate banner
                 androidx.compose.animation.AnimatedVisibility(
                     visible = uiState.isFriendStatusLoaded && uiState.friendStatus != FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther,
@@ -477,6 +507,7 @@ fun WhisperChatScreen(
                 )
             }
         }
+    }
 
         WhisperToastHost(hostState = toastState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
     }
@@ -540,6 +571,13 @@ fun WhisperChatScreen(
 
 @Composable
 private fun BouncingDotsIndicator(modifier: Modifier = Modifier) {
+    val performanceMode = LocalPerformanceMode.current
+    if (performanceMode) {
+        Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            repeat(3) { Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape)) }
+        }
+        return
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "typing_dots")
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { index ->
@@ -775,63 +813,112 @@ private fun MessageBubble(
     onLongClick: () -> Unit
 ) {
     val bubbleShape = if (isMine) RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp) else RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp)
+    val performanceMode = LocalPerformanceMode.current
     
+    // ── SLIDE TO REPLY STATE ──
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val animatedOffsetX by animateFloatAsState(
+        targetValue = offsetX,
+        animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.7f, stiffness = 500f),
+        label = "swipeReplyOffset"
+    )
+
     // Sending pulse
     val statePulse = rememberInfiniteTransition(label = "msgPulse")
     val pulseAlpha by statePulse.animateFloat(
         initialValue = 0.6f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = ""
     )
-    val bubbleAlpha = if (isPending) pulseAlpha else 1f
+    val bubbleAlpha = if (isPending && !performanceMode) pulseAlpha else 1f
 
     Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start, modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .clip(bubbleShape)
-                .background(
-                    if (isHighlighted) MaterialTheme.colorScheme.primary 
-                    else if (isMine) MaterialTheme.colorScheme.primaryContainer 
-                    else MaterialTheme.colorScheme.surfaceContainerHigh
-                )
-                .alpha(bubbleAlpha)
-                .combinedClickable(onClick = { onReply() }, onDoubleClick = onDoubleTap, onLongClick = onLongClick)
-                .padding(12.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Column {
-                if (message.replyToContent != null) {
-                    Surface(color = Color.Black.copy(0.05f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable { message.replyToId?.let { onQuotedClick(it) } }) {
-                        Row(Modifier.padding(8.dp)) {
-                            Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text(message.replyToSenderName ?: "User", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Text(message.replyToContent ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Swipe icon indicator
+            if (animatedOffsetX > 10f) {
+                Icon(
+                    Icons.AutoMirrored.Rounded.Reply,
+                    contentDescription = "Reply",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 8.dp).size(20.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(animatedOffsetX.roundToInt(), 0) }
+                    .widthIn(max = 280.dp)
+                    .clip(bubbleShape)
+                    .background(
+                        if (isHighlighted) MaterialTheme.colorScheme.primary 
+                        else if (isMine) MaterialTheme.colorScheme.primaryContainer 
+                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                    .alpha(bubbleAlpha)
+                    .combinedClickable(
+                        onClick = { }, // Click no longer replies to allow for slide
+                        onDoubleClick = onDoubleTap,
+                        onLongClick = onLongClick
+                    )
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { _, dragAmount ->
+                                if (dragAmount > 0) {
+                                    offsetX = (offsetX + dragAmount).coerceIn(0f, 80f)
+                                }
+                            },
+                            onDragEnd = {
+                                if (offsetX > 45f) {
+                                    onReply()
+                                }
+                                offsetX = 0f
+                            },
+                            onDragCancel = { offsetX = 0f }
+                        )
+                    }
+                    .padding(12.dp)
+            ) {
+                Column {
+                    if (message.replyToContent != null) {
+                        Surface(color = Color.Black.copy(0.05f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable { message.replyToId?.let { onQuotedClick(it) } }) {
+                            Row(Modifier.padding(8.dp)) {
+                                Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(message.replyToSenderName ?: "User", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(message.replyToContent ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
-                }
-                
-                if (message.isDeletedForEveryone) {
-                    Text(
-                        if (isMine) "You deleted this message" else "$partnerName deleted this message",
-                        fontStyle = FontStyle.Italic,
-                        color = (if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f)
-                    )
-                } else {
-                    Text(message.content, color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-                }
-                
-                Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                    Text(message.createdAt.formatWhisperTime(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.6f))
-                    if (isMine && !message.isDeletedForEveryone) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
-                            null,
-                            Modifier.size(14.dp),
-                            tint = if (message.isRead) MaterialTheme.colorScheme.primary else Color.Gray
+                    
+                    if (message.isDeletedForEveryone) {
+                        Text(
+                            if (isMine) "You deleted this message" else "$partnerName deleted this message",
+                            fontStyle = FontStyle.Italic,
+                            color = (if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f)
                         )
+                    } else {
+                        Text(
+                            text = message.content.parseMarkdown(),
+                            color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    
+                    Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message.createdAt.formatWhisperTime(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.6f))
+                        if (isMine && !message.isDeletedForEveryone) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
+                                null,
+                                Modifier.size(14.dp),
+                                tint = if (message.isRead) MaterialTheme.colorScheme.primary else Color.Gray
+                            )
+                        }
                     }
                 }
             }
@@ -851,13 +938,17 @@ private fun MessageBubble(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText: String, pulseTrigger: Int, onDraftChanged: (String) -> Unit, onSend: (String) -> Unit) {
+    val performanceMode = LocalPerformanceMode.current
+    
     // Send pop animation
     val sendPop = remember { Animatable(1f) }
     LaunchedEffect(pulseTrigger) {
-        if (pulseTrigger > 0) {
+        if (pulseTrigger > 0 && !performanceMode) {
             sendPop.snapTo(1f)
             sendPop.animateTo(1.2f, spring(dampingRatio = 0.4f, stiffness = 800f))
             sendPop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 600f))
+        } else if (performanceMode) {
+            sendPop.snapTo(1f)
         }
     }
 
@@ -896,4 +987,53 @@ fun String.formatWhisperTime(): String {
     } catch (e: Exception) {
         ""
     }
+}
+
+/**
+ * Basic Markdown parser for Bold (**text**) and Italic (*text*).
+ */
+private fun String.parseMarkdown(): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    var i = 0
+    while (i < this.length) {
+        when {
+            // Bold: **text**
+            startsWith("**", i) -> {
+                val end = indexOf("**", i + 2)
+                if (end != -1 && end > i + 2) {
+                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                    builder.append(substring(i + 2, end))
+                    builder.pop()
+                    i = end + 2
+                } else {
+                    builder.append("**")
+                    i += 2
+                }
+            }
+            // Italic: *text* (must not be followed by another * to avoid bold collision)
+            startsWith("*", i) -> {
+                val end = indexOf("*", i + 1)
+                if (end != -1 && end > i + 1) {
+                    // Check if it's actually bold starting (handled above, but for safety)
+                    if (this.getOrNull(i + 1) == '*') {
+                        builder.append("*")
+                        i += 1
+                    } else {
+                        builder.pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                        builder.append(substring(i + 1, end))
+                        builder.pop()
+                        i = end + 1
+                    }
+                } else {
+                    builder.append("*")
+                    i += 1
+                }
+            }
+            else -> {
+                builder.append(this[i])
+                i++
+            }
+        }
+    }
+    return builder.toAnnotatedString()
 }
