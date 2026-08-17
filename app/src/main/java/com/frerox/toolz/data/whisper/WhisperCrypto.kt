@@ -46,7 +46,8 @@ class WhisperCrypto @Inject constructor() {
         private const val AES_GCM_TAG_LEN = 128
         private const val IV_LEN = 12
         private const val MAX_MESSAGE_CHARS = 8_192
-        private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+        // ImgBB accepts 32 MB base64 input; ciphertext and base64 expansion require headroom.
+        private const val MAX_ATTACHMENT_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES
         private val ATTACHMENT_AAD = "whisper-attachment-v1".toByteArray(Charsets.UTF_8)
     }
 

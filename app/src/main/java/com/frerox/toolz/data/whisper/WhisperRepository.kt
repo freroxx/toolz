@@ -57,6 +57,7 @@ import java.util.concurrent.ConcurrentHashMap
 class WhisperRepository @Inject constructor(
     private val supabase: SupabaseClient,
     private val crypto: WhisperCrypto,
+    private val encryptedImageHost: WhisperEncryptedImageHost,
     private val deletedStore: WhisperDeletedMessagesStore,
     private val outgoingQueue: WhisperOutgoingQueue,
     private val deliveryScheduler: WhisperDeliveryScheduler,
@@ -68,6 +69,9 @@ class WhisperRepository @Inject constructor(
         const val MAX_MESSAGE_CHARS = 8_192
         const val EVENT_DEDUPE_TTL_MS = 60_000L
         const val MAX_RECENT_EVENT_IDS = 1_024
+        val SUPPORTED_IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/webp")
+        const val MIN_IMAGE_EXPIRY_SECONDS = 60L
+        const val MAX_IMAGE_EXPIRY_SECONDS = 15_552_000L
     }
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
@@ -497,6 +501,49 @@ class WhisperRepository @Inject constructor(
         invalidateConversationsCache()
 
         clearMsg
+    }
+
+    /** Encrypts image bytes on-device, then uploads only ciphertext through the authenticated Edge Function. */
+    suspend fun sendEncryptedImage(
+        receiverId: String,
+        imageBytes: ByteArray,
+        mimeType: String,
+        expiresAfterSeconds: Long? = null,
+        replyToId: String? = null,
+    ): Result<WhisperMessage> = runCatching {
+        require(mimeType in SUPPORTED_IMAGE_TYPES) { "Whisper supports JPEG, PNG, and WebP images." }
+        require(expiresAfterSeconds == null || expiresAfterSeconds in MIN_IMAGE_EXPIRY_SECONDS..MAX_IMAGE_EXPIRY_SECONDS) {
+            "Disappearing images must expire between 1 minute and 180 days."
+        }
+        val receiverKey = getProfile(receiverId, forceRefresh = true).getOrNull()?.publicKey
+            ?: error("Secure image delivery is unavailable because this user has no encryption key.")
+        val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey)
+            ?: error("This image is too large or could not be encrypted.")
+        val uploadUrl = encryptedImageHost.upload(
+            cipherBytes = WhisperImageCipherTransport.encode(cipherBytes),
+            name = "whisper_${System.currentTimeMillis()}",
+            expirationSeconds = expiresAfterSeconds,
+        ).getOrThrow()
+        val expiresAt = expiresAfterSeconds?.let { java.time.Instant.now().epochSecond + it }
+        val attachment = WhisperImageAttachment(
+            url = uploadUrl,
+            iv = iv,
+            mimeType = mimeType,
+            expiresAtEpochSeconds = expiresAt,
+            sizeBytes = imageBytes.size,
+        )
+        sendMessage(receiverId, attachment.toMessageContent(), replyToId).getOrThrow()
+    }
+
+    suspend fun downloadEncryptedImage(attachment: WhisperImageAttachment, peerPublicKey: String?): Result<ByteArray> = runCatching {
+        if (attachment.expiresAtEpochSeconds != null && java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds) {
+            error("This disappearing image has expired.")
+        }
+        val transportBytes = encryptedImageHost.download(attachment.url).getOrThrow()
+        val cipherBytes = WhisperImageCipherTransport.decode(transportBytes)
+            ?: error("This encrypted image is invalid or has been altered.")
+        crypto.decryptAttachment(cipherBytes, attachment.iv, peerPublicKey)
+            ?: error("Unable to decrypt this image on this device.")
     }
 
     /** Replays only this signed-in user's ciphertext outbox; safe to call repeatedly. */

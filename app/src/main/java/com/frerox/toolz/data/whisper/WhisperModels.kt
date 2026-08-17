@@ -19,6 +19,7 @@ package com.frerox.toolz.data.whisper
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 // ─────────────────────────────────────────────────────────────
 // Profile
@@ -205,6 +206,27 @@ data class WhisperQueuedMessage(
     val attempts: Int = 0,
 )
 
+/** Encrypted-image metadata. This envelope itself is sent as an encrypted Whisper message. */
+@Serializable
+data class WhisperImageAttachment(
+    val version: Int = 1,
+    val url: String,
+    val iv: String,
+    val mimeType: String,
+    val expiresAtEpochSeconds: Long? = null,
+    val sizeBytes: Int = 0,
+) {
+    fun toMessageContent(): String = MESSAGE_PREFIX + Json.encodeToString(serializer(), this)
+
+    companion object {
+        const val MESSAGE_PREFIX = "whisper:image:"
+        fun fromMessageContent(content: String): WhisperImageAttachment? = runCatching {
+            if (!content.startsWith(MESSAGE_PREFIX)) return null
+            Json.decodeFromString(serializer(), content.removePrefix(MESSAGE_PREFIX))
+        }.getOrNull()
+    }
+}
+
 /**
  * A conversation summary — the latest message thread with another user.
  */
@@ -364,5 +386,7 @@ data class WhisperChatUiState(
     val activeSearchMatchIndex: Int = -1,
     val unreadMessagesScrolledUp: Int = 0,
     val keyTrust: KeyTrustInfo? = null,
+    val isUploadingAttachment: Boolean = false,
+    val decryptedImageBytes: Map<String, ByteArray> = emptyMap(),
     val error: String? = null,
 )

@@ -17,9 +17,13 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.graphics.BitmapFactory
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -45,8 +49,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -74,6 +80,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -99,6 +106,19 @@ fun WhisperChatScreen(
     var selectedMessageForDelete by remember { mutableStateOf<WhisperMessage?>(null) }
     var quickReactionTargetMessage by remember { mutableStateOf<WhisperMessage?>(null) }
     var showKeyVerifyDialog by remember { mutableStateOf(false) }
+    var showImageOptions by remember { mutableStateOf(false) }
+    var selectedImageExpiry by remember { mutableStateOf<Long?>(null) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use(::readBoundedImageBytes) }.getOrNull()
+        if (bytes == null) {
+            toastState.show("Couldn’t read that image.", WhisperToastType.ERROR)
+        } else {
+            val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+            viewModel.sendImage(bytes, mimeType, selectedImageExpiry)
+        }
+    }
 
     val listState = rememberLazyListState()
     val messages = uiState.messages
@@ -407,6 +427,8 @@ fun WhisperChatScreen(
                                         isPending = isPending,
                                         isHighlighted = uiState.matchingMessageIds.contains(message.id),
                                         partnerName = uiState.otherUser?.effectiveName ?: "User",
+                                        decryptedImageBytes = uiState.decryptedImageBytes[message.id],
+                                        onLoadImage = { viewModel.loadEncryptedImage(message) },
                                         onReply = { haptic.click(); viewModel.setReplyTarget(message) },
                                         onQuotedClick = { targetId ->
                                             val targetIndex = reversedMessages.indexOfFirst { it.id == targetId }
@@ -503,7 +525,9 @@ fun WhisperChatScreen(
                     },
                     pulseTrigger = sendPulse,
                     onDraftChanged = { viewModel.updateDraft(it) },
-                    onSend = { viewModel.sendMessage(it) }
+                    onSend = { viewModel.sendMessage(it) },
+                    onImage = { showImageOptions = true },
+                    isUploadingImage = uiState.isUploadingAttachment,
                 )
             }
         }
@@ -561,6 +585,17 @@ fun WhisperChatScreen(
             onVerify = { showKeyVerifyDialog = false; viewModel.verifyKey() },
             onAccept = { showKeyVerifyDialog = false; viewModel.acceptNewKey() },
             onDismiss = { showKeyVerifyDialog = false },
+        )
+    }
+
+    if (showImageOptions) {
+        ImageExpiryDialog(
+            onDismiss = { showImageOptions = false },
+            onSelect = { expiry ->
+                selectedImageExpiry = expiry
+                showImageOptions = false
+                imagePicker.launch("image/*")
+            },
         )
     }
     
@@ -806,6 +841,8 @@ private fun MessageBubble(
     isPending: Boolean,
     isHighlighted: Boolean,
     partnerName: String,
+    decryptedImageBytes: ByteArray?,
+    onLoadImage: () -> Unit,
     onReply: () -> Unit,
     onQuotedClick: (String) -> Unit,
     onDoubleTap: () -> Unit,
@@ -902,10 +939,28 @@ private fun MessageBubble(
                             color = (if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f)
                         )
                     } else {
+                        val attachment = WhisperImageAttachment.fromMessageContent(message.content)
+                        if (attachment != null) {
+                            LaunchedEffect(message.id) { onLoadImage() }
+                            val bitmap = decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "Encrypted image",
+                                    modifier = Modifier.widthIn(max = 256.dp).heightIn(max = 320.dp).clip(RoundedCornerShape(12.dp)),
+                                )
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(Icons.Rounded.Lock, contentDescription = null)
+                                    Text(if (attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true) "Image expired" else "Loading encrypted image…")
+                                }
+                            }
+                        } else {
                         Text(
                             text = message.content.parseMarkdown(),
                             color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                         )
+                        }
                     }
                     
                     Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
@@ -937,7 +992,7 @@ private fun MessageBubble(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText: String, pulseTrigger: Int, onDraftChanged: (String) -> Unit, onSend: (String) -> Unit) {
+private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText: String, pulseTrigger: Int, onDraftChanged: (String) -> Unit, onSend: (String) -> Unit, onImage: () -> Unit, isUploadingImage: Boolean) {
     val performanceMode = LocalPerformanceMode.current
     
     // Send pop animation
@@ -954,6 +1009,10 @@ private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText
 
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(28.dp), modifier = Modifier.padding(8.dp).fillMaxWidth()) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
+            IconButton(onClick = onImage, enabled = enabled && !isUploadingImage) {
+                if (isUploadingImage) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.Image, contentDescription = "Send encrypted image")
+            }
             OutlinedTextField(
                 value = draftText,
                 onValueChange = onDraftChanged,
@@ -974,6 +1033,27 @@ private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText
             }
         }
     }
+}
+
+@Composable
+private fun ImageExpiryDialog(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Send encrypted image") },
+        text = { Column {
+            Text("Images are encrypted before upload. Choose when this image should disappear.")
+            listOf(
+                "Keep in chat" to null,
+                "Disappear in 1 minute" to 60L,
+                "Disappear in 1 hour" to 3_600L,
+                "Disappear in 1 day" to 86_400L,
+            ).forEach { (label, expiry) ->
+                ListItem(headlineContent = { Text(label) }, modifier = Modifier.clickable { onSelect(expiry) })
+            }
+        } },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
@@ -1037,3 +1117,19 @@ private fun String.parseMarkdown(): AnnotatedString {
     }
     return builder.toAnnotatedString()
 }
+
+private fun readBoundedImageBytes(input: java.io.InputStream): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        total += read
+        require(total <= MAX_LOCAL_IMAGE_BYTES) { "Choose an image smaller than 22 MB." }
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
+}
+
+private const val MAX_LOCAL_IMAGE_BYTES = 22 * 1024 * 1024

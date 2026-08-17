@@ -349,6 +349,36 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    fun sendImage(imageBytes: ByteArray, mimeType: String, expiresAfterSeconds: Long?) {
+        if (uiState.value.isBlockedByMe || uiState.value.isBlockedByOther) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isUploadingAttachment = true) }
+            repository.sendEncryptedImage(otherUserId, imageBytes, mimeType, expiresAfterSeconds)
+                .onSuccess { message ->
+                    _uiState.update { state ->
+                        state.copy(
+                            messages = state.messages.filterNot { it.id == message.id } + message,
+                            isUploadingAttachment = false,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(isUploadingAttachment = false) }
+                    handleError(error, "sendEncryptedImage")
+                }
+        }
+    }
+
+    fun loadEncryptedImage(message: WhisperMessage) {
+        if (_uiState.value.decryptedImageBytes.containsKey(message.id)) return
+        val attachment = WhisperImageAttachment.fromMessageContent(message.content) ?: return
+        viewModelScope.launch {
+            repository.downloadEncryptedImage(attachment, partnerPublicKey)
+                .onSuccess { bytes -> _uiState.update { state -> state.copy(decryptedImageBytes = state.decryptedImageBytes + (message.id to bytes)) } }
+                .onFailure { error -> handleError(error, "downloadEncryptedImage") }
+        }
+    }
+
     // ── MESSAGE DELETION ──
     fun deleteMessageForEveryone(message: WhisperMessage) {
         val myDisplayName = authManager.currentUserId?.let { "You" } ?: "User"
