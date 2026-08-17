@@ -1,5 +1,6 @@
 package com.frerox.toolz.data.whisper
 
+import android.util.Base64
 import com.frerox.toolz.BuildConfig
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -12,7 +13,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,7 +25,7 @@ class WhisperEncryptedImageHost @Inject constructor(
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Image is too large to send securely." }
         val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before uploading an image.")
         val body = buildJsonObject {
-            put("image", Base64.getEncoder().encodeToString(cipherBytes))
+            put("image", Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
             put("name", name.take(80))
             expirationSeconds?.let { put("expiration", it) }
         }.toString()
@@ -33,16 +33,21 @@ class WhisperEncryptedImageHost @Inject constructor(
         withContext(Dispatchers.IO) {
             val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
             try {
+                val bodyBytes = body.toByteArray(Charsets.UTF_8)
                 connection.requestMethod = "POST"
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
                 connection.doOutput = true
+                connection.setFixedLengthStreamingMode(bodyBytes.size)
                 connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
                 connection.setRequestProperty("Content-Type", "application/json")
-                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                connection.outputStream.use { it.write(bodyBytes) }
                 val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
                 val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (connection.responseCode !in 200..299) error("Image upload failed. Please try again.")
+                if (connection.responseCode !in 200..299) {
+                    error("Image upload failed (${connection.responseCode}): $response")
+                }
                 Json.parseToJsonElement(response).jsonObject["url"]?.jsonPrimitive?.content
                     ?: error("Image host returned an invalid response.")
             } finally {
@@ -54,7 +59,7 @@ class WhisperEncryptedImageHost @Inject constructor(
     suspend fun download(url: String): Result<ByteArray> = runCatching {
         require(url.startsWith("https://")) { "Invalid image URL." }
         withContext(Dispatchers.IO) {
-            val connection = (URL(url).openConnection() as HttpURLConnection)
+             val connection = (URL(url).openConnection() as HttpURLConnection)
             try {
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
