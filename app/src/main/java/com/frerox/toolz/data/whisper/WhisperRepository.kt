@@ -519,11 +519,14 @@ class WhisperRepository @Inject constructor(
             ?: error("Secure image delivery is unavailable because this user has no encryption key.")
         val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey)
             ?: error("This image is too large or could not be encrypted.")
+        
+        // Since we are using ImgBB, we must wrap the ciphertext in a PNG container.
         val uploadUrl = encryptedImageHost.upload(
             cipherBytes = WhisperImageCipherTransport.encode(cipherBytes),
             name = "whisper_${System.currentTimeMillis()}",
             expirationSeconds = expiresAfterSeconds,
         ).getOrThrow()
+        
         val expiresAt = expiresAfterSeconds?.let { java.time.Instant.now().epochSecond + it }
         val attachment = WhisperImageAttachment(
             url = uploadUrl,
@@ -539,9 +542,12 @@ class WhisperRepository @Inject constructor(
         if (attachment.expiresAtEpochSeconds != null && java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds) {
             error("This disappearing image has expired.")
         }
-        val transportBytes = encryptedImageHost.download(attachment.url).getOrThrow()
-        val cipherBytes = WhisperImageCipherTransport.decode(transportBytes)
-            ?: error("This encrypted image is invalid or has been altered.")
+        val rawBytes = encryptedImageHost.download(attachment.url).getOrThrow()
+        
+        // Attempt to decode as a legacy PNG transport first.
+        // If it fails (returns null), assume it's the new direct ciphertext format.
+        val cipherBytes = WhisperImageCipherTransport.decode(rawBytes) ?: rawBytes
+        
         crypto.decryptAttachment(cipherBytes, attachment.iv, peerPublicKey)
             ?: error("Unable to decrypt this image on this device.")
     }

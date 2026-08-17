@@ -34,9 +34,13 @@ object WhisperImageCipherTransport {
     }
 
     fun decode(pngBytes: ByteArray): ByteArray? = runCatching {
-        val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size) ?: return null
+        val options = BitmapFactory.Options().apply {
+            inScaled = false
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inMutable = true
+        }
+        val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, options) ?: return null
         try {
-            if (bitmap.config != Bitmap.Config.ARGB_8888) return null
             val raw = ByteArray(bitmap.width * bitmap.height * 4)
             bitmap.copyPixelsToBuffer(ByteBuffer.wrap(raw))
             val buffer = ByteBuffer.wrap(raw)
