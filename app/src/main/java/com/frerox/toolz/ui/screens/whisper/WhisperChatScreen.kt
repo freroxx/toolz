@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -69,12 +70,11 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
+import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDateTime
@@ -111,9 +111,9 @@ fun WhisperChatScreen(
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use(::readBoundedImageBytes) }.getOrNull()
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) } }.getOrNull()
         if (bytes == null) {
-            toastState.show("Couldn’t read that image.", WhisperToastType.ERROR)
+            toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
         } else {
             val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
             viewModel.sendImage(bytes, mimeType, selectedImageExpiry)
@@ -160,7 +160,7 @@ fun WhisperChatScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            toastState.show(it, WhisperToastType.ERROR)
+            toastState.show(it.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }
@@ -191,7 +191,7 @@ fun WhisperChatScreen(
                                 onValueChange = { viewModel.updateSearchQuery(it) },
                                 placeholder = { 
                                     Text(
-                                        "Search messages…", 
+                                        stringResource(R.string.st_Whisper_Chat_SearchPlaceholder), 
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                     ) 
@@ -208,7 +208,7 @@ fun WhisperChatScreen(
                                 trailingIcon = {
                                     if (uiState.searchQuery.isNotEmpty()) {
                                         IconButton(onClick = { viewModel.updateSearchQuery("") }) {
-                                            Icon(Icons.Rounded.Close, "Clear search", modifier = Modifier.size(20.dp))
+                                            Icon(Icons.Rounded.Close, stringResource(R.string.cd_Whisper_ClearSearch), modifier = Modifier.size(20.dp))
                                         }
                                     }
                                 }
@@ -250,16 +250,16 @@ fun WhisperChatScreen(
                                             if (uiState.isMuted) {
                                                 Icon(
                                                     Icons.Rounded.NotificationsOff,
-                                                    contentDescription = "Muted",
+                                                    contentDescription = stringResource(R.string.cd_Whisper_Muted),
                                                     tint = MaterialTheme.colorScheme.outline,
                                                     modifier = Modifier.size(14.dp)
                                                 )
                                             }
                                         }
                                         val subtitle = when {
-                                            uiState.isPartnerTyping -> "typing…"
-                                            uiState.isPartnerOnline -> "Online"
-                                            else -> status
+                                            uiState.isPartnerTyping -> stringResource(R.string.st_Whisper_Typing)
+                                            uiState.isPartnerOnline -> stringResource(R.string.st_Whisper_Online)
+                                            else -> if (status == "Online") stringResource(R.string.st_Whisper_Online) else status
                                         }
                                         Text(
                                             subtitle,
@@ -267,7 +267,7 @@ fun WhisperChatScreen(
                                             color = if (uiState.isPartnerTyping || isUserOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                } ?: Text("Chat", fontWeight = FontWeight.Bold)
+                                } ?: Text(stringResource(R.string.st_Whisper_Title), fontWeight = FontWeight.Bold)
                             }
                         }
                     },
@@ -285,7 +285,7 @@ fun WhisperChatScreen(
                                 ),
                                 shape = CircleShape
                             ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Exit search")
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Whisper_ExitSearch))
                             }
                         } else {
                             ToolzExpressiveIconButton(onClick = {
@@ -316,13 +316,13 @@ fun WhisperChatScreen(
                                     haptic.click()
                                     viewModel.navigateSearchMatch(-1)
                                 }) {
-                                    Icon(Icons.Rounded.KeyboardArrowUp, "Previous match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Icon(Icons.Rounded.KeyboardArrowUp, stringResource(R.string.cd_Whisper_SearchPrev), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 IconButton(onClick = {
                                     haptic.click()
                                     viewModel.navigateSearchMatch(1)
                                 }) {
-                                    Icon(Icons.Rounded.KeyboardArrowDown, "Next match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Icon(Icons.Rounded.KeyboardArrowDown, stringResource(R.string.cd_Whisper_SearchNext), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         } else {
@@ -330,13 +330,13 @@ fun WhisperChatScreen(
                                 haptic.click()
                                 viewModel.toggleSearch(true)
                             }) {
-                                Icon(Icons.Rounded.Search, contentDescription = "Search messages")
+                                Icon(Icons.Rounded.Search, contentDescription = stringResource(R.string.cd_Whisper_Search))
                             }
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()
                                 showOptionsSheet = true
                             }) {
-                                Icon(Icons.Rounded.MoreVert, contentDescription = "Chat options")
+                                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.cd_Whisper_Options))
                             }
                         }
                     },
@@ -370,15 +370,15 @@ fun WhisperChatScreen(
                     Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.onErrorContainer)
-                            Text("You have been blocked by this user.", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
+                            Text(stringResource(R.string.st_Whisper_Chat_BlockedByOther), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
                 } else if (uiState.isBlockedByMe) {
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
                         Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Block, null, tint = MaterialTheme.colorScheme.error)
-                            Text("You have blocked this user.", modifier = Modifier.weight(1f))
-                            ToolzTonalExpressiveButton(onClick = { viewModel.toggleBlock() }) { Text("Unblock") }
+                            Text(stringResource(R.string.st_Whisper_Chat_BlockedByMe), modifier = Modifier.weight(1f))
+                            ToolzTonalExpressiveButton(onClick = { viewModel.toggleBlock() }) { Text(stringResource(R.string.st_Whisper_Unblock)) }
                         }
                     }
                 }
@@ -389,13 +389,13 @@ fun WhisperChatScreen(
                         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
                             Text(
-                                "Encryption key changed — verify before trusting this conversation.",
+                                stringResource(R.string.st_Whisper_Chat_KeyChanged),
                                 modifier = Modifier.weight(1f),
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 style = MaterialTheme.typography.bodySmall
                             )
                             ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
-                                Text("Review", fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -426,7 +426,7 @@ fun WhisperChatScreen(
                                         isMine = isMine,
                                         isPending = isPending,
                                         isHighlighted = uiState.matchingMessageIds.contains(message.id),
-                                        partnerName = uiState.otherUser?.effectiveName ?: "User",
+                                        partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
                                         decryptedImageBytes = uiState.decryptedImageBytes[message.id],
                                         onLoadImage = { viewModel.loadEncryptedImage(message) },
                                         onReply = { haptic.click(); viewModel.setReplyTarget(message) },
@@ -471,7 +471,7 @@ fun WhisperChatScreen(
                             shape = CircleShape,
                             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
                         ) {
-                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Scroll to bottom", modifier = Modifier.size(28.dp))
+                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_Whisper_ScrollBottom), modifier = Modifier.size(28.dp))
                         }
                     }
                 }
@@ -487,9 +487,9 @@ fun WhisperChatScreen(
                         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Cleared ${uiState.clearedUndoMessagesCount} messages", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.st_Whisper_Chat_ClearedMessages, uiState.clearedUndoMessagesCount), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
                             ToolzTonalExpressiveButton(onClick = { viewModel.undoClearChat() }) {
-                                Text("Undo (${uiState.undoSecondsRemaining}s)", fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_Whisper_Undo, uiState.undoSecondsRemaining), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -500,13 +500,13 @@ fun WhisperChatScreen(
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
                         BouncingDotsIndicator()
                         Spacer(Modifier.width(8.dp))
-                        Text("${uiState.otherUser?.effectiveName ?: "Partner"} is typing…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.st_Whisper_PartnerTyping, uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
 
                 // Reply bar
                 uiState.replyingToMessage?.let { replyTarget ->
-                    ReplyPreviewBar(replyTarget = replyTarget, partnerName = uiState.otherUser?.effectiveName ?: "User", myUserId = viewModel.myUserId, onDismiss = { viewModel.clearReplyTarget() })
+                    ReplyPreviewBar(replyTarget = replyTarget, partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault), myUserId = viewModel.myUserId, onDismiss = { viewModel.clearReplyTarget() })
                 }
 
                 // Input bar
@@ -518,10 +518,10 @@ fun WhisperChatScreen(
                     enabled = uiState.friendStatus == FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther,
                     draftText = draftText,
                     placeholderText = when {
-                        uiState.isBlockedByOther -> "You have been blocked"
-                        uiState.isBlockedByMe -> "Unblock user to send"
-                        uiState.friendStatus != FriendStatus.ACCEPTED -> "Accept request to message"
-                        else -> "Whisper something..."
+                        uiState.isBlockedByOther -> stringResource(R.string.st_Whisper_Chat_InputBlocked)
+                        uiState.isBlockedByMe -> stringResource(R.string.st_Whisper_Chat_InputUnblock)
+                        uiState.friendStatus != FriendStatus.ACCEPTED -> stringResource(R.string.st_Whisper_Chat_InputAcceptRequest)
+                        else -> stringResource(R.string.st_Whisper_Chat_InputPlaceholder)
                     },
                     pulseTrigger = sendPulse,
                     onDraftChanged = { viewModel.updateDraft(it) },
@@ -574,12 +574,12 @@ fun WhisperChatScreen(
     }
 
     if (showBlockConfirmDialog) {
-        BlockConfirmDialog(partnerName = uiState.otherUser?.effectiveName ?: "User", onDismiss = { showBlockConfirmDialog = false }, onConfirmBlock = { viewModel.toggleBlock(); showBlockConfirmDialog = false })
+        BlockConfirmDialog(partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault), onDismiss = { showBlockConfirmDialog = false }, onConfirmBlock = { viewModel.toggleBlock(); showBlockConfirmDialog = false })
     }
 
     if (showKeyVerifyDialog) {
         KeyVerifyDialog(
-            partnerName = uiState.otherUser?.effectiveName ?: "This user",
+            partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
             partnerFingerprint = uiState.keyTrust?.partnerFingerprint,
             myFingerprint = uiState.keyTrust?.myFingerprint,
             onVerify = { showKeyVerifyDialog = false; viewModel.verifyKey() },
@@ -632,7 +632,7 @@ private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, my
         Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.width(4.dp).height(36.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
             Column(Modifier.weight(1f)) {
-                Text("Replying to ${if (replyTarget.isSentByMe(myUserId)) "You" else partnerName}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.st_Whisper_ReplyingTo, if (replyTarget.isSentByMe(myUserId)) stringResource(R.string.st_Whisper_You) else partnerName), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Text(replyTarget.content, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null, Modifier.size(16.dp)) }
@@ -642,10 +642,10 @@ private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, my
 
 @Composable
 private fun QuickReactionDialog(onDismiss: () -> Unit, onEmojiSelected: (String) -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp), title = { Text("React") },
+    AlertDialog(onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp), title = { Text(stringResource(R.string.st_Whisper_React)) },
         text = { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { Text(it, fontSize = 24.sp, modifier = Modifier.clickable { onEmojiSelected(it) }) }
-        }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+        }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -653,12 +653,12 @@ private fun QuickReactionDialog(onDismiss: () -> Unit, onEmojiSelected: (String)
 private fun ConversationOptionsSheet(isMuted: Boolean, isBlocked: Boolean, hasClearedUndo: Boolean, clearedCount: Int, onDismiss: () -> Unit, onSearch: () -> Unit, onClearChat: () -> Unit, onUndoClear: () -> Unit, onToggleMute: () -> Unit, onToggleBlock: () -> Unit, onViewProfile: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ListItem(headlineContent = { Text("Search") }, leadingContent = { Icon(Icons.Rounded.Search, null) }, modifier = Modifier.clickable { onSearch() })
-            ListItem(headlineContent = { Text("View Profile") }, leadingContent = { Icon(Icons.Rounded.Person, null) }, modifier = Modifier.clickable { onViewProfile() })
-            ListItem(headlineContent = { Text("Clear History") }, leadingContent = { Icon(Icons.Rounded.CleaningServices, null) }, modifier = Modifier.clickable { onClearChat() })
-            if (hasClearedUndo) ListItem(headlineContent = { Text("Undo Clear ($clearedCount)") }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null) }, modifier = Modifier.clickable { onUndoClear() })
-            ListItem(headlineContent = { Text(if (isMuted) "Unmute" else "Mute") }, leadingContent = { Icon(if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null) }, modifier = Modifier.clickable { onToggleMute() })
-            ListItem(headlineContent = { Text(if (isBlocked) "Unblock" else "Block", color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.Block, null, tint = Color.Red) }, modifier = Modifier.clickable { onToggleBlock() })
+            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_SearchLabel)) }, leadingContent = { Icon(Icons.Rounded.Search, null) }, modifier = Modifier.clickable { onSearch() })
+            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_ViewProfile)) }, leadingContent = { Icon(Icons.Rounded.Person, null) }, modifier = Modifier.clickable { onViewProfile() })
+            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_ClearHistory)) }, leadingContent = { Icon(Icons.Rounded.CleaningServices, null) }, modifier = Modifier.clickable { onClearChat() })
+            if (hasClearedUndo) ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount)) }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null) }, modifier = Modifier.clickable { onUndoClear() })
+            ListItem(headlineContent = { Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute)) }, leadingContent = { Icon(if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null) }, modifier = Modifier.clickable { onToggleMute() })
+            ListItem(headlineContent = { Text(if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block), color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.Block, null, tint = Color.Red) }, modifier = Modifier.clickable { onToggleBlock() })
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -681,15 +681,15 @@ private fun DeleteMessageSheet(
                 listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { Text(it, fontSize = 22.sp, modifier = Modifier.clickable { onReact(it) }) }
             }
             HorizontalDivider()
-            ListItem(headlineContent = { Text("Reply") }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null) }, modifier = Modifier.clickable { onReply() })
+            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_Reply)) }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null) }, modifier = Modifier.clickable { onReply() })
             
             // Message Preview
             Surface(color = Color.Black.copy(0.05f), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Text(message.content.take(100), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp), maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
 
-            if (isMine) ListItem(headlineContent = { Text("Delete for everyone", color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.DeleteForever, null, tint = Color.Red) }, modifier = Modifier.clickable { onDeleteForEveryone() })
-            ListItem(headlineContent = { Text("Delete for me") }, leadingContent = { Icon(Icons.Rounded.Delete, null) }, modifier = Modifier.clickable { onDeleteForMe() })
+            if (isMine) ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForEveryone), color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.DeleteForever, null, tint = Color.Red) }, modifier = Modifier.clickable { onDeleteForEveryone() })
+            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForMe)) }, leadingContent = { Icon(Icons.Rounded.Delete, null) }, modifier = Modifier.clickable { onDeleteForMe() })
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -700,8 +700,8 @@ private fun DeleteMessageSheet(
 private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeRange) -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Clear History", fontWeight = FontWeight.Bold)
-            listOf(Pair("Past 24h", ClearChatTimeRange.PAST_24_HOURS), Pair("Past 7d", ClearChatTimeRange.PAST_7_DAYS), Pair("Past 30d", ClearChatTimeRange.PAST_30_DAYS), Pair("All time", ClearChatTimeRange.ALL_TIME)).forEach { (label, range) ->
+            Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Bold)
+            listOf(Pair(stringResource(R.string.st_Whisper_Clear_Past24h), ClearChatTimeRange.PAST_24_HOURS), Pair(stringResource(R.string.st_Whisper_Clear_Past7d), ClearChatTimeRange.PAST_7_DAYS), Pair(stringResource(R.string.st_Whisper_Clear_Past30d), ClearChatTimeRange.PAST_30_DAYS), Pair(stringResource(R.string.st_Whisper_Clear_AllTime), ClearChatTimeRange.ALL_TIME)).forEach { (label, range) ->
                 ListItem(headlineContent = { Text(label) }, modifier = Modifier.clickable { onSelectRange(range) })
             }
             Spacer(Modifier.height(16.dp))
@@ -711,18 +711,18 @@ private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeR
 
 @Composable
 private fun MuteOptionsDialog(onDismiss: () -> Unit, onSelectDuration: (Long) -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Mute") }, text = { Column {
-        listOf(Pair("1 Hour", 3600000L), Pair("8 Hours", 28800000L), Pair("1 Week", 604800000L), Pair("Forever", Long.MAX_VALUE)).forEach { (l, d) ->
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.st_Whisper_Mute)) }, text = { Column {
+        listOf(Pair(stringResource(R.string.st_Whisper_Mute_1h), 3600000L), Pair(stringResource(R.string.st_Whisper_Mute_8h), 28800000L), Pair(stringResource(R.string.st_Whisper_Mute_1w), 604800000L), Pair(stringResource(R.string.st_Whisper_Mute_Forever), Long.MAX_VALUE)).forEach { (l, d) ->
             ListItem(headlineContent = { Text(l) }, modifier = Modifier.clickable { onSelectDuration(d) })
         }
-    }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
 
 @Composable
 private fun BlockConfirmDialog(partnerName: String, onDismiss: () -> Unit, onConfirmBlock: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Block $partnerName?") }, text = { Text("They won't be able to message you.") },
-        confirmButton = { TextButton(onClick = onConfirmBlock) { Text("Block", color = Color.Red) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.st_Whisper_BlockConfirmTitle, partnerName)) }, text = { Text(stringResource(R.string.st_Whisper_BlockConfirmDesc)) },
+        confirmButton = { TextButton(onClick = onConfirmBlock) { Text(stringResource(R.string.st_Whisper_Block), color = Color.Red) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
 
 @Composable
@@ -737,17 +737,17 @@ private fun KeyVerifyDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
-        title = { Text("Encryption key changed") },
+        title = { Text(stringResource(R.string.st_Whisper_KeyChanged_Title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "$partnerName's encryption key is different from the one you last used together. Compare the fingerprint below with the one shown on their device before continuing.",
+                    stringResource(R.string.st_Whisper_KeyChanged_Desc, partnerName),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (partnerFingerprint != null) {
                     Text(
-                        "$partnerName's fingerprint",
+                        stringResource(R.string.st_Whisper_PartnerFingerprint, partnerName),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -769,7 +769,7 @@ private fun KeyVerifyDialog(
                 }
                 if (myFingerprint != null) {
                     Text(
-                        "Your fingerprint",
+                        stringResource(R.string.st_Whisper_YourFingerprint),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -790,19 +790,19 @@ private fun KeyVerifyDialog(
                     }
                 }
                 Text(
-                    "Only continue if the fingerprint matches the one on their device. If it doesn't, the person may be impersonated.",
+                    stringResource(R.string.st_Whisper_KeyChanged_Warning),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onVerify) { Text("Verify", fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onVerify) { Text(stringResource(R.string.st_Whisper_Verify), fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onAccept) { Text("Accept anyway") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onAccept) { Text(stringResource(R.string.st_Whisper_AcceptAnyway)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) }
             }
         }
     )
@@ -814,12 +814,12 @@ private fun FriendGateBanner(friendStatus: FriendStatus, iAmRequester: Boolean, 
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
             val msg = when {
-                friendStatus == FriendStatus.PENDING && iAmRequester -> "Friend request sent"
-                friendStatus == FriendStatus.PENDING && !iAmRequester -> "Friend request received"
-                else -> "Add them to start chatting"
+                friendStatus == FriendStatus.PENDING && iAmRequester -> stringResource(R.string.st_Whisper_FriendRequestSent)
+                friendStatus == FriendStatus.PENDING && !iAmRequester -> stringResource(R.string.st_Whisper_FriendRequestReceived)
+                else -> stringResource(R.string.st_Whisper_AddFriendToChat)
             }
             Text(msg, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSecondaryContainer)
-            if (friendStatus == FriendStatus.NONE) ToolzTonalExpressiveButton(onClick = onSendRequest) { Text("Add Friend") }
+            if (friendStatus == FriendStatus.NONE) ToolzTonalExpressiveButton(onClick = onSendRequest) { Text(stringResource(R.string.st_Whisper_Chat_AddFriend)) }
         }
     }
 }
@@ -878,7 +878,7 @@ private fun MessageBubble(
             if (animatedOffsetX > 10f) {
                 Icon(
                     Icons.AutoMirrored.Rounded.Reply,
-                    contentDescription = "Reply",
+                    contentDescription = stringResource(R.string.cd_Whisper_Reply),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(end = 8.dp).size(20.dp)
                 )
@@ -925,7 +925,7 @@ private fun MessageBubble(
                                 Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text(message.replyToSenderName ?: "User", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(message.replyToSenderName ?: stringResource(R.string.st_Whisper_UserDefault), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     Text(message.replyToContent ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
@@ -934,7 +934,7 @@ private fun MessageBubble(
                     
                     if (message.isDeletedForEveryone) {
                         Text(
-                            if (isMine) "You deleted this message" else "$partnerName deleted this message",
+                            if (isMine) stringResource(R.string.st_Whisper_YouDeleted) else stringResource(R.string.st_Whisper_PartnerDeleted, partnerName),
                             fontStyle = FontStyle.Italic,
                             color = (if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f)
                         )
@@ -946,13 +946,13 @@ private fun MessageBubble(
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "Encrypted image",
+                                    contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
                                     modifier = Modifier.widthIn(max = 256.dp).heightIn(max = 320.dp).clip(RoundedCornerShape(12.dp)),
                                 )
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Rounded.Lock, contentDescription = null)
-                                    Text(if (attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true) "Image expired" else "Loading encrypted image…")
+                                    Text(if (attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true) stringResource(R.string.st_Whisper_ImageExpired) else stringResource(R.string.st_Whisper_LoadingImage))
                                 }
                             }
                         } else {
@@ -1011,7 +1011,7 @@ private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
             IconButton(onClick = onImage, enabled = enabled && !isUploadingImage) {
                 if (isUploadingImage) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Image, contentDescription = "Send encrypted image")
+                else Icon(Icons.Rounded.Image, contentDescription = stringResource(R.string.cd_Whisper_SendImage))
             }
             OutlinedTextField(
                 value = draftText,
@@ -1039,20 +1039,20 @@ private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText
 private fun ImageExpiryDialog(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Send encrypted image") },
+        title = { Text(stringResource(R.string.cd_Whisper_SendImage)) },
         text = { Column {
-            Text("Images are encrypted before upload. Choose when this image should disappear.")
+            Text(stringResource(R.string.st_Whisper_ImageExpiryDesc))
             listOf(
-                "Keep in chat" to null,
-                "Disappear in 1 minute" to 60L,
-                "Disappear in 1 hour" to 3_600L,
-                "Disappear in 1 day" to 86_400L,
+                stringResource(R.string.st_Whisper_Expiry_Never) to null,
+                stringResource(R.string.st_Whisper_Expiry_1m) to 60L,
+                stringResource(R.string.st_Whisper_Expiry_1h) to 3_600L,
+                stringResource(R.string.st_Whisper_Expiry_1d) to 86_400L,
             ).forEach { (label, expiry) ->
                 ListItem(headlineContent = { Text(label) }, modifier = Modifier.clickable { onSelect(expiry) })
             }
         } },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } },
     )
 }
 
@@ -1118,7 +1118,7 @@ private fun String.parseMarkdown(): AnnotatedString {
     return builder.toAnnotatedString()
 }
 
-private fun readBoundedImageBytes(input: java.io.InputStream): ByteArray {
+private fun readBoundedImageBytes(input: java.io.InputStream, context: Context): ByteArray {
     val output = ByteArrayOutputStream()
     val buffer = ByteArray(16 * 1024)
     var total = 0
@@ -1126,7 +1126,7 @@ private fun readBoundedImageBytes(input: java.io.InputStream): ByteArray {
         val read = input.read(buffer)
         if (read < 0) break
         total += read
-        require(total <= MAX_LOCAL_IMAGE_BYTES) { "Choose an image smaller than 22 MB." }
+        require(total <= MAX_LOCAL_IMAGE_BYTES) { context.getString(R.string.st_Whisper_Error_ImageTooLarge) }
         output.write(buffer, 0, read)
     }
     return output.toByteArray()

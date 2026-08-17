@@ -20,6 +20,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -77,7 +78,7 @@ class WhisperChatViewModel @Inject constructor(
 
     private fun handleError(err: Throwable, context: String) {
         val mapped = WhisperErrorMapper.map(err, context)
-        if (mapped == WhisperErrorMapper.SESSION_EXPIRED_SENTINEL || WhisperErrorMapper.isSessionExpired(err)) {
+        if (WhisperErrorMapper.isSessionExpired(err)) {
             viewModelScope.launch {
                 authManager.signOut()
                 _sessionExpired.emit(Unit)
@@ -297,11 +298,11 @@ class WhisperChatViewModel @Inject constructor(
     fun sendMessage(content: String) {
         if (content.isBlank()) return
         if (uiState.value.isBlockedByOther) {
-            _uiState.update { it.copy(error = "You have been blocked by this user.") }
+            _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Chat_BlockedByOther)) }
             return
         }
         if (uiState.value.isBlockedByMe) {
-            _uiState.update { it.copy(error = "Unblock user to send messages.") }
+            _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Chat_InputUnblock)) }
             return
         }
 

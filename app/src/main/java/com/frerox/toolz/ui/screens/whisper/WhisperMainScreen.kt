@@ -104,6 +104,7 @@ fun WhisperMainScreen(
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
     var isLoggingOut by remember { mutableStateOf(false) }
@@ -135,7 +136,7 @@ fun WhisperMainScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            toastState.show(it, WhisperToastType.ERROR)
+            toastState.show(it.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }

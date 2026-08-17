@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -61,6 +62,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperAuthState
+import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 
@@ -83,6 +85,7 @@ fun WhisperAuthScreen(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
 
@@ -93,14 +96,14 @@ fun WhisperAuthScreen(
     LaunchedEffect(authState) {
         (authState as? WhisperAuthState.Error)?.let { err ->
             haptic.error()
-            toastState.show(err.message, WhisperToastType.ERROR)
+            toastState.show(err.message.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }
 
     LaunchedEffect(authState) {
         (authState as? WhisperAuthState.Notice)?.let { notice ->
-            toastState.show(notice.message, WhisperToastType.SUCCESS)
+            toastState.show(notice.message.asString(context), WhisperToastType.SUCCESS)
             viewModel.clearError()
         }
     }
@@ -204,7 +207,7 @@ private fun WhisperAuthContent(
         ToolzConnectedButtonGroup(
             selectedIndex = selectedMode,
             options = listOf(
-                "Username",
+                stringResource(R.string.st_Whisper_Auth_Mode_Username),
                 stringResource(R.string.st_Whisper_Auth_Mode_Token),
             ),
             unCheckedIcons = listOf(Icons.Rounded.Person, Icons.Rounded.Key),
@@ -266,12 +269,12 @@ private fun VaultAssuranceCard() {
             )
             Column {
                 Text(
-                    "Secured in Vault",
+                    stringResource(R.string.st_Whisper_Vault_SecuredTitle),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Your credentials will be automatically saved to your Toolz Vault for safe keeping.",
+                    stringResource(R.string.st_Whisper_Vault_SecuredDesc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -311,7 +314,7 @@ private fun WhisperAuthHeader() {
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            "Instant messaging with zero configuration. No email required.",
+            stringResource(R.string.st_Whisper_Auth_ZeroKnowledgeHeadline),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -414,7 +417,7 @@ private fun UsernameAuthForm(
                 username = formatted
                 if (isRegister) onCheckUsername(formatted)
             },
-            label = { Text(if (isRegister) "Choose Username" else "Username") },
+            label = { Text(if (isRegister) stringResource(R.string.st_Whisper_Auth_ChooseUsernameLabel) else stringResource(R.string.st_Whisper_Auth_UsernameLabel)) },
             leadingIcon = { Icon(Icons.Rounded.Person, null) },
             trailingIcon = {
                 if (isRegister) {
@@ -434,7 +437,7 @@ private fun UsernameAuthForm(
                         is UsernameAvailability.Taken -> Text(stringResource(R.string.st_Whisper_Auth_UsernameTaken))
                         is UsernameAvailability.Available -> Text(stringResource(R.string.st_Whisper_Auth_UsernameAvailable))
                         is UsernameAvailability.Checking -> Text(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
-                        is UsernameAvailability.Invalid -> Text(usernameAvailability.reason)
+                        is UsernameAvailability.Invalid -> Text(usernameAvailability.reason.asString())
                         else -> {}
                     }
                 }
@@ -455,7 +458,7 @@ private fun UsernameAuthForm(
                 ToolzExpressiveIconButton(onClick = { showPassword = !showPassword }) {
                     Icon(
                         if (showPassword) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                        contentDescription = if (showPassword) "Hide password" else "Show password",
+                        contentDescription = if (showPassword) stringResource(R.string.cd_Whisper_HidePassword) else stringResource(R.string.cd_Whisper_ShowPassword),
                     )
                 }
             },
@@ -673,7 +676,7 @@ private fun TokenLoginForm(
                     if (hasInvalidChars) {
                         stringResource(R.string.st_Whisper_Auth_TokenInvalidChars)
                     } else {
-                        "${normalized.length}/64"
+                        stringResource(R.string.st_Whisper_Auth_TokenLength, normalized.length)
                     }
                 )
             },

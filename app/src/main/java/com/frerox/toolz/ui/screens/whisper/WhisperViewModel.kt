@@ -112,7 +112,7 @@ class WhisperViewModel @Inject constructor(
 
     private fun handleError(err: Throwable, context: String) {
         val mapped = WhisperErrorMapper.map(err, context)
-        if (mapped == WhisperErrorMapper.SESSION_EXPIRED_SENTINEL || WhisperErrorMapper.isSessionExpired(err)) {
+        if (WhisperErrorMapper.isSessionExpired(err)) {
             viewModelScope.launch {
                 authManager.signOut()
             }

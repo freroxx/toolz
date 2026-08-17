@@ -6,12 +6,10 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
-import com.frerox.toolz.data.whisper.WhisperAuthManager
-import com.frerox.toolz.data.whisper.WhisperAnonToken
-import com.frerox.toolz.data.whisper.WhisperAuthState
-import com.frerox.toolz.data.whisper.WhisperRepository
+import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.util.password.PasswordGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -29,7 +27,7 @@ sealed class UsernameAvailability {
     object Checking : UsernameAvailability()
     object Available : UsernameAvailability()
     object Taken : UsernameAvailability()
-    data class Invalid(val reason: String) : UsernameAvailability()
+    data class Invalid(val reason: UiText) : UsernameAvailability()
 }
 
 @HiltViewModel
@@ -77,10 +75,10 @@ class WhisperAuthViewModel @Inject constructor(
         }
     }
 
-    private fun validateUsernameFormat(username: String): String? {
-        if (username.length !in 3..20) return "Username must be 3-20 characters"
-        if (!username.matches(Regex("[a-z0-9_]+"))) return "Only letters, numbers, and underscores allowed"
-        if (username.startsWith("_") || username.endsWith("_")) return "Cannot start or end with underscore"
+    private fun validateUsernameFormat(username: String): UiText? {
+        if (username.length !in 3..20) return UiText.StringResource(R.string.st_Whisper_Error_UsernameLength)
+        if (!username.matches(Regex("[a-z0-9_]+"))) return UiText.StringResource(R.string.st_Whisper_Error_UsernameInvalidChars)
+        if (username.startsWith("_") || username.endsWith("_")) return UiText.StringResource(R.string.st_Whisper_Error_UsernameUnderscore)
         return null
     }
 
@@ -128,7 +126,7 @@ class WhisperAuthViewModel @Inject constructor(
         val token = _generatedToken.value ?: return
         val cleanName = displayName.trim()
         if (cleanName.isEmpty()) {
-            _authState.value = WhisperAuthState.Error("Choose a display name to continue")
+            _authState.value = WhisperAuthState.Error(UiText.StringResource(R.string.st_Whisper_Error_DisplayNameRequired))
             return
         }
         val cleanUsername = if (!customUsername.isNullOrBlank()) {
@@ -156,7 +154,7 @@ class WhisperAuthViewModel @Inject constructor(
     fun loginWithToken(rawToken: String) {
         val cleanToken = authManager.normalizeToken(rawToken)
         if (!authManager.isValidToken(cleanToken)) {
-            _authState.value = WhisperAuthState.Error("That token doesn't look right. Check for missing or extra characters.")
+            _authState.value = WhisperAuthState.Error(UiText.StringResource(R.string.st_Whisper_Error_InvalidToken))
             return
         }
         viewModelScope.launch {
@@ -164,7 +162,9 @@ class WhisperAuthViewModel @Inject constructor(
             authManager.loginWithToken(rawToken)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure {
-                    val message = if (authManager.isInvalidCredentials(it)) "Token not recognized. Double-check it and try again." else formatError(it)
+                    val message = if (authManager.isInvalidCredentials(it)) {
+                        UiText.StringResource(R.string.st_Whisper_Error_TokenNotRecognized)
+                    } else formatError(it)
                     _authState.value = WhisperAuthState.Error(message)
                 }
         }
@@ -173,15 +173,16 @@ class WhisperAuthViewModel @Inject constructor(
     fun normalizeToken(raw: String): String = authManager.normalizeToken(raw)
     fun clearError() { _authState.value = WhisperAuthState.Idle }
 
-    private fun formatError(throwable: Throwable): String {
-        val msg = throwable.message ?: return "Something went wrong. Try again."
+    private fun formatError(throwable: Throwable): UiText {
+        val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)
         return when {
             msg.contains("Token must be", ignoreCase = true) || msg.contains("doesn't look right", ignoreCase = true) ->
-                "That token doesn't look right. Check for missing or extra characters."
-            authManager.isInvalidCredentials(throwable) -> "Invalid username or password"
-            msg.contains("User already registered", ignoreCase = true) -> "An account with this username already exists"
-            msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true) -> "Network error — check your connection"
-            else -> msg
+                UiText.StringResource(R.string.st_Whisper_Error_InvalidToken)
+            authManager.isInvalidCredentials(throwable) -> UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
+            msg.contains("User already registered", ignoreCase = true) -> UiText.StringResource(R.string.st_Whisper_Error_UsernameExists)
+            msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true) -> 
+                UiText.StringResource(R.string.st_Whisper_Error_Network)
+            else -> UiText.DynamicString(msg)
         }
     }
 }

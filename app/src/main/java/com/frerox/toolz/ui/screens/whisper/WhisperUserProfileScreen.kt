@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
 import com.frerox.toolz.data.whisper.KeyTrustStatus
+import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
 import java.security.MessageDigest
@@ -63,10 +65,11 @@ fun WhisperUserProfileScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
+    val context = LocalContext.current
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            toastState.show(it, WhisperToastType.ERROR)
+            toastState.show(it.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
         }
     }
@@ -95,8 +98,8 @@ fun WhisperUserProfileScreen(
                 if (profile == null) {
                     WhisperEmptyState(
                         icon = Icons.Rounded.PersonOff,
-                        title = "User not found",
-                        subtitle = "This profile does not exist or has been removed.",
+                        title = stringResource(R.string.st_Whisper_Profile_NotFoundTitle),
+                        subtitle = stringResource(R.string.st_Whisper_Profile_NotFoundDesc),
                     )
                 } else {
                     Column(
@@ -179,7 +182,7 @@ fun WhisperUserProfileScreen(
                                             tint = if (profile.publicKey != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                                         )
                                         Text(
-                                            if (profile.publicKey != null) stringResource(R.string.st_Whisper_Profile_E2EEBadge) else "Standard Auth",
+                                            if (profile.publicKey != null) stringResource(R.string.st_Whisper_Profile_E2EEBadge) else stringResource(R.string.st_Whisper_Profile_StandardAuth),
                                             style = MaterialTheme.typography.labelSmall
                                         )
                                     }
@@ -226,7 +229,7 @@ fun WhisperUserProfileScreen(
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Text(
-                                            if (keyTrust?.isVerified == true) "Encryption Verified" else "E2EE Security Fingerprint",
+                                            if (keyTrust?.isVerified == true) stringResource(R.string.st_Whisper_Profile_KeyVerifiedTitle) else stringResource(R.string.st_Whisper_Profile_KeyUnverifiedTitle),
                                             style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -235,11 +238,11 @@ fun WhisperUserProfileScreen(
                                     Text(
                                         when {
                                             keyTrust?.isVerified == true ->
-                                                "You verified this key by comparing fingerprints. This conversation is protected from impersonation."
+                                                stringResource(R.string.st_Whisper_Profile_KeyVerifiedDesc)
                                             keyTrust?.status == KeyTrustStatus.CHANGED ->
-                                                "This key changed since your last conversation. Compare the fingerprint below before trusting it again."
+                                                stringResource(R.string.st_Whisper_Profile_KeyChangedDesc)
                                             else ->
-                                                "Compare this key fingerprint with ${profile.effectiveName} to verify your end-to-end encrypted session is secure."
+                                                stringResource(R.string.st_Whisper_Profile_KeyFingerprintDesc, profile.effectiveName)
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -251,7 +254,7 @@ fun WhisperUserProfileScreen(
                                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                                     ) {
                                         Text(
-                                            text = uiState.keyTrust?.partnerFingerprint ?: profile.publicKey?.let { computeFingerprint(it) } ?: "UNVERIFIED",
+                                            text = uiState.keyTrust?.partnerFingerprint ?: profile.publicKey?.let { computeFingerprint(it) } ?: stringResource(R.string.st_Whisper_Unverified),
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
@@ -271,19 +274,19 @@ fun WhisperUserProfileScreen(
                                                     onClick = { haptic.success(); viewModel.verifyKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text("Verify", fontWeight = FontWeight.Bold)
+                                                    Text(stringResource(R.string.st_Whisper_Verify), fontWeight = FontWeight.Bold)
                                                 }
                                                 ToolzOutlinedExpressiveButton(
                                                     onClick = { haptic.click(); viewModel.acceptNewKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text("Accept new key", fontWeight = FontWeight.Bold)
+                                                    Text(stringResource(R.string.st_Whisper_Profile_AcceptNewKey), fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
                                         keyTrust != null && !keyTrust.isVerified -> {
                                             Text(
-                                                "Not verified yet — compare fingerprints in person to confirm this key.",
+                                                stringResource(R.string.st_Whisper_Profile_NotVerifiedNote),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )

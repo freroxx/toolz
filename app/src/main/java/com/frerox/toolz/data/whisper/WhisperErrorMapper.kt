@@ -18,11 +18,12 @@
 package com.frerox.toolz.data.whisper
 
 import android.util.Log
+import com.frerox.toolz.R
 import io.github.jan.supabase.exceptions.RestException
 
 /**
- * Central error mapping for Whisper — converts raw throwables into user-friendly,
- * privacy-safe messages while always logging the full technical detail to Logcat.
+ * Central error mapping for Whisper — converts raw throwables into user-friendly [UiText] messages
+ * while always logging the full technical detail to Logcat.
  */
 object WhisperErrorMapper {
 
@@ -42,37 +43,37 @@ object WhisperErrorMapper {
     }
 
     /**
-     * Maps a [Throwable] to a short, user-friendly string.
+     * Maps a [Throwable] to a short, user-friendly [UiText].
      * Always logs the technical message to Logcat first.
      */
-    fun map(throwable: Throwable, context: String = ""): String {
+    fun map(throwable: Throwable, context: String = ""): UiText {
         val prefix = if (context.isNotBlank()) "[$context] " else ""
         Log.e(TAG, "$prefix${throwable.javaClass.simpleName}: ${throwable.message}", throwable)
 
         if (isSessionExpired(throwable)) {
-            return SESSION_EXPIRED_SENTINEL
+            return UiText.DynamicString(SESSION_EXPIRED_SENTINEL)
         }
 
-        val msg = throwable.message ?: return "Something went wrong. Try again."
+        val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)
 
         return when {
             // Auth errors
             isInvalidCredentials(throwable) ->
-                "Incorrect credentials. Double-check your details."
+                UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
             msg.contains("User already registered", ignoreCase = true) ->
-                "An account with these details already exists."
+                UiText.StringResource(R.string.st_Whisper_Error_UsernameExists)
             msg.contains("Email not confirmed", ignoreCase = true) ->
-                "Please confirm your email before signing in."
+                UiText.StringResource(R.string.st_Whisper_Error_EmailNotConfirmed)
             msg.contains("signup_disabled", ignoreCase = true) ->
-                "Sign-up is temporarily unavailable. Try again later."
+                UiText.StringResource(R.string.st_Whisper_Error_SignupDisabled)
             msg.contains("over_email_send_rate_limit", ignoreCase = true) ->
-                "Too many attempts. Wait a moment before trying again."
+                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
 
             // Token errors
             msg.contains("Token must be", ignoreCase = true) ->
-                "That token doesn't look right — it should be a 64-character code."
+                UiText.StringResource(R.string.st_Whisper_Error_InvalidTokenFormat)
             msg.contains("doesn't look right", ignoreCase = true) ->
-                "Token format is invalid. Check for missing or extra characters."
+                UiText.StringResource(R.string.st_Whisper_Error_InvalidToken)
 
             // Network & offline errors
             msg.contains("offline", ignoreCase = true) ||
@@ -86,29 +87,29 @@ object WhisperErrorMapper {
             msg.contains("connect", ignoreCase = true) ||
             msg.contains("timeout", ignoreCase = true) ||
             msg.contains("unreachable", ignoreCase = true) ->
-                "You are currently offline. Please check your internet connection."
+                UiText.StringResource(R.string.st_Whisper_Error_Offline)
 
             // Permission / database errors
             msg.contains("blocked", ignoreCase = true) ->
-                "Action unavailable: user is blocked."
+                UiText.StringResource(R.string.st_Whisper_Error_Blocked)
             msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true) || msg.contains("23505") ->
-                "Already completed or connected."
+                UiText.StringResource(R.string.st_Whisper_Error_AlreadyConnected)
             msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
-                "Action not permitted by security rules."
+                UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
             throwable is RestException && throwable.statusCode == 404 ->
-                "Item not found."
+                UiText.StringResource(R.string.st_Whisper_Error_NotFound)
             throwable is RestException && throwable.statusCode == 409 ->
-                "Already up to date."
+                UiText.StringResource(R.string.st_Whisper_Error_AlreadyUpToDate)
             throwable is RestException && throwable.statusCode in 400..499 ->
-                "Request could not be completed. Please try again."
+                UiText.StringResource(R.string.st_Whisper_Error_RequestFailed)
             throwable is RestException && throwable.statusCode in 500..599 ->
-                "Server is temporarily busy. Retrying..."
+                UiText.StringResource(R.string.st_Whisper_Error_ServerBusy)
 
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->
-                "⚠️ Could not decrypt this message."
+                UiText.StringResource(R.string.st_Whisper_Error_DecryptionFailed)
 
-            else -> "Request could not be completed. Please try again."
+            else -> UiText.StringResource(R.string.st_Whisper_Error_RequestFailed)
         }
     }
 

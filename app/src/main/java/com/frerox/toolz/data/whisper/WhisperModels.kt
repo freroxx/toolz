@@ -317,11 +317,31 @@ data class WhisperAnonToken(
 // UI State sealed classes
 // ─────────────────────────────────────────────────────────────
 
+sealed class UiText {
+    data class DynamicString(val value: String) : UiText()
+    class StringResource(val resId: Int, vararg val args: Any) : UiText()
+
+    fun asString(context: android.content.Context): String {
+        return when (this) {
+            is DynamicString -> value
+            is StringResource -> context.getString(resId, *args)
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+fun UiText.asString(): String {
+    return when (this) {
+        is UiText.DynamicString -> value
+        is UiText.StringResource -> androidx.compose.ui.res.stringResource(resId, *args)
+    }
+}
+
 sealed class WhisperAuthState {
     object Idle : WhisperAuthState()
     object Loading : WhisperAuthState()
-    data class Error(val message: String) : WhisperAuthState()
-    data class Notice(val message: String) : WhisperAuthState()
+    data class Error(val message: UiText) : WhisperAuthState()
+    data class Notice(val message: UiText) : WhisperAuthState()
     /** Account exists but is deliberately not allowed into Whisper until Supabase confirms ownership. */
     data class EmailVerificationRequired(val email: String) : WhisperAuthState()
     object Authenticated : WhisperAuthState()
@@ -339,7 +359,7 @@ data class WhisperUiState(
     val searchResults: List<WhisperProfile> = emptyList(),
     val recommendedProfiles: List<WhisperProfile> = emptyList(),
     val mutedUserIds: Set<String> = emptySet(),
-    val error: String? = null,
+    val error: UiText? = null,
 ) {
     val totalUnreadCount: Int get() = conversations.sumOf { it.unreadCount }
 }
@@ -388,5 +408,6 @@ data class WhisperChatUiState(
     val keyTrust: KeyTrustInfo? = null,
     val isUploadingAttachment: Boolean = false,
     val decryptedImageBytes: Map<String, ByteArray> = emptyMap(),
-    val error: String? = null,
+    val error: UiText? = null,
 )
+
