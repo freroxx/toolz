@@ -99,12 +99,6 @@ fun ToolzConnectedButtonGroup(
         modifier = modifier.padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
     ) {
-        val modifiers = listOf(
-            Modifier.weight(1f),
-            Modifier.weight(1.5f),
-            Modifier.weight(1f),
-        )
-
         options.forEachIndexed { index, label ->
             val interactionSource = remember { MutableInteractionSource() }
 
@@ -116,7 +110,7 @@ fun ToolzConnectedButtonGroup(
                         onOptionSelected(index)
                     }
                 },
-                modifier = modifiers.getOrElse(index) { Modifier.weight(1f) }
+                modifier = Modifier.weight(1f)
                     .expressivePressScale(interactionSource, enabled)
                     .semantics { role = Role.RadioButton },
                 enabled = enabled,
@@ -135,7 +129,11 @@ fun ToolzConnectedButtonGroup(
                     )
                     Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
                 }
-                Text(label)
+                Text(
+                    text = label,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
         }
     }

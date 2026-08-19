@@ -81,14 +81,14 @@
 
     <!-- Whisper Tool Strings -->
     <string name="st_Whisper_Title">Whisper</string>
-    <string name="st_Whisper_Auth_Headline">Mensagens Seguras</string>
+    <string name="st_Whisper_Auth_Headline">Mensagens Privadas</string>
     <string name="st_Whisper_Auth_Subtitle">Mensagens focadas em privacidade, construídas para confiança.</string>
     <string name="st_Whisper_Auth_Mode_Email">E-mail</string>
     <string name="st_Whisper_Auth_Mode_Login">Entrar</string>
     <string name="st_Whisper_Auth_Mode_Register">Cadastrar</string>
     <string name="st_Whisper_Auth_Mode_Token">Token</string>
     <string name="st_Whisper_Auth_Mode_Username">Nome de usuário</string>
-    <string name="st_Whisper_Auth_ZeroKnowledgeHeadline">Mensagens instantâneas com zero configuração. Sem necessidade de e-mail.</string>
+    <string name="st_Whisper_Auth_ZeroKnowledgeHeadline">Chat criptografado de ponta a ponta com zero configuração. Sem necessidade de e-mail ou número de telefone.</string>
     <string name="st_Whisper_Auth_UsernameLabel">Nome de usuário</string>
     <string name="st_Whisper_Auth_ChooseUsernameLabel">Escolha o nome de usuário</string>
     <string name="st_Whisper_Auth_TokenLength">%1$d/64</string>
