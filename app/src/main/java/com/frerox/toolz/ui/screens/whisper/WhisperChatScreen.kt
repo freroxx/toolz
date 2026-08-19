@@ -18,6 +18,7 @@
 package com.frerox.toolz.ui.screens.whisper
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -36,6 +37,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -82,7 +84,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
+import kotlin.math.min
 import kotlin.time.Duration.Companion.milliseconds
+
 
 /**
  * Individual conversation screen with Material 3 Expressive UI.
@@ -111,12 +115,16 @@ fun WhisperChatScreen(
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) } }.getOrNull()
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) }
+        }.getOrNull()
         if (bytes == null) {
             toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
         } else {
             val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-            viewModel.sendImage(bytes, mimeType, selectedImageExpiry)
+            // Compress before encrypt to stay within the edge-function body limit
+            val compressed = compressImageForUpload(bytes, mimeType)
+            viewModel.sendImage(compressed, "image/jpeg", selectedImageExpiry)
         }
     }
 
@@ -589,7 +597,7 @@ fun WhisperChatScreen(
     }
 
     if (showImageOptions) {
-        ImageExpiryDialog(
+        ImageExpirySheet(
             onDismiss = { showImageOptions = false },
             onSelect = { expiry ->
                 selectedImageExpiry = expiry
@@ -650,15 +658,106 @@ private fun QuickReactionDialog(onDismiss: () -> Unit, onEmojiSelected: (String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ConversationOptionsSheet(isMuted: Boolean, isBlocked: Boolean, hasClearedUndo: Boolean, clearedCount: Int, onDismiss: () -> Unit, onSearch: () -> Unit, onClearChat: () -> Unit, onUndoClear: () -> Unit, onToggleMute: () -> Unit, onToggleBlock: () -> Unit, onViewProfile: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_SearchLabel)) }, leadingContent = { Icon(Icons.Rounded.Search, null) }, modifier = Modifier.clickable { onSearch() })
-            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_ViewProfile)) }, leadingContent = { Icon(Icons.Rounded.Person, null) }, modifier = Modifier.clickable { onViewProfile() })
-            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_ClearHistory)) }, leadingContent = { Icon(Icons.Rounded.CleaningServices, null) }, modifier = Modifier.clickable { onClearChat() })
-            if (hasClearedUndo) ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount)) }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null) }, modifier = Modifier.clickable { onUndoClear() })
-            ListItem(headlineContent = { Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute)) }, leadingContent = { Icon(if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff, null) }, modifier = Modifier.clickable { onToggleMute() })
-            ListItem(headlineContent = { Text(if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block), color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.Block, null, tint = Color.Red) }, modifier = Modifier.clickable { onToggleBlock() })
+private fun ConversationOptionsSheet(
+    isMuted: Boolean,
+    isBlocked: Boolean,
+    hasClearedUndo: Boolean,
+    clearedCount: Int,
+    onDismiss: () -> Unit,
+    onSearch: () -> Unit,
+    onClearChat: () -> Unit,
+    onUndoClear: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleBlock: () -> Unit,
+    onViewProfile: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Tune, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
+                }
+                Column {
+                    Text(stringResource(R.string.st_Whisper_Chat_Options), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("Manage this conversation", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.st_Whisper_SearchLabel), fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSearch() }
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
+            )
+            if (hasClearedUndo) {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount), fontWeight = FontWeight.Medium) },
+                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onUndoClear() }
+                )
+            }
+            ListItem(
+                headlineContent = { Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute), fontWeight = FontWeight.Medium) },
+                leadingContent = {
+                    Icon(
+                        if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                        null,
+                        tint = if (isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            ListItem(
+                headlineContent = {
+                    Text(
+                        if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
+                        null,
+                        tint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
+            )
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -675,21 +774,78 @@ private fun DeleteMessageSheet(
     onDeleteForEveryone: () -> Unit,
     onDeleteForMe: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { Text(it, fontSize = 22.sp, modifier = Modifier.clickable { onReact(it) }) }
-            }
-            HorizontalDivider()
-            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_Reply)) }, leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null) }, modifier = Modifier.clickable { onReply() })
-            
-            // Message Preview
-            Surface(color = Color.Black.copy(0.05f), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Text(message.content.take(100), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp), maxLines = 3, overflow = TextOverflow.Ellipsis)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Quick Emoji Reaction Bar (Expressive circular pills)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { emoji ->
+                    Surface(
+                        onClick = { onReact(emoji) },
+                        shape = CircleShape,
+                        color = Color.Transparent,
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(emoji, fontSize = 24.sp)
+                        }
+                    }
+                }
             }
 
-            if (isMine) ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForEveryone), color = Color.Red) }, leadingContent = { Icon(Icons.Rounded.DeleteForever, null, tint = Color.Red) }, modifier = Modifier.clickable { onDeleteForEveryone() })
-            ListItem(headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForMe)) }, leadingContent = { Icon(Icons.Rounded.Delete, null) }, modifier = Modifier.clickable { onDeleteForMe() })
+            // Message Preview (Subtle tinted bubble)
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    message.content.take(100),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(14.dp),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.st_Whisper_Reply), fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onReply() }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+            if (isMine) {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForEveryone), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error) },
+                    leadingContent = { Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteForEveryone() }
+                )
+            }
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForMe), fontWeight = FontWeight.Medium, color = if (isMine) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error) },
+                leadingContent = { Icon(Icons.Rounded.Delete, null, tint = if (isMine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteForMe() }
+            )
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -698,16 +854,123 @@ private fun DeleteMessageSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeRange) -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Bold)
-            listOf(Pair(stringResource(R.string.st_Whisper_Clear_Past24h), ClearChatTimeRange.PAST_24_HOURS), Pair(stringResource(R.string.st_Whisper_Clear_Past7d), ClearChatTimeRange.PAST_7_DAYS), Pair(stringResource(R.string.st_Whisper_Clear_Past30d), ClearChatTimeRange.PAST_30_DAYS), Pair(stringResource(R.string.st_Whisper_Clear_AllTime), ClearChatTimeRange.ALL_TIME)).forEach { (label, range) ->
-                ListItem(headlineContent = { Text(label) }, modifier = Modifier.clickable { onSelectRange(range) })
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(22.dp))
+                }
+                Column {
+                    Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("Select how far back to clear", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            listOf(
+                Pair(stringResource(R.string.st_Whisper_Clear_Past24h), ClearChatTimeRange.PAST_24_HOURS),
+                Pair(stringResource(R.string.st_Whisper_Clear_Past7d), ClearChatTimeRange.PAST_7_DAYS),
+                Pair(stringResource(R.string.st_Whisper_Clear_Past30d), ClearChatTimeRange.PAST_30_DAYS),
+                Pair(stringResource(R.string.st_Whisper_Clear_AllTime), ClearChatTimeRange.ALL_TIME)
+            ).forEach { (label, range) ->
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            label,
+                            fontWeight = if (range == ClearChatTimeRange.ALL_TIME) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (range == ClearChatTimeRange.ALL_TIME) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    leadingContent = {
+                        Icon(
+                            if (range == ClearChatTimeRange.ALL_TIME) Icons.Rounded.DeleteForever else Icons.Rounded.Schedule,
+                            null,
+                            tint = if (range == ClearChatTimeRange.ALL_TIME) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelectRange(range) }
+                )
             }
             Spacer(Modifier.height(16.dp))
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ImageExpirySheet(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
+                }
+                Column {
+                    Text(stringResource(R.string.cd_Whisper_SendImage), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.st_Whisper_ImageExpiryDesc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+            listOf(
+                Triple(stringResource(R.string.st_Whisper_Expiry_Never), null, Icons.Rounded.AllInclusive),
+                Triple(stringResource(R.string.st_Whisper_Expiry_1m), 60L, Icons.Rounded.Timelapse),
+                Triple(stringResource(R.string.st_Whisper_Expiry_1h), 3_600L, Icons.Rounded.HourglassTop),
+                Triple(stringResource(R.string.st_Whisper_Expiry_1d), 86_400L, Icons.Rounded.Today),
+            ).forEach { (label, expiry, icon) ->
+                ListItem(
+                    headlineContent = { Text(label, fontWeight = FontWeight.Medium) },
+                    leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(expiry) }
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
 
 @Composable
 private fun MuteOptionsDialog(onDismiss: () -> Unit, onSelectDuration: (Long) -> Unit) {
@@ -992,69 +1255,187 @@ private fun MessageBubble(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun MessageInputBar(enabled: Boolean, draftText: String, placeholderText: String, pulseTrigger: Int, onDraftChanged: (String) -> Unit, onSend: (String) -> Unit, onImage: () -> Unit, isUploadingImage: Boolean) {
+private fun MessageInputBar(
+    enabled: Boolean,
+    draftText: String,
+    placeholderText: String,
+    pulseTrigger: Int,
+    onDraftChanged: (String) -> Unit,
+    onSend: (String) -> Unit,
+    onImage: () -> Unit,
+    isUploadingImage: Boolean,
+) {
     val performanceMode = LocalPerformanceMode.current
-    
-    // Send pop animation
+
+    // Send-pop bounce animation
     val sendPop = remember { Animatable(1f) }
     LaunchedEffect(pulseTrigger) {
         if (pulseTrigger > 0 && !performanceMode) {
-            sendPop.snapTo(1f)
-            sendPop.animateTo(1.2f, spring(dampingRatio = 0.4f, stiffness = 800f))
-            sendPop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 600f))
-        } else if (performanceMode) {
+            sendPop.snapTo(1.2f)
+            sendPop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 600f))
+        } else {
             sendPop.snapTo(1f)
         }
     }
 
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(28.dp), modifier = Modifier.padding(8.dp).fillMaxWidth()) {
-        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.Bottom) {
-            IconButton(onClick = onImage, enabled = enabled && !isUploadingImage) {
-                if (isUploadingImage) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Image, contentDescription = stringResource(R.string.cd_Whisper_SendImage))
+    val hasText = draftText.isNotBlank()
+
+    // Animated attachment icon scale (shrinks out when send appears)
+    val attachIconScale by animateFloatAsState(
+        targetValue = if (hasText) 0f else 1f,
+        animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.5f, stiffness = 600f),
+        label = "attachScale"
+    )
+    val attachIconAlpha by animateFloatAsState(
+        targetValue = if (hasText) 0f else 1f,
+        animationSpec = if (performanceMode) snap() else tween(150),
+        label = "attachAlpha"
+    )
+    val sendIconScale by animateFloatAsState(
+        targetValue = if (hasText) 1f else 0f,
+        animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.45f, stiffness = 700f),
+        label = "sendScale"
+    )
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(32.dp),
+        tonalElevation = 2.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            // Attachment / upload icon (morphs away when typing)
+            Box(
+                modifier = Modifier.size(44.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isUploadingImage) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    FilledTonalIconButton(
+                        onClick = onImage,
+                        enabled = enabled,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .graphicsLayer {
+                                scaleX = attachIconScale
+                                scaleY = attachIconScale
+                                alpha = attachIconAlpha
+                            },
+                        shape = CircleShape,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    ) {
+                        Icon(
+                            Icons.Rounded.AddPhotoAlternate,
+                            contentDescription = stringResource(R.string.cd_Whisper_SendImage),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
-            OutlinedTextField(
+
+            // Pill text field
+            BasicTextField(
                 value = draftText,
                 onValueChange = onDraftChanged,
-                placeholder = { Text(placeholderText) },
                 enabled = enabled,
-                modifier = Modifier.weight(1f),
-                shape = CircleShape,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
                 maxLines = 5,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                decorationBox = { innerTextField ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp, horizontal = 8.dp)
+                    ) {
+                        if (draftText.isEmpty()) {
+                            Text(
+                                placeholderText,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
             )
-            Spacer(Modifier.width(8.dp))
-            Box(modifier = Modifier.graphicsLayer { scaleX = sendPop.value; scaleY = sendPop.value }) {
-                IconButton(
-                    onClick = { onSend(draftText) },
-                    enabled = enabled && draftText.isNotBlank(),
-                    colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, disabledContainerColor = Color.Transparent)
-                ) { Icon(Icons.AutoMirrored.Rounded.Send, null) }
+
+            // Send button (morphs in when typing)
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .graphicsLayer {
+                        scaleX = sendPop.value * sendIconScale
+                        scaleY = sendPop.value * sendIconScale
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                FilledIconButton(
+                    onClick = { if (hasText) onSend(draftText) },
+                    enabled = enabled && hasText,
+                    modifier = Modifier.size(40.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                    )
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.Send,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
 }
 
-@Composable
-private fun ImageExpiryDialog(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.cd_Whisper_SendImage)) },
-        text = { Column {
-            Text(stringResource(R.string.st_Whisper_ImageExpiryDesc))
-            listOf(
-                stringResource(R.string.st_Whisper_Expiry_Never) to null,
-                stringResource(R.string.st_Whisper_Expiry_1m) to 60L,
-                stringResource(R.string.st_Whisper_Expiry_1h) to 3_600L,
-                stringResource(R.string.st_Whisper_Expiry_1d) to 86_400L,
-            ).forEach { (label, expiry) ->
-                ListItem(headlineContent = { Text(label) }, modifier = Modifier.clickable { onSelect(expiry) })
-            }
-        } },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } },
-    )
+
+private fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray {
+    return runCatching {
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
+        val maxDimension = 1920
+        val width = bitmap.width
+        val height = bitmap.height
+        val scaledBitmap = if (width > maxDimension || height > maxDimension) {
+            val ratio = min(maxDimension.toFloat() / width, maxDimension.toFloat() / height)
+            val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
+            val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        } else {
+            bitmap
+        }
+        val out = ByteArrayOutputStream()
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+        if (scaledBitmap != bitmap) {
+            scaledBitmap.recycle()
+        }
+        bitmap.recycle()
+        val result = out.toByteArray()
+        if (result.isNotEmpty() && result.size < bytes.size) result else bytes
+    }.getOrDefault(bytes)
 }
+
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
 fun String.extractDate(): String = if (length >= 10) take(10) else ""

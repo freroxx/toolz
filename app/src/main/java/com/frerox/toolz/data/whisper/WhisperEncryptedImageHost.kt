@@ -51,7 +51,10 @@ class WhisperEncryptedImageHost @Inject constructor(
                 val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 
                 if (connection.responseCode !in 200..299) {
-                    error("Image upload failed (${connection.responseCode}): $response")
+                    val errorMsg = runCatching {
+                        Json.parseToJsonElement(response).jsonObject["error"]?.jsonPrimitive?.content
+                    }.getOrNull() ?: response.take(200).ifBlank { "HTTP ${connection.responseCode}" }
+                    error("Image upload failed: $errorMsg")
                 }
                 
                 Json.parseToJsonElement(response).jsonObject["url"]?.jsonPrimitive?.content

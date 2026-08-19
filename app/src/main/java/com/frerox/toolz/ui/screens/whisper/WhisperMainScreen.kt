@@ -658,23 +658,56 @@ private fun ConversationCard(
     onLongClick: () -> Unit,
 ) {
     val unread = conversation.unreadCount > 0
+    val isOnline = conversation.otherUser.onlineStatus == "Online"
 
+    // Animated online dot pulse
+    val infiniteTransition = rememberInfiniteTransition(label = "onlinePulse")
+    val onlineDotScale by infiniteTransition.animateFloat(
+        initialValue = 1f, targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot"
+    )
+
+    // Fix: pass onLongClick to ExpressiveCard directly (no duplicate combinedClickable)
     ExpressiveCard(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        onLongClick = onLongClick,
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = if (unread)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        else
+            MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            WhisperAvatar(conversation.otherUser, 50.dp)
+            // Avatar with animated online dot
+            Box {
+                WhisperAvatar(conversation.otherUser, 52.dp)
+                if (isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
+                            .align(Alignment.BottomEnd)
+                            .graphicsLayer {
+                                scaleX = onlineDotScale
+                                scaleY = onlineDotScale
+                            }
+                            .clip(CircleShape)
+                            .background(Color(0xFF4CAF50))
+                            .border(2.dp, MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+                    )
+                }
+            }
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -683,7 +716,7 @@ private fun ConversationCard(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                         modifier = Modifier.weight(1f, fill = false)
                     ) {
                         Text(
@@ -693,19 +726,12 @@ private fun ConversationCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
-                        Text(
-                            conversation.otherUser.onlineStatus,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (conversation.otherUser.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
                         if (conversation.isMuted) {
                             Icon(
                                 Icons.Rounded.NotificationsOff,
                                 contentDescription = "Muted",
                                 tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                         }
                     }
@@ -723,17 +749,33 @@ private fun ConversationCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        conversation.lastMessage.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
                         modifier = Modifier.weight(1f),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Online status as small colored label
+                        if (isOnline) {
+                            Text(
+                                "Online",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
+                        }
+                        Text(
+                            conversation.lastMessage.content,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
 
                     if (conversation.unreadCount > 0) {
+                        Spacer(Modifier.width(8.dp))
                         Badge(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -746,6 +788,8 @@ private fun ConversationCard(
         }
     }
 }
+
+
 
 @Composable
 private fun FriendRequestCard(

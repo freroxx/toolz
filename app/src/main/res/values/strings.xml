@@ -186,6 +186,7 @@
     <string name="st_Whisper_React">React</string>
     <string name="st_Whisper_Cancel">Cancel</string>
     <string name="st_Whisper_SearchLabel">Search</string>
+    <string name="st_Whisper_Chat_Options">Chat Options</string>
     <string name="st_Whisper_ViewProfile">View Profile</string>
     <string name="st_Whisper_ClearHistory">Clear History</string>
     <string name="st_Whisper_UndoClearCount">Undo Clear (%d)</string>
