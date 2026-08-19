@@ -520,9 +520,8 @@ class WhisperRepository @Inject constructor(
         val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey)
             ?: error("This image is too large or could not be encrypted.")
         
-        // Since we are using ImgBB, we must wrap the ciphertext in a PNG container.
         val uploadUrl = encryptedImageHost.upload(
-            cipherBytes = WhisperImageCipherTransport.encode(cipherBytes),
+            cipherBytes = cipherBytes,
             name = "whisper_${System.currentTimeMillis()}",
             expirationSeconds = expiresAfterSeconds,
         ).getOrThrow()
@@ -544,13 +543,18 @@ class WhisperRepository @Inject constructor(
         }
         val rawBytes = encryptedImageHost.download(attachment.url).getOrThrow()
         
-        // Attempt to decode as a legacy PNG transport first.
-        // If it fails (returns null), assume it's the new direct ciphertext format.
-        val cipherBytes = WhisperImageCipherTransport.decode(rawBytes) ?: rawBytes
+        // 1. Attempt to decode via lossless PNG transport (ImgBB host)
+        val decodedPng = WhisperImageCipherTransport.decode(rawBytes)
+        val candidateCipher = decodedPng ?: rawBytes
         
-        crypto.decryptAttachment(cipherBytes, attachment.iv, peerPublicKey)
+        // 2. Decrypt with candidateCipher, and fallback to rawBytes if needed
+        val decrypted = crypto.decryptAttachment(candidateCipher, attachment.iv, peerPublicKey)
+            ?: (if (decodedPng != null) crypto.decryptAttachment(rawBytes, attachment.iv, peerPublicKey) else null)
             ?: error("Unable to decrypt this image on this device.")
+            
+        decrypted
     }
+
 
     /** Replays only this signed-in user's ciphertext outbox; safe to call repeatedly. */
     suspend fun flushOutgoingMessages(): Int {

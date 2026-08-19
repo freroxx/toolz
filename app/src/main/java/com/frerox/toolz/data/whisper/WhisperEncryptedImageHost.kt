@@ -30,8 +30,9 @@ class WhisperEncryptedImageHost @Inject constructor(
         
         // 1. Try uploading to Edge Function (ImgBB) first
         val edgeFunctionResult = runCatching {
+            val pngBytes = WhisperImageCipherTransport.encode(cipherBytes)
             val body = buildJsonObject {
-                put("image", Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
+                put("image", Base64.encodeToString(pngBytes, Base64.NO_WRAP))
                 put("name", name.take(80))
                 expirationSeconds?.let { put("expiration", it) }
             }.toString()
