@@ -52,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -636,17 +637,53 @@ private fun BouncingDotsIndicator(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, myUserId: String, onDismiss: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.width(4.dp).height(36.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.st_Whisper_ReplyingTo, if (replyTarget.isSentByMe(myUserId)) stringResource(R.string.st_Whisper_You) else partnerName), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Text(replyTarget.content, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                Modifier
+                    .width(4.dp)
+                    .height(34.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    stringResource(
+                        R.string.st_Whisper_ReplyingTo,
+                        if (replyTarget.isSentByMe(myUserId)) stringResource(R.string.st_Whisper_You) else partnerName
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    replyTarget.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-            IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, null, Modifier.size(16.dp)) }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(Icons.Rounded.Close, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
+            }
         }
     }
 }
+
 
 @Composable
 private fun QuickReactionDialog(onDismiss: () -> Unit, onEmojiSelected: (String) -> Unit) {
@@ -1271,7 +1308,7 @@ private fun MessageInputBar(
     val sendPop = remember { Animatable(1f) }
     LaunchedEffect(pulseTrigger) {
         if (pulseTrigger > 0 && !performanceMode) {
-            sendPop.snapTo(1.2f)
+            sendPop.snapTo(1.25f)
             sendPop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 600f))
         } else {
             sendPop.snapTo(1f)
@@ -1279,136 +1316,133 @@ private fun MessageInputBar(
     }
 
     val hasText = draftText.isNotBlank()
-
-    // Animated attachment icon scale (shrinks out when send appears)
-    val attachIconScale by animateFloatAsState(
-        targetValue = if (hasText) 0f else 1f,
+    val sendButtonScale by animateFloatAsState(
+        targetValue = if (hasText) 1f else 0.88f,
         animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.5f, stiffness = 600f),
-        label = "attachScale"
-    )
-    val attachIconAlpha by animateFloatAsState(
-        targetValue = if (hasText) 0f else 1f,
-        animationSpec = if (performanceMode) snap() else tween(150),
-        label = "attachAlpha"
-    )
-    val sendIconScale by animateFloatAsState(
-        targetValue = if (hasText) 1f else 0f,
-        animationSpec = if (performanceMode) snap() else spring(dampingRatio = 0.45f, stiffness = 700f),
         label = "sendScale"
     )
 
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(32.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 0.dp,
+    Row(
         modifier = Modifier
-            .padding(horizontal = 8.dp, vertical = 6.dp)
             .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp)
+            .navigationBarsPadding(),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Bottom,
+        // 1. Main Pill Container (Attachment + Text input)
+        Surface(
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 2.dp,
+            shadowElevation = 0.dp,
         ) {
-            // Attachment / upload icon (morphs away when typing)
-            Box(
-                modifier = Modifier.size(44.dp),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // Attachment / photo picker button
                 if (isUploadingImage) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.5.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Box(
+                        modifier = Modifier.size(38.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.5.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 } else {
-                    FilledTonalIconButton(
+                    IconButton(
                         onClick = onImage,
                         enabled = enabled,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .graphicsLayer {
-                                scaleX = attachIconScale
-                                scaleY = attachIconScale
-                                alpha = attachIconAlpha
-                            },
-                        shape = CircleShape,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             Icons.Rounded.AddPhotoAlternate,
                             contentDescription = stringResource(R.string.cd_Whisper_SendImage),
-                            modifier = Modifier.size(20.dp)
+                            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
-            }
 
-            // Pill text field
-            BasicTextField(
-                value = draftText,
-                onValueChange = onDraftChanged,
-                enabled = enabled,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
-                ),
-                maxLines = 5,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                decorationBox = { innerTextField ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp, horizontal = 8.dp)
-                    ) {
-                        if (draftText.isEmpty()) {
-                            Text(
-                                placeholderText,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                            )
+                // Text field
+                BasicTextField(
+                    value = draftText,
+                    onValueChange = onDraftChanged,
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 6.dp, vertical = 10.dp),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    maxLines = 5,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (draftText.isEmpty()) {
+                                Text(
+                                    placeholderText,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            innerTextField()
                         }
-                        innerTextField()
                     }
-                }
-            )
+                )
+            }
+        }
 
-            // Send button (morphs in when typing)
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .graphicsLayer {
-                        scaleX = sendPop.value * sendIconScale
-                        scaleY = sendPop.value * sendIconScale
+        // 2. Floating Circular Action Button (Send / Mic)
+        Surface(
+            onClick = { if (hasText) onSend(draftText) },
+            enabled = enabled && hasText,
+            shape = CircleShape,
+            color = if (hasText && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (hasText && enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            shadowElevation = if (hasText) 3.dp else 0.dp,
+            modifier = Modifier
+                .size(48.dp)
+                .graphicsLayer {
+                    scaleX = sendPop.value * sendButtonScale
+                    scaleY = sendPop.value * sendButtonScale
+                }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                AnimatedContent(
+                    targetState = hasText,
+                    transitionSpec = {
+                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
                     },
-                contentAlignment = Alignment.Center
-            ) {
-                FilledIconButton(
-                    onClick = { if (hasText) onSend(draftText) },
-                    enabled = enabled && hasText,
-                    modifier = Modifier.size(40.dp),
-                    shape = CircleShape,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                    )
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.Send,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    label = "sendIconAnim"
+                ) { targetHasText ->
+                    if (targetHasText) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.Send,
+                            contentDescription = "Send",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.Mic,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
         }
     }
 }
+
 
 
 private fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray {

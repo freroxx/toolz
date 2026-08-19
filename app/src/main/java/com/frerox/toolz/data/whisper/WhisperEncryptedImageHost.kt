@@ -13,10 +13,12 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
+import io.github.jan.supabase.storage.storage
+import io.github.jan.supabase.storage.upload
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Calls the authenticated Edge Function; the ImgBB secret never enters the APK. */
+/** Calls the authenticated Edge Function with automatic Supabase Storage fallback. */
 @Singleton
 class WhisperEncryptedImageHost @Inject constructor(
     private val supabase: SupabaseClient,
@@ -24,46 +26,69 @@ class WhisperEncryptedImageHost @Inject constructor(
     suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<String> = runCatching {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Image is too large to send securely." }
         val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before uploading an image.")
+        val myUserId = supabase.auth.currentUserOrNull()?.id ?: "anonymous"
         
-        val body = buildJsonObject {
-            put("image", Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
-            put("name", name.take(80))
-            expirationSeconds?.let { put("expiration", it) }
-        }.toString()
+        // 1. Try uploading to Edge Function (ImgBB) first
+        val edgeFunctionResult = runCatching {
+            val body = buildJsonObject {
+                put("image", Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
+                put("name", name.take(80))
+                expirationSeconds?.let { put("expiration", it) }
+            }.toString()
 
-        withContext(Dispatchers.IO) {
-            val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
-            try {
-                val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                connection.requestMethod = "POST"
-                connection.connectTimeout = CONNECT_TIMEOUT_MS
-                connection.readTimeout = READ_TIMEOUT_MS
-                connection.doOutput = true
-                connection.setFixedLengthStreamingMode(bodyBytes.size)
-                
-                connection.setRequestProperty("Authorization", "Bearer $token")
-                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                connection.setRequestProperty("Content-Type", "application/json")
-                
-                connection.outputStream.use { it.write(bodyBytes) }
-                
-                val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
-                val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                
-                if (connection.responseCode !in 200..299) {
-                    val errorMsg = runCatching {
-                        Json.parseToJsonElement(response).jsonObject["error"]?.jsonPrimitive?.content
-                    }.getOrNull() ?: response.take(200).ifBlank { "HTTP ${connection.responseCode}" }
-                    error("Image upload failed: $errorMsg")
+            withContext(Dispatchers.IO) {
+                val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
+                try {
+                    val bodyBytes = body.toByteArray(Charsets.UTF_8)
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = CONNECT_TIMEOUT_MS
+                    connection.readTimeout = READ_TIMEOUT_MS
+                    connection.doOutput = true
+                    connection.setFixedLengthStreamingMode(bodyBytes.size)
+                    
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    
+                    connection.outputStream.use { it.write(bodyBytes) }
+                    
+                    val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+                    val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    
+                    if (connection.responseCode !in 200..299) {
+                        val errorMsg = runCatching {
+                            Json.parseToJsonElement(response).jsonObject["error"]?.jsonPrimitive?.content
+                        }.getOrNull() ?: response.take(200).ifBlank { "HTTP ${connection.responseCode}" }
+                        error(errorMsg)
+                    }
+                    
+                    Json.parseToJsonElement(response).jsonObject["url"]?.jsonPrimitive?.content
+                        ?: error("Image host returned an invalid response.")
+                } finally {
+                    connection.disconnect()
                 }
-                
-                Json.parseToJsonElement(response).jsonObject["url"]?.jsonPrimitive?.content
-                    ?: error("Image host returned an invalid response.")
-            } finally {
-                connection.disconnect()
             }
         }
+
+        if (edgeFunctionResult.isSuccess) {
+            return@runCatching edgeFunctionResult.getOrThrow()
+        }
+
+        // 2. Direct Supabase Storage fallback if Edge Function is unconfigured (503 / missing ImgBB key)
+        val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
+        val storageResult = runCatching {
+            val path = "$myUserId/attachments/${java.util.UUID.randomUUID()}.png"
+            supabase.storage.from("whisper-avatars").upload(path, cipherBytes) { upsert = true }
+            supabase.storage.from("whisper-avatars").publicUrl(path)
+        }
+
+        if (storageResult.isSuccess) {
+            return@runCatching storageResult.getOrThrow()
+        }
+
+        error("Image upload failed: $edgeError")
     }
+
 
     suspend fun download(url: String): Result<ByteArray> = runCatching {
         require(url.startsWith("https://")) { "Invalid image URL." }

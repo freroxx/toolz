@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.retry
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -402,8 +403,13 @@ class WhisperViewModel @Inject constructor(
         val myId = authManager.currentUserId ?: return
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            try {
-                repository.subscribeToIncomingMessages(myId).collect { msg ->
+            repository.subscribeToIncomingMessages(myId)
+                .retry { cause ->
+                    android.util.Log.e("WhisperVM", "Incoming messages realtime error: ${cause.message}. Retrying in 3s...")
+                    delay(3000)
+                    true
+                }
+                .collect { msg ->
                     // Force refresh conversations from server on new incoming message
                     loadConversationsInternal(forceRefresh = true)
                     if (msg.senderId != myId) {
@@ -415,15 +421,19 @@ class WhisperViewModel @Inject constructor(
                         )
                     }
                 }
-            } catch (_: Exception) { }
         }
     }
 
     private fun subscribeToFriends() {
         friendsJob?.cancel()
         friendsJob = viewModelScope.launch {
-            try {
-                repository.subscribeToFriendUpdates().collect { friendship ->
+            repository.subscribeToFriendUpdates()
+                .retry { cause ->
+                    android.util.Log.e("WhisperVM", "Friends realtime error: ${cause.message}. Retrying in 3s...")
+                    delay(3000)
+                    true
+                }
+                .collect { friendship ->
                     loadFriendsInternal()
                     loadRecommendationsInternal()
                     val myId = authManager.currentUserId
@@ -433,9 +443,9 @@ class WhisperViewModel @Inject constructor(
                         notificationManager.showFriendRequestNotification(senderName)
                     }
                 }
-            } catch (_: Exception) { }
         }
     }
+
 
     override fun onCleared() {
         super.onCleared()

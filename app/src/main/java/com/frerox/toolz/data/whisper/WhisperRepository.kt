@@ -1168,7 +1168,41 @@ class WhisperRepository @Inject constructor(
             }
             if (record.userA == myId && record.userB == targetUserId) return@runCatching
         }
-        db.from("friends").insert(WhisperFriendshipInsert(userA = myId, userB = targetUserId))
+        val inserted = db.from("friends")
+            .insert(WhisperFriendshipInsert(userA = myId, userB = targetUserId)) { select() }
+            .decodeSingleOrNull<WhisperFriendship>()
+
+        // Instant Realtime Peer Broadcast to target user
+        runCatching {
+            val myProfile = getMyProfile().getOrNull()
+            val friendsChannel = getOrJoinBroadcastChannel("whisper-friends-all-$targetUserId")
+            friendsChannel.broadcast(
+                event = "friend_update",
+                payload = BroadcastPayload.Json(
+                    buildJsonObject {
+                        put("id", inserted?.id ?: "")
+                        put("user_a", myId)
+                        put("user_b", targetUserId)
+                        put("status", "pending")
+                    }
+                )
+            )
+
+            val notifChannel = getOrJoinBroadcastChannel("whisper-notifs-$targetUserId")
+            notifChannel.broadcast(
+                event = "incoming_notification",
+                payload = BroadcastPayload.Json(
+                    buildJsonObject {
+                        put("id", inserted?.id ?: "")
+                        put("sender_id", myId)
+                        put("sender_name", myProfile?.effectiveName ?: "Someone")
+                        put("type", "friend_request")
+                        put("content", "sent you a friend request")
+                        put("created_at", java.time.Instant.now().toString())
+                    }
+                )
+            )
+        }
     }
 
     suspend fun acceptFriendRequest(friendshipId: String): Result<Unit> = runCatching {
@@ -1180,6 +1214,23 @@ class WhisperRepository @Inject constructor(
         if (existing != null) {
             val uA = existing.userA
             val uB = existing.userB
+            val otherId = if (uA == myId) uB else uA
+            
+            runCatching {
+                val friendsChannel = getOrJoinBroadcastChannel("whisper-friends-all-$otherId")
+                friendsChannel.broadcast(
+                    event = "friend_update",
+                    payload = BroadcastPayload.Json(
+                        buildJsonObject {
+                            put("id", friendshipId)
+                            put("user_a", uA)
+                            put("user_b", uB)
+                            put("status", "accepted")
+                        }
+                    )
+                )
+            }
+
             runCatching {
                 db.from("friends").delete {
                     filter {
@@ -1195,7 +1246,26 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteFriendship(friendshipId: String): Result<Unit> = runCatching {
+        val existing = db.from("friends").select { filter { eq("id", friendshipId) } }
+            .decodeSingleOrNull<WhisperFriendship>()
         db.from("friends").delete { filter { eq("id", friendshipId) } }
+        if (existing != null) {
+            val otherId = if (existing.userA == myId) existing.userB else existing.userA
+            runCatching {
+                val friendsChannel = getOrJoinBroadcastChannel("whisper-friends-all-$otherId")
+                friendsChannel.broadcast(
+                    event = "friend_update",
+                    payload = BroadcastPayload.Json(
+                        buildJsonObject {
+                            put("id", friendshipId)
+                            put("user_a", existing.userA)
+                            put("user_b", existing.userB)
+                            put("status", "deleted")
+                        }
+                    )
+                )
+            }
+        }
     }
 
     suspend fun getFriendshipStatus(otherUserId: String): Result<Pair<FriendStatus, WhisperFriendship?>> = runCatching {
@@ -1225,23 +1295,62 @@ class WhisperRepository @Inject constructor(
             close()
             return@callbackFlow
         }
-        val channel = supabase.channel("whisper-friends-all-$currentId")
+        val channelName = "whisper-friends-all-$currentId"
+        channelMutex.withLock {
+            broadcastChannelCache[channelName]?.let {
+                runCatching { realtime.removeChannel(it) }
+                broadcastChannelCache.remove(channelName)
+            }
+        }
+        val channel = supabase.channel(channelName)
+
+        // 1. Instant Realtime Broadcast flow
+        val broadcastFlow = channel.broadcastFlow<JsonObject>("friend_update")
+        val bJob = launch {
+            broadcastFlow.collect { json ->
+                try {
+                    val id = json["id"]?.jsonPrimitive?.content ?: ""
+                    val uA = json["user_a"]?.jsonPrimitive?.content ?: ""
+                    val uB = json["user_b"]?.jsonPrimitive?.content ?: ""
+                    val status = json["status"]?.jsonPrimitive?.content ?: "pending"
+                    if (uA.isNotBlank() && uB.isNotBlank()) {
+                        trySend(WhisperFriendship(id = id, userA = uA, userB = uB, status = status))
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("WhisperRepo", "Friend broadcast parse error: ${e.message}")
+                }
+            }
+        }
+
+        // 2. Postgres Change flow fallback
         val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = "friends" }
+        val pJob = launch {
+            changes.collect { action ->
+                try {
+                    val record = when (action) {
+                        is PostgresAction.Insert -> action.decodeRecord<WhisperFriendship>()
+                        is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
+                        else -> null
+                    }
+                    if (record != null && (record.userA == currentId || record.userB == currentId)) {
+                        trySend(record)
+                    }
+                } catch (_: Exception) { }
+            }
+        }
         channel.subscribe()
-        val job = launch { changes.collect { action ->
-            try {
-                val record = when (action) {
-                    is PostgresAction.Insert -> action.decodeRecord<WhisperFriendship>()
-                    is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
-                    else -> null
-                }
-                if (record != null && (record.userA == currentId || record.userB == currentId)) {
-                    trySend(record)
-                }
-            } catch (_: Exception) { }
-        } }
-        awaitClose { job.cancel(); launch { runCatching { realtime.removeChannel(channel) } } }
+        channelMutex.withLock {
+            broadcastChannelCache[channelName] = channel
+        }
+        awaitClose {
+            bJob.cancel()
+            pJob.cancel()
+            launch {
+                removeCachedChannel(channelName, channel)
+            }
+        }
     }
+
 
     private val blockedByMeCache = mutableSetOf<String>()
 
