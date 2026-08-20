@@ -88,8 +88,10 @@ import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -111,6 +113,7 @@ fun WhisperChatScreen(
     viewModel: WhisperChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val undoState by viewModel.undoState.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val scope = rememberCoroutineScope()
@@ -138,8 +141,10 @@ fun WhisperChatScreen(
         } else {
             val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
             // Compress before encrypt to stay within the edge-function body limit
-            val compressed = compressImageForUpload(bytes, mimeType)
-            viewModel.sendImage(compressed, "image/jpeg", selectedImageExpiry)
+            scope.launch {
+                val compressed = compressImageForUpload(bytes, mimeType)
+                viewModel.sendImage(compressed, "image/jpeg", selectedImageExpiry)
+            }
         }
     }
 
@@ -328,7 +333,7 @@ fun WhisperChatScreen(
                                     modifier = Modifier.padding(end = 4.dp)
                                 ) {
                                     Text(
-                                        "${uiState.activeSearchMatchIndex + 1}/${uiState.matchingMessageIds.size}",
+                                        "${(uiState.activeSearchMatchIndex + 1).coerceAtLeast(1)}/${uiState.matchingMessageIds.size}",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.primary,
@@ -385,6 +390,7 @@ fun WhisperChatScreen(
                         friendStatus = uiState.friendStatus,
                         iAmRequester = uiState.iAmRequester,
                         onSendRequest = { haptic.success(); viewModel.sendFriendRequest() },
+                        onAcceptRequest = { haptic.success(); viewModel.acceptFriendRequest() },
                     )
                 }
 
@@ -504,8 +510,9 @@ fun WhisperChatScreen(
                     }
                 }
 
-                // 30s Undo Banner
-                androidx.compose.animation.AnimatedVisibility(visible = uiState.clearedUndoMessagesCount > 0) {
+                // 30s Undo Banner (undo countdown state is separate from chat state so the
+                // 1 Hz tick doesn't recompose the message list)
+                androidx.compose.animation.AnimatedVisibility(visible = undoState.clearedCount > 0) {
                     Surface(
                         color = MaterialTheme.colorScheme.tertiaryContainer,
                         shape = RoundedCornerShape(20.dp),
@@ -515,9 +522,9 @@ fun WhisperChatScreen(
                         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.st_Whisper_Chat_ClearedMessages, uiState.clearedUndoMessagesCount), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.st_Whisper_Chat_ClearedMessages, undoState.clearedCount), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
                             ToolzTonalExpressiveButton(onClick = { viewModel.undoClearChat() }) {
-                                Text(stringResource(R.string.st_Whisper_Undo, uiState.undoSecondsRemaining), fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_Whisper_Undo, undoState.secondsRemaining), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -581,8 +588,8 @@ fun WhisperChatScreen(
         ConversationOptionsSheet(
             isMuted = uiState.isMuted,
             isBlocked = uiState.isBlockedByMe,
-            hasClearedUndo = uiState.clearedUndoMessagesCount > 0,
-            clearedCount = uiState.clearedUndoMessagesCount,
+            hasClearedUndo = undoState.clearedCount > 0,
+            clearedCount = undoState.clearedCount,
             onDismiss = { showOptionsSheet = false },
             onSearch = { showOptionsSheet = false; viewModel.toggleSearch(true) },
             onClearChat = { showOptionsSheet = false; showClearChatSheet = true },
@@ -1112,6 +1119,10 @@ private fun KeyVerifyDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        ),
         shape = RoundedCornerShape(28.dp),
         title = { Text(stringResource(R.string.st_Whisper_KeyChanged_Title)) },
         text = {
@@ -1185,7 +1196,7 @@ private fun KeyVerifyDialog(
 }
 
 @Composable
-private fun FriendGateBanner(friendStatus: FriendStatus, iAmRequester: Boolean, onSendRequest: () -> Unit) {
+private fun FriendGateBanner(friendStatus: FriendStatus, iAmRequester: Boolean, onSendRequest: () -> Unit, onAcceptRequest: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
@@ -1195,7 +1206,10 @@ private fun FriendGateBanner(friendStatus: FriendStatus, iAmRequester: Boolean, 
                 else -> stringResource(R.string.st_Whisper_AddFriendToChat)
             }
             Text(msg, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSecondaryContainer)
-            if (friendStatus == FriendStatus.NONE) ToolzTonalExpressiveButton(onClick = onSendRequest) { Text(stringResource(R.string.st_Whisper_Chat_AddFriend)) }
+            when {
+                friendStatus == FriendStatus.NONE -> ToolzTonalExpressiveButton(onClick = onSendRequest) { Text(stringResource(R.string.st_Whisper_Chat_AddFriend)) }
+                friendStatus == FriendStatus.PENDING && !iAmRequester -> ToolzTonalExpressiveButton(onClick = onAcceptRequest) { Text(stringResource(R.string.st_Whisper_Accept)) }
+            }
         }
     }
 }
@@ -1541,30 +1555,31 @@ private fun MessageInputBar(
 
 
 
-private fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray {
-    return runCatching {
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return bytes
-        val maxDimension = 1920
-        val width = bitmap.width
-        val height = bitmap.height
-        val scaledBitmap = if (width > maxDimension || height > maxDimension) {
-            val ratio = min(maxDimension.toFloat() / width, maxDimension.toFloat() / height)
-            val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
-            val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-        } else {
-            bitmap
-        }
-        val out = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
-        if (scaledBitmap != bitmap) {
-            scaledBitmap.recycle()
-        }
-        bitmap.recycle()
-        val result = out.toByteArray()
-        if (result.isNotEmpty() && result.size < bytes.size) result else bytes
-    }.getOrDefault(bytes)
-}
+private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
+    withContext(Dispatchers.Default) {
+        runCatching {
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext bytes
+            val maxDimension = 1920
+            val width = bitmap.width
+            val height = bitmap.height
+            val scaledBitmap = if (width > maxDimension || height > maxDimension) {
+                val ratio = min(maxDimension.toFloat() / width, maxDimension.toFloat() / height)
+                val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
+                val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+            } else {
+                bitmap
+            }
+            val out = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+            if (scaledBitmap != bitmap) {
+                scaledBitmap.recycle()
+            }
+            bitmap.recycle()
+            val result = out.toByteArray()
+            if (result.isNotEmpty() && result.size < bytes.size) result else bytes
+        }.getOrDefault(bytes)
+    }
 
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
@@ -1652,6 +1667,7 @@ private fun WhisperFullScreenImageViewer(
 ) {
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
+    val scope = rememberCoroutineScope()
     val bitmap = remember(imageBytes) {
         runCatching { BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) }.getOrNull()
     }
@@ -1720,11 +1736,13 @@ private fun WhisperFullScreenImageViewer(
                 ToolzExpressiveIconButton(
                     onClick = {
                         haptic.click()
-                        val saved = saveImageToGallery(context, imageBytes, mimeType)
-                        if (saved) {
-                            onShowToast(context.getString(R.string.st_BackgroundRemover_Success), WhisperToastType.SUCCESS)
-                        } else {
-                            onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
+                        scope.launch {
+                            val saved = saveImageToGallery(context, imageBytes, mimeType)
+                            if (saved) {
+                                onShowToast(context.getString(R.string.st_BackgroundRemover_Success), WhisperToastType.SUCCESS)
+                            } else {
+                                onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
+                            }
                         }
                     },
                     colors = IconButtonDefaults.filledIconButtonColors(
@@ -1739,29 +1757,30 @@ private fun WhisperFullScreenImageViewer(
     }
 }
 
-private fun saveImageToGallery(context: Context, bytes: ByteArray, mimeType: String): Boolean {
-    return try {
-        val filename = "Whisper_${System.currentTimeMillis()}.${if (mimeType == "image/png") "png" else "jpg"}"
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Whisper")
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
+private suspend fun saveImageToGallery(context: Context, bytes: ByteArray, mimeType: String): Boolean =
+    withContext(Dispatchers.IO) {
+        try {
+            val filename = "Whisper_${System.currentTimeMillis()}.${if (mimeType == "image/png") "png" else "jpg"}"
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Whisper")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return@withContext false
+
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+
+            contentValues.clear()
+            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, contentValues, null, null)
+            true
+        } catch (e: Exception) {
+            false
         }
-
-        val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            ?: return false
-
-        resolver.openOutputStream(uri)?.use { it.write(bytes) }
-
-        contentValues.clear()
-        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-        resolver.update(uri, contentValues, null, null)
-        true
-    } catch (e: Exception) {
-        false
     }
-}
 
 private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024

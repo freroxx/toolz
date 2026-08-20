@@ -33,10 +33,13 @@ import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.upload
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -79,6 +82,28 @@ class WhisperRepository @Inject constructor(
     val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
     private val profileCache = ConcurrentHashMap<String, WhisperProfile>()
+
+    // In-memory partner public keys for offline decryption of cached ciphertext.
+    // Only ever populated from authenticated profile reads; the persisted fallback
+    // (keyTrustStore) holds the key the user last accepted, so a changed key can
+    // never silently decrypt old or new material.
+    private val peerKeys = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    private fun cachePeerKey(userId: String, publicKey: String?) {
+        if (!publicKey.isNullOrBlank()) {
+            peerKeys.update { it + (userId to publicKey) }
+        }
+    }
+
+    private fun peerKeyFor(userId: String): String? =
+        peerKeys.value[userId] ?: keyTrustStore.knownKey(userId)
+
+    /** Decrypts a cached ciphertext message for display, falling back to a neutral marker. */
+    private fun WhisperMessage.decryptContent(peerKey: String?): WhisperMessage {
+        if (isDeletedForEveryone || contentIv == null) return this
+        val key = peerKey ?: return copy(content = "[Encrypted message]")
+        return copy(content = crypto.decryptMessage(content, contentIv, key) ?: "[Encrypted message]")
+    }
     // Cache conversations list to avoid full reload on every new message in the chats hub
     @Volatile private var conversationsCache: List<WhisperConversation>? = null
     @Volatile private var conversationsCacheTime: Long = 0L
@@ -224,6 +249,7 @@ class WhisperRepository @Inject constructor(
         if (!forceRefresh && profileCache.containsKey(userId)) {
             val cached = profileCache[userId]
             if (cached != null && (!cached.publicKey.isNullOrBlank() || userId == myId)) {
+                cachePeerKey(userId, cached.publicKey)
                 return Result.success(cached)
             }
         }
@@ -231,6 +257,7 @@ class WhisperRepository @Inject constructor(
             .select { filter { eq("id", userId) } }
             .decodeSingle<WhisperProfile>()
         profileCache[userId] = p
+        cachePeerKey(userId, p.publicKey)
         p
     }
 
@@ -309,8 +336,14 @@ class WhisperRepository @Inject constructor(
     fun getMessagesFlow(otherUserId: String): Flow<List<WhisperMessage>> {
         val currentId = myId
         if (currentId.isBlank()) return flowOf(emptyList())
-        return messageDao.getMessages(currentId, otherUserId).map { list ->
-            list.map { it.toModel() }
+        // Room stores only ciphertext. Decrypt at read time with the accepted peer key so
+        // nothing plaintext ever lands on disk, while the UI still renders full history.
+        return combine(
+            messageDao.getMessages(currentId, otherUserId),
+            peerKeys.map { it[otherUserId] }
+        ) { entities, inMemoryKey ->
+            val peerKey = inMemoryKey ?: keyTrustStore.knownKey(otherUserId)
+            entities.map { it.toModel().decryptContent(peerKey) }
         }
     }
 
@@ -347,8 +380,9 @@ class WhisperRepository @Inject constructor(
         }
 
         // Decrypt messages first, filtering out locally deleted messages
-        val decryptedMessages = rawMessages
+        val visibleRaw = rawMessages
             .filter { msg -> (!isBlocked || msg.senderId == currentId) && !deletedStore.isMessageDeleted(msg.id) }
+        val decryptedMessages = visibleRaw
             .map { msg ->
                 if (msg.isDeletedForEveryone) {
                     msg
@@ -389,9 +423,9 @@ class WhisperRepository @Inject constructor(
             )
         }
         
-        // Cache fetched messages
-        if (finalMessages.isNotEmpty()) {
-            messageDao.insertMessages(finalMessages.map { it.toEntity() })
+        // Cache fetched messages as ciphertext only (never the decrypted plaintext)
+        if (visibleRaw.isNotEmpty()) {
+            messageDao.insertMessages(visibleRaw.map { it.toEntity() })
         }
 
         finalMessages.reversed()
@@ -465,47 +499,9 @@ class WhisperRepository @Inject constructor(
         }
         
         val clearMsg = insertedMsg.copy(content = content)
-        // Cache successfully sent message
-        messageDao.insertMessage(clearMsg.toEntity())
-
-        // Instant Realtime Peer-to-Peer Broadcast & Instant Notification
-        runCatching {
-            val convoKey = conversationKey(myId, receiverId)
-            val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
-            chatChannel.broadcast(
-                event = "new_message",
-                payload = BroadcastPayload.Json(
-                    buildJsonObject {
-                        put("id", insertedMsg.id)
-                        put("sender_id", insertedMsg.senderId)
-                        put("receiver_id", insertedMsg.receiverId)
-                        put("content", insertedMsg.content)
-                        put("content_iv", insertedMsg.contentIv)
-                        put("reply_to_id", insertedMsg.replyToId)
-                        put("created_at", insertedMsg.createdAt)
-                    }
-                )
-            )
-
-            // Direct instant notification broadcast to receiver's dedicated inbox channel
-            val notifChannel = getOrJoinBroadcastChannel("whisper-user-inbox-$receiverId")
-            val myProfile = getMyProfile().getOrNull()
-            notifChannel.broadcast(
-                event = "incoming_notification",
-                payload = BroadcastPayload.Json(
-                    buildJsonObject {
-                        put("id", insertedMsg.id)
-                        put("sender_id", myId)
-                        put("sender_name", myProfile?.effectiveName ?: "Someone")
-                        // Broadcast channels are a latency hint, not a secure message store.
-                        // Never put cleartext in this secondary delivery path.
-                        put("content", "New encrypted message")
-                        put("created_at", insertedMsg.createdAt)
-                    }
-                )
-            )
-        }
-
+        // Cache the successfully sent message as ciphertext only (never the plaintext).
+        // getMessagesFlow decrypts it on read using the recipient's accepted public key.
+        messageDao.insertMessage(insertedMsg.toEntity())
 
         // Invalidate conversation cache so the chats list refreshes
         invalidateConversationsCache()
@@ -573,6 +569,7 @@ class WhisperRepository @Inject constructor(
         var delivered = 0
         outgoingQueue.entries().filter { it.senderId == myId }.forEach { queued ->
             if (queued.attempts >= 8) {
+                android.util.Log.w("WhisperRepo", "Dropping undeliverable queued message after ${queued.attempts} attempts (clientId=${queued.clientId})")
                 outgoingQueue.remove(queued.clientId)
                 return@forEach
             }
@@ -667,9 +664,15 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteMessageForEveryone(messageId: String, otherUserId: String, senderDisplayName: String): Result<Unit> = runCatching {
-        // 1. Fetch message to check for attachments
+        // 1. Fetch message to check for attachments. Room holds ciphertext, so decrypt with
+        // the accepted peer key before parsing the attachment envelope.
         val message = messageDao.getMessageById(messageId)
-        val attachment: WhisperImageAttachment? = message?.content?.let { WhisperImageAttachment.fromMessageContent(it) }
+        val attachment: WhisperImageAttachment? = message?.let { m ->
+            val raw = if (m.contentIv != null) {
+                crypto.decryptMessage(m.content, m.contentIv, peerKeyFor(otherUserId)) ?: m.content
+            } else m.content
+            WhisperImageAttachment.fromMessageContent(raw)
+        }
         
         // 2. Perform remote attachment deletion if applicable
         attachment?.let { att ->
@@ -692,21 +695,6 @@ class WhisperRepository @Inject constructor(
         
         // 4. Erase from local cache
         messageDao.deleteMessage(messageId)
-
-        // 5. Broadcast instant delete event
-        runCatching {
-            val convoKey = conversationKey(myId, otherUserId)
-            val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
-            chatChannel.broadcast(
-                event = "delete_message",
-                payload = BroadcastPayload.Json(
-                    buildJsonObject {
-                        put("message_id", messageId)
-                        put("tombstone", tombstone)
-                    }
-                )
-            )
-        }
     }
 
     suspend fun deleteMessageForMe(messageId: String): Result<Unit> = runCatching {
@@ -752,98 +740,9 @@ class WhisperRepository @Inject constructor(
         
         val channel = supabase.channel(channelName)
 
-        // Listen for Instant Realtime Message Broadcasts
-        val messageBroadcastFlow = channel.broadcastFlow<JsonObject>("new_message")
-        val bMsgJob = launch {
-            messageBroadcastFlow.collect { json ->
-                // Broadcast is only a best-effort latency hint and cannot prove sender identity.
-                // Never persist or render it; authenticated Postgres/RLS events are authoritative.
-                return@collect
-                try {
-                    val id = json["id"]?.jsonPrimitive?.content ?: return@collect
-                    val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
-                    val receiverId = json["receiver_id"]?.jsonPrimitive?.content ?: return@collect
-                    val rawContent = json["content"]?.jsonPrimitive?.content ?: ""
-                    val contentIv = json["content_iv"]?.jsonPrimitive?.content
-                    val replyToId = json["reply_to_id"]?.jsonPrimitive?.content
-                    val createdAt = json["created_at"]?.jsonPrimitive?.content ?: ""
-
-                    if (isUserBlockedByMe(senderId)) return@collect
-
-                    val otherProfile = getProfile(otherUserId).getOrNull()
-                    var otherKey = otherProfile?.publicKey
-                    
-                    if (otherKey == null) {
-                        // Key might be missing in cache, force refresh
-                        otherKey = getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey
-                    }
-
-                    val decrypted = if (rawContent.startsWith("This message has been deleted") || rawContent.startsWith("[deleted_by_sender")) {
-                        rawContent
-                    } else if (contentIv != null && otherKey != null) {
-                        crypto.decryptMessage(rawContent, contentIv, otherKey)
-                            ?: crypto.decryptMessage(rawContent, contentIv, getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey)
-                            ?: "[Encrypted message]"
-                    } else rawContent
-
-                    val msg = WhisperMessage(
-                        id = id,
-                        senderId = senderId,
-                        receiverId = receiverId,
-                        content = decrypted,
-                        contentIv = contentIv,
-                        replyToId = replyToId,
-                        createdAt = createdAt
-                    )
-                    
-                    // Cache incoming message in background
-                    launch { messageDao.insertMessage(msg.toEntity()) }
-                    
-                    if (shouldEmitMessage(msg.id)) {
-                        trySend(WhisperChatEvent.MessageEvent(msg))
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Broadcast message parse error: ${e.message}")
-                }
-            }
-        }
-
-        // Listen for Instant Realtime Reaction Broadcasts
-        val reactionBroadcastFlow = channel.broadcastFlow<JsonObject>("reaction_update")
-        val bReactionJob = launch {
-            reactionBroadcastFlow.collect { json ->
-                return@collect
-                try {
-                    val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
-                    val userId = json["user_id"]?.jsonPrimitive?.content ?: return@collect
-                    val emoji = json["emoji"]?.jsonPrimitive?.content ?: return@collect
-                    trySend(WhisperChatEvent.ReactionEvent(messageId, userId, emoji))
-                } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Broadcast reaction parse error: ${e.message}")
-                }
-            }
-        }
-
-        // Listen for Instant Delete-for-Everyone Broadcasts
-        val deleteBroadcastFlow = channel.broadcastFlow<JsonObject>("delete_message")
-        val bDeleteJob = launch {
-            deleteBroadcastFlow.collect { json ->
-                return@collect
-                try {
-                    val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
-                    
-                    // Remove from cache immediately
-                    launch { messageDao.deleteMessage(messageId) }
-                    
-                    // Notify ViewModel to remove from UI
-                    trySend(WhisperChatEvent.DeleteEvent(messageId))
-                } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Broadcast delete parse error: ${e.message}")
-                }
-            }
-        }
-
-        // Listen for Postgres Changes on messages
+        // Listen for Postgres Changes on messages. Realtime broadcasts are deliberately
+        // NOT consumed: they cannot prove sender identity and are therefore never used as
+        // a message source, cache fill, or notification trigger.
         val postgresMessageChanges = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "messages"
         }
@@ -876,12 +775,12 @@ class WhisperRepository @Inject constructor(
                         
                         val finalMsg = msg.copy(content = decrypted)
                         
-                        // Sync to cache in background
+                        // Sync ciphertext to cache in background (never the decrypted plaintext)
                         launch {
                             if (msg.isDeletedForEveryone) {
                                 messageDao.deleteMessage(msg.id)
                             } else {
-                                messageDao.insertMessage(finalMsg.toEntity())
+                                messageDao.insertMessage(msg.toEntity())
                             }
                         }
 
@@ -921,9 +820,6 @@ class WhisperRepository @Inject constructor(
         }
 
         awaitClose {
-            bMsgJob.cancel()
-            bReactionJob.cancel()
-            bDeleteJob.cancel()
             pMsgJob.cancel()
             pReactionJob.cancel()
             launch {
@@ -943,39 +839,12 @@ class WhisperRepository @Inject constructor(
             broadcastChannelCache[channelName]?.let { runCatching { realtime.removeChannel(it) } }
             broadcastChannelCache.remove(channelName)
         }
-        runCatching { realtime.removeChannel(supabase.channel(channelName)) }
 
         val channel = supabase.channel(channelName)
 
-        // 1. Listen for direct instant push broadcast notifications (<50ms)
-        val notifBroadcastFlow = channel.broadcastFlow<JsonObject>("incoming_notification")
-        val notifJob = launch {
-            notifBroadcastFlow.collect { json ->
-                // Never use an unauthenticated broadcast as a message source or notification.
-                return@collect
-                try {
-                    val id = json["id"]?.jsonPrimitive?.content ?: ""
-                    val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
-                    val content = json["content"]?.jsonPrimitive?.content ?: ""
-                    val createdAt = json["created_at"]?.jsonPrimitive?.content ?: ""
-
-                    if (isUserBlockedByMe(senderId)) return@collect
-
-                    val msg = WhisperMessage(
-                        id = id,
-                        senderId = senderId,
-                        receiverId = userId,
-                        content = content,
-                        createdAt = createdAt
-                    )
-                    trySend(msg)
-                } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Notif broadcast parse error: ${e.message}")
-                }
-            }
-        }
-
-        // 2. Also listen to database messages table changes
+        // Listen to database messages table changes. Realtime broadcasts are deliberately
+        // NOT consumed: they cannot prove sender identity and are never used as a
+        // message source or notification trigger.
         val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "messages"
         }
@@ -1019,7 +888,6 @@ class WhisperRepository @Inject constructor(
         }
 
         awaitClose {
-            notifJob.cancel()
             dbJob.cancel()
             launch {
                 removeCachedChannel(channelName, channel)
@@ -1534,7 +1402,8 @@ class WhisperRepository @Inject constructor(
         val channel = getOrJoinBroadcastChannel(name)
         val broadcasts = channel.broadcastFlow<JsonObject>("typing")
         val job = launch { broadcasts.collect { json ->
-            return@collect
+            // Typing is a cosmetic, boolean-only presence hint. It carries no message content,
+            // so accepting it from the broadcast channel cannot inject user-visible state.
             try {
                 val senderId = json["sender_id"]?.jsonPrimitive?.content
                 val isTyping = json["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -1562,11 +1431,11 @@ class WhisperRepository @Inject constructor(
         val name = "presence_$channelKey"
         val channel = getOrJoinBroadcastChannel(name)
         
-        // 1. Instant Realtime Broadcasts (app in foreground status)
+        // 1. Instant Realtime Broadcasts (app in foreground status) — boolean-only presence
+        // hints with no message content; the DB window below remains the authoritative source.
         val broadcasts = channel.broadcastFlow<JsonObject>("presence")
         val bJob = launch { 
             broadcasts.collect { json ->
-                return@collect
                 try {
                     val senderId = json["sender_id"]?.jsonPrimitive?.content
                     val isOnline = json["is_online"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -1646,6 +1515,7 @@ class WhisperRepository @Inject constructor(
         val profile = getProfile(otherUserId).getOrNull() ?: return false
         val currentKey = profile.publicKey ?: return false
         keyTrustStore.markVerified(otherUserId, currentKey)
+        cachePeerKey(otherUserId, currentKey)
         return true
     }
 
@@ -1654,6 +1524,7 @@ class WhisperRepository @Inject constructor(
         val profile = getProfile(otherUserId).getOrNull() ?: return false
         val currentKey = profile.publicKey ?: return false
         keyTrustStore.rememberKey(otherUserId, currentKey)
+        cachePeerKey(otherUserId, currentKey)
         return true
     }
 }

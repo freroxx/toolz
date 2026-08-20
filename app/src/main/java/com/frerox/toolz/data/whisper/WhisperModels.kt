@@ -402,8 +402,6 @@ data class WhisperChatUiState(
     val isMuted: Boolean = false,
     val isBlockedByMe: Boolean = false,
     val isBlockedByOther: Boolean = false,
-    val clearedUndoMessagesCount: Int = 0,
-    val undoSecondsRemaining: Int = 0,
     val replyingToMessage: WhisperMessage? = null,
     val isSearchActive: Boolean = false,
     val searchQuery: String = "",
@@ -414,4 +412,10 @@ data class WhisperChatUiState(
     val isUploadingAttachment: Boolean = false,
     val decryptedImageBytes: Map<String, ByteArray> = emptyMap(),
     val error: UiText? = null,
+)
+
+/** 30s clear-chat undo banner state, kept separate so 1 Hz countdown ticks don't recompose the message list. */
+data class WhisperUndoUiState(
+    val clearedCount: Int = 0,
+    val secondsRemaining: Int = 0,
 )

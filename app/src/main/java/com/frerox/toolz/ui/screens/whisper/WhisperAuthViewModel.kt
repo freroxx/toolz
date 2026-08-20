@@ -137,7 +137,9 @@ class WhisperAuthViewModel @Inject constructor(
             }
             customUsername.trim().lowercase()
         } else {
-            "anon_" + token.token.take(6)
+            // Random suffix instead of a leaky 6-char token prefix: usernames must not
+            // reveal partial credential material, and anon users stay unpredictable.
+            "anon_" + java.util.UUID.randomUUID().toString().replace("-", "").take(8)
         }
 
         viewModelScope.launch {

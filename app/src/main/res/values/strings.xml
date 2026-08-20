@@ -215,6 +215,7 @@
     <string name="st_Whisper_AcceptAnyway">Accept anyway</string>
     <string name="st_Whisper_FriendRequestSent">Friend request sent</string>
     <string name="st_Whisper_FriendRequestReceived">Friend request received</string>
+    <string name="st_Whisper_Accept">Accept</string>
     <string name="st_Whisper_AddFriendToChat">Add them to start chatting</string>
     <string name="st_Whisper_YouDeleted">You deleted this message</string>
     <string name="st_Whisper_PartnerDeleted">%s deleted this message</string>

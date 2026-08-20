@@ -136,8 +136,12 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
+    private var loadAllJob: Job? = null
+
     fun loadAll(isRefresh: Boolean = false) {
-        viewModelScope.launch {
+        // Guard against overlapping loads (e.g. refresh + auth-state re-entry)
+        if (loadAllJob?.isActive == true) return
+        loadAllJob = viewModelScope.launch {
             if (isRefresh) _uiState.update { it.copy(isRefreshing = true) }
             else _uiState.update { it.copy(isLoading = true) }
 
@@ -370,10 +374,15 @@ class WhisperViewModel @Inject constructor(
         isHiddenFromDiscover: Boolean = false,
         onSuccess: (() -> Unit)? = null,
     ) {
+        val trimmedName = displayName.trim()
+        if (trimmedName.isBlank()) {
+            handleError(Exception("Display name cannot be empty"), "updateProfile")
+            return
+        }
         viewModelScope.launch {
             val update = WhisperProfileUpdate(
-                displayName = displayName.takeIf { it.isNotBlank() },
-                bio = bio.takeIf { it.isNotBlank() },
+                displayName = trimmedName,
+                bio = bio.trim().takeIf { it.isNotBlank() },
                 isPrivate = isPrivate,
                 isHiddenFromDiscover = isHiddenFromDiscover,
             )
@@ -424,6 +433,10 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun signOut(onComplete: () -> Unit = {}) {
+        // Stop realtime subscriptions first so they don't retry against a dead session
+        messagesJob?.cancel()
+        friendsJob?.cancel()
+        loadAllJob?.cancel()
         viewModelScope.launch {
             authManager.signOut()
             onComplete()
@@ -491,5 +504,7 @@ class WhisperViewModel @Inject constructor(
         messagesJob?.cancel()
         friendsJob?.cancel()
         muteJob?.cancel()
+        hiddenJob?.cancel()
+        loadAllJob?.cancel()
     }
 }

@@ -213,6 +213,7 @@
     <string name="st_Whisper_AcceptAnyway">Aceitar mesmo assim</string>
     <string name="st_Whisper_FriendRequestSent">Solicitação de amizade enviada</string>
     <string name="st_Whisper_FriendRequestReceived">Solicitação de amizade recebida</string>
+    <string name="st_Whisper_Accept">Aceitar</string>
     <string name="st_Whisper_AddFriendToChat">Adicione para começar a conversar</string>
     <string name="st_Whisper_YouDeleted">Você excluiu esta mensagem</string>
     <string name="st_Whisper_PartnerDeleted">%s excluiu esta mensagem</string>

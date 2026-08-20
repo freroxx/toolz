@@ -51,7 +51,10 @@ class WhisperChatViewModel @Inject constructor(
     private val _draftText = MutableStateFlow("")
     val draftText: StateFlow<String> = _draftText.asStateFlow()
 
-    private val _sessionExpired = MutableSharedFlow<Unit>(replay = 0)
+    private val _undoState = MutableStateFlow(WhisperUndoUiState())
+    val undoState: StateFlow<WhisperUndoUiState> = _undoState.asStateFlow()
+
+    private val _sessionExpired = MutableSharedFlow<Unit>(replay = 1)
     val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
 
     private var partnerPublicKey: String? = null
@@ -60,6 +63,7 @@ class WhisperChatViewModel @Inject constructor(
     private var typingDebounceJob: Job? = null
     private var presenceJob: Job? = null
     private var undoTimerJob: Job? = null
+    private var reactionSyncJob: Job? = null
     private var isCurrentlyTyping = false
 
     private val deletedMessagesUndoBuffer = mutableListOf<WhisperMessage>()
@@ -152,23 +156,26 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     fun loadMessages() {
-        // 1. Instant loading from Room cache
+        // 1. Instant loading from Room cache (ciphertext is decrypted by the repository)
         viewModelScope.launch {
             repository.getMessagesFlow(otherUserId).collect { newMessages ->
                 _uiState.update { state ->
-                    // CRITICAL: Preserve transient metadata (reactions, enriched reply data) 
-                    // that isn't persisted in the basic message entity.
+                    // CRITICAL: Preserve transient metadata (decrypted content, reactions,
+                    // enriched reply data) that isn't persisted in the basic message entity.
+                    val existingById = state.messages.associateBy { it.id }
+                    val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
                     val merged = newMessages.map { newMsg ->
-                        val existing = state.messages.find { it.id == newMsg.id }
+                        val existing = existingById[newMsg.id]
                         if (existing != null) {
                             newMsg.copy(
+                                content = existing.content,
                                 reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
                                 replyToContent = newMsg.replyToContent ?: existing.replyToContent,
                                 replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
-                                isPending = newMsg.isPending
+                                isPending = existing.isPending || newMsg.isPending
                             )
                         } else newMsg
-                    }
+                    } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
 
                     state.copy(
                         messages = merged,
@@ -204,7 +211,7 @@ class WhisperChatViewModel @Inject constructor(
 
     // ── EMOJI REACTIONS ──
     fun toggleReaction(message: WhisperMessage, emoji: String) {
-        if (message.id.isBlank()) return
+        if (message.id.isBlank() || message.isPending) return
         // Optimistic local state update
         _uiState.update { state ->
             val updatedMsgs = state.messages.map { msg ->
@@ -289,7 +296,7 @@ class WhisperChatViewModel @Inject constructor(
     fun navigateSearchMatch(direction: Int) {
         _uiState.update { state ->
             val size = state.matchingMessageIds.size
-            if (size == 0) return@update state
+            if (size == 0) return@update state.copy(activeSearchMatchIndex = -1)
             val next = (state.activeSearchMatchIndex + direction).mod(size)
             state.copy(activeSearchMatchIndex = next)
         }
@@ -314,7 +321,7 @@ class WhisperChatViewModel @Inject constructor(
         val trimmedContent = content.trim()
         val replySnippet = replyTarget?.let { target ->
             val content = if (target.content.startsWith("whisper:image:")) {
-                "📷 Image"
+                "Image"
             } else {
                 target.content.take(100)
             }
@@ -350,9 +357,10 @@ class WhisperChatViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     _draftText.value = originalText
+                    // Restore the reply quote the user was composing so nothing is silently lost
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id }
-                        state.copy(messages = filtered)
+                        state.copy(messages = filtered, replyingToMessage = replyTarget)
                     }
                     handleError(err, "sendMessage")
                 }
@@ -453,6 +461,24 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    fun acceptFriendRequest() {
+        viewModelScope.launch {
+            repository.getFriendshipStatus(otherUserId)
+                .onSuccess { (_, friendship) ->
+                    val recordId = friendship?.id ?: run {
+                        handleError(Exception("No friendship record found"), "acceptFriendRequest")
+                        return@launch
+                    }
+                    repository.acceptFriendRequest(recordId)
+                        .onSuccess {
+                            _uiState.update { it.copy(friendStatus = FriendStatus.ACCEPTED, iAmRequester = false) }
+                        }
+                        .onFailure { handleError(it, "acceptFriendRequest") }
+                }
+                .onFailure { handleError(it, "acceptFriendRequest") }
+        }
+    }
+
     // ── CLEAR CHAT WITH 30s LIVE COUNTDOWN UNDO ──
     fun clearChat(range: ClearChatTimeRange, customStartIso: String? = null, customEndIso: String? = null) {
         viewModelScope.launch {
@@ -471,21 +497,18 @@ class WhisperChatViewModel @Inject constructor(
                     deletedMessagesUndoBuffer.addAll(deletedList)
                     _uiState.update { state ->
                         val deletedIds = deletedList.map { it.id }.toSet()
-                        state.copy(
-                            messages = state.messages.filter { it.id !in deletedIds },
-                            clearedUndoMessagesCount = deletedList.size,
-                            undoSecondsRemaining = 30
-                        )
+                        state.copy(messages = state.messages.filter { it.id !in deletedIds })
                     }
+                    _undoState.value = WhisperUndoUiState(clearedCount = deletedList.size, secondsRemaining = 30)
 
                     undoTimerJob?.cancel()
                     undoTimerJob = viewModelScope.launch {
                         for (sec in 30 downTo 1) {
-                            _uiState.update { it.copy(undoSecondsRemaining = sec) }
+                            _undoState.update { it.copy(secondsRemaining = sec) }
                             delay(1_000)
                         }
                         deletedMessagesUndoBuffer.clear()
-                        _uiState.update { it.copy(clearedUndoMessagesCount = 0, undoSecondsRemaining = 0) }
+                        _undoState.value = WhisperUndoUiState()
                     }
                 }
                 .onFailure { err ->
@@ -498,7 +521,7 @@ class WhisperChatViewModel @Inject constructor(
         if (deletedMessagesUndoBuffer.isEmpty()) return
         val toRestore = deletedMessagesUndoBuffer.toList()
         undoTimerJob?.cancel()
-        _uiState.update { it.copy(clearedUndoMessagesCount = 0, undoSecondsRemaining = 0) }
+        _undoState.value = WhisperUndoUiState()
 
         viewModelScope.launch {
             repository.restoreMessages(toRestore)
@@ -663,51 +686,57 @@ class WhisperChatViewModel @Inject constructor(
                             }
                         }
                         is WhisperChatEvent.ReactionEvent -> {
-                            // 1. Optimistic local update from the instant broadcast event
-                            _uiState.update { state ->
-                                val updated = state.messages.map { msg ->
-                                    if (msg.id == event.messageId) {
-                                        val curReactions = msg.reactions.toMutableList()
-                                        val idx = curReactions.indexOfFirst { it.emoji == event.emoji }
-                                        if (idx >= 0) {
-                                            val existing = curReactions[idx]
-                                            val containsUser = existing.userIds.contains(event.userId)
-                                            if (containsUser) {
-                                                val newUserIds = existing.userIds.filter { it != event.userId }
-                                                if (newUserIds.isEmpty()) {
-                                                    curReactions.removeAt(idx)
+                            // Skip echoes of my own toggles: the optimistic UI update already
+                            // applied this change, and re-applying would double-flip it.
+                            if (event.userId != myUserId) {
+                                _uiState.update { state ->
+                                    val updated = state.messages.map { msg ->
+                                        if (msg.id == event.messageId) {
+                                            val curReactions = msg.reactions.toMutableList()
+                                            val idx = curReactions.indexOfFirst { it.emoji == event.emoji }
+                                            if (idx >= 0) {
+                                                val existing = curReactions[idx]
+                                                val containsUser = existing.userIds.contains(event.userId)
+                                                if (containsUser) {
+                                                    val newUserIds = existing.userIds.filter { it != event.userId }
+                                                    if (newUserIds.isEmpty()) {
+                                                        curReactions.removeAt(idx)
+                                                    } else {
+                                                        curReactions[idx] = existing.copy(
+                                                            count = newUserIds.size,
+                                                            userIds = newUserIds,
+                                                            reactedByMe = if (event.userId == myUserId) false else existing.reactedByMe
+                                                        )
+                                                    }
                                                 } else {
+                                                    val newUserIds = existing.userIds + event.userId
                                                     curReactions[idx] = existing.copy(
                                                         count = newUserIds.size,
                                                         userIds = newUserIds,
-                                                        reactedByMe = if (event.userId == myUserId) false else existing.reactedByMe
+                                                        reactedByMe = if (event.userId == myUserId) true else existing.reactedByMe
                                                     )
                                                 }
                                             } else {
-                                                val newUserIds = existing.userIds + event.userId
-                                                curReactions[idx] = existing.copy(
-                                                    count = newUserIds.size,
-                                                    userIds = newUserIds,
-                                                    reactedByMe = if (event.userId == myUserId) true else existing.reactedByMe
+                                                curReactions.add(
+                                                    WhisperReactionSummary(
+                                                        emoji = event.emoji,
+                                                        count = 1,
+                                                        userIds = listOf(event.userId),
+                                                        reactedByMe = event.userId == myUserId
+                                                    )
                                                 )
                                             }
-                                        } else {
-                                            curReactions.add(
-                                                WhisperReactionSummary(
-                                                    emoji = event.emoji,
-                                                    count = 1,
-                                                    userIds = listOf(event.userId),
-                                                    reactedByMe = event.userId == myUserId
-                                                )
-                                            )
-                                        }
-                                        msg.copy(reactions = curReactions)
-                                    } else msg
+                                            msg.copy(reactions = curReactions)
+                                        } else msg
+                                    }
+                                    state.copy(messages = updated)
                                 }
-                                state.copy(messages = updated)
                             }
-                            // 2. Authoritative sync with DB
-                            viewModelScope.launch {
+                            // 2. Authoritative sync with DB (debounced: bursts of reactions
+                            // only trigger one round-trip)
+                            reactionSyncJob?.cancel()
+                            reactionSyncJob = viewModelScope.launch {
+                                delay(400)
                                 val reactionMap = repository.getReactionsForMessages(listOf(event.messageId)).getOrNull()
                                 if (reactionMap != null) {
                                     val updatedList = reactionMap[event.messageId] ?: emptyList()

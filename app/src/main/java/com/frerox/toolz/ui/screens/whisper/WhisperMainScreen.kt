@@ -114,6 +114,8 @@ fun WhisperMainScreen(
         if (isAuthenticated == false && !isLoggingOut) {
             isLoggingOut = true
             onLoggedOut()
+        } else if (isAuthenticated == true) {
+            isLoggingOut = false
         }
     }
 

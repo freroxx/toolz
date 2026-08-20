@@ -48,9 +48,15 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     id = id,
     senderId = senderId,
     receiverId = receiverId,
-    // Room is a transport cache, not a plaintext message archive. Server sync holds the
-    // ciphertext; on restart we refetch/decrypt it after authentication.
-    content = if (contentIv != null) "[encrypted-cache]" else "[message pending sync]",
+    // Room is a ciphertext-only transport cache, never a plaintext message archive.
+    // Encrypted payloads keep their ciphertext (decrypted at read time by the repository),
+    // pending/unsent messages store a neutral marker, and legacy unencrypted rows pass
+    // through untouched. Plaintext is never written to disk.
+    content = when {
+        contentIv != null -> content
+        isPending -> "[message pending sync]"
+        else -> content
+    },
     contentIv = contentIv,
     replyToId = replyToId,
     isRead = isRead,
