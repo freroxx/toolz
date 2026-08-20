@@ -2900,4 +2900,33 @@
     <!-- BiometricPromptUtils -->
     <string name="st_BiometricPromptUtils_title">Biometric Authentication</string>
     <string name="st_BiometricPromptUtils_subtitle">Please authenticate to continue</string>
+    <string name="cd_Whisper_ShowToken">Show token</string>
+    <string name="cd_Whisper_HideToken">Hide token</string>
+    <string name="st_Whisper_Auth_CopyExpiry">Token copied — clipboard clears in 60 seconds</string>
+    <string name="st_Whisper_Retry">Retry</string>
+    <string name="st_Whisper_Profile_LoadFailedDesc">Couldn\'t load this profile. Check your connection and try again.</string>
+    <string name="st_Whisper_RemovedFriend">Removed friend</string>
+    <string name="st_Whisper_MutedNotifications">Muted notifications</string>
+    <string name="st_Whisper_UnmutedNotifications">Unmuted notifications</string>
+    <string name="st_Whisper_UserBlocked">User blocked</string>
+    <string name="st_Whisper_UserUnblocked">User unblocked</string>
+    <string name="st_Whisper_ChatHidden">Chat hidden</string>
+    <string name="st_Whisper_ProfileSaved">Profile saved</string>
+    <string name="st_Whisper_Profile_NoChanges">No changes</string>
+    <string name="st_Whisper_UnsavedTitle">Unsaved Changes</string>
+    <string name="st_Whisper_UnsavedDesc">You have unsaved changes in your profile. Would you like to save them before switching tabs?</string>
+    <string name="st_Whisper_SaveAndSwitch">Save &amp; Switch</string>
+    <string name="st_Whisper_Discard">Discard</string>
+    <string name="st_Whisper_FriendsHeader">Friends</string>
+    <string name="st_Whisper_MessagesHeader">Messages</string>
+    <string name="st_Whisper_Discover_EmptySearch">Search for users in Discover to start end-to-end encrypted chats.</string>
+    <string name="st_Whisper_FriendRequestsCount">Friend Requests (%1$d)</string>
+    <string name="st_Whisper_FriendsCount">Friends (%1$d)</string>
+    <string name="st_Whisper_MessagesCount">Messages (%1$d)</string>
+    <string name="st_Whisper_DisplayNameUpdated">Display name updated</string>
+    <string name="st_Whisper_BioUpdated">Bio updated</string>
+    <string name="st_Whisper_ProfileSetPrivate">Profile set to Private</string>
+    <string name="st_Whisper_ProfileSetPublic">Profile set to Public</string>
+    <string name="st_Whisper_HiddenFromDiscover">Hidden from Discover</string>
+    <string name="st_Whisper_VisibleInDiscover">Visible in Discover</string>
 </resources>

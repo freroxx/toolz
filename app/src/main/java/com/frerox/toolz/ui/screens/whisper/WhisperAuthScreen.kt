@@ -38,6 +38,8 @@ import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,11 +85,15 @@ fun WhisperAuthScreen(
     viewModel: WhisperAuthViewModel = hiltViewModel(),
 ) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
+    val submitting by viewModel.submitting.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
+
+    // Recovery tokens and credentials are sensitive — never capture this screen.
+    SecureWindow()
 
     LaunchedEffect(authState) {
         if (authState is WhisperAuthState.Authenticated) onAuthenticated()
@@ -104,7 +110,7 @@ fun WhisperAuthScreen(
     LaunchedEffect(authState) {
         (authState as? WhisperAuthState.Notice)?.let { notice ->
             toastState.show(notice.message.asString(context), WhisperToastType.SUCCESS)
-            viewModel.clearError()
+            viewModel.dismissNotice()
         }
     }
 
@@ -142,15 +148,20 @@ fun WhisperAuthScreen(
             containerColor = Color.Transparent,
             modifier = Modifier.toolzBackground(),
         ) { paddingValues ->
-            if (authState is WhisperAuthState.Loading) {
+            // Full-screen loading only while the session is being resolved at startup.
+            // During a submit the form stays mounted so user input is never lost.
+            val initLoading = authState is WhisperAuthState.Loading && !submitting
+            if (initLoading) {
                 Box(Modifier.fillMaxSize().toolzBackground(), contentAlignment = Alignment.Center) {
                     ToolzLoadingIndicator()
                 }
             } else {
                 WhisperAuthContent(
                     authState = authState,
+                    isLoading = submitting || authState is WhisperAuthState.Loading,
                     generatedToken = generatedToken?.token,
                     usernameAvailability = usernameAvailability,
+                    toastState = toastState,
                     onCheckUsername = viewModel::checkUsernameAvailable,
                     onLoginUsername = viewModel::loginWithUsername,
                     onRegisterUsername = viewModel::registerWithUsername,
@@ -177,8 +188,10 @@ fun WhisperAuthScreen(
 @Composable
 private fun WhisperAuthContent(
     authState: WhisperAuthState,
+    isLoading: Boolean,
     generatedToken: String?,
     usernameAvailability: UsernameAvailability,
+    toastState: WhisperToastState,
     onCheckUsername: (String) -> Unit,
     onLoginUsername: (String, String) -> Unit,
     onRegisterUsername: (String, String, String) -> Unit,
@@ -190,7 +203,6 @@ private fun WhisperAuthContent(
 ) {
     // 0 = Username, 1 = Token
     var selectedMode by remember { mutableIntStateOf(0) }
-    val isLoading = authState is WhisperAuthState.Loading
 
     Column(
         modifier = modifier
@@ -235,6 +247,7 @@ private fun WhisperAuthContent(
                 1 -> TokenAuthSection(
                     isLoading = isLoading,
                     generatedToken = generatedToken,
+                    toastState = toastState,
                     onGenerate = onGenerateToken,
                     onRegister = onRegisterToken,
                     onLogin = onLoginToken,
@@ -567,6 +580,7 @@ private fun PasswordStrengthMeter(password: String) {
 private fun TokenAuthSection(
     isLoading: Boolean,
     generatedToken: String?,
+    toastState: WhisperToastState,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
     onLogin: (String) -> Unit,
@@ -598,6 +612,7 @@ private fun TokenAuthSection(
                 TokenRegisterForm(
                     isLoading = isLoading,
                     generatedToken = generatedToken,
+                    toastState = toastState,
                     onGenerate = onGenerate,
                     onRegister = onRegister,
                 )
@@ -699,18 +714,43 @@ private fun TokenLoginForm(
 private fun TokenRegisterForm(
     isLoading: Boolean,
     generatedToken: String?,
+    toastState: WhisperToastState,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
 ) {
     var isCopied by remember { mutableStateOf(false) }
     var hasSavedToken by remember { mutableStateOf(false) }
+    var revealToken by remember { mutableStateOf(false) }
     var displayName by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
     val nameFocusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(isCopied) {
         if (isCopied) hasSavedToken = true
+    }
+
+    // The token only ever sits on the clipboard for 60 seconds: it is masked on screen
+    // and replaced afterwards, so a leaked screenshot or a forgotten clipboard never
+    // hands over a working credential.
+    fun copyTokenWithExpiry(token: String) {
+        val previous = clipboard.getText()?.text
+        clipboard.setText(AnnotatedString(token))
+        isCopied = true
+        hasSavedToken = true
+        toastState.show(
+            context.getString(R.string.st_Whisper_Auth_CopyExpiry),
+            WhisperToastType.INFO
+        )
+        scope.launch {
+            delay(60_000)
+            // Only touch the clipboard if our token is still the top entry.
+            if (clipboard.getText()?.text == token) {
+                clipboard.setText(AnnotatedString(previous ?: ""))
+            }
+        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -740,8 +780,7 @@ private fun TokenRegisterForm(
                         Spacer(Modifier.weight(1f))
                         ToolzExpressiveIconButton(onClick = {
                             haptic.success()
-                            clipboard.setText(AnnotatedString(generatedToken))
-                            isCopied = true
+                            copyTokenWithExpiry(generatedToken)
                         }) {
                             Icon(
                                 if (isCopied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
@@ -749,9 +788,20 @@ private fun TokenRegisterForm(
                                 tint = if (isCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             )
                         }
+                        ToolzExpressiveIconButton(onClick = {
+                            haptic.click()
+                            revealToken = !revealToken
+                        }) {
+                            Icon(
+                                if (revealToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                stringResource(
+                                    if (revealToken) R.string.cd_Whisper_HideToken else R.string.cd_Whisper_ShowToken
+                                ),
+                            )
+                        }
                     }
                     Text(
-                        generatedToken,
+                        if (revealToken) generatedToken else generatedToken.maskedHex(),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
@@ -842,4 +892,10 @@ private fun calculatePasswordScore(pwd: String): Int {
     if (pwd.length >= 10) score++
     if (pwd.any { it.isDigit() } && pwd.any { it.isUpperCase() }) score++
     return score.coerceAtMost(3)
+}
+
+/** Hides a long hex credential, keeping only enough for the user to recognize it. */
+private fun String.maskedHex(): String {
+    if (length <= 12) return "•".repeat(length)
+    return take(6) + "•".repeat(length - 10) + takeLast(4)
 }

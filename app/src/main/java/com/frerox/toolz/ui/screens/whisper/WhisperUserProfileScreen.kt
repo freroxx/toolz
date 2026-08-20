@@ -96,11 +96,35 @@ fun WhisperUserProfileScreen(
             } else {
                 val profile = uiState.profile
                 if (profile == null) {
-                    WhisperEmptyState(
-                        icon = Icons.Rounded.PersonOff,
-                        title = stringResource(R.string.st_Whisper_Profile_NotFoundTitle),
-                        subtitle = stringResource(R.string.st_Whisper_Profile_NotFoundDesc),
-                    )
+                    if (uiState.loadFailed) {
+                        // Load failed (offline, server error, …) — offer a retry instead of
+                        // pretending the user does not exist.
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(paddingValues),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            WhisperEmptyState(
+                                icon = Icons.Rounded.CloudOff,
+                                title = stringResource(R.string.st_Whisper_Error_Offline),
+                                subtitle = stringResource(R.string.st_Whisper_Profile_LoadFailedDesc),
+                            )
+                            ToolzExpressiveButton(
+                                onClick = { haptic.click(); viewModel.loadData() },
+                                modifier = Modifier.padding(horizontal = 24.dp),
+                            ) {
+                                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.st_Whisper_Retry), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        WhisperEmptyState(
+                            icon = Icons.Rounded.PersonOff,
+                            title = stringResource(R.string.st_Whisper_Profile_NotFoundTitle),
+                            subtitle = stringResource(R.string.st_Whisper_Profile_NotFoundDesc),
+                        )
+                    }
                 } else {
                     Column(
                         modifier = Modifier

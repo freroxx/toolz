@@ -32,8 +32,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -54,6 +52,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -64,8 +63,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -84,6 +81,7 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.launch
 
@@ -313,6 +311,7 @@ fun WhisperMainScreen(
 
     // Clear-history confirmation (destructive and permanent)
     convoPendingClear?.let { convo ->
+        val clearedMsg = stringResource(R.string.st_Whisper_ChatHistoryCleared)
         AlertDialog(
             onDismissRequest = { convoPendingClear = null },
             shape = RoundedCornerShape(28.dp),
@@ -337,7 +336,7 @@ fun WhisperMainScreen(
                         convoPendingClear = null
                         haptic.success()
                         viewModel.clearChatHistory(uId)
-                        toastState.show(stringResource(R.string.st_Whisper_ChatHistoryCleared), WhisperToastType.SUCCESS)
+                        toastState.show(clearedMsg, WhisperToastType.SUCCESS)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
                 ) { Text(stringResource(R.string.st_Whisper_Delete), fontWeight = FontWeight.Bold) }
@@ -353,6 +352,7 @@ fun WhisperMainScreen(
 
     // Material 3 Expressive Friend Options Bottom Sheet
     selectedFriendForOptions?.let { friend ->
+        val unfriendedMsg = stringResource(R.string.st_Whisper_RemovedFriend)
         FriendOptionsSheet(
             friend = friend,
             onDismiss = { selectedFriendForOptions = null },
@@ -371,13 +371,18 @@ fun WhisperMainScreen(
                 selectedFriendForOptions = null
                 haptic.click()
                 viewModel.unfriend(fId)
-                toastState.show("Removed friend", WhisperToastType.INFO)
+                toastState.show(unfriendedMsg, WhisperToastType.INFO)
             }
         )
     }
 
     // Material 3 Expressive Chat Options Bottom Sheet
     selectedConvoForOptions?.let { convo ->
+        val unmutedMsg = stringResource(R.string.st_Whisper_UnmutedNotifications)
+        val mutedMsg = stringResource(R.string.st_Whisper_MutedNotifications)
+        val unblockedMsg = stringResource(R.string.st_Whisper_UserUnblocked)
+        val blockedMsg = stringResource(R.string.st_Whisper_UserBlocked)
+        val hiddenMsg = stringResource(R.string.st_Whisper_ChatHidden)
         var isBlocked by remember(convo.otherUser.id) { mutableStateOf(false) }
         LaunchedEffect(convo.otherUser.id) {
             isBlocked = viewModel.isBlockedByMe(convo.otherUser.id)
@@ -403,21 +408,21 @@ fun WhisperMainScreen(
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 viewModel.toggleMuteUser(uId)
-                toastState.show(if (convo.isMuted) "Unmuted notifications" else "Muted notifications", WhisperToastType.INFO)
+                toastState.show(if (convo.isMuted) unmutedMsg else mutedMsg, WhisperToastType.INFO)
             },
             onToggleBlock = {
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 haptic.click()
                 viewModel.toggleBlockUser(uId)
-                toastState.show(if (isBlocked) "User unblocked" else "User blocked", WhisperToastType.INFO)
+                toastState.show(if (isBlocked) unblockedMsg else blockedMsg, WhisperToastType.INFO)
             },
             onDeleteChat = {
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 haptic.click()
                 viewModel.hideChat(uId)
-                toastState.show("Chat hidden", WhisperToastType.INFO)
+                toastState.show(hiddenMsg, WhisperToastType.INFO)
             }
         )
     }
@@ -460,11 +465,11 @@ fun WhisperMainScreen(
                 }
             },
             title = {
-                Text("Unsaved Changes", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.st_Whisper_UnsavedTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
             },
             text = {
                 Text(
-                    "You have unsaved changes in your profile. Would you like to save them before switching tabs?",
+                    stringResource(R.string.st_Whisper_UnsavedDesc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -477,7 +482,7 @@ fun WhisperMainScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Save & Switch", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_Whisper_SaveAndSwitch), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -494,7 +499,7 @@ fun WhisperMainScreen(
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Discard")
+                        Text(stringResource(R.string.st_Whisper_Discard))
                     }
                     ToolzOutlinedExpressiveButton(
                         onClick = {
@@ -576,13 +581,13 @@ private fun MergedChatsAndFriendsTab(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { SectionHeader("Friends") }
+            item { SectionHeader(stringResource(R.string.st_Whisper_FriendsHeader)) }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(5) { FriendSkeleton() }
                 }
             }
-            item { SectionHeader("Messages") }
+            item { SectionHeader(stringResource(R.string.st_Whisper_MessagesHeader)) }
             items(5) { ConversationSkeleton() }
         }
         return
@@ -592,7 +597,7 @@ private fun MergedChatsAndFriendsTab(
         WhisperEmptyState(
             icon = Icons.AutoMirrored.Rounded.Chat,
             title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
-            subtitle = "Search for users in Discover to start end-to-end encrypted chats.",
+            subtitle = stringResource(R.string.st_Whisper_Discover_EmptySearch),
         )
         return
     }
@@ -607,7 +612,7 @@ private fun MergedChatsAndFriendsTab(
         // Incoming Friend Requests Banner
         if (uiState.pendingIncomingRequests.isNotEmpty()) {
             item {
-                SectionHeader("Friend Requests (${uiState.pendingIncomingRequests.size})")
+                SectionHeader(stringResource(R.string.st_Whisper_FriendRequestsCount, uiState.pendingIncomingRequests.size))
             }
             items(uiState.pendingIncomingRequests, key = { "req_${it.friendship.id}" }) { reqItem ->
                 FriendRequestCard(
@@ -618,7 +623,7 @@ private fun MergedChatsAndFriendsTab(
             }
         } else if (uiState.pendingIncoming.isNotEmpty()) {
             item {
-                SectionHeader("Friend Requests (${uiState.pendingIncoming.size})")
+                SectionHeader(stringResource(R.string.st_Whisper_FriendRequestsCount, uiState.pendingIncoming.size))
             }
             items(uiState.pendingIncoming, key = { "req_${it.id}" }) { friendship ->
                 FriendRequestCard(
@@ -632,7 +637,7 @@ private fun MergedChatsAndFriendsTab(
         // Friends Quick Bar
         if (uiState.friends.isNotEmpty()) {
             item {
-                SectionHeader("Friends (${uiState.friends.size})")
+                SectionHeader(stringResource(R.string.st_Whisper_FriendsCount, uiState.friends.size))
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
@@ -683,7 +688,7 @@ private fun MergedChatsAndFriendsTab(
         // Conversations List
         if (uiState.conversations.isNotEmpty()) {
             item {
-                SectionHeader("Messages (${uiState.conversations.size})")
+                SectionHeader(stringResource(R.string.st_Whisper_MessagesCount, uiState.conversations.size))
             }
             itemsIndexed(uiState.conversations, key = { _, c -> c.otherUser.id }) { _, convo ->
                 ConversationCard(
@@ -1222,6 +1227,16 @@ private fun ProfileTab(
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var showDiscoveryWarningDialog by remember { mutableStateOf(false) }
 
+    // Resolved in composition scope: stringResource is composable-only and cannot be
+    // called from the non-composable doSave() callback.
+    val nameUpdatedMsg = stringResource(R.string.st_Whisper_DisplayNameUpdated)
+    val bioUpdatedMsg = stringResource(R.string.st_Whisper_BioUpdated)
+    val setPrivateMsg = stringResource(R.string.st_Whisper_ProfileSetPrivate)
+    val setPublicMsg = stringResource(R.string.st_Whisper_ProfileSetPublic)
+    val hiddenMsg = stringResource(R.string.st_Whisper_HiddenFromDiscover)
+    val visibleMsg = stringResource(R.string.st_Whisper_VisibleInDiscover)
+    val profileSavedMsg = stringResource(R.string.st_Whisper_ProfileSaved)
+
     // Track unsaved changes and notify parent
     val hasUnsaved = displayName != initialDisplayName || bio != initialBio || 
                     isPrivate != initialIsPrivate || isHidden != initialIsHidden
@@ -1234,7 +1249,7 @@ private fun ProfileTab(
     LaunchedEffect(saveTrigger) {
         if (saveTrigger > 0) {
             viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
-                toastState.show("Profile saved", WhisperToastType.SUCCESS)
+                toastState.show(profileSavedMsg, WhisperToastType.SUCCESS)
                 onProfileSaved()
             }
         }
@@ -1255,14 +1270,14 @@ private fun ProfileTab(
         val prevBio = initialBio
         val prevPrivate = initialIsPrivate
         val prevHidden = initialIsHidden
-        
+
         viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
             val toasts = mutableListOf<String>()
-            if (displayName != prevName) toasts.add("Display name updated")
-            if (bio != prevBio) toasts.add("Bio updated")
-            if (isPrivate != prevPrivate) toasts.add(if (isPrivate) "Profile set to Private" else "Profile set to Public")
-            if (isHidden != prevHidden) toasts.add(if (isHidden) "Hidden from Discover" else "Visible in Discover")
-            if (toasts.isEmpty()) toasts.add("Profile saved")
+            if (displayName != prevName) toasts.add(nameUpdatedMsg)
+            if (bio != prevBio) toasts.add(bioUpdatedMsg)
+            if (isPrivate != prevPrivate) toasts.add(if (isPrivate) setPrivateMsg else setPublicMsg)
+            if (isHidden != prevHidden) toasts.add(if (isHidden) hiddenMsg else visibleMsg)
+            if (toasts.isEmpty()) toasts.add(profileSavedMsg)
             toastState.show(toasts.joinToString(" · "), WhisperToastType.SUCCESS)
         }
     }
@@ -1568,7 +1583,7 @@ private fun ProfileTab(
             Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                if (hasUnsaved) stringResource(R.string.st_Whisper_Profile_SaveChanges) else "No changes",
+                if (hasUnsaved) stringResource(R.string.st_Whisper_Profile_SaveChanges) else stringResource(R.string.st_Whisper_Profile_NoChanges),
                 fontWeight = FontWeight.Bold
             )
         }

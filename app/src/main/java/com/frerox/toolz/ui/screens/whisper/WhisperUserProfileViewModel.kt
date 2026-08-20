@@ -32,6 +32,7 @@ import javax.inject.Inject
 data class WhisperUserProfileUiState(
     val isLoading: Boolean = false,
     val profile: WhisperProfile? = null,
+    val loadFailed: Boolean = false,
     val friendshipStatus: FriendStatus = FriendStatus.NONE,
     val friendshipRecord: WhisperFriendship? = null,
     val keyTrust: KeyTrustInfo? = null,
@@ -67,18 +68,24 @@ class WhisperUserProfileViewModel @Inject constructor(
 
     fun loadData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, loadFailed = false) }
 
             repository.getProfile(targetUserId, forceRefresh = true)
                 .onSuccess { profile ->
                     _uiState.update { it.copy(profile = profile) }
                 }
                 .onFailure { err ->
-                    handleError(err, "getProfile")
+                    // A real 404 means "profile not found"; anything else is a load
+                    // failure that deserves a retry instead of a dead end.
+                    if (!WhisperErrorMapper.isNotFound(err)) {
+                        _uiState.update { it.copy(loadFailed = true) }
+                        handleError(err, "getProfile")
+                    }
                 }
 
-            val info = repository.getKeyTrustInfo(targetUserId)
-                _uiState.update { it.copy(keyTrust = info) }
+            // Key trust is a soft-read: a failure here must not block friendship status.
+            val info = runCatching { repository.getKeyTrustInfo(targetUserId) }.getOrNull()
+            _uiState.update { it.copy(keyTrust = info) }
 
             repository.getFriendshipStatus(targetUserId)
                 .onSuccess { (status, record) ->

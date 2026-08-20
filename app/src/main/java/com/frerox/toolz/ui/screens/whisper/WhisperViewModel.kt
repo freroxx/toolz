@@ -61,12 +61,6 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    fun resetOnboarding() {
-        viewModelScope.launch {
-            settingsRepository.setWhisperOnboardingShown(false)
-        }
-    }
-
     private val _pickPhotoTrigger = MutableStateFlow(0)
     val pickPhotoTrigger: StateFlow<Int> = _pickPhotoTrigger.asStateFlow()
 

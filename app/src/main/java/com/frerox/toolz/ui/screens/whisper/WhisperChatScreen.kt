@@ -16,7 +16,6 @@
  */
 package com.frerox.toolz.ui.screens.whisper
 
-import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 
@@ -25,7 +24,6 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.view.WindowManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -1849,17 +1847,6 @@ private suspend fun saveImageToGallery(context: Context, bytes: ByteArray, mimeT
         }
     }
 
-/** Sets FLAG_SECURE on the hosting window so sensitive content never appears in
- *  screenshots, screen recordings, or the recents preview. */
-@Composable
-private fun SecureWindow() {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as? Activity)?.window ?: return@SideEffect
-            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        }
-    }
-}
+
 
 private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024 - 16 // transport cap minus AES-GCM tag

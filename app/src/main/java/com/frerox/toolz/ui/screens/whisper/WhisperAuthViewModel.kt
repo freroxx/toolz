@@ -39,6 +39,8 @@ class WhisperAuthViewModel @Inject constructor(
 
     private val _authState = MutableStateFlow<WhisperAuthState>(WhisperAuthState.Loading)
     val authState: StateFlow<WhisperAuthState> = _authState.asStateFlow()
+    private val _submitting = MutableStateFlow(false)
+    val submitting: StateFlow<Boolean> = _submitting.asStateFlow()
     private val _generatedToken = MutableStateFlow<WhisperAnonToken?>(null)
     val generatedToken: StateFlow<WhisperAnonToken?> = _generatedToken.asStateFlow()
 
@@ -46,6 +48,14 @@ class WhisperAuthViewModel @Inject constructor(
     val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
 
     init {
+        // The session check must never leave the user stuck on the splash: after a hard
+        // cap, fall back to the auth form even if Supabase never resolved the session.
+        viewModelScope.launch {
+            delay(15_000)
+            if (_authState.value is WhisperAuthState.Loading) {
+                _authState.value = WhisperAuthState.Idle
+            }
+        }
         viewModelScope.launch {
             authManager.sessionStatus.collectLatest { status ->
                 when (status) {
@@ -84,24 +94,47 @@ class WhisperAuthViewModel @Inject constructor(
 
     fun loginWithUsername(username: String, password: String) {
         viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
+            _submitting.value = true
             authManager.loginWithUsername(username, password)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+            _submitting.value = false
         }
     }
 
     fun registerWithUsername(username: String, password: String, displayName: String) {
         viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
+            _submitting.value = true
             val cleanUser = username.trim().lowercase()
-            authManager.registerWithUsername(cleanUser, password, displayName)
-                .onSuccess {
-                    _authState.value = WhisperAuthState.Authenticated
-                    saveToVault("Whisper: $cleanUser", cleanUser, password)
-                }
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+            // Fail fast with a clean error instead of a generic one from GoTrue.
+            if (validateUsernameFormat(cleanUser) == null) {
+                repository.checkUsernameAvailable(cleanUser)
+                    .onSuccess { available ->
+                        if (!available) {
+                            _authState.value = WhisperAuthState.Error(UiText.StringResource(R.string.st_Whisper_Error_UsernameExists))
+                        } else {
+                            registerWithUsernameInternal(cleanUser, password, displayName)
+                        }
+                    }
+                    .onFailure {
+                        // Availability check failed (offline etc.) — let the real
+                        // registration attempt surface the actual result.
+                        registerWithUsernameInternal(cleanUser, password, displayName)
+                    }
+            } else {
+                registerWithUsernameInternal(cleanUser, password, displayName)
+            }
+            _submitting.value = false
         }
+    }
+
+    private suspend fun registerWithUsernameInternal(cleanUser: String, password: String, displayName: String) {
+        authManager.registerWithUsername(cleanUser, password, displayName)
+            .onSuccess {
+                _authState.value = WhisperAuthState.Authenticated
+                saveToVault("Whisper: $cleanUser", cleanUser, password)
+            }
+            .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
     }
 
     private fun saveToVault(name: String, user: String, pass: String) {
@@ -143,13 +176,19 @@ class WhisperAuthViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
+            _submitting.value = true
             authManager.registerWithToken(token, username = cleanUsername, displayName = cleanName)
-                .onSuccess { 
+                .onSuccess {
                     _authState.value = WhisperAuthState.Authenticated
                     saveToVault("Whisper Anon: $cleanUsername", cleanUsername, token.token)
                 }
-                .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
+                .onFailure {
+                    _authState.value = WhisperAuthState.Error(formatError(it))
+                    // A failed registration must not leave a usable token floating around:
+                    // roll a fresh one so the old credential is burned on both sides.
+                    _generatedToken.value = authManager.generateAnonToken()
+                }
+            _submitting.value = false
         }
     }
 
@@ -160,8 +199,8 @@ class WhisperAuthViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            _authState.value = WhisperAuthState.Loading
-            authManager.loginWithToken(rawToken)
+            _submitting.value = true
+            authManager.loginWithToken(cleanToken)
                 .onSuccess { _authState.value = WhisperAuthState.Authenticated }
                 .onFailure {
                     val message = if (authManager.isInvalidCredentials(it)) {
@@ -169,11 +208,20 @@ class WhisperAuthViewModel @Inject constructor(
                     } else formatError(it)
                     _authState.value = WhisperAuthState.Error(message)
                 }
+            _submitting.value = false
         }
     }
 
     fun normalizeToken(raw: String): String = authManager.normalizeToken(raw)
-    fun clearError() { _authState.value = WhisperAuthState.Idle }
+
+    fun clearError() {
+        // Only a real error is cleared; a Notice (or the form itself) is never stomped.
+        if (_authState.value is WhisperAuthState.Error) _authState.value = WhisperAuthState.Idle
+    }
+
+    fun dismissNotice() {
+        if (_authState.value is WhisperAuthState.Notice) _authState.value = WhisperAuthState.Idle
+    }
 
     private fun formatError(throwable: Throwable): UiText {
         val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)

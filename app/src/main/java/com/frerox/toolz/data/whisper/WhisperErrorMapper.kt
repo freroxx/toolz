@@ -42,6 +42,12 @@ object WhisperErrorMapper {
             msg.contains("user_not_found", ignoreCase = true)
     }
 
+    /** True when the resource genuinely does not exist (as opposed to a network failure). */
+    fun isNotFound(throwable: Throwable): Boolean =
+        (throwable is RestException && throwable.statusCode == 404) ||
+            throwable.message?.contains("404", ignoreCase = true) == true ||
+            throwable.message?.contains("No rows found", ignoreCase = true) == true
+
     /**
      * Maps a [Throwable] to a short, user-friendly [UiText].
      * Always logs the technical message to Logcat first.

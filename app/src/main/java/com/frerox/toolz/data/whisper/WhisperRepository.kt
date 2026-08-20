@@ -233,12 +233,14 @@ class WhisperRepository @Inject constructor(
             val needsKey = pubKey != null && existing.publicKey != pubKey
 
             if (needsKey || cleanUsername != null || needsDisplayName) {
-                val update = WhisperProfileUpdate(
-                    publicKey = if (needsKey) pubKey else null,
-                    username = cleanUsername,
-                    displayName = if (needsDisplayName) metaDisplayName else null
-                )
-                db.from("profiles").update(update) { filter { eq("id", currentId) } }
+                // Build the body without nulls: a null field would be serialized as
+                // "field": null and NULL the server column (e.g. username) on self-heal.
+                val body = buildJsonObject {
+                    if (needsKey) put("public_key", pubKey!!)
+                    cleanUsername?.let { put("username", it) }
+                    if (needsDisplayName) put("display_name", metaDisplayName!!)
+                }
+                db.from("profiles").update(body) { filter { eq("id", currentId) } }
                 existing.copy(
                     publicKey = if (needsKey) pubKey else existing.publicKey,
                     username = cleanUsername ?: existing.username,
@@ -295,20 +297,30 @@ class WhisperRepository @Inject constructor(
         val currentId = myId
         if (currentId.isBlank()) error("User not authenticated")
         val pubKey = crypto.getPublicKeyBase64()
-        // Never overwrite a server-side key with a local mismatch: only push the local key
-        // when it was explicitly requested or when the server row has none to begin with.
-        val updateWithKey = when {
-            update.publicKey != null -> update
-            pubKey != null -> {
-                val serverKey = runCatching {
-                    db.from("profiles").select { filter { eq("id", currentId) } }
-                        .decodeSingleOrNull<WhisperProfile>()?.publicKey
-                }.getOrNull()
-                if (serverKey.isNullOrBlank() && pubKey != null) update.copy(publicKey = pubKey) else update
+        // Build the body explicitly so unset fields (especially public_key) are OMITTED:
+        // supabase-kt serializes nulls by default, and "public_key": null would NULL the
+        // server's column. The local key is only pushed when explicitly requested or when
+        // the server row has none to begin with — never overwritten with a mismatch.
+        val body = buildJsonObject {
+            update.username?.let { put("username", it) }
+            update.displayName?.let { put("display_name", it) }
+            update.bio?.let { put("bio", it) }
+            update.avatarUrl?.let { put("avatar_url", it) }
+            update.isPrivate?.let { put("is_private", it) }
+            update.isHiddenFromDiscover?.let { put("hide_from_discover", it) }
+            update.lastSeenAt?.let { put("last_seen_at", it) }
+            when {
+                update.publicKey != null -> put("public_key", update.publicKey!!)
+                pubKey != null -> {
+                    val serverKey = runCatching {
+                        db.from("profiles").select { filter { eq("id", currentId) } }
+                            .decodeSingleOrNull<WhisperProfile>()?.publicKey
+                    }.getOrNull()
+                    if (serverKey.isNullOrBlank()) put("public_key", pubKey)
+                }
             }
-            else -> update
         }
-        db.from("profiles").update(updateWithKey) { filter { eq("id", currentId) } }
+        db.from("profiles").update(body) { filter { eq("id", currentId) } }
         profileCache.remove(currentId)
     }
 
