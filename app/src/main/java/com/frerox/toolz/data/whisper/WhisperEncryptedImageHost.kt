@@ -82,7 +82,7 @@ class WhisperEncryptedImageHost @Inject constructor(
             return@runCatching edgeFunctionResult.getOrThrow()
         }
 
-        error("Encrypted image upload failed. Please try again later.")
+        error("Encrypted image upload failed: ${edgeFunctionResult.exceptionOrNull()?.message.orEmpty().ifBlank { "unknown error" }}")
     }
 
     suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {
