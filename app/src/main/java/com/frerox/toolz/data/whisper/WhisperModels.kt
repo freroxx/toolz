@@ -168,7 +168,7 @@ data class WhisperMessage(
 
     /** Whether this message was deleted for everyone */
     val isDeletedForEveryone: Boolean get() =
-        content == "[deleted_by_sender]" || content.startsWith("[deleted_by_sender:")
+        content == "[deleted_by_sender]" || content.startsWith("[deleted_by_sender:") || content == "This message has been deleted"
 
     /** Extracted sender name attached to deletion tombstone */
     val deletedSenderName: String? get() {
@@ -415,4 +415,3 @@ data class WhisperChatUiState(
     val decryptedImageBytes: Map<String, ByteArray> = emptyMap(),
     val error: UiText? = null,
 )
-

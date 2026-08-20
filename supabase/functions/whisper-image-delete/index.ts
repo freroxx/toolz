@@ -1,25 +1,23 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 serve(async (request) => {
-  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
-
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) return new Response("Unauthorized", { status: 401 });
-
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  // Deploy with verify_jwt=true; duplicate this guard as defense in depth.
+  if (!request.headers.get("Authorization")?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
   try {
     const { id } = await request.json();
-    if (!id) return new Response("Missing ID", { status: 400 });
-
-    // ImgBB doesn't have a public programmatic delete API that works with just a hash
-    // in the same way as upload. Usually deletion is done via the delete_url.
-    // This is a placeholder for future remote deletion logic.
-    console.log(`Requested deletion of attachment: ${id}`);
-
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    return new Response("Invalid request", { status: 400 });
+    const deletionUrl = typeof id === "string" ? new URL(id) : null;
+    if (!deletionUrl || deletionUrl.protocol !== "https:" || deletionUrl.hostname !== "ibb.co") {
+      return json({ error: "Invalid deletion capability" }, 400);
+    }
+    const upstream = await fetch(deletionUrl, { method: "GET", redirect: "follow" });
+    if (!upstream.ok) return json({ error: "Image deletion failed" }, 502);
+    return json({ success: true }, 200);
+  } catch {
+    return json({ error: "Invalid request" }, 400);
   }
 });
+
+function json(body: unknown, status: number) {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+}

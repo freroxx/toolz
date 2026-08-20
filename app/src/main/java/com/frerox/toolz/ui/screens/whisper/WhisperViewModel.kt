@@ -33,6 +33,7 @@ class WhisperViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val crypto: WhisperCrypto,
 ) : ViewModel() {
+    private var profileSearchJob: Job? = null
 
     private val _uiState = MutableStateFlow(WhisperUiState())
     val uiState: StateFlow<WhisperUiState> = _uiState.asStateFlow()
@@ -303,11 +304,13 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun searchProfiles(query: String) {
+        profileSearchJob?.cancel()
         if (query.isBlank()) {
             _uiState.update { it.copy(searchResults = emptyList()) }
             return
         }
-        viewModelScope.launch {
+        profileSearchJob = viewModelScope.launch {
+            delay(300)
             repository.searchProfiles(query)
                 .onSuccess { results -> _uiState.update { it.copy(searchResults = results) } }
                 .onFailure { err -> handleError(err, "searchProfiles") }

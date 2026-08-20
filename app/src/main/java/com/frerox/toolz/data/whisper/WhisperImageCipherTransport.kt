@@ -13,7 +13,9 @@ import java.nio.ByteBuffer
  */
 object WhisperImageCipherTransport {
     private const val HEADER_BYTES = 4
-    const val MAX_CIPHER_BYTES = 22 * 1024 * 1024
+    // PNG is RGBA (up to ~4x cipher bytes) and base64 adds 4/3. Keep the worst case under
+    // ImgBB's 32 MB request ceiling instead of relying on PNG compression for random ciphertext.
+    const val MAX_CIPHER_BYTES = 5 * 1024 * 1024
 
     fun encode(cipherBytes: ByteArray): ByteArray {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Encrypted image is too large." }
@@ -90,4 +92,3 @@ object WhisperImageCipherTransport {
         }
     }.getOrNull()
 }
-

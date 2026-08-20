@@ -166,9 +166,10 @@ class WhisperCrypto @Inject constructor() {
     }
 
     fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String? {
-        // If message is unencrypted (no IV) or missing public key, return as-is
+        // Whisper v1 never accepts a cleartext downgrade. Only authenticated AEAD payloads
+        // are renderable; legacy/plain broadcast payloads are intentionally rejected.
         if (ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) {
-            return cipherTextBase64
+            return null
         }
         val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
         return try {

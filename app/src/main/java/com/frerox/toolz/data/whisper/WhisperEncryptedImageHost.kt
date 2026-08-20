@@ -75,27 +75,14 @@ class WhisperEncryptedImageHost @Inject constructor(
 
         if (edgeFunctionResult.isFailure) {
             val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
-            android.util.Log.w("WhisperEncryptedImageHost", "Edge function upload failed: $edgeError. Falling back to Supabase Storage.")
+            android.util.Log.w("WhisperEncryptedImageHost", "Edge function upload failed: $edgeError")
         }
         
         if (edgeFunctionResult.isSuccess) {
             return@runCatching edgeFunctionResult.getOrThrow()
         }
 
-        // 2. Direct Supabase Storage fallback if Edge Function is unconfigured (503 / missing ImgBB key)
-        val storageResult = runCatching {
-            val randomToken = java.util.UUID.randomUUID().toString().replace("-", "")
-            val path = "vault/$randomToken.bin"
-            supabase.storage.from("whisper-avatars").upload(path, cipherBytes) { upsert = true }
-            val url = supabase.storage.from("whisper-avatars").publicUrl(path)
-            url to path // Use the path as the ID for Supabase Storage
-        }
-
-        if (storageResult.isSuccess) {
-            return@runCatching storageResult.getOrThrow()
-        }
-
-        error("Image upload failed.")
+        error("Encrypted image upload failed. Please try again later.")
     }
 
     suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {
@@ -152,7 +139,7 @@ class WhisperEncryptedImageHost @Inject constructor(
 
     private companion object {
         // Base64 expands payloads by 4/3; stay below ImgBB's 32 MB input limit.
-        const val MAX_CIPHER_BYTES = 23 * 1024 * 1024
+        const val MAX_CIPHER_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 45_000
     }

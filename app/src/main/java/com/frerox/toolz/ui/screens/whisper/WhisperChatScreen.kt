@@ -707,7 +707,9 @@ private fun ReplyPreviewBar(
             // Thumbnail for image replies
             val attachment = WhisperImageAttachment.fromMessageContent(replyTarget.content)
             if (attachment != null) {
-                val bitmap = decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                val bitmap = remember(decryptedImageBytes) {
+                    decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                }
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
@@ -1323,7 +1325,9 @@ private fun MessageBubble(
                         val attachment = WhisperImageAttachment.fromMessageContent(message.content)
                         if (attachment != null) {
                             LaunchedEffect(message.id) { onLoadImage() }
-                            val bitmap = decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            val bitmap = remember(decryptedImageBytes) {
+                                decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                            }
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
@@ -1332,7 +1336,7 @@ private fun MessageBubble(
                                         .widthIn(max = 256.dp)
                                         .heightIn(max = 320.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .clickable { onImageClick(decryptedImageBytes, attachment.mimeType) },
+                                        .clickable { decryptedImageBytes?.let { onImageClick(it, attachment.mimeType) } },
                                 )
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1760,4 +1764,4 @@ private fun saveImageToGallery(context: Context, bytes: ByteArray, mimeType: Str
     }
 }
 
-private const val MAX_LOCAL_IMAGE_BYTES = 22 * 1024 * 1024
+private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024

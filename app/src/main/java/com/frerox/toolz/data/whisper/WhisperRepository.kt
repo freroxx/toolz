@@ -414,6 +414,10 @@ class WhisperRepository @Inject constructor(
         require(content.isNotBlank() && content.length <= MAX_MESSAGE_CHARS) { "Message must be between 1 and $MAX_MESSAGE_CHARS characters." }
         val receiverProfile = getProfile(receiverId, forceRefresh = true).getOrNull()
         val receiverPubKey = receiverProfile?.publicKey
+        val knownKey = keyTrustStore.knownKey(receiverId)
+        if (knownKey != null && receiverPubKey != null && knownKey != receiverPubKey) {
+            error("Safety number changed for this contact. Review and accept the new key before sending.")
+        }
         val encryptedPair = receiverPubKey?.let { key -> crypto.encryptMessage(content, key) }
             ?: error("Secure delivery is unavailable because this user has no valid encryption key.")
         val insert = run {
@@ -568,6 +572,10 @@ class WhisperRepository @Inject constructor(
         if (myId.isBlank()) return 0
         var delivered = 0
         outgoingQueue.entries().filter { it.senderId == myId }.forEach { queued ->
+            if (queued.attempts >= 8) {
+                outgoingQueue.remove(queued.clientId)
+                return@forEach
+            }
             val sent = runCatching {
                 db.from("messages").insert(
                     WhisperMessageInsert(
@@ -748,6 +756,9 @@ class WhisperRepository @Inject constructor(
         val messageBroadcastFlow = channel.broadcastFlow<JsonObject>("new_message")
         val bMsgJob = launch {
             messageBroadcastFlow.collect { json ->
+                // Broadcast is only a best-effort latency hint and cannot prove sender identity.
+                // Never persist or render it; authenticated Postgres/RLS events are authoritative.
+                return@collect
                 try {
                     val id = json["id"]?.jsonPrimitive?.content ?: return@collect
                     val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
@@ -801,6 +812,7 @@ class WhisperRepository @Inject constructor(
         val reactionBroadcastFlow = channel.broadcastFlow<JsonObject>("reaction_update")
         val bReactionJob = launch {
             reactionBroadcastFlow.collect { json ->
+                return@collect
                 try {
                     val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
                     val userId = json["user_id"]?.jsonPrimitive?.content ?: return@collect
@@ -816,6 +828,7 @@ class WhisperRepository @Inject constructor(
         val deleteBroadcastFlow = channel.broadcastFlow<JsonObject>("delete_message")
         val bDeleteJob = launch {
             deleteBroadcastFlow.collect { json ->
+                return@collect
                 try {
                     val messageId = json["message_id"]?.jsonPrimitive?.content ?: return@collect
                     
@@ -938,6 +951,8 @@ class WhisperRepository @Inject constructor(
         val notifBroadcastFlow = channel.broadcastFlow<JsonObject>("incoming_notification")
         val notifJob = launch {
             notifBroadcastFlow.collect { json ->
+                // Never use an unauthenticated broadcast as a message source or notification.
+                return@collect
                 try {
                     val id = json["id"]?.jsonPrimitive?.content ?: ""
                     val senderId = json["sender_id"]?.jsonPrimitive?.content ?: return@collect
@@ -1034,7 +1049,9 @@ class WhisperRepository @Inject constructor(
         val toDeleteIds = toDelete.map { it.id }.filter { it.isNotBlank() }
         if (toDeleteIds.isNotEmpty()) {
             deletedStore.markMessagesDeleted(toDeleteIds)
-            messageDao.clearChat(currentId, otherUserId)
+            // Clear only the messages selected by the same server predicate. Clearing the
+            // whole Room conversation here made received messages disappear then resurrect.
+            toDeleteIds.forEach { messageDao.deleteMessage(it) }
             db.from("messages").delete {
                 filter {
                     eq("sender_id", currentId)
@@ -1517,6 +1534,7 @@ class WhisperRepository @Inject constructor(
         val channel = getOrJoinBroadcastChannel(name)
         val broadcasts = channel.broadcastFlow<JsonObject>("typing")
         val job = launch { broadcasts.collect { json ->
+            return@collect
             try {
                 val senderId = json["sender_id"]?.jsonPrimitive?.content
                 val isTyping = json["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -1548,6 +1566,7 @@ class WhisperRepository @Inject constructor(
         val broadcasts = channel.broadcastFlow<JsonObject>("presence")
         val bJob = launch { 
             broadcasts.collect { json ->
+                return@collect
                 try {
                     val senderId = json["sender_id"]?.jsonPrimitive?.content
                     val isOnline = json["is_online"]?.jsonPrimitive?.booleanOrNull ?: false

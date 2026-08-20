@@ -48,12 +48,14 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     id = id,
     senderId = senderId,
     receiverId = receiverId,
-    content = content,
+    // Room is a transport cache, not a plaintext message archive. Server sync holds the
+    // ciphertext; on restart we refetch/decrypt it after authentication.
+    content = if (contentIv != null) "[encrypted-cache]" else "[message pending sync]",
     contentIv = contentIv,
     replyToId = replyToId,
     isRead = isRead,
     createdAt = createdAt,
-    replyToContent = replyToContent,
+    replyToContent = null,
     replyToSenderName = replyToSenderName,
     isDeletedForEveryone = isDeletedForEveryone
 )

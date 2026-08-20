@@ -52,7 +52,8 @@ serve(async (request) => {
 
     return json({
       url: result.data.url,
-      id: result.data.delete_hash // Keep the delete_hash for the deletion feature
+      // This capability URL is encrypted inside the Whisper attachment envelope.
+      id: result.data.delete_url
     }, 200);
   } catch (error) {
     console.error("whisper-image-upload failed", error);

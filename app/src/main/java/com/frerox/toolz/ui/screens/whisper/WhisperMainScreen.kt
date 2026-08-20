@@ -251,6 +251,13 @@ fun WhisperMainScreen(
                             saveTrigger = triggerProfileSaveFromDialog,
                             discardTrigger = triggerProfileDiscardFromDialog,
                             onUnsavedChangesChanged = { hasUnsavedProfileChanges = it },
+                            onProfileSaved = {
+                                hasUnsavedProfileChanges = false
+                                pendingTabSwitchIndex?.let { target ->
+                                    scope.launch { pagerState.animateScrollToPage(target) }
+                                }
+                                pendingTabSwitchIndex = null
+                            },
                             onLoggedOut = {
                                 if (!isLoggingOut) {
                                     isLoggingOut = true
@@ -418,11 +425,6 @@ fun WhisperMainScreen(
                     onClick = {
                         showUnsavedChangesDialog = false
                         triggerProfileSaveFromDialog++
-                        hasUnsavedProfileChanges = false
-                        pendingTabSwitchIndex?.let { target ->
-                            scope.launch { pagerState.animateScrollToPage(target) }
-                        }
-                        pendingTabSwitchIndex = null
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1138,6 +1140,7 @@ private fun ProfileTab(
     saveTrigger: Int,
     discardTrigger: Int,
     onUnsavedChangesChanged: (Boolean) -> Unit,
+    onProfileSaved: () -> Unit,
     onLoggedOut: () -> Unit,
     onShowAvatarOptions: () -> Unit,
     onViewAvatarFull: (WhisperProfile) -> Unit,
@@ -1153,10 +1156,12 @@ private fun ProfileTab(
     val initialIsPrivate = profile.isPrivate
     val initialIsHidden = profile.isHiddenFromDiscover
 
-    var displayName by remember(profile.id) { mutableStateOf(initialDisplayName) }
-    var bio by remember(profile.id) { mutableStateOf(initialBio) }
-    var isPrivate by remember(profile.id) { mutableStateOf(initialIsPrivate) }
-    var isHidden by remember(profile.id) { mutableStateOf(initialIsHidden) }
+    // Reset the form when the refreshed profile arrives after a successful save, not only
+    // when the account ID changes.
+    var displayName by remember(profile.id, initialDisplayName) { mutableStateOf(initialDisplayName) }
+    var bio by remember(profile.id, initialBio) { mutableStateOf(initialBio) }
+    var isPrivate by remember(profile.id, initialIsPrivate) { mutableStateOf(initialIsPrivate) }
+    var isHidden by remember(profile.id, initialIsHidden) { mutableStateOf(initialIsHidden) }
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
@@ -1175,6 +1180,7 @@ private fun ProfileTab(
         if (saveTrigger > 0) {
             viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
                 toastState.show("Profile saved", WhisperToastType.SUCCESS)
+                onProfileSaved()
             }
         }
     }
