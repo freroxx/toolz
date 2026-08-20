@@ -2,12 +2,14 @@ package com.frerox.toolz.data.whisper
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
 /**
  * Encodes arbitrary ciphertext into a lossless PNG pixel stream for image-only hosts.
  * Sets Alpha=255 for all pixels to completely prevent Skia color pre-multiplication corruption.
+ * Forces sRGB color space to prevent Android color management from altering pixel values.
  */
 object WhisperImageCipherTransport {
     private const val HEADER_BYTES = 4
@@ -34,7 +36,8 @@ object WhisperImageCipherTransport {
             dstIdx += 4
         }
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        // Force sRGB to prevent any color space transformations during compression
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888, false, ColorSpace.get(ColorSpace.Named.SRGB))
         return try {
             bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(raw))
             ByteArrayOutputStream().use { output ->
@@ -56,6 +59,8 @@ object WhisperImageCipherTransport {
             inPremultiplied = false
             inPreferredConfig = Bitmap.Config.ARGB_8888
             inMutable = true
+            // Ensure we decode as sRGB to match the encoding
+            inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
         }
         val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, options) ?: return null
         try {
@@ -74,6 +79,7 @@ object WhisperImageCipherTransport {
             }
 
             val buffer = ByteBuffer.wrap(extracted)
+            if (buffer.remaining() < HEADER_BYTES) return null
             val size = buffer.int
             if (size !in 1..MAX_CIPHER_BYTES || size > buffer.remaining()) return null
             val cipherBytes = ByteArray(size)

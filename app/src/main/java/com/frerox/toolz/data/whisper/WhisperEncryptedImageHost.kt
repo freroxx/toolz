@@ -71,6 +71,11 @@ class WhisperEncryptedImageHost @Inject constructor(
             }
         }
 
+        if (edgeFunctionResult.isFailure) {
+            val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
+            android.util.Log.w("WhisperEncryptedImageHost", "Edge function upload failed: $edgeError. Falling back to Supabase Storage.")
+        }
+        
         if (edgeFunctionResult.isSuccess) {
             return@runCatching edgeFunctionResult.getOrThrow()
         }

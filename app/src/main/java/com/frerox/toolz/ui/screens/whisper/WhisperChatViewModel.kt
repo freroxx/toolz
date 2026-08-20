@@ -374,10 +374,18 @@ class WhisperChatViewModel @Inject constructor(
         if (_uiState.value.decryptedImageBytes.containsKey(message.id)) return
         val attachment = WhisperImageAttachment.fromMessageContent(message.content) ?: return
         viewModelScope.launch {
-            val key = partnerPublicKey ?: repository.getProfile(otherUserId).getOrNull()?.publicKey
-            if (key != null) {
+            // Ensure we have a public key for decryption. If it's a message from 'me', 
+            // we need the receiver's key (since we encrypted it for them). 
+            // If it's from someone else, we need the sender's key.
+            val peerId = if (message.senderId == myUserId) message.receiverId else message.senderId
+            
+            val key = partnerPublicKey.takeIf { peerId == otherUserId } 
+                ?: repository.getProfile(peerId).getOrNull()?.publicKey
+            
+            if (key != null && peerId == otherUserId) {
                 partnerPublicKey = key
             }
+            
             repository.downloadEncryptedImage(attachment, key)
                 .onSuccess { bytes -> _uiState.update { state -> state.copy(decryptedImageBytes = state.decryptedImageBytes + (message.id to bytes)) } }
                 .onFailure { error -> handleError(error, "downloadEncryptedImage") }
