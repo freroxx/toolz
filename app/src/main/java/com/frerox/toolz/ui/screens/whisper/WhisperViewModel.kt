@@ -263,7 +263,43 @@ class WhisperViewModel @Inject constructor(
 
     private suspend fun loadRecommendationsInternal() {
         repository.getFriendsOfFriends()
-            .onSuccess { recommended -> _uiState.update { it.copy(recommendedProfiles = recommended) } }
+            .onSuccess { recommended -> 
+                _uiState.update { it.copy(recommendedProfiles = recommended) }
+                if (_uiState.value.discoverProfiles.isEmpty()) {
+                    loadDiscoverProfiles(0)
+                }
+            }
+    }
+
+    fun loadDiscoverProfiles(page: Int) {
+        if (page == 0) {
+            _uiState.update { it.copy(discoverProfiles = emptyList(), discoverPage = 0, hasReachedEndOfDiscover = false) }
+        }
+        
+        if (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover) return
+
+        _uiState.update { it.copy(isDiscoverLoadingNext = true) }
+        viewModelScope.launch {
+            repository.getDiscoverProfiles(page)
+                .onSuccess { results ->
+                    _uiState.update { state ->
+                        state.copy(
+                            discoverProfiles = if (page == 0) results else state.discoverProfiles + results,
+                            discoverPage = page,
+                            isDiscoverLoadingNext = false,
+                            hasReachedEndOfDiscover = results.isEmpty()
+                        )
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update { it.copy(isDiscoverLoadingNext = false) }
+                    handleError(err, "loadDiscoverProfiles")
+                }
+        }
+    }
+
+    fun loadNextDiscoverPage() {
+        loadDiscoverProfiles(_uiState.value.discoverPage + 1)
     }
 
     fun searchProfiles(query: String) {

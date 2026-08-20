@@ -213,6 +213,7 @@ data class WhisperImageAttachment(
     val url: String,
     val iv: String,
     val mimeType: String,
+    val attachmentId: String? = null,
     val expiresAtEpochSeconds: Long? = null,
     val sizeBytes: Int = 0,
 ) {
@@ -358,6 +359,10 @@ data class WhisperUiState(
     val pendingOutgoing: List<WhisperFriendship> = emptyList(),
     val searchResults: List<WhisperProfile> = emptyList(),
     val recommendedProfiles: List<WhisperProfile> = emptyList(),
+    val discoverProfiles: List<WhisperProfile> = emptyList(),
+    val discoverPage: Int = 0,
+    val isDiscoverLoadingNext: Boolean = false,
+    val hasReachedEndOfDiscover: Boolean = false,
     val mutedUserIds: Set<String> = emptySet(),
     val error: UiText? = null,
 ) {

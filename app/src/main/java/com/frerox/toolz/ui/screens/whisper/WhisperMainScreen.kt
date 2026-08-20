@@ -39,6 +39,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -930,11 +931,31 @@ private fun DiscoverTab(
                     items(3) { DiscoverSkeleton() }
                 }
             } else {
+                val lazyListState = rememberLazyListState()
+                
+                // Infinite scroll trigger
+                val shouldLoadMore = remember {
+                    derivedStateOf {
+                        val layoutInfo = lazyListState.layoutInfo
+                        val totalItems = layoutInfo.totalItemsCount
+                        val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        totalItems > 0 && lastVisibleItem >= totalItems - 5 && !uiState.hasReachedEndOfDiscover && !uiState.isDiscoverLoadingNext
+                    }
+                }
+                
+                LaunchedEffect(shouldLoadMore.value) {
+                    if (shouldLoadMore.value) {
+                        viewModel.loadNextDiscoverPage()
+                    }
+                }
+
                 LazyColumn(
+                    state = lazyListState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
                 ) {
+                    // 1. Suggested For You Section
                     if (uiState.recommendedProfiles.isNotEmpty()) {
                         item {
                             Row(
@@ -961,7 +982,40 @@ private fun DiscoverTab(
                                 onViewAvatarFull = { onViewAvatarFull(profile) },
                             )
                         }
-                    } else {
+                    }
+
+                    // 2. Whisper Someone Section
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                        ) {
+                            Icon(Icons.Rounded.Explore, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                            SectionHeader("Whisper Someone")
+                        }
+                    }
+
+                    items(uiState.discoverProfiles, key = { "disc_${it.id}" }) { profile ->
+                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
+                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+
+                        DiscoverUserCard(
+                            profile = profile,
+                            isAlreadyFriend = isAlreadyFriend,
+                            isPendingOutgoing = isPendingOutgoing,
+                            onChat = { haptic.click(); onNavigateToChat(profile.id) },
+                            onViewProfile = { haptic.click(); onNavigateToProfile(profile.id) },
+                            onAddFriend = { haptic.success(); viewModel.sendFriendRequest(profile.id) },
+                            onViewAvatarFull = { onViewAvatarFull(profile) },
+                        )
+                    }
+
+                    if (uiState.isDiscoverLoadingNext) {
+                        items(2) { DiscoverSkeleton() }
+                    }
+                    
+                    if (uiState.recommendedProfiles.isEmpty() && uiState.discoverProfiles.isEmpty() && !uiState.isLoading) {
                         item {
                             WhisperEmptyState(
                                 icon = Icons.Rounded.Search,

@@ -23,10 +23,10 @@ import javax.inject.Singleton
 class WhisperEncryptedImageHost @Inject constructor(
     private val supabase: SupabaseClient,
 ) {
-    suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<String> = runCatching {
+    /** Returns Pair(url, attachmentId) */
+    suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<Pair<String, String?>> = runCatching {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Image is too large to send securely." }
         val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before uploading an image.")
-        val myUserId = supabase.auth.currentUserOrNull()?.id ?: "anonymous"
         
         // 1. Try uploading to Edge Function (ImgBB) first
         val edgeFunctionResult = runCatching {
@@ -63,8 +63,10 @@ class WhisperEncryptedImageHost @Inject constructor(
                         error(errorMsg)
                     }
                     
-                    Json.parseToJsonElement(response).jsonObject["url"]?.jsonPrimitive?.content
-                        ?: error("Image host returned an invalid response.")
+                    val json = Json.parseToJsonElement(response).jsonObject
+                    val url = json["url"]?.jsonPrimitive?.content ?: error("Image host returned an invalid response.")
+                    val id = json["id"]?.jsonPrimitive?.content
+                    url to id
                 } finally {
                     connection.disconnect()
                 }
@@ -81,20 +83,53 @@ class WhisperEncryptedImageHost @Inject constructor(
         }
 
         // 2. Direct Supabase Storage fallback if Edge Function is unconfigured (503 / missing ImgBB key)
-        val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
         val storageResult = runCatching {
             val randomToken = java.util.UUID.randomUUID().toString().replace("-", "")
             val path = "vault/$randomToken.bin"
             supabase.storage.from("whisper-avatars").upload(path, cipherBytes) { upsert = true }
-            supabase.storage.from("whisper-avatars").publicUrl(path)
+            val url = supabase.storage.from("whisper-avatars").publicUrl(path)
+            url to path // Use the path as the ID for Supabase Storage
         }
-
 
         if (storageResult.isSuccess) {
             return@runCatching storageResult.getOrThrow()
         }
 
-        error("Image upload failed: $edgeError")
+        error("Image upload failed.")
+    }
+
+    suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {
+        if (attachmentId == null) return@runCatching // Cannot delete without ID
+
+        if (url.contains("supabase.co/storage/v1/object/public/whisper-avatars/")) {
+            // It's a Supabase Storage file (the ID we store is the path)
+            supabase.storage.from("whisper-avatars").delete(attachmentId)
+        } else {
+            // It's an ImgBB file. We need an Edge Function to delete it because the API key is secret.
+            val token = supabase.auth.currentSessionOrNull()?.accessToken ?: return@runCatching
+            
+            withContext(Dispatchers.IO) {
+                val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-delete").openConnection() as HttpURLConnection)
+                try {
+                    val body = buildJsonObject { put("id", attachmentId) }.toString()
+                    val bodyBytes = body.toByteArray(Charsets.UTF_8)
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = CONNECT_TIMEOUT_MS
+                    connection.readTimeout = READ_TIMEOUT_MS
+                    connection.doOutput = true
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.outputStream.use { it.write(bodyBytes) }
+                    
+                    if (connection.responseCode !in 200..299) {
+                        android.util.Log.w("WhisperEncryptedImageHost", "Remote deletion failed: HTTP ${connection.responseCode}")
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        }
     }
 
 

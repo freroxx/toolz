@@ -521,7 +521,7 @@ class WhisperRepository @Inject constructor(
         val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey)
             ?: error("This image is too large or could not be encrypted.")
         
-        val uploadUrl = encryptedImageHost.upload(
+        val (uploadUrl, attachmentId) = encryptedImageHost.upload(
             cipherBytes = cipherBytes,
             name = "whisper_${System.currentTimeMillis()}",
             expirationSeconds = expiresAfterSeconds,
@@ -532,6 +532,7 @@ class WhisperRepository @Inject constructor(
             url = uploadUrl,
             iv = iv,
             mimeType = mimeType,
+            attachmentId = attachmentId,
             expiresAtEpochSeconds = expiresAt,
             sizeBytes = imageBytes.size,
         )
@@ -653,7 +654,17 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteMessageForEveryone(messageId: String, otherUserId: String, senderDisplayName: String): Result<Unit> = runCatching {
-        val tombstone = "[deleted_by_sender:$senderDisplayName]"
+        // 1. Fetch message to check for attachments
+        val message = messageDao.getMessageById(messageId)
+        val attachment: WhisperImageAttachment? = message?.content?.let { WhisperImageAttachment.fromMessageContent(it) }
+        
+        // 2. Perform remote attachment deletion if applicable
+        attachment?.let { att ->
+            runCatching { encryptedImageHost.delete(att.url, att.attachmentId) }
+        }
+
+        // 3. Update database with tombstone
+        val tombstone = "This message has been deleted"
         db.from("messages").update(
             buildJsonObject {
                 put("content", tombstone)
@@ -666,11 +677,10 @@ class WhisperRepository @Inject constructor(
             }
         }
         
-        // Erase from local cache
+        // 4. Erase from local cache
         messageDao.deleteMessage(messageId)
 
-        // Broadcast instant delete event so the other user's chat screen updates without
-        // waiting for Postgres realtime (which may be slow or require replica identity FULL)
+        // 5. Broadcast instant delete event
         runCatching {
             val convoKey = conversationKey(myId, otherUserId)
             val chatChannel = getOrJoinBroadcastChannel("chat_$convoKey")
@@ -694,15 +704,6 @@ class WhisperRepository @Inject constructor(
         messageDao.deleteMessage(messageId)
         // 3. Invalidate conversation cache
         invalidateConversationsCache()
-        // 3. If sent by me, attempt to delete from server
-        runCatching {
-            db.from("messages").delete {
-                filter {
-                    eq("id", messageId)
-                    eq("sender_id", myId)
-                }
-            }
-        }
     }
 
     suspend fun markMessagesAsRead(senderId: String): Result<Unit> = runCatching {
@@ -753,10 +754,15 @@ class WhisperRepository @Inject constructor(
 
                     if (isUserBlockedByMe(senderId)) return@collect
 
-                    val otherProfile = runCatching { getProfile(otherUserId).getOrNull() }.getOrNull()
-                    val otherKey = otherProfile?.publicKey
+                    val otherProfile = getProfile(otherUserId).getOrNull()
+                    var otherKey = otherProfile?.publicKey
+                    
+                    if (otherKey == null) {
+                        // Key might be missing in cache, force refresh
+                        otherKey = getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey
+                    }
 
-                    val decrypted = if (rawContent.startsWith("[deleted_by_sender")) {
+                    val decrypted = if (rawContent.startsWith("This message has been deleted") || rawContent.startsWith("[deleted_by_sender")) {
                         rawContent
                     } else if (contentIv != null && otherKey != null) {
                         crypto.decryptMessage(rawContent, contentIv, otherKey)
@@ -835,8 +841,10 @@ class WhisperRepository @Inject constructor(
                     )) {
                         if (isUserBlockedByMe(msg.senderId)) return@collect
 
-                        val otherProfile = runCatching { getProfile(otherUserId).getOrNull() }.getOrNull()
-                        val otherKey = otherProfile?.publicKey
+                        var otherKey = getProfile(otherUserId).getOrNull()?.publicKey
+                        if (otherKey == null) {
+                            otherKey = getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey
+                        }
 
                         val decrypted = if (msg.isDeletedForEveryone) {
                             msg.content
@@ -959,8 +967,11 @@ class WhisperRepository @Inject constructor(
                         if (isUserBlockedByMe(msg.senderId)) return@collect
 
                         val otherId = if (msg.senderId == userId) msg.receiverId else msg.senderId
-                        val otherProfile = runCatching { getProfile(otherId).getOrNull() }.getOrNull()
-                        val otherKey = otherProfile?.publicKey
+                        var otherKey = getProfile(otherId).getOrNull()?.publicKey
+                        
+                        if (otherKey == null) {
+                            otherKey = getProfile(otherId, forceRefresh = true).getOrNull()?.publicKey
+                        }
 
                         val decrypted = if (msg.isDeletedForEveryone) {
                             msg.content
@@ -1419,57 +1430,63 @@ class WhisperRepository @Inject constructor(
         val myFriendIds = getFriendships().getOrThrow()
             .filter { it.status == "accepted" }
             .map { it.otherUserId(myId) }
-            .toSet() + myId
+            .toSet()
 
-        if (myFriendIds.size == 1) {
-            return@runCatching db.from("profiles")
-                .select {
-                    filter {
-                        eq("is_private", false)
-                        eq("hide_from_discover", false)
-                        neq("id", myId)
-                    }
-                    limit(15)
-                }
-                .decodeList<WhisperProfile>()
-        }
+        if (myFriendIds.isEmpty()) return Result.success(emptyList())
 
+        // Fetch accepted friendships involving our friends
         val candidateFriendships = db.from("friends").select {
-            filter { eq("status", "accepted") }
+            filter { 
+                eq("status", "accepted") 
+                or {
+                    isIn("user_a", myFriendIds.toList())
+                    isIn("user_b", myFriendIds.toList())
+                }
+            }
             limit(1_000)
         }.decodeList<WhisperFriendship>()
 
-        val mutualCounts = mutableMapOf<String, Int>()
+        val fofIds = mutableSetOf<String>()
         for (f in candidateFriendships) {
-            if (f.userA in myFriendIds && f.userB !in myFriendIds) {
-                mutualCounts[f.userB] = (mutualCounts[f.userB] ?: 0) + 1
-            } else if (f.userB in myFriendIds && f.userA !in myFriendIds) {
-                mutualCounts[f.userA] = (mutualCounts[f.userA] ?: 0) + 1
-            }
+            val a = f.userA
+            val b = f.userB
+            if (a in myFriendIds && b !in myFriendIds && b != myId) fofIds.add(b)
+            if (b in myFriendIds && a !in myFriendIds && a != myId) fofIds.add(a)
         }
 
-        if (mutualCounts.isEmpty()) {
-            return@runCatching db.from("profiles")
-                .select {
-                    filter {
-                        eq("is_private", false)
-                        neq("id", myId)
-                    }
-                    limit(15)
-                }
-                .decodeList<WhisperProfile>()
-                .filter { it.id !in myFriendIds }
-        }
+        if (fofIds.isEmpty()) return Result.success(emptyList())
 
+        // Resolve profiles for these IDs
         val recommended = mutableListOf<WhisperProfile>()
-        for (cId in mutualCounts.entries.sortedByDescending { it.value }.map { it.key }.take(30)) {
-            val p = getProfile(cId).getOrNull()
-            if (p != null && !p.isPrivate && p.id != myId && !isUserBlockedByMe(p.id)) {
-                recommended.add(p)
-                if (recommended.size == 15) break
+        for (id in fofIds.take(20)) {
+            getProfile(id).getOrNull()?.let { p ->
+                if (!p.isPrivate && !p.isHiddenFromDiscover && !isUserBlockedByMe(p.id)) {
+                    recommended.add(p)
+                }
             }
+            if (recommended.size >= 15) break
         }
         recommended
+    }
+
+    suspend fun getDiscoverProfiles(page: Int, pageSize: Int = 20): Result<List<WhisperProfile>> = runCatching {
+        val myFriendIds = getFriendships().getOrThrow()
+            .filter { it.status == "accepted" }
+            .map { it.otherUserId(myId) }
+            .toSet()
+
+        db.from("profiles")
+            .select {
+                filter {
+                    eq("is_private", false)
+                    eq("hide_from_discover", false)
+                    neq("id", myId)
+                }
+                order("last_seen_at", Order.DESCENDING)
+                range((page * pageSize).toLong(), ((page + 1) * pageSize - 1).toLong())
+            }
+            .decodeList<WhisperProfile>()
+            .filter { it.id !in myFriendIds }
     }
 
     suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {

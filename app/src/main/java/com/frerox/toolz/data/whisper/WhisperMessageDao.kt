@@ -30,6 +30,9 @@ interface WhisperMessageDao {
 
     @Query("DELETE FROM whisper_messages WHERE (senderId = :myId AND receiverId = :otherId) OR (senderId = :otherId AND receiverId = :myId)")
     suspend fun clearChat(myId: String, otherId: String)
+
+    @Query("SELECT * FROM whisper_messages WHERE id = :messageId LIMIT 1")
+    suspend fun getMessageById(messageId: String): WhisperMessageEntity?
     
     @Update
     suspend fun updateMessage(message: WhisperMessageEntity)
