@@ -140,6 +140,20 @@ class WhisperNotificationManager @Inject constructor(
     fun showFriendRequestNotification(fromName: String) {
         if (isInForeground) return
         val notifId = "friend_req_$fromName".hashCode()
+        // Tapping the notification opens MainActivity and surfaces the request list;
+        // there is no chat to deep-link into, so only the request flag is passed.
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_friend_requests", true)
+        }
+        // Request code stays below REQUEST_CODE_BASE + 1000, the floor used by the
+        // per-sender message PendingIntents, so the two can never collide.
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_BASE + 1,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
             .setContentTitle("New Friend Request")
@@ -149,6 +163,7 @@ class WhisperNotificationManager @Inject constructor(
             .setGroup(GROUP_KEY)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
             .build()
         try {
             notifManager.notify(notifId, notification)
@@ -165,5 +180,9 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     private fun senderNotifId(senderId: String): Int =
-        (senderId.hashCode() and 0x7FFFFFFF) + 1000
+        // (hashCode() and 0x7FFFFFFF) + 1000 can overflow past Int.MAX_VALUE for the
+        // largest hash codes and wrap to a negative notification id (which crashes
+        // notify()). Modulo 2_000_000_000 keeps the base small enough that the +1000
+        // offset stays within Int.MAX_VALUE (max 2,000,000,999).
+        ((senderId.hashCode() and 0x7FFFFFFF) % 2_000_000_000) + 1000
 }

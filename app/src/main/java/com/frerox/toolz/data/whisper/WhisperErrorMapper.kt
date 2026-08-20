@@ -48,6 +48,20 @@ object WhisperErrorMapper {
             throwable.message?.contains("404", ignoreCase = true) == true ||
             throwable.message?.contains("No rows found", ignoreCase = true) == true
 
+    /** True when an insert was rejected because the row already exists (idempotent client UUID retry). */
+    fun isDuplicateKey(throwable: Throwable): Boolean {
+        if (throwable is RestException && throwable.statusCode == 409) return true
+        val msg = throwable.message.orEmpty()
+        return msg.contains("duplicate key", ignoreCase = true) ||
+            msg.contains("23505", ignoreCase = true)
+    }
+
+    /** True when retrying cannot help: the request is rejected outright or the input is invalid. */
+    fun isPermanentError(throwable: Throwable): Boolean =
+        throwable is IllegalArgumentException || throwable is IllegalStateException ||
+            (throwable is RestException && throwable.statusCode in 400..404) ||
+            (throwable is RestException && throwable.statusCode == 410)
+
     /**
      * Maps a [Throwable] to a short, user-friendly [UiText].
      * Always logs the technical message to Logcat first.

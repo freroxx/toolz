@@ -50,6 +50,7 @@ class WhisperCrypto @Inject constructor() {
         // AES-GCM appends a 16-byte tag, so plaintext must stay below the transport cap.
         private const val MAX_ATTACHMENT_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES - (AES_GCM_TAG_LEN / 8)
         private val ATTACHMENT_AAD = "whisper-attachment-v1".toByteArray(Charsets.UTF_8)
+        private val MESSAGE_AAD = "whisper-message-v1".toByteArray(Charsets.UTF_8)
     }
 
     init {
@@ -148,14 +149,25 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
-    fun encryptMessage(plainText: String, recipientPublicKeyBase64: String): Pair<String, String>? {
+    /**
+     * Encrypts a chat message with AAD binding to the exact conversation direction
+     * (senderId/receiverId from the message row), so ciphertext replayed into another
+     * chat — or with swapped participants — can never authenticate.
+     */
+    fun encryptMessage(
+        plainText: String,
+        peerPublicKeyBase64: String,
+        senderId: String,
+        receiverId: String,
+    ): Pair<String, String>? {
         if (plainText.length > MAX_MESSAGE_CHARS) return null
-        val secretKey = deriveSharedKey(recipientPublicKeyBase64) ?: return null
+        val secretKey = deriveSharedKey(peerPublicKeyBase64) ?: return null
         return try {
             val iv = ByteArray(IV_LEN).apply { SecureRandom().nextBytes(this) }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, gcmSpec)
+            cipher.updateAAD(MESSAGE_AAD + senderId.encodeToByteArray() + receiverId.encodeToByteArray())
             val cipherBytes = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
             val cipherTextBase64 = Base64.encodeToString(cipherBytes, Base64.NO_WRAP)
             val ivBase64 = Base64.encodeToString(iv, Base64.NO_WRAP)
@@ -166,22 +178,44 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
-    fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String? {
+    /**
+     * Decrypts a chat message. Tries the direction-bound AAD first; if that fails the
+     * payload is retried WITHOUT AAD so legacy (pre-AAD) rows keep decrypting — history
+     * must never break after this upgrade.
+     */
+    fun decryptMessage(
+        cipherText: String,
+        ivBase64: String?,
+        peerPublicKeyBase64: String?,
+        senderId: String,
+        receiverId: String,
+    ): String? {
         // Whisper v1 never accepts a cleartext downgrade. Only authenticated AEAD payloads
         // are renderable; legacy/plain broadcast payloads are intentionally rejected.
-        if (ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) {
+        if (ivBase64.isNullOrBlank() || peerPublicKeyBase64.isNullOrBlank()) {
             return null
         }
-        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
+        val secretKey = deriveSharedKey(peerPublicKeyBase64) ?: return null
         return try {
             val iv = Base64.decode(ivBase64.trim(), Base64.DEFAULT)
-            val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.DEFAULT)
+            val cipherBytes = Base64.decode(cipherText.trim(), Base64.DEFAULT)
             if (iv.size != IV_LEN || cipherBytes.size < 16) return null
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
-            val plainBytes = cipher.doFinal(cipherBytes)
-            String(plainBytes, Charsets.UTF_8)
+
+            val aad = MESSAGE_AAD + senderId.encodeToByteArray() + receiverId.encodeToByteArray()
+            val aadCipher = Cipher.getInstance("AES/GCM/NoPadding")
+            aadCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
+            aadCipher.updateAAD(aad)
+            val aadPlainBytes = runCatching { aadCipher.doFinal(cipherBytes) }.getOrNull()
+            if (aadPlainBytes != null) {
+                String(aadPlainBytes, Charsets.UTF_8)
+            } else {
+                // Legacy rows predating AAD binding: decrypt without it.
+                val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding")
+                legacyCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
+                val legacyPlainBytes = legacyCipher.doFinal(cipherBytes)
+                String(legacyPlainBytes, Charsets.UTF_8)
+            }
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Decryption failed: ${e.message}")
             null

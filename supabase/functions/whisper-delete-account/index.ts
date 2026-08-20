@@ -1,14 +1,17 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 // Deletes the caller's GoTrue user account (and everything cascade-deleted from it).
-// Deploy with verify_jwt=true; the platform gateway already validates the bearer token,
-// the payload parsing below is defense in depth.
+// The bearer token is genuinely verified in-function: signature and exp are checked
+// against the project's JWT secret (SUPABASE_JWT_SECRET is injected into every edge
+// function automatically), and the deleted user id comes from the verified payload's
+// sub claim — never from an unverified header.
 serve(async (request) => {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const auth = request.headers.get("Authorization");
   if (!auth?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
 
-  const userId = extractUserId(auth.slice(7));
+  const userId = await extractVerifiedUserId(auth.slice(7));
   if (!userId) return json({ error: "Invalid token" }, 401);
 
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -30,12 +33,12 @@ serve(async (request) => {
   return json({ success: true }, 200);
 });
 
-function extractUserId(jwt: string): string | null {
+async function extractVerifiedUserId(jwt: string): Promise<string | null> {
   try {
-    const payload = jwt.split(".")[1];
-    const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    const json = JSON.parse(decoded);
-    return typeof json.sub === "string" ? json.sub : null;
+    const secret = new TextEncoder().encode(Deno.env.get("SUPABASE_JWT_SECRET") ?? "");
+    if (secret.length === 0) return null;
+    const { payload } = await jwtVerify(jwt, secret, { algorithms: ["HS256"] });
+    return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;
   }

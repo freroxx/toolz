@@ -20,12 +20,10 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -44,9 +42,19 @@ class WhisperUserProfileViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     val targetUserId: String = checkNotNull(savedStateHandle["userId"])
+
+    val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setScreenshotBypass(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setWhisperScreenshotBypass(enabled)
+        }
+    }
 
     private val _uiState = MutableStateFlow(WhisperUserProfileUiState())
     val uiState: StateFlow<WhisperUserProfileUiState> = _uiState.asStateFlow()
@@ -67,6 +75,9 @@ class WhisperUserProfileViewModel @Inject constructor(
     }
 
     fun loadData() {
+        // In-flight guard: ignore re-entrant calls so overlapping loads (double-tap
+        // refreshes, callbacks chaining into loadData) can't tear the state apart.
+        if (_uiState.value.isLoading) return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, loadFailed = false) }
 
@@ -126,15 +137,31 @@ class WhisperUserProfileViewModel @Inject constructor(
 
     fun verifyKey() {
         viewModelScope.launch {
-            repository.verifyUserKey(targetUserId)
-            loadData()
+            runCatching { repository.verifyUserKey(targetUserId) }
+                .onSuccess { verified ->
+                    if (verified) {
+                        loadData()
+                    } else {
+                        // No exception thrown but the key could not be verified (e.g. profile
+                        // missing); surface it instead of silently succeeding.
+                        _uiState.update { it.copy(error = UiText.DynamicString("Unable to verify this key.")) }
+                    }
+                }
+                .onFailure { err -> handleError(err, "verifyKey") }
         }
     }
 
     fun acceptNewKey() {
         viewModelScope.launch {
-            repository.acceptNewKey(targetUserId)
-            loadData()
+            runCatching { repository.acceptNewKey(targetUserId) }
+                .onSuccess { accepted ->
+                    if (accepted) {
+                        loadData()
+                    } else {
+                        _uiState.update { it.copy(error = UiText.DynamicString("Unable to accept this key.")) }
+                    }
+                }
+                .onFailure { err -> handleError(err, "acceptNewKey") }
         }
     }
 

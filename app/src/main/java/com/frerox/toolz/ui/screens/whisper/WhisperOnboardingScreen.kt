@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.graphics.shapes.Morph
 import androidx.graphics.shapes.RoundedPolygon
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -60,9 +61,14 @@ fun WhisperOnboardingScreen(
     onComplete: () -> Unit,
     viewModel: WhisperViewModel = hiltViewModel(),
 ) {
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(initialPage = 0) { 4 }
-    val haptic = rememberToolzHapticFeedback()
+    // Local guard against double-taps: once completing starts, both buttons disable until
+    // the VM callback fires (the VM-side markOnboardingAsShown guard is handled separately).
+    var isCompleting by remember { mutableStateOf(false) }
+
+    // Onboarding contains key-generation details — never capture this screen.
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
     val onboardingSteps = listOf(
         OnboardingStep(
@@ -98,6 +104,11 @@ fun WhisperOnboardingScreen(
             shape = MaterialShapes.Sunny,
         ),
     )
+
+    // Page count is derived from the steps list so adding/removing a page can never
+    // desync the pager from its content.
+    val pagerState = rememberPagerState(initialPage = 0) { onboardingSteps.size }
+    val haptic = rememberToolzHapticFeedback()
 
     Box(
         modifier = Modifier
@@ -170,7 +181,9 @@ fun WhisperOnboardingScreen(
                 ToolzExpressiveButton(
                     onClick = {
                         haptic.click()
+                        if (isCompleting) return@ToolzExpressiveButton
                         if (isLastPage) {
+                            isCompleting = true
                             viewModel.markOnboardingAsShown { onComplete() }
                         } else {
                             scope.launch {
@@ -181,6 +194,7 @@ fun WhisperOnboardingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp),
+                    enabled = !isCompleting,
                 ) {
                     AnimatedContent(
                         targetState = isLastPage,
@@ -211,11 +225,14 @@ fun WhisperOnboardingScreen(
                         TextButton(
                             onClick = {
                                 haptic.click()
+                                if (isCompleting) return@TextButton
+                                isCompleting = true
                                 viewModel.markOnboardingAsShown { onComplete() }
-                            }
+                            },
+                            enabled = !isCompleting,
                         ) {
                             Text(
-                                "Skip", // TODO: swap for your localized skip string resource if one exists
+                                stringResource(R.string.st_Whisper_OnboardingSkip),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

@@ -17,19 +17,33 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.ByteArrayOutputStream
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
+
+import com.frerox.toolz.data.settings.SettingsRepository
 
 @HiltViewModel
 class WhisperChatViewModel @Inject constructor(
@@ -39,11 +53,21 @@ class WhisperChatViewModel @Inject constructor(
     private val notificationManager: WhisperNotificationManager,
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
+    private val settingsRepository: SettingsRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     val otherUserId: String = checkNotNull(savedStateHandle["otherUserId"])
     val myUserId: String get() = authManager.currentUserId ?: ""
+
+    val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setScreenshotBypass(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setWhisperScreenshotBypass(enabled)
+        }
+    }
 
     private val _uiState = MutableStateFlow(WhisperChatUiState())
     val uiState: StateFlow<WhisperChatUiState> = _uiState.asStateFlow()
@@ -64,6 +88,8 @@ class WhisperChatViewModel @Inject constructor(
     private var presenceJob: Job? = null
     private var undoTimerJob: Job? = null
     private var reactionSyncJob: Job? = null
+    private var messagesCollectionJob: Job? = null
+    private var searchDebounceJob: Job? = null
     private var isCurrentlyTyping = false
 
     private val deletedMessagesUndoBuffer = mutableListOf<WhisperMessage>()
@@ -169,54 +195,68 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     fun loadMessages() {
-        // 1. Instant loading from Room cache (ciphertext is decrypted by the repository)
-        viewModelScope.launch {
-            repository.getMessagesFlow(otherUserId).collect { newMessages ->
-                _uiState.update { state ->
-                    // CRITICAL: Preserve transient metadata (decrypted content, reactions,
-                    // enriched reply data) that isn't persisted in the basic message entity.
-                    // A tombstone must never be reverted to stale plaintext, so deletions
-                    // always win over any cached content.
-                    val existingById = state.messages.associateBy { it.id }
-                    val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
-                    val merged = newMessages.map { newMsg ->
-                        val existing = existingById[newMsg.id]
-                        if (existing != null) {
-                            newMsg.copy(
-                                content = if (newMsg.isDeletedForEveryone || existing.isDeletedForEveryone) newMsg.content else existing.content,
-                                reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
-                                replyToContent = newMsg.replyToContent ?: existing.replyToContent,
-                                replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
-                                isPending = existing.isPending || newMsg.isPending
-                            )
-                        } else newMsg
-                    } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
+        // 1. Instant loading from Room cache (ciphertext is decrypted by the repository).
+        // The live collector must be a SINGLE permanent subscription: re-invoking
+        // loadMessages() from failure handlers / undo must never stack a second collector,
+        // while the immediate server fetch below still runs on every call.
+        if (messagesCollectionJob?.isActive != true) {
+            messagesCollectionJob = viewModelScope.launch {
+                repository.getMessagesFlow(otherUserId).collect { newMessages ->
+                    _uiState.update { state ->
+                        // CRITICAL: Preserve transient metadata (decrypted content, reactions,
+                        // enriched reply data) that isn't persisted in the basic message entity.
+                        // A tombstone must never be reverted to stale plaintext, so deletions
+                        // always win over any cached content.
+                        val existingById = state.messages.associateBy { it.id }
+                        val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
+                        val merged = newMessages.map { newMsg ->
+                            val existing = existingById[newMsg.id]
+                            if (existing != null) {
+                                newMsg.copy(
+                                    content = if (newMsg.isDeletedForEveryone || existing.isDeletedForEveryone) newMsg.content else existing.content,
+                                    reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
+                                    replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
+                                    replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
+                                    isPending = existing.isPending || newMsg.isPending
+                                )
+                            } else newMsg
+                        } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
 
-                    // Strict chronological order (ISO timestamps sort lexicographically),
-                    // with unsent pending messages pinned to the bottom of the list.
-                    val sorted = merged.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
+                        // Strict chronological order (ISO timestamps sort lexicographically),
+                        // with unsent pending messages pinned to the bottom of the list.
+                        val sorted = merged.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
 
-                    state.copy(
-                        messages = sorted,
-                        isLoading = false,
-                        matchingMessageIds = if (state.searchQuery.isNotBlank()) {
-                            sorted.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
-                        } else emptySet()
-                    )
-                }
-                if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {
-                    repository.markMessagesAsRead(otherUserId)
+                        state.copy(
+                            messages = sorted,
+                            isLoading = false,
+                            // Keep the same filter as updateSearchQuery: deleted-for-everyone
+                            // tombstones must never count as search matches.
+                            matchingMessageIds = if (state.searchQuery.isNotBlank()) {
+                                sorted.filter { !it.isDeletedForEveryone && it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                            } else emptySet()
+                        )
+                    }
+                    if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {
+                        repository.markMessagesAsRead(otherUserId)
+                    }
                 }
             }
         }
 
-        // 2. Background sync with Supabase
+        // 2. Background sync with Supabase (runs on every call for the immediate path)
         viewModelScope.launch {
             repository.getMessages(otherUserId)
                 .onFailure { err ->
                     handleError(err, "getMessagesSync")
                 }
         }
+    }
+
+    /** Reply snippets for image targets are normalized to the attachment prefix so the UI
+     *  can detect them model-robustly instead of matching display strings. */
+    private fun String?.normalizeReplySnippet(): String? = when (this) {
+        "Image", "📷 Image" -> WhisperImageAttachment.MESSAGE_PREFIX
+        else -> this
     }
 
     // ── REPLY-TO MESSAGE ──
@@ -284,7 +324,37 @@ class WhisperChatViewModel @Inject constructor(
                 }
                 .onSuccess {
                     pendingReactions[message.id]?.remove(emoji)
+                    // Reflect the server-confirmed state once the optimistic update is no
+                    // longer in flight (own ReactionEvent echoes are skipped by the UI).
+                    scheduleReactionSync(message.id, delayMs = 600)
                 }
+        }
+    }
+
+    /**
+     * Debounced authoritative reaction fetch. While any of MY pending toggles for a message
+     * is still in flight, the server snapshot would clobber the optimistic state — defer
+     * instead of overwriting, until the pending set drains.
+     */
+    private fun scheduleReactionSync(messageId: String, delayMs: Long = 400) {
+        reactionSyncJob?.cancel()
+        reactionSyncJob = viewModelScope.launch {
+            delay(delayMs)
+            if (pendingReactions[messageId].isNullOrEmpty()) {
+                val reactionMap = repository.getReactionsForMessages(listOf(messageId)).getOrNull()
+                if (reactionMap != null) {
+                    val updatedList = reactionMap[messageId] ?: emptyList()
+                    _uiState.update { state ->
+                        val updated = state.messages.map { msg ->
+                            if (msg.id == messageId) msg.copy(reactions = updatedList) else msg
+                        }
+                        state.copy(messages = updated)
+                    }
+                }
+            } else {
+                // My optimistic toggle is still in flight — re-schedule instead of clobbering.
+                scheduleReactionSync(messageId, delayMs = 800)
+            }
         }
     }
 
@@ -302,20 +372,26 @@ class WhisperChatViewModel @Inject constructor(
     }
 
     fun updateSearchQuery(query: String) {
-        _uiState.update { state ->
-            val matchedIds = if (query.isBlank()) {
-                emptySet()
-            } else {
-                state.messages
-                    .filter { !it.isDeletedForEveryone && it.content.contains(query, ignoreCase = true) }
-                    .map { it.id }
-                    .toSet()
+        // The text field updates immediately; the O(n) match scan is debounced so typing
+        // never runs a full-list scan per keystroke on the main thread.
+        _uiState.update { it.copy(searchQuery = query) }
+        searchDebounceJob?.cancel()
+        searchDebounceJob = viewModelScope.launch {
+            delay(250)
+            _uiState.update { state ->
+                val matchedIds = if (state.searchQuery.isBlank()) {
+                    emptySet()
+                } else {
+                    state.messages
+                        .filter { !it.isDeletedForEveryone && it.content.contains(state.searchQuery, ignoreCase = true) }
+                        .map { it.id }
+                        .toSet()
+                }
+                state.copy(
+                    matchingMessageIds = matchedIds,
+                    activeSearchMatchIndex = if (matchedIds.isNotEmpty()) 0 else -1
+                )
             }
-            state.copy(
-                searchQuery = query,
-                matchingMessageIds = matchedIds,
-                activeSearchMatchIndex = if (matchedIds.isNotEmpty()) 0 else -1
-            )
         }
     }
 
@@ -346,12 +422,13 @@ class WhisperChatViewModel @Inject constructor(
         sendTypingSignal(false)
         val trimmedContent = content.trim()
         val replySnippet = replyTarget?.let { target ->
-            val content = if (target.content.startsWith("whisper:image:")) {
-                "Image"
+            // Image targets use the attachment prefix marker so the UI can detect them
+            // model-robustly (normalized back to display labels at render time).
+            if (target.content.startsWith("whisper:image:")) {
+                WhisperImageAttachment.MESSAGE_PREFIX
             } else {
                 target.content.take(100)
             }
-            content
         }
 
         val optimisticMsg = WhisperMessage(
@@ -378,7 +455,7 @@ class WhisperChatViewModel @Inject constructor(
                             replyToContent = replySnippet,
                             replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User"
                         )
-                        state.copy(messages = filtered + enrichedMsg)
+                        state.copy(messages = sortedMessages(filtered + enrichedMsg))
                     }
                 }
                 .onFailure { err ->
@@ -405,7 +482,7 @@ class WhisperChatViewModel @Inject constructor(
                 .onSuccess { message ->
                     _uiState.update { state ->
                         state.copy(
-                            messages = state.messages.filterNot { it.id == message.id } + message,
+                            messages = sortedMessages(state.messages.filterNot { it.id == message.id } + message),
                             isUploadingAttachment = false,
                         )
                     }
@@ -414,6 +491,29 @@ class WhisperChatViewModel @Inject constructor(
                     _uiState.update { it.copy(isUploadingAttachment = false) }
                     handleError(error, "sendEncryptedImage")
                 }
+        }
+    }
+
+    /** Reads + compresses a picked image and sends it, all in viewModelScope so leaving the
+     *  screen mid-upload no longer silently cancels the send (unlike a composition scope). */
+    fun sendImageFromUri(context: Context, uri: android.net.Uri, expiresAfterSeconds: Long?) {
+        viewModelScope.launch {
+            // Bounded read off the main thread; the spinner stays up until sendImage resolves.
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) }
+                }.getOrNull()
+            }
+            if (bytes == null) {
+                _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_ReadImage)) }
+                return@launch
+            }
+            val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+            // Compress before encrypt to stay within the edge-function body limit.
+            val compressed = compressImageForUpload(bytes, mimeType)
+            // If compression succeeded the bytes are JPEG; otherwise keep the source mime.
+            val outMime = if (compressed === bytes) mimeType else "image/jpeg"
+            sendImage(compressed, outMime, expiresAfterSeconds)
         }
     }
 
@@ -463,10 +563,10 @@ class WhisperChatViewModel @Inject constructor(
 
     // ── MESSAGE DELETION ──
     fun deleteMessageForEveryone(message: WhisperMessage) {
-        val myDisplayName = authManager.currentUserId?.let { "You" } ?: "User"
-
-        // Optimistic local update
-        val tombstone = "[deleted_by_sender:$myDisplayName]"
+        // Optimistic local update. WhisperMessage.isDeletedForEveryone is a computed getter
+        // derived from content, so mirroring the server's exact tombstone text both marks the
+        // message deleted and keeps local and remote state identical until the next reload.
+        val tombstone = "This message has been deleted"
         _uiState.update { state ->
             val updated = state.messages.map {
                 if (it.id == message.id) it.copy(content = tombstone, contentIv = null) else it
@@ -475,7 +575,9 @@ class WhisperChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            repository.deleteMessageForEveryone(message.id, otherUserId, myDisplayName)
+            // senderDisplayName is unused by the server write; pass "" rather than a dead
+            // "You" constant so the tombstone stays server-authoritative.
+            repository.deleteMessageForEveryone(message.id, otherUserId, "")
                 .onFailure { err ->
                     handleError(err, "deleteMessage")
                     loadMessages()
@@ -678,11 +780,26 @@ class WhisperChatViewModel @Inject constructor(
 
     private fun subscribeToPresence() {
         presenceJob = viewModelScope.launch {
-            try {
-                repository.subscribeToPresence(otherUserId).collect { (isOnline, ts) ->
-                    _uiState.update { it.copy(isPartnerOnline = isOnline, partnerLastSeen = ts) }
+            // Transient subscription failures (offline blips, channel teardown) must not
+            // kill presence permanently: re-subscribe every 3s, capped at 10 consecutive
+            // failures. Cancellation is always rethrown.
+            var retries = 0
+            while (isActive) {
+                try {
+                    repository.subscribeToPresence(otherUserId).collect { (isOnline, ts) ->
+                        _uiState.update { it.copy(isPartnerOnline = isOnline, partnerLastSeen = ts) }
+                    }
+                    break
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    retries++
+                    if (retries > 10) {
+                        android.util.Log.w("WhisperChatVM", "Presence subscription gave up after $retries failures")
+                        break
+                    }
+                    delay(3000)
                 }
-            } catch (_: Exception) {}
+            }
         }
     }
 
@@ -691,13 +808,28 @@ class WhisperChatViewModel @Inject constructor(
         if (myId.isEmpty()) return
 
         realtimeJob = viewModelScope.launch {
+            // Consecutive-failure cap prevents an endless retry loop after e.g. a revoked
+            // session or a permanently broken channel; each successful event resets it.
+            var consecutiveFailures = 0
             repository.subscribeToChat(otherUserId)
                 .retry { cause ->
-                    android.util.Log.e("WhisperVM", "Realtime subscription error: ${cause.message}. Retrying in 3s...")
-                    delay(3000)
-                    true // Retry indefinitely while screen is active
+                    if (authManager.currentUserId == null) {
+                        // Session is gone: the screen will navigate back; retrying would
+                        // just spam failed auth requests forever.
+                        android.util.Log.w("WhisperChatVM", "Realtime subscription stopped: session expired (${cause.message})")
+                        false
+                    } else if (consecutiveFailures >= 10) {
+                        android.util.Log.w("WhisperChatVM", "Realtime subscription gave up after 10 consecutive failures: ${cause.message}")
+                        false
+                    } else {
+                        consecutiveFailures++
+                        android.util.Log.e("WhisperVM", "Realtime subscription error: ${cause.message}. Retrying in 3s...")
+                        delay(3000)
+                        true // Retry while the screen is active (capped above)
+                    }
                 }
                 .collect { event ->
+                    consecutiveFailures = 0
                     when (event) {
                         is WhisperChatEvent.MessageEvent -> {
                             val newMsg = event.message
@@ -718,8 +850,10 @@ class WhisperChatViewModel @Inject constructor(
                                     val enrichedMsg = if (newMsg.replyToId != null && (newMsg.replyToContent == null || newMsg.replyToContent.startsWith("whisper:image:"))) {
                                         val replyTarget = state.messages.find { it.id == newMsg.replyToId }
                                         if (replyTarget != null) {
+                                            // Image targets use the attachment prefix marker so the UI can
+                                            // detect them model-robustly (rendered as a localized label).
                                             val content = if (replyTarget.content.startsWith("whisper:image:")) {
-                                                "📷 Image"
+                                                WhisperImageAttachment.MESSAGE_PREFIX
                                             } else {
                                                 replyTarget.content.take(100)
                                             }
@@ -734,14 +868,20 @@ class WhisperChatViewModel @Inject constructor(
                                     // Use a stricter match or just let Room handle the cleanup if repository persists it.
                                     // Repository DOES persist it, so Room will eventually emit the cleaned list.
                                     // We add it here for ultra-low-latency UI updates.
-                                    val filtered = state.messages.filter { 
-                                        val isThisPending = it.id.startsWith("pending_")
-                                        if (isThisPending) {
-                                            // Stricter check: only remove if content is identical and it's mine
-                                            it.content.trim() != enrichedMsg.content.trim() || enrichedMsg.senderId != myUserId
-                                        } else {
-                                            it.id != enrichedMsg.id
+                                    val filtered = state.messages.toMutableList()
+                                    if (enrichedMsg.senderId == myUserId) {
+                                        // Remove only the FIRST pending message with identical content:
+                                        // two identical pending sends must not both be dropped by one echo.
+                                        val echoIndex = filtered.indexOfFirst {
+                                            it.id.startsWith("pending_") && it.content.trim() == enrichedMsg.content.trim()
                                         }
+                                        if (echoIndex >= 0) {
+                                            filtered.removeAt(echoIndex)
+                                        } else {
+                                            filtered.removeAll { it.id == enrichedMsg.id }
+                                        }
+                                    } else {
+                                        filtered.removeAll { it.id == enrichedMsg.id }
                                     }
                                     state.copy(messages = sortedMessages(filtered + enrichedMsg))
                                 }
@@ -799,21 +939,9 @@ class WhisperChatViewModel @Inject constructor(
                                 }
                             }
                             // 2. Authoritative sync with DB (debounced: bursts of reactions
-                            // only trigger one round-trip)
-                            reactionSyncJob?.cancel()
-                            reactionSyncJob = viewModelScope.launch {
-                                delay(400)
-                                val reactionMap = repository.getReactionsForMessages(listOf(event.messageId)).getOrNull()
-                                if (reactionMap != null) {
-                                    val updatedList = reactionMap[event.messageId] ?: emptyList()
-                                    _uiState.update { state ->
-                                        val updated = state.messages.map { msg ->
-                                            if (msg.id == event.messageId) msg.copy(reactions = updatedList) else msg
-                                        }
-                                        state.copy(messages = updated)
-                                    }
-                                }
-                            }
+                            // only trigger one round-trip). Messages with in-flight pending
+                            // toggles are deferred, never overwritten (see scheduleReactionSync).
+                            scheduleReactionSync(event.messageId)
                         }
                         is WhisperChatEvent.DeleteEvent -> {
                             _uiState.update { state ->
@@ -827,11 +955,26 @@ class WhisperChatViewModel @Inject constructor(
 
     private fun subscribeToTyping() {
         typingSubscriptionJob = viewModelScope.launch {
-            try {
-                repository.subscribeToTypingStatus(otherUserId).collect { isTyping ->
-                    _uiState.update { it.copy(isPartnerTyping = isTyping) }
+            // Transient subscription failures must not kill typing status permanently:
+            // re-subscribe every 3s, capped at 10 consecutive failures. Cancellation is
+            // always rethrown.
+            var retries = 0
+            while (isActive) {
+                try {
+                    repository.subscribeToTypingStatus(otherUserId).collect { isTyping ->
+                        _uiState.update { it.copy(isPartnerTyping = isTyping) }
+                    }
+                    break
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    retries++
+                    if (retries > 10) {
+                        android.util.Log.w("WhisperChatVM", "Typing subscription gave up after $retries failures")
+                        break
+                    }
+                    delay(3000)
                 }
-            } catch (_: Exception) { }
+            }
         }
     }
 
@@ -846,12 +989,75 @@ class WhisperChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         notificationManager.currentChatId = null
-        sendPresenceSignal(false)
+        // viewModelScope is cancelled the moment onCleared starts, so a scope-launched
+        // presence-off would never leave. Fire it in a top-level scope that ignores
+        // cancellation so partners reliably see us go offline.
+        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
+            runCatching { repository.sendPresence(otherUserId, false) }
+                .onFailure { android.util.Log.w("WhisperChatVM", "presence-off signal failed", it) }
+        }
         realtimeJob?.cancel()
         typingSubscriptionJob?.cancel()
         typingDebounceJob?.cancel()
         presenceJob?.cancel()
         undoTimerJob?.cancel()
         reactionSyncJob?.cancel()
+        messagesCollectionJob?.cancel()
+        searchDebounceJob?.cancel()
     }
 }
+
+private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024 - 16 // transport cap minus AES-GCM tag
+
+private fun readBoundedImageBytes(input: java.io.InputStream, context: Context): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        total += read
+        require(total <= MAX_LOCAL_IMAGE_BYTES) { context.getString(R.string.st_Whisper_Error_ImageTooLarge) }
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
+}
+
+/** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
+private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= maxWidth && bounds.outHeight / (sample * 2) >= maxHeight) {
+        sample *= 2
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+}
+
+private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
+    withContext(Dispatchers.Default) {
+        runCatching {
+            // Sample-decode huge sources first so the pipeline never allocates a full-size bitmap.
+            val bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
+            val maxDimension = 1920
+            val width = bitmap.width
+            val height = bitmap.height
+            val scaledBitmap = if (width > maxDimension || height > maxDimension) {
+                val ratio = min(maxDimension.toFloat() / width, maxDimension.toFloat() / height)
+                val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
+                val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+            } else {
+                bitmap
+            }
+            val out = ByteArrayOutputStream()
+            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+            if (scaledBitmap != bitmap) {
+                scaledBitmap.recycle()
+            }
+            bitmap.recycle()
+            val result = out.toByteArray()
+            if (result.isNotEmpty() && result.size < bytes.size) result else bytes
+        }.getOrDefault(bytes)
+    }

@@ -38,8 +38,6 @@ import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,12 +86,30 @@ fun WhisperAuthScreen(
     val submitting by viewModel.submitting.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
 
+    var showBypassDialog by remember { mutableStateOf(false) }
+
     // Recovery tokens and credentials are sensitive — never capture this screen.
-    SecureWindow()
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
+
+    if (showBypassDialog) {
+        WhisperScreenshotBypassDialog(
+            onDismiss = { showBypassDialog = false },
+            onConfirm = { password ->
+                if (password == "SSForWhisperTester") {
+                    viewModel.setScreenshotBypass(true)
+                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                } else {
+                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                }
+                showBypassDialog = false
+            }
+        )
+    }
 
     LaunchedEffect(authState) {
         if (authState is WhisperAuthState.Authenticated) onAuthenticated()
@@ -118,6 +134,14 @@ fun WhisperAuthScreen(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
+                    modifier = Modifier.screenshotBypassGesture {
+                        if (screenshotBypassEnabled) {
+                            viewModel.setScreenshotBypass(false)
+                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                        } else {
+                            showBypassDialog = true
+                        }
+                    },
                     title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -169,6 +193,10 @@ fun WhisperAuthScreen(
                     onRegisterToken = viewModel::registerWithGeneratedToken,
                     onLoginToken = viewModel::loginWithToken,
                     onNormalizeToken = viewModel::normalizeToken,
+                    onCopyToken = { token, restoreTo ->
+                        val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                        viewModel.scheduleTokenClipboardExpiry(token, restoreTo, systemClipboard)
+                    },
                     modifier = Modifier.padding(paddingValues),
                 )
             }
@@ -199,6 +227,7 @@ private fun WhisperAuthContent(
     onRegisterToken: (displayName: String) -> Unit,
     onLoginToken: (String) -> Unit,
     onNormalizeToken: (String) -> String,
+    onCopyToken: (token: String, restoreTo: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 0 = Username, 1 = Token
@@ -252,6 +281,7 @@ private fun WhisperAuthContent(
                     onRegister = onRegisterToken,
                     onLogin = onLoginToken,
                     onNormalizeToken = onNormalizeToken,
+                    onCopyToken = onCopyToken,
                 )
             }
         }
@@ -585,6 +615,7 @@ private fun TokenAuthSection(
     onRegister: (displayName: String) -> Unit,
     onLogin: (String) -> Unit,
     onNormalizeToken: (String) -> String,
+    onCopyToken: (token: String, restoreTo: String?) -> Unit,
 ) {
     var isLoginMode by remember { mutableStateOf(false) }
 
@@ -615,6 +646,7 @@ private fun TokenAuthSection(
                     toastState = toastState,
                     onGenerate = onGenerate,
                     onRegister = onRegister,
+                    onCopyToken = onCopyToken,
                 )
             }
         }
@@ -717,6 +749,7 @@ private fun TokenRegisterForm(
     toastState: WhisperToastState,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
+    onCopyToken: (token: String, restoreTo: String?) -> Unit,
 ) {
     var isCopied by remember { mutableStateOf(false) }
     var hasSavedToken by remember { mutableStateOf(false) }
@@ -725,7 +758,6 @@ private fun TokenRegisterForm(
     val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
     val nameFocusRequester = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     LaunchedEffect(isCopied) {
@@ -734,7 +766,9 @@ private fun TokenRegisterForm(
 
     // The token only ever sits on the clipboard for 60 seconds: it is masked on screen
     // and replaced afterwards, so a leaked screenshot or a forgotten clipboard never
-    // hands over a working credential.
+    // hands over a working credential. The expiry timer lives on the ViewModel so it
+    // survives rotation and navigation (the old rememberCoroutineScope died with the
+    // composable and could leak a live token).
     fun copyTokenWithExpiry(token: String) {
         val previous = clipboard.getText()?.text
         clipboard.setText(AnnotatedString(token))
@@ -744,13 +778,7 @@ private fun TokenRegisterForm(
             context.getString(R.string.st_Whisper_Auth_CopyExpiry),
             WhisperToastType.INFO
         )
-        scope.launch {
-            delay(60_000)
-            // Only touch the clipboard if our token is still the top entry.
-            if (clipboard.getText()?.text == token) {
-                clipboard.setText(AnnotatedString(previous ?: ""))
-            }
-        }
+        onCopyToken(token, previous)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

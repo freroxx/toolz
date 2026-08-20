@@ -66,8 +66,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
@@ -98,9 +100,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
-import kotlin.math.min
 import kotlin.time.Duration.Companion.milliseconds
 
 
@@ -116,6 +116,7 @@ fun WhisperChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val undoState by viewModel.undoState.collectAsStateWithLifecycle()
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val scope = rememberCoroutineScope()
@@ -125,9 +126,11 @@ fun WhisperChatScreen(
     var showMuteDialog by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
     var selectedMessageForDelete by remember { mutableStateOf<WhisperMessage?>(null) }
+    var pendingDeleteForEveryone by remember { mutableStateOf<WhisperMessage?>(null) }
     var quickReactionTargetMessage by remember { mutableStateOf<WhisperMessage?>(null) }
     var showKeyVerifyDialog by remember { mutableStateOf(false) }
     var showImageOptions by remember { mutableStateOf(false) }
+    var showBypassDialog by remember { mutableStateOf(false) }
     // One-shot expiry: consumed by the next picker result, then cleared so a stale
     // choice never silently applies to a later image.
     var pendingImageExpiry by remember { mutableStateOf<Long?>(null) }
@@ -136,26 +139,32 @@ fun WhisperChatScreen(
     val context = LocalContext.current
 
     // E2EE content never appears in screenshots or recent-app previews.
-    SecureWindow()
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
+
+    if (showBypassDialog) {
+        WhisperScreenshotBypassDialog(
+            onDismiss = { showBypassDialog = false },
+            onConfirm = { password ->
+                if (password == "SSForWhisperTester") {
+                    viewModel.setScreenshotBypass(true)
+                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                } else {
+                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                }
+                showBypassDialog = false
+            }
+        )
+    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) }
-        }.getOrNull()
-        if (bytes == null) {
-            toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
-        } else {
-            val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-            val expiry = pendingImageExpiry
-            // Compress before encrypt to stay within the edge-function body limit
-            scope.launch {
-                val compressed = compressImageForUpload(bytes, mimeType)
-                // If compression succeeded the bytes are JPEG; otherwise keep the source mime.
-                val outMime = if (compressed === bytes) mimeType else "image/jpeg"
-                viewModel.sendImage(compressed, outMime, expiry)
-            }
-        }
+        // One-shot expiry: consumed by this picker result, then cleared so a stale
+        // choice never silently applies to a later image.
+        val expiry = pendingImageExpiry
+        pendingImageExpiry = null
+        // Read + compress + send all run inside the ViewModel scope, so leaving the
+        // screen mid-upload no longer silently cancels the send.
+        viewModel.sendImageFromUri(context.applicationContext, uri, expiry)
     }
 
     val listState = rememberLazyListState()
@@ -168,8 +177,9 @@ fun WhisperChatScreen(
     val isAtBottom by remember {
         derivedStateOf {
             // In reverseLayout, firstVisibleItemIndex is the index from the BOTTOM.
-            // Index 0 is the newest message.
-            listState.firstVisibleItemIndex <= 1
+            // Index 0 is the newest message. The scroll offset must also be near zero:
+            // a partially scrolled-away bottom row shouldn't count as "at bottom".
+            listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset < 200
         }
     }
 
@@ -190,8 +200,11 @@ fun WhisperChatScreen(
     }
 
     // Auto-logout when session expires
+    val sessionExpiredMsg = stringResource(R.string.st_Whisper_Error_SessionExpired)
     LaunchedEffect(Unit) {
         viewModel.sessionExpired.collect {
+            // Surface WHY the chat bounced before navigating away.
+            toastState.show(sessionExpiredMsg, WhisperToastType.ERROR)
             onNavigateBack()
         }
     }
@@ -222,6 +235,14 @@ fun WhisperChatScreen(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
+                    modifier = Modifier.screenshotBypassGesture {
+                        if (screenshotBypassEnabled) {
+                            viewModel.setScreenshotBypass(false)
+                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                        } else {
+                            showBypassDialog = true
+                        }
+                    },
                     title = {
                         if (uiState.isSearchActive) {
                             OutlinedTextField(
@@ -343,7 +364,8 @@ fun WhisperChatScreen(
                                     modifier = Modifier.padding(end = 4.dp)
                                 ) {
                                     Text(
-                                        "${(uiState.activeSearchMatchIndex + 1).coerceAtLeast(1)}/${uiState.matchingMessageIds.size}",
+                                        // Clamp so the counter can never over-report the match count.
+                                        "${(uiState.activeSearchMatchIndex + 1).coerceIn(1, uiState.matchingMessageIds.size)}/${uiState.matchingMessageIds.size}",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.primary,
@@ -521,24 +543,9 @@ fun WhisperChatScreen(
                 }
 
                 // 30s Undo Banner (undo countdown state is separate from chat state so the
-                // 1 Hz tick doesn't recompose the message list)
-                androidx.compose.animation.AnimatedVisibility(visible = undoState.clearedCount > 0) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                        shape = RoundedCornerShape(20.dp),
-                        tonalElevation = 4.dp,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.st_Whisper_Chat_ClearedMessages, undoState.clearedCount), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
-                            ToolzTonalExpressiveButton(onClick = { viewModel.undoClearChat() }) {
-                                Text(stringResource(R.string.st_Whisper_Undo, undoState.secondsRemaining), fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
+                // 1 Hz tick doesn't recompose the message list; UndoBanner reads
+                // secondsRemaining itself so only the banner subtree recomposes)
+                UndoBanner(undoState = undoState, onUndo = { viewModel.undoClearChat() })
 
                 // Typing indicator
                 androidx.compose.animation.AnimatedVisibility(visible = uiState.isPartnerTyping) {
@@ -617,7 +624,7 @@ fun WhisperChatScreen(
             onDismiss = { selectedMessageForDelete = null },
             onReply = { selectedMessageForDelete = null; viewModel.setReplyTarget(msg) },
             onReact = { emoji -> selectedMessageForDelete = null; viewModel.toggleReaction(msg, emoji) },
-            onDeleteForEveryone = { selectedMessageForDelete = null; viewModel.deleteMessageForEveryone(msg) },
+            onDeleteForEveryone = { selectedMessageForDelete = null; pendingDeleteForEveryone = msg },
             onDeleteForMe = { selectedMessageForDelete = null; viewModel.deleteMessageForMe(msg) }
         )
     }
@@ -632,6 +639,24 @@ fun WhisperChatScreen(
 
     if (showBlockConfirmDialog) {
         BlockConfirmDialog(partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault), onDismiss = { showBlockConfirmDialog = false }, onConfirmBlock = { viewModel.toggleBlock(); showBlockConfirmDialog = false })
+    }
+
+    // Delete-for-everyone is irreversible and affects the partner too — confirm first.
+    pendingDeleteForEveryone?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteForEveryone = null },
+            title = { Text(stringResource(R.string.st_Whisper_DeleteForEveryoneTitle)) },
+            text = { Text(stringResource(R.string.st_Whisper_DeleteForEveryoneDesc)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDeleteForEveryone = null
+                    viewModel.deleteMessageForEveryone(msg)
+                }) {
+                    Text(stringResource(R.string.st_Whisper_Delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { pendingDeleteForEveryone = null }) { Text(stringResource(R.string.st_Whisper_Cancel)) } }
+        )
     }
 
     if (showKeyVerifyDialog) {
@@ -670,6 +695,29 @@ fun WhisperChatScreen(
     }
 }
 
+
+@Composable
+private fun UndoBanner(undoState: WhisperUndoUiState, onUndo: () -> Unit) {
+    // Reads secondsRemaining itself so the 1 Hz countdown only recomposes this subtree,
+    // never the whole message list column. The message list is deliberately NOT a param.
+    androidx.compose.animation.AnimatedVisibility(visible = undoState.clearedCount > 0) {
+        Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            shape = RoundedCornerShape(20.dp),
+            tonalElevation = 4.dp,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+        ) {
+            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.st_Whisper_Chat_ClearedMessages, undoState.clearedCount), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onTertiaryContainer, style = MaterialTheme.typography.bodyMedium)
+                ToolzTonalExpressiveButton(onClick = onUndo) {
+                    Text(stringResource(R.string.st_Whisper_Undo, undoState.secondsRemaining), fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun BouncingDotsIndicator(modifier: Modifier = Modifier) {
@@ -831,7 +879,7 @@ private fun ConversationOptionsSheet(
                 }
                 Column {
                     Text(stringResource(R.string.st_Whisper_Chat_Options), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("Manage this conversation", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_Whisper_ManageConversation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -1124,7 +1172,7 @@ private fun MuteOptionsDialog(onDismiss: () -> Unit, onSelectDuration: (Long) ->
 @Composable
 private fun BlockConfirmDialog(partnerName: String, onDismiss: () -> Unit, onConfirmBlock: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.st_Whisper_BlockConfirmTitle, partnerName)) }, text = { Text(stringResource(R.string.st_Whisper_BlockConfirmDesc)) },
-        confirmButton = { TextButton(onClick = onConfirmBlock) { Text(stringResource(R.string.st_Whisper_Block), color = Color.Red) } },
+        confirmButton = { TextButton(onClick = onConfirmBlock) { Text(stringResource(R.string.st_Whisper_Block), color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
 
@@ -1262,6 +1310,8 @@ private fun MessageBubble(
 ) {
     val bubbleShape = if (isMine) RoundedCornerShape(20.dp, 4.dp, 20.dp, 20.dp) else RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp)
     val performanceMode = LocalPerformanceMode.current
+    // Gesture hints for accessibility (resolved once; the semantics block isn't composable).
+    val messageSemanticsCd = stringResource(R.string.st_Whisper_MessageSemantics)
     
     // ── SLIDE TO REPLY STATE ──
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -1311,6 +1361,8 @@ private fun MessageBubble(
                         onDoubleClick = onDoubleTap,
                         onLongClick = onLongClick
                     )
+                    // Surface the swipe/double-tap gestures to screen readers.
+                    .semantics { contentDescription = messageSemanticsCd }
                     .pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { _, dragAmount ->
@@ -1337,7 +1389,9 @@ private fun MessageBubble(
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(message.replyToSenderName ?: stringResource(R.string.st_Whisper_UserDefault), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    val isImage = message.replyToContent == stringResource(R.string.st_Whisper_Image) || message.replyToContent == "📷 Image"
+                                    // Image replies are flagged with the attachment prefix by the ViewModel
+                                    // (locale-independent, model-based) instead of a display-string sentinel.
+                                    val isImage = message.replyToContent?.startsWith(WhisperImageAttachment.MESSAGE_PREFIX) == true
                                     val isDeletedQuote = message.replyToContent?.startsWith("[deleted_by_sender") == true || message.replyToContent == stringResource(R.string.st_Whisper_MessageDeleted)
                                     Text(
                                         when {
@@ -1363,7 +1417,24 @@ private fun MessageBubble(
                     } else {
                         val attachment = WhisperImageAttachment.fromMessageContent(message.content)
                         if (attachment != null) {
-                            LaunchedEffect(message.id) { onLoadImage() }
+                            // A failed decrypt used to leave "Loading image" up forever. Track a
+                            // per-message retry key + a bounded failure window so the user can
+                            // re-trigger the load when decryption doesn't resolve.
+                            var imageRetryKey by remember { mutableStateOf(0) }
+                            var imageLoadFailed by remember { mutableStateOf(false) }
+                            // Reload on first appearance and on every explicit retry.
+                            LaunchedEffect(message.id, imageRetryKey) { onLoadImage() }
+                            // Give the decrypt a bounded window; if nothing arrives, surface a
+                            // retry affordance instead of an endless spinner.
+                            LaunchedEffect(message.id, imageRetryKey, decryptedImageBytes, message.isPending) {
+                                if (decryptedImageBytes == null && !message.isPending) {
+                                    imageLoadFailed = false
+                                    delay(12_000)
+                                    imageLoadFailed = true
+                                } else {
+                                    imageLoadFailed = false
+                                }
+                            }
                             val bitmap = remember(decryptedImageBytes) {
                                 decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
                             }
@@ -1378,9 +1449,33 @@ private fun MessageBubble(
                                         .clickable { decryptedImageBytes?.let { onImageClick(it, attachment.mimeType) } },
                                 )
                             } else {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Rounded.Lock, contentDescription = null)
-                                    Text(if (attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true) stringResource(R.string.st_Whisper_ImageExpired) else stringResource(R.string.st_Whisper_LoadingImage))
+                                when {
+                                    attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true -> {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.Lock, contentDescription = null)
+                                            Text(stringResource(R.string.st_Whisper_ImageExpired))
+                                        }
+                                    }
+                                    imageLoadFailed -> {
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Icon(Icons.Rounded.Lock, contentDescription = null)
+                                                Text(stringResource(R.string.st_Whisper_ImageLoadFailed))
+                                            }
+                                            TextButton(
+                                                onClick = { imageRetryKey++ },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                            ) {
+                                                Text(stringResource(R.string.st_Whisper_Retry), style = MaterialTheme.typography.labelMedium)
+                                            }
+                                        }
+                                    }
+                                    else -> {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Rounded.Lock, contentDescription = null)
+                                            Text(stringResource(R.string.st_Whisper_LoadingImage))
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -1401,7 +1496,7 @@ private fun MessageBubble(
                                 if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
                                 null,
                                 Modifier.size(14.dp),
-                                tint = if (message.isRead) MaterialTheme.colorScheme.primary else Color.Gray
+                                tint = if (message.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                             )
                         }
                     }
@@ -1539,6 +1634,7 @@ private fun MessageInputBar(
         }
 
         // 2. Floating Circular Action Button (Send / Mic)
+        val sendMessageCd = stringResource(R.string.cd_Whisper_SendMessage)
         Surface(
             onClick = { if (hasText) onSend(draftText) },
             enabled = enabled && hasText,
@@ -1552,6 +1648,8 @@ private fun MessageInputBar(
                     scaleX = sendPop.value * sendButtonScale
                     scaleY = sendPop.value * sendButtonScale
                 }
+                // The idle mic-less icon has no CD of its own — expose the action here.
+                .semantics { if (!hasText) contentDescription = sendMessageCd }
         ) {
             Box(contentAlignment = Alignment.Center) {
                 AnimatedContent(
@@ -1581,34 +1679,6 @@ private fun MessageInputBar(
     }
 }
 
-
-
-private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
-    withContext(Dispatchers.Default) {
-        runCatching {
-            // Sample-decode huge sources first so the pipeline never allocates a full-size bitmap.
-            val bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
-            val maxDimension = 1920
-            val width = bitmap.width
-            val height = bitmap.height
-            val scaledBitmap = if (width > maxDimension || height > maxDimension) {
-                val ratio = min(maxDimension.toFloat() / width, maxDimension.toFloat() / height)
-                val newWidth = (width * ratio).roundToInt().coerceAtLeast(1)
-                val newHeight = (height * ratio).roundToInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-            } else {
-                bitmap
-            }
-            val out = ByteArrayOutputStream()
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
-            if (scaledBitmap != bitmap) {
-                scaledBitmap.recycle()
-            }
-            bitmap.recycle()
-            val result = out.toByteArray()
-            if (result.isNotEmpty() && result.size < bytes.size) result else bytes
-        }.getOrDefault(bytes)
-    }
 
 
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
@@ -1686,20 +1756,6 @@ private fun String.parseMarkdown(): AnnotatedString {
     return builder.toAnnotatedString()
 }
 
-private fun readBoundedImageBytes(input: java.io.InputStream, context: Context): ByteArray {
-    val output = ByteArrayOutputStream()
-    val buffer = ByteArray(16 * 1024)
-    var total = 0
-    while (true) {
-        val read = input.read(buffer)
-        if (read < 0) break
-        total += read
-        require(total <= MAX_LOCAL_IMAGE_BYTES) { context.getString(R.string.st_Whisper_Error_ImageTooLarge) }
-        output.write(buffer, 0, read)
-    }
-    return output.toByteArray()
-}
-
 /** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
 private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -1723,10 +1779,20 @@ private fun WhisperFullScreenImageViewer(
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
     val screen = LocalConfiguration.current
-    val bitmap = remember(imageBytes) {
-        runCatching { decodeBoundedBitmap(imageBytes, screen.screenWidthDp * 2, screen.screenHeightDp * 2) }.getOrNull()
+    val density = LocalDensity.current
+    // Decode off the main thread — a full-screen decode can take tens of ms and must
+    // never run during composition. Configuration bounds are dp; convert to px first
+    // because decodeBoundedBitmap treats its bounds as pixels.
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(imageBytes) {
+        val maxWidthPx = with(density) { (screen.screenWidthDp * 2).dp.toPx() }.toInt()
+        val maxHeightPx = with(density) { (screen.screenHeightDp * 2).dp.toPx() }.toInt()
+        bitmap = withContext(Dispatchers.Default) {
+            runCatching { decodeBoundedBitmap(imageBytes, maxWidthPx, maxHeightPx) }.getOrNull()
+        }
     }
-    // Release the decoded bitmap when the viewer closes instead of leaking it.
+    // Release the decoded bitmap when the viewer closes or it is replaced,
+    // instead of leaking it.
     DisposableEffect(bitmap) {
         onDispose { bitmap?.recycle() }
     }
@@ -1744,12 +1810,13 @@ private fun WhisperFullScreenImageViewer(
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.92f))
         ) {
-            if (bitmap != null) {
+            val bmp = bitmap
+            if (bmp != null) {
                 var scale by remember { mutableStateOf(1f) }
                 var offset by remember { mutableStateOf(Offset.Zero) }
 
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = bmp.asImageBitmap(),
                     contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
                     modifier = Modifier
                         .fillMaxSize()
@@ -1798,7 +1865,7 @@ private fun WhisperFullScreenImageViewer(
                         scope.launch {
                             val saved = saveImageToGallery(context, imageBytes, mimeType)
                             if (saved) {
-                                onShowToast(context.getString(R.string.st_BackgroundRemover_Success), WhisperToastType.SUCCESS)
+                                onShowToast(context.getString(R.string.st_Whisper_ImageSaved), WhisperToastType.SUCCESS)
                             } else {
                                 onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
                             }
@@ -1809,7 +1876,7 @@ private fun WhisperFullScreenImageViewer(
                         contentColor = Color.White
                     )
                 ) {
-                    Icon(Icons.Rounded.Download, contentDescription = "Save")
+                    Icon(Icons.Rounded.Download, contentDescription = stringResource(R.string.st_Whisper_Save))
                 }
             }
         }
@@ -1821,32 +1888,44 @@ private suspend fun saveImageToGallery(context: Context, bytes: ByteArray, mimeT
         val resolver = context.contentResolver
         try {
             val filename = "Whisper_${System.currentTimeMillis()}.${if (mimeType == "image/png") "png" else "jpg"}"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Whisper")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
+            // RELATIVE_PATH / IS_PENDING only exist on API 29+; older devices get a plain
+            // insert (MediaStore auto-assigns the Pictures location) without the pending dance.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Whisper")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
 
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return@withContext false
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    ?: return@withContext false
 
-            try {
-                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
-                contentValues.clear()
-                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(uri, contentValues, null, null)
-            } catch (e: Exception) {
-                // A failed write must not leave a phantom pending media item behind.
-                runCatching { resolver.delete(uri, null, null) }
-                return@withContext false
+                try {
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                } catch (e: Exception) {
+                    // A failed write must not leave a phantom pending media item behind.
+                    runCatching { resolver.delete(uri, null, null) }
+                    return@withContext false
+                }
+            } else {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                }
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                    ?: return@withContext false
+                val wrote = resolver.openOutputStream(uri)?.use { it.write(bytes) } != null
+                if (!wrote) {
+                    runCatching { resolver.delete(uri, null, null) }
+                    return@withContext false
+                }
             }
             true
         } catch (e: Exception) {
             false
         }
     }
-
-
-
-private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024 - 16 // transport cap minus AES-GCM tag

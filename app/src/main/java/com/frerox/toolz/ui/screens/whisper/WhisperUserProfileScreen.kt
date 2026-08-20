@@ -63,9 +63,30 @@ fun WhisperUserProfileScreen(
     viewModel: WhisperUserProfileViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val context = LocalContext.current
+
+    var showBypassDialog by remember { mutableStateOf(false) }
+
+    // User profile data is sensitive — never capture this screen.
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
+
+    if (showBypassDialog) {
+        WhisperScreenshotBypassDialog(
+            onDismiss = { showBypassDialog = false },
+            onConfirm = { password ->
+                if (password == "SSForWhisperTester") {
+                    viewModel.setScreenshotBypass(true)
+                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                } else {
+                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                }
+                showBypassDialog = false
+            }
+        )
+    }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -78,6 +99,14 @@ fun WhisperUserProfileScreen(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
+                    modifier = Modifier.screenshotBypassGesture {
+                        if (screenshotBypassEnabled) {
+                            viewModel.setScreenshotBypass(false)
+                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                        } else {
+                            showBypassDialog = true
+                        }
+                    },
                     title = { Text(uiState.profile?.effectiveName ?: "", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
@@ -402,13 +431,21 @@ fun WhisperUserProfileScreen(
     }
 }
 
+/**
+ * SHA-256 fingerprint of a base64 public key, rendered as 4 groups of 4 uppercase
+ * hex chars — byte-for-byte the same algorithm as WhisperCrypto.fingerprint. Kept
+ * as a file-level function because this screen has no crypto instance; WhisperCrypto
+ * should eventually delegate to this single implementation.
+ */
+internal fun whisperFingerprint(base64Key: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(base64Key.trim().toByteArray(Charsets.UTF_8))
+    val hex = digest.joinToString("") { "%02X".format(it) }
+    return hex.chunked(4).take(4).joinToString("-")
+}
+
 /** Compute a SHA-256 fingerprint from a base64 public key */
-private fun computeFingerprint(base64PublicKey: String): String {
-    return try {
-        val bytes = MessageDigest.getInstance("SHA-256").digest(base64PublicKey.trim().toByteArray(Charsets.UTF_8))
-        val hex = bytes.joinToString("") { "%02X".format(it) }
-        hex.chunked(4).take(4).joinToString("-")
-    } catch (_: Exception) {
-        "UNVERIFIED"
-    }
+private fun computeFingerprint(base64PublicKey: String): String = try {
+    whisperFingerprint(base64PublicKey)
+} catch (_: Exception) {
+    "UNVERIFIED"
 }

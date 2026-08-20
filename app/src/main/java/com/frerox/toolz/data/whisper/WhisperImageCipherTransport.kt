@@ -16,6 +16,11 @@ object WhisperImageCipherTransport {
     // PNG is RGBA (up to ~4x cipher bytes) and base64 adds 4/3. Keep the worst case under
     // ImgBB's 32 MB request ceiling instead of relying on PNG compression for random ciphertext.
     const val MAX_CIPHER_BYTES = 5 * 1024 * 1024
+    // Decoded pixel ceiling for decode(): a hostile PNG can declare huge dimensions, and
+    // each decoded pixel costs up to ~11 bytes at peak (4 for ARGB_8888 + 4 raw buffer +
+    // 3 extracted), so a few KB of header can demand gigabytes of heap. The send pipeline
+    // compresses real images to ~5 MP, so 8 MP leaves ample headroom for legit payloads.
+    private const val MAX_PIXELS = 8_000_000
 
     fun encode(cipherBytes: ByteArray): ByteArray {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Encrypted image is too large." }
@@ -56,6 +61,16 @@ object WhisperImageCipherTransport {
         if (pngBytes.size < 8 || pngBytes[0] != 0x89.toByte() || pngBytes[1] != 0x50.toByte() || pngBytes[2] != 0x4E.toByte() || pngBytes[3] != 0x47.toByte()) {
             return null
         }
+        // Bounds pre-pass: reject dimension bombs before any pixels are allocated. A PNG
+        // header can claim arbitrary width/height; decoding then materializes
+        // width*height*4 bytes (plus the extraction buffers), i.e. ~11 bytes/pixel at
+        // peak. Legit images from the send pipeline are compressed to ~5 MP, so an 8 MP
+        // ceiling cannot reject them. Long math avoids Int overflow that could otherwise
+        // wrap the product negative and slip past the cap.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        if (bounds.outWidth.toLong() * bounds.outHeight > MAX_PIXELS) return null
         val options = BitmapFactory.Options().apply {
             inScaled = false
             inPremultiplied = false

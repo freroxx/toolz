@@ -84,9 +84,14 @@ fun WhisperToastHost(
     modifier: Modifier = Modifier
 ) {
     val currentToast by hostState.currentToast.collectAsState()
+    // The AnimatedVisibility content stays composed for the whole exit transition, but
+    // currentToast is already null by then; keep the last non-null toast so the exit
+    // animation renders the actual message instead of an empty container.
+    var lastToast by remember { mutableStateOf<WhisperToastData?>(null) }
 
     LaunchedEffect(currentToast) {
         currentToast?.let {
+            lastToast = it
             delay(3500)
             if (hostState.currentToast.value?.id == it.id) {
                 hostState.dismiss()
@@ -106,7 +111,7 @@ fun WhisperToastHost(
         ) + fadeOut(),
         modifier = modifier
     ) {
-        currentToast?.let { toast ->
+        lastToast?.let { toast ->
             WhisperToastItem(
                 data = toast,
                 onDismiss = { hostState.dismiss() }

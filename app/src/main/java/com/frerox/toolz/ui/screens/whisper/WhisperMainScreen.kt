@@ -83,6 +83,8 @@ import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -100,13 +102,31 @@ fun WhisperMainScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
     val betaWarningShown by viewModel.betaWarningShown.collectAsStateWithLifecycle()
+    val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    var showBypassDialog by remember { mutableStateOf(false) }
+
     // Conversation previews contain decrypted content — never allow screenshots/recents capture.
-    SecureWindow()
+    SecureWindow(bypassEnabled = screenshotBypassEnabled)
+
+    if (showBypassDialog) {
+        WhisperScreenshotBypassDialog(
+            onDismiss = { showBypassDialog = false },
+            onConfirm = { password ->
+                if (password == "SSForWhisperTester") {
+                    viewModel.setScreenshotBypass(true)
+                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                } else {
+                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                }
+                showBypassDialog = false
+            }
+        )
+    }
 
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
     var isLoggingOut by rememberSaveable { mutableStateOf(false) }
@@ -130,6 +150,9 @@ fun WhisperMainScreen(
     var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
     var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
     var convoPendingClear by remember { mutableStateOf<WhisperConversation?>(null) }
+    var pendingUnfriend by remember { mutableStateOf<WhisperProfile?>(null) }
+    var pendingRemovePhoto by remember { mutableStateOf(false) }
+    var pendingHideChat by remember { mutableStateOf<WhisperConversation?>(null) }
     var showAvatarOptions by remember { mutableStateOf(false) }
     var profileForFullView by remember { mutableStateOf<WhisperProfile?>(null) }
 
@@ -156,6 +179,14 @@ fun WhisperMainScreen(
         Scaffold(
             topBar = {
                 ExpressiveTopAppBar(
+                    modifier = Modifier.screenshotBypassGesture {
+                        if (screenshotBypassEnabled) {
+                            viewModel.setScreenshotBypass(false)
+                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                        } else {
+                            showBypassDialog = true
+                        }
+                    },
                     title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -301,9 +332,9 @@ fun WhisperMainScreen(
                 },
                 onDeletePhoto = {
                     haptic.click()
-                    viewModel.deleteAvatar()
                     showAvatarOptions = false
-                    // No optimistic toast: failures surface through the shared error handler.
+                    // Deleting the photo is destructive, so it always asks first.
+                    pendingRemovePhoto = true
                 }
             )
         }
@@ -350,6 +381,127 @@ fun WhisperMainScreen(
         )
     }
 
+    // Unfriend confirmation (removes the friend permanently)
+    pendingUnfriend?.let { friend ->
+        val unfriendedMsg = stringResource(R.string.st_Whisper_RemovedFriend)
+        AlertDialog(
+            onDismissRequest = { pendingUnfriend = null },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.PersonRemove, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = { Text(stringResource(R.string.st_Whisper_UnfriendTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge) },
+            text = { Text(stringResource(R.string.st_Whisper_UnfriendDesc, friend.effectiveName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        val fId = friend.id
+                        pendingUnfriend = null
+                        haptic.success()
+                        viewModel.unfriend(fId)
+                        toastState.show(unfriendedMsg, WhisperToastType.INFO)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
+                ) { Text(stringResource(R.string.st_Whisper_UnfriendConfirm), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { pendingUnfriend = null }) {
+                    Text(stringResource(R.string.st_Whisper_Cancel))
+                }
+            },
+            properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+        )
+    }
+
+    // Remove-profile-photo confirmation (deletes the avatar permanently)
+    if (pendingRemovePhoto) {
+        AlertDialog(
+            onDismissRequest = { pendingRemovePhoto = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = { Text(stringResource(R.string.st_Whisper_RemovePhotoTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge) },
+            text = { Text(stringResource(R.string.st_Whisper_RemovePhotoDesc), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        pendingRemovePhoto = false
+                        haptic.success()
+                        viewModel.deleteAvatar()
+                        // No optimistic toast: failures surface through the shared error handler.
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
+                ) { Text(stringResource(R.string.st_Whisper_Delete), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { pendingRemovePhoto = false }) {
+                    Text(stringResource(R.string.st_Whisper_Cancel))
+                }
+            },
+            properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+        )
+    }
+
+    // Hide-chat confirmation (hides the conversation locally, non-destructive)
+    pendingHideChat?.let { convo ->
+        val hiddenMsg = stringResource(R.string.st_Whisper_ChatHidden)
+        AlertDialog(
+            onDismissRequest = { pendingHideChat = null },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.VisibilityOff, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = { Text(stringResource(R.string.st_Whisper_HideChatTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge) },
+            text = { Text(stringResource(R.string.st_Whisper_HideChatDesc), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        val uId = convo.otherUser.id
+                        pendingHideChat = null
+                        haptic.success()
+                        viewModel.hideChat(uId)
+                        toastState.show(hiddenMsg, WhisperToastType.INFO)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(stringResource(R.string.st_Whisper_HideChat), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { pendingHideChat = null }, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.st_Whisper_Cancel))
+                }
+            },
+            properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+        )
+    }
+
     // Material 3 Expressive Friend Options Bottom Sheet
     selectedFriendForOptions?.let { friend ->
         val unfriendedMsg = stringResource(R.string.st_Whisper_RemovedFriend)
@@ -367,11 +519,11 @@ fun WhisperMainScreen(
                 onNavigateToProfile(fId)
             },
             onUnfriend = {
-                val fId = friend.id
+                val friend = friend
                 selectedFriendForOptions = null
                 haptic.click()
-                viewModel.unfriend(fId)
-                toastState.show(unfriendedMsg, WhisperToastType.INFO)
+                // Unfriending is destructive, so it always asks for confirmation first.
+                pendingUnfriend = friend
             }
         )
     }
@@ -382,7 +534,6 @@ fun WhisperMainScreen(
         val mutedMsg = stringResource(R.string.st_Whisper_MutedNotifications)
         val unblockedMsg = stringResource(R.string.st_Whisper_UserUnblocked)
         val blockedMsg = stringResource(R.string.st_Whisper_UserBlocked)
-        val hiddenMsg = stringResource(R.string.st_Whisper_ChatHidden)
         var isBlocked by remember(convo.otherUser.id) { mutableStateOf(false) }
         LaunchedEffect(convo.otherUser.id) {
             isBlocked = viewModel.isBlockedByMe(convo.otherUser.id)
@@ -414,15 +565,18 @@ fun WhisperMainScreen(
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
                 haptic.click()
-                viewModel.toggleBlockUser(uId)
-                toastState.show(if (isBlocked) unblockedMsg else blockedMsg, WhisperToastType.INFO)
+                // Toast from the toggle RESULT, not the possibly-stale local snapshot:
+                // the callback carries the new state, so the message can never invert.
+                viewModel.toggleBlockUser(uId) { isBlockedNow ->
+                    toastState.show(if (isBlockedNow) blockedMsg else unblockedMsg, WhisperToastType.INFO)
+                }
             },
             onDeleteChat = {
-                val uId = convo.otherUser.id
+                val convo = convo
                 selectedConvoForOptions = null
                 haptic.click()
-                viewModel.hideChat(uId)
-                toastState.show(hiddenMsg, WhisperToastType.INFO)
+                // Hiding is not destructive, but confirm anyway so the action is explicit.
+                pendingHideChat = convo
             }
         )
     }
@@ -597,7 +751,7 @@ private fun MergedChatsAndFriendsTab(
         WhisperEmptyState(
             icon = Icons.AutoMirrored.Rounded.Chat,
             title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
-            subtitle = stringResource(R.string.st_Whisper_Discover_EmptySearch),
+            subtitle = stringResource(R.string.st_Whisper_Chats_EmptySubtitle),
         )
         return
     }
@@ -609,7 +763,8 @@ private fun MergedChatsAndFriendsTab(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Incoming Friend Requests Banner
+        // Incoming Friend Requests Banner. pendingIncomingRequests is the single source
+        // of truth (it mirrors pendingIncoming, which is kept for the nav badge only).
         if (uiState.pendingIncomingRequests.isNotEmpty()) {
             item {
                 SectionHeader(stringResource(R.string.st_Whisper_FriendRequestsCount, uiState.pendingIncomingRequests.size))
@@ -619,17 +774,6 @@ private fun MergedChatsAndFriendsTab(
                     reqItem = reqItem,
                     onAccept = { haptic.success(); viewModel.acceptFriendRequest(reqItem.friendship.id) },
                     onDecline = { haptic.click(); viewModel.declineFriendRequest(reqItem.friendship.id) },
-                )
-            }
-        } else if (uiState.pendingIncoming.isNotEmpty()) {
-            item {
-                SectionHeader(stringResource(R.string.st_Whisper_FriendRequestsCount, uiState.pendingIncoming.size))
-            }
-            items(uiState.pendingIncoming, key = { "req_${it.id}" }) { friendship ->
-                FriendRequestCard(
-                    reqItem = WhisperFriendRequestItem(friendship, null),
-                    onAccept = { haptic.success(); viewModel.acceptFriendRequest(friendship.id) },
-                    onDecline = { haptic.click(); viewModel.declineFriendRequest(friendship.id) },
                 )
             }
         }
@@ -932,8 +1076,12 @@ private fun DiscoverTab(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val haptic = rememberToolzHapticFeedback()
+    val discoverLoadFailed by viewModel.discoverLoadFailed.collectAsStateWithLifecycle()
 
+    // Debounced search: a network call per keystroke is wasteful, so wait 400ms of
+    // stillness before asking the VM (the VM also cancels the previous in-flight job).
     LaunchedEffect(searchQuery) {
+        delay(400)
         viewModel.searchProfiles(searchQuery)
     }
 
@@ -1076,6 +1224,29 @@ private fun DiscoverTab(
                     if (uiState.isDiscoverLoadingNext) {
                         items(2) { DiscoverSkeleton() }
                     }
+
+                    // A failed page load leaves the infinite scroll stuck (the load
+                    // effect only re-fires when the scroll/loading state changes), so
+                    // offer an explicit retry.
+                    if (discoverLoadFailed) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
+                                ToolzOutlinedExpressiveButton(
+                                    onClick = {
+                                        haptic.click()
+                                        viewModel.loadNextDiscoverPage()
+                                    },
+                                ) {
+                                    Icon(Icons.Rounded.Refresh, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(stringResource(R.string.st_Whisper_Retry), fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                     
                     if (uiState.recommendedProfiles.isEmpty() && uiState.discoverProfiles.isEmpty() && !uiState.isLoading) {
                         item {
@@ -1217,11 +1388,12 @@ private fun ProfileTab(
     val initialIsHidden = profile.isHiddenFromDiscover
 
     // Reset the form only when a different account loads; refreshed profile data after a
-    // save should not wipe edits the user is still making.
-    var displayName by remember(profile.id) { mutableStateOf(initialDisplayName) }
-    var bio by remember(profile.id) { mutableStateOf(initialBio) }
-    var isPrivate by remember(profile.id) { mutableStateOf(initialIsPrivate) }
-    var isHidden by remember(profile.id) { mutableStateOf(initialIsHidden) }
+    // save should not wipe edits the user is still making. rememberSaveable keeps the
+    // in-progress edits across rotation/process recreation too.
+    var displayName by rememberSaveable(profile.id) { mutableStateOf(initialDisplayName) }
+    var bio by rememberSaveable(profile.id) { mutableStateOf(initialBio) }
+    var isPrivate by rememberSaveable(profile.id) { mutableStateOf(initialIsPrivate) }
+    var isHidden by rememberSaveable(profile.id) { mutableStateOf(initialIsHidden) }
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
@@ -1286,11 +1458,26 @@ private fun ProfileTab(
         ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                // Bound the read so a huge picker image can never exhaust memory.
-                val bytes = stream.readBounded(MAX_AVATAR_READ_BYTES)
-                val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-                viewModel.uploadAvatar(bytes, mimeType)
+            // Reads and bounded-size checks never run on the main thread; any failure
+            // (including readBounded's require for oversized files) is caught here and
+            // surfaced as a toast instead of crashing the picker.
+            scope.launch(Dispatchers.IO) {
+                val result = runCatching {
+                    val stream = context.contentResolver.openInputStream(uri)
+                        ?: error("Could not open picked image")
+                    stream.use { s ->
+                        // Bound the read so a huge picker image can never exhaust memory.
+                        val bytes = s.readBounded(MAX_AVATAR_READ_BYTES)
+                        val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+                        bytes to mimeType
+                    }
+                }
+                result
+                    .onSuccess { (bytes, mimeType) -> viewModel.uploadAvatar(bytes, mimeType) }
+                    .onFailure { err ->
+                        if (err is kotlinx.coroutines.CancellationException) return@onFailure
+                        toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
+                    }
             }
         }
     }
@@ -2013,13 +2200,13 @@ private fun ChatOptionsSheet(
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
             )
 
-            // Delete chat (hides from the chats tab)
+            // Hide chat (hides from the chats tab, non-destructive)
             ListItem(
                 headlineContent = {
-                    Text("Delete chat", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.st_Whisper_HideChat), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
                 },
                 leadingContent = {
-                    Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Rounded.VisibilityOff, null, tint = MaterialTheme.colorScheme.error)
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteChat() }
             )

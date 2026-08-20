@@ -84,8 +84,9 @@ class WhisperAuthManager @Inject constructor(
                 connection.requestMethod = "POST"
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 30_000
-                connection.doOutput = true
-                connection.setFixedLengthStreamingMode(0)
+                // Bodyless POST: the edge function only checks the method and the
+                // Authorization header, so no request body is written or streamed.
+                connection.doOutput = false
                 connection.setRequestProperty("Authorization", "Bearer $token")
                 connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -156,9 +157,28 @@ class WhisperAuthManager @Inject constructor(
         
         // With email confirmation OFF in Supabase, this signs in immediately
         if (supabase.auth.currentSessionOrNull() == null) {
-            supabase.auth.signInWith(Email) {
-                this.email = virtualEmail
-                this.password = password
+            val firstAttempt = runCatching {
+                supabase.auth.signInWith(Email) {
+                    this.email = virtualEmail
+                    this.password = password
+                }
+            }
+            if (firstAttempt.isFailure) {
+                val firstError = firstAttempt.exceptionOrNull()
+                // A transient failure right after signup leaves the account created but
+                // no session: retry the sign-in once so a hiccup doesn't strand the user.
+                if (firstError != null && !isInvalidCredentials(firstError)) {
+                    val retry = loginWithUsername(username, password)
+                    if (retry.isFailure) {
+                        val retryError = retry.exceptionOrNull()
+                        if (retryError != null && isInvalidCredentials(retryError)) {
+                            error("Your account was created, but the automatic sign-in failed. Please sign in with your username and password.")
+                        }
+                        throw retryError ?: firstError
+                    }
+                } else {
+                    throw firstError ?: Exception("Sign-in failed after registration")
+                }
             }
         }
     }

@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.retry
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -36,6 +38,7 @@ class WhisperViewModel @Inject constructor(
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val settingsRepository: SettingsRepository,
     private val crypto: WhisperCrypto,
+    private val outgoingQueue: WhisperOutgoingQueue,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
@@ -48,16 +51,33 @@ class WhisperViewModel @Inject constructor(
     val onboardingShown: StateFlow<Boolean?> = settingsRepository.whisperOnboardingShown
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setScreenshotBypass(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setWhisperScreenshotBypass(enabled)
+        }
+    }
+
     fun markBetaWarningAsShown() {
         viewModelScope.launch {
             settingsRepository.setWhisperBetaWarningShown(true)
         }
     }
 
+    private var onboardingInFlight = false
     fun markOnboardingAsShown(onDone: (() -> Unit)? = null) {
+        // Guard against two rapid taps double-invoking onDone (e.g. switching tabs twice).
+        if (onboardingInFlight) return
+        onboardingInFlight = true
         viewModelScope.launch {
-            settingsRepository.setWhisperOnboardingShown(true)
-            onDone?.invoke()
+            try {
+                settingsRepository.setWhisperOnboardingShown(true)
+                onDone?.invoke()
+            } finally {
+                onboardingInFlight = false
+            }
         }
     }
 
@@ -77,10 +97,28 @@ class WhisperViewModel @Inject constructor(
     private var hiddenJob: Job? = null
     private var heartbeatJob: Job? = null
 
+    // Ids already surfaced to the user after their outbox entry was permanently dropped.
+    private val droppedNotifiedClientIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     init {
         observeMutes()
         observeHiddenChats()
-        
+
+        // Surfacing dropped outbox entries: if the delivery scheduler permanently gives
+        // up on a queued message, the user must know it never arrived.
+        viewModelScope.launch {
+            outgoingQueue.droppedClientIds.collect { dropped ->
+                for (clientId in dropped) {
+                    // One notice per clientId; later duplicates are ignored.
+                    if (droppedNotifiedClientIds.add(clientId)) {
+                        _uiState.update {
+                            it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_MessageFailed))
+                        }
+                    }
+                }
+            }
+        }
+
         viewModelScope.launch {
             isAuthenticated.collect { auth ->
                 if (auth == true) {
@@ -120,6 +158,9 @@ class WhisperViewModel @Inject constructor(
     }
 
     private fun handleError(err: Throwable, context: String) {
+        // Cancellation (e.g. a debounce cancelling the previous search job, or the VM
+        // being cleared) is not an error — never surface it as a toast.
+        if (err is kotlinx.coroutines.CancellationException) return
         val mapped = WhisperErrorMapper.map(err, context)
         if (WhisperErrorMapper.isSessionExpired(err)) {
             viewModelScope.launch {
@@ -179,10 +220,13 @@ class WhisperViewModel @Inject constructor(
         repository.getConversations(forceRefresh = forceRefresh)
             .onSuccess { convos ->
                 val muted = mutePrefs.mutedUsers.value
-                val hidden = hiddenChatsStore.hiddenChats.value
-                val mapped = convos
-                    .map { it.copy(isMuted = it.otherUser.id in muted) }
-                    .filter { convo ->
+                val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
+                _uiState.update { state ->
+                    // Re-read the hidden-chats snapshot at write time: a chat hidden while
+                    // this network call was in flight must not resurrect from a stale map
+                    // captured before the request started.
+                    val hidden = hiddenChatsStore.hiddenChats.value
+                    val filtered = mapped.filter { convo ->
                         val hideTime = hidden[convo.otherUser.id] ?: return@filter true
                         val lastEpoch = runCatching {
                             java.time.OffsetDateTime.parse(convo.lastMessage.createdAt).toInstant().toEpochMilli()
@@ -195,7 +239,8 @@ class WhisperViewModel @Inject constructor(
                             false
                         }
                     }
-                _uiState.update { it.copy(conversations = mapped) }
+                    state.copy(conversations = filtered)
+                }
 
                 // Clear notifications for any conversations that have been read (read receipts)
                 for (convo in convos) {
@@ -240,17 +285,38 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    fun toggleBlockUser(userId: String) {
+    // In-flight guard so a double-tap can't toggle the block twice.
+    private val blockInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Toggles the block state for [userId]. [onResult] is invoked with the NEW state
+     * (true = now blocked) after a successful toggle, so the caller can toast accurately
+     * instead of guessing from a possibly-stale local snapshot.
+     */
+    fun toggleBlockUser(userId: String, onResult: (Boolean) -> Unit = {}) {
+        // Double-tap guard: only one block toggle per user at a time.
+        if (userId in blockInFlight) return
+        blockInFlight.add(userId)
         viewModelScope.launch {
-            val isBlocked = repository.isBlockedByMe(userId)
-            if (isBlocked) {
-                repository.unblockUser(userId)
-                    .onSuccess { loadConversationsInternal(forceRefresh = true) }
-                    .onFailure { handleError(it, "unblockUser") }
-            } else {
-                repository.blockUser(userId)
-                    .onSuccess { loadConversationsInternal(forceRefresh = true) }
-                    .onFailure { handleError(it, "blockUser") }
+            try {
+                val isBlocked = repository.isBlockedByMe(userId)
+                if (isBlocked) {
+                    repository.unblockUser(userId)
+                        .onSuccess {
+                            loadConversationsInternal(forceRefresh = true)
+                            onResult(false)
+                        }
+                        .onFailure { handleError(it, "unblockUser") }
+                } else {
+                    repository.blockUser(userId)
+                        .onSuccess {
+                            loadConversationsInternal(forceRefresh = true)
+                            onResult(true)
+                        }
+                        .onFailure { handleError(it, "blockUser") }
+                }
+            } finally {
+                blockInFlight.remove(userId)
             }
         }
     }
@@ -283,12 +349,16 @@ class WhisperViewModel @Inject constructor(
             }
     }
 
+    private val _discoverLoadFailed = MutableStateFlow(false)
+    val discoverLoadFailed: StateFlow<Boolean> = _discoverLoadFailed.asStateFlow()
+
     fun loadDiscoverProfiles(page: Int) {
+        // The guard runs first: a page-0 reset must never wipe the list while a
+        // next-page fetch is still in flight, or the older response would overwrite it.
+        if (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover) return
         if (page == 0) {
             _uiState.update { it.copy(discoverProfiles = emptyList(), discoverPage = 0, hasReachedEndOfDiscover = false) }
         }
-        
-        if (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover) return
 
         _uiState.update { it.copy(isDiscoverLoadingNext = true) }
         viewModelScope.launch {
@@ -302,9 +372,11 @@ class WhisperViewModel @Inject constructor(
                             hasReachedEndOfDiscover = results.isEmpty()
                         )
                     }
+                    _discoverLoadFailed.value = false
                 }
                 .onFailure { err ->
                     _uiState.update { it.copy(isDiscoverLoadingNext = false) }
+                    _discoverLoadFailed.value = true
                     handleError(err, "loadDiscoverProfiles")
                 }
         }
@@ -324,7 +396,12 @@ class WhisperViewModel @Inject constructor(
             delay(300)
             repository.searchProfiles(query)
                 .onSuccess { results -> _uiState.update { it.copy(searchResults = results) } }
-                .onFailure { err -> handleError(err, "searchProfiles") }
+                .onFailure { err ->
+                    // A keystroke cancels the previous job; the repository's runCatching
+                    // turns that cancellation into a failure, so never toast it.
+                    if (err is kotlinx.coroutines.CancellationException) return@onFailure
+                    handleError(err, "searchProfiles")
+                }
         }
     }
 
@@ -446,12 +523,19 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun signOut(onComplete: () -> Unit = {}) {
-        // Stop realtime subscriptions first so they don't retry against a dead session
+        // Stop the heartbeat FIRST so a dead session never keeps writing last_seen,
+        // then tear down realtime subscriptions so they don't retry against a dead session.
+        stopHeartbeat()
         messagesJob?.cancel()
         friendsJob?.cancel()
         loadAllJob?.cancel()
         viewModelScope.launch {
             authManager.signOut()
+                .onFailure { err -> android.util.Log.w("WhisperVM", "signOut failed: ${err.message}", err) }
+            // Regardless of the network outcome, wipe every session-scoped cache and
+            // reset the UI so the user is never left staring at a stale account.
+            repository.clearSessionScopedCaches()
+            _uiState.update { WhisperUiState() }
             onComplete()
         }
     }

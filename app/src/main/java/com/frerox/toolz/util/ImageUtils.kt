@@ -49,7 +49,7 @@ object ImageUtils {
             if (originalWidth <= 0 || originalHeight <= 0) return null
 
             // 2. Calculate sample size
-            options.inSampleSize = calculateInSampleSize(originalWidth, originalHeight, maxDimension)
+            options.inSampleSize = computeInSampleSize(originalWidth, originalHeight, maxDimension)
             options.inJustDecodeBounds = false
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
 
@@ -70,7 +70,7 @@ object ImageUtils {
         }
     }
 
-    private fun calculateInSampleSize(width: Int, height: Int, maxDim: Int): Int {
+    private fun computeInSampleSize(width: Int, height: Int, maxDim: Int): Int {
         var inSampleSize = 1
         val larger = maxOf(width, height)
         if (larger > maxDim) {
@@ -123,8 +123,23 @@ object ImageUtils {
      * Automatically fixes EXIF rotation from camera captures.
      */
     fun downscaleAndCompress(imageBytes: ByteArray, maxDimension: Int = 1024, quality: Int = 80): ByteArray {
-        val options = BitmapFactory.Options().apply { inMutable = true }
-        var bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options) ?: return imageBytes
+        // Two-pass sampling: read the bounds first, then decode with an inSampleSize so the
+        // full-resolution bitmap is never materialized. A raw decode of a large capture can
+        // otherwise allocate several hundred MB of heap before downscaling begins.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            // Undecodable input: return an empty payload instead of the original bytes so
+            // callers' downstream size caps (5 MB / 10 MB) reject it gracefully rather than
+            // letting a malformed image slip through uncompressed.
+            return ByteArray(0)
+        }
+
+        val options = BitmapFactory.Options().apply {
+            inMutable = true
+            inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
+        }
+        var bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, options) ?: return ByteArray(0)
         
         // Correct EXIF rotation (e.g. camera orientation)
         val rotation = getRotationDegreesFromBytes(imageBytes)

@@ -187,6 +187,7 @@
     <string name="st_Whisper_Cancel">Cancel</string>
     <string name="st_Whisper_SearchLabel">Search</string>
     <string name="st_Whisper_Chat_Options">Chat Options</string>
+    <string name="st_Whisper_ManageConversation">Manage this conversation</string>
     <string name="st_Whisper_ViewProfile">View Profile</string>
     <string name="st_Whisper_ClearHistory">Clear History</string>
     <string name="st_Whisper_ClearHistoryConfirmTitle">Clear chat history?</string>
@@ -199,6 +200,8 @@
     <string name="st_Whisper_Block">Block</string>
     <string name="st_Whisper_Reply">Reply</string>
     <string name="st_Whisper_DeleteForEveryone">Delete for everyone</string>
+    <string name="st_Whisper_DeleteForEveryoneTitle">Delete for everyone?</string>
+    <string name="st_Whisper_DeleteForEveryoneDesc">This deletes the message for everyone in the conversation. This can\'t be undone.</string>
     <string name="st_Whisper_DeleteForMe">Delete for me</string>
     <string name="st_Whisper_Clear_Past24h">Past 24h</string>
     <string name="st_Whisper_Clear_Past7d">Past 7d</string>
@@ -227,6 +230,9 @@
     <string name="st_Whisper_Image">Image</string>
     <string name="st_Whisper_ImageExpired">Image expired</string>
     <string name="st_Whisper_LoadingImage">Loading encrypted image…</string>
+    <string name="st_Whisper_ImageLoadFailed">Couldn\'t load image</string>
+    <string name="st_Whisper_ImageSaved">Image saved to gallery</string>
+    <string name="st_Whisper_Save">Save</string>
     <string name="st_Whisper_ImageExpiryDesc">Images are encrypted before upload. Choose when this image should disappear.</string>
     <string name="st_Whisper_Expiry_Never">Keep in chat</string>
     <string name="st_Whisper_Expiry_1m">Disappear in 1 minute</string>
@@ -241,6 +247,7 @@
     <string name="st_Whisper_Error_InvalidToken">That token doesn\'t look right. Check for missing or extra characters.</string>
     <string name="st_Whisper_Error_TokenNotRecognized">Token not recognized. Double-check it and try again.</string>
     <string name="st_Whisper_Error_Generic">Something went wrong. Try again.</string>
+    <string name="st_Whisper_Error_SessionExpired">Your session expired. Please sign in again.</string>
     <string name="st_Whisper_Error_InvalidCredentials">Invalid username or password</string>
     <string name="st_Whisper_Error_UsernameExists">An account with this username already exists</string>
     <string name="st_Whisper_Error_Network">Network error — check your connection</string>
@@ -274,6 +281,7 @@
     <string name="st_Whisper_Onboarding_Desc4">Break free from the password era. Whisper uses locally hashed, one-way security tokens. No email, no trackers, and no central database to leak. In Whisper, you aren\'t the product—you are the architect of your own digital identity.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Begin Your Journey</string>
     <string name="st_Whisper_Onboarding_Next">Continue</string>
+    <string name="st_Whisper_OnboardingSkip">Skip</string>
     <!-- Whisper: Auth - Registration -->
     <string name="st_Whisper_Auth_ChooseUsername">@ Username</string>
     <string name="st_Whisper_Auth_UsernameAvailable">Available ✓</string>
@@ -303,6 +311,7 @@
     <string name="cd_Whisper_SendMessage">Send message</string>
     <string name="cd_Whisper_Reply">Reply</string>
     <string name="cd_Whisper_EncryptedImage">Encrypted image</string>
+    <string name="st_Whisper_MessageSemantics">Message. Swipe right to reply, double tap for reactions.</string>
     <!-- Accessibility content descriptions -->
     <string name="cd_Back">Go back</string>
     <string name="cd_HidePassword">Hide password</string>
@@ -2911,6 +2920,15 @@
     <string name="st_Whisper_UserBlocked">User blocked</string>
     <string name="st_Whisper_UserUnblocked">User unblocked</string>
     <string name="st_Whisper_ChatHidden">Chat hidden</string>
+    <string name="st_Whisper_Error_MessageFailed">A message couldn\'t be sent and was removed.</string>
+    <string name="st_Whisper_UnfriendTitle">Remove friend?</string>
+    <string name="st_Whisper_UnfriendDesc">%1$s will be removed from your friends. They will no longer see your messages.</string>
+    <string name="st_Whisper_UnfriendConfirm">Remove</string>
+    <string name="st_Whisper_RemovePhotoTitle">Remove profile photo?</string>
+    <string name="st_Whisper_RemovePhotoDesc">Your profile photo will be deleted.</string>
+    <string name="st_Whisper_HideChat">Hide chat</string>
+    <string name="st_Whisper_HideChatTitle">Hide conversation?</string>
+    <string name="st_Whisper_HideChatDesc">The conversation will be hidden from your chats list.</string>
     <string name="st_Whisper_ProfileSaved">Profile saved</string>
     <string name="st_Whisper_Profile_NoChanges">No changes</string>
     <string name="st_Whisper_UnsavedTitle">Unsaved Changes</string>

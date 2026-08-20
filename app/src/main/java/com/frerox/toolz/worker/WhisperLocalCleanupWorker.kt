@@ -24,8 +24,12 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     override suspend fun doWork(): ListenableWorker.Result = try {
         deletedMessagesStore.purgeExpired()
         ListenableWorker.Result.success()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        // WorkManager cancels this coroutine on stop; rethrow so cancellation is honored.
+        throw e
     } catch (_: Exception) {
-        // The operation is local and idempotent; a future periodic pass can safely retry it.
-        ListenableWorker.Result.retry()
+        // The operation is local and idempotent; a future periodic pass can safely retry it,
+        // so a persistent failure just ends this run instead of churning the retry queue.
+        ListenableWorker.Result.failure()
     }
 }

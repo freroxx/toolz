@@ -10,8 +10,11 @@ serve(async (request) => {
     if (!deletionUrl || deletionUrl.protocol !== "https:" || deletionUrl.hostname !== "ibb.co") {
       return json({ error: "Invalid deletion capability" }, 400);
     }
-    const upstream = await fetch(deletionUrl, { method: "GET", redirect: "follow" });
-    if (!upstream.ok) return json({ error: "Image deletion failed" }, 502);
+    // Redirects are followed nowhere: a redirect could escape the hostname allowlist
+    // above, and deletion capability URLs never legitimately redirect. Any 3xx is
+    // treated as a failure.
+    const upstream = await fetch(deletionUrl, { method: "GET", redirect: "manual" });
+    if (!upstream.ok || upstream.status >= 300) return json({ error: "Image deletion failed" }, 502);
     return json({ success: true }, 200);
   } catch {
     return json({ error: "Invalid request" }, 400);

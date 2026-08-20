@@ -89,7 +89,16 @@ class WhisperEncryptedImageHost @Inject constructor(
         if (attachmentId == null) return@runCatching // Cannot delete without ID
 
         if (url.contains("supabase.co/storage/v1/object/public/whisper-avatars/")) {
-            // It's a Supabase Storage file (the ID we store is the path)
+            // It's a Supabase Storage file (the ID we store is the path). Avatar objects live
+            // at "<userId>/avatar.ext" (see WhisperRepository.uploadAvatar), so only blobs
+            // inside the current user's own folder may be deleted — otherwise a crafted URL
+            // would let any signed-in user delete another user's avatar.
+            val currentUserId = supabase.auth.currentSessionOrNull()?.user?.id
+            if (currentUserId == null ||
+                !attachmentId.startsWith("$currentUserId/") ||
+                !attachmentId.contains("/") ||
+                attachmentId.contains("..")
+            ) return@runCatching
             supabase.storage.from("whisper-avatars").delete(attachmentId)
         } else {
             // It's an ImgBB file. We need an Edge Function to delete it because the API key is secret.
@@ -111,6 +120,9 @@ class WhisperEncryptedImageHost @Inject constructor(
                     
                     if (connection.responseCode !in 200..299) {
                         android.util.Log.w("WhisperEncryptedImageHost", "Remote deletion failed: HTTP ${connection.responseCode}")
+                        // Surface the failure to the caller: a silent success here would make
+                        // the app think the image was removed when the blob is still hosted.
+                        error("Remote deletion failed: HTTP ${connection.responseCode}")
                     }
                 } finally {
                     connection.disconnect()
@@ -122,14 +134,32 @@ class WhisperEncryptedImageHost @Inject constructor(
 
     suspend fun download(url: String): Result<ByteArray> = runCatching {
         require(url.startsWith("https://")) { "Invalid image URL." }
+        // SSRF allowlist: only the image hosts this app actually uses may be fetched.
+        // Anything else (metadata endpoints, internal addresses, redirect targets) is
+        // rejected before a connection is even opened.
+        val host = runCatching { URL(url).host }.getOrNull() ?: error("Invalid image URL.")
+        if (host != "i.ibb.co" && host != "ibb.co" && !host.endsWith(".supabase.co")) {
+            error("Invalid image host.")
+        }
         withContext(Dispatchers.IO) {
              val connection = (URL(url).openConnection() as HttpURLConnection)
             try {
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
                 if (connection.responseCode !in 200..299) error("Image is no longer available.")
+                if (connection.contentLength > DOWNLOAD_MAX_BYTES) error("Image is too large.")
                 connection.inputStream.use { input ->
-                    input.readBytes().also { require(it.size <= MAX_CIPHER_BYTES) { "Image is too large." } }
+                    // Capped read: never buffer more than the download ceiling into memory,
+                    // even if the server omits Content-Length or lies about it.
+                    val buffer = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(64 * 1024)
+                    while (buffer.size() <= DOWNLOAD_MAX_BYTES) {
+                        val n = input.read(chunk)
+                        if (n == -1) break
+                        buffer.write(chunk, 0, n)
+                    }
+                    if (buffer.size() > DOWNLOAD_MAX_BYTES) error("Image is too large.")
+                    buffer.toByteArray()
                 }
             } finally {
                 connection.disconnect()
@@ -140,6 +170,10 @@ class WhisperEncryptedImageHost @Inject constructor(
     private companion object {
         // Base64 expands payloads by 4/3; stay below ImgBB's 32 MB input limit.
         const val MAX_CIPHER_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES
+        // Downloads carry PNG-encoded ciphertext: 5 MiB of ciphertext becomes up to ~6.7 MiB
+        // of PNG (4/3 RGBA expansion), so the download ceiling is separate from and larger
+        // than the upload cap. 7 MiB bounds memory use while never rejecting legit images.
+        const val DOWNLOAD_MAX_BYTES = 7 * 1024 * 1024
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 45_000
     }

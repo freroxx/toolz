@@ -29,6 +29,9 @@ import javax.inject.Singleton
 /**
  * Persists IDs of messages deleted locally ("delete for me" / clear chat).
  * Ensures that deleted messages never reappear when reloading messages from the database or cache.
+ *
+ * Tombstones never expire by age — time-based pruning would resurrect deleted messages —
+ * so the set is bounded only by a count cap that evicts the OLDEST ids first.
  */
 @Singleton
 class WhisperDeletedMessagesStore @Inject constructor(
@@ -40,24 +43,33 @@ class WhisperDeletedMessagesStore @Inject constructor(
     private val _deletedIds = MutableStateFlow<Set<String>>(loadDeletedIds())
     val deletedIds: StateFlow<Set<String>> = _deletedIds.asStateFlow()
 
-    private fun loadDeletedIds(): Set<String> = cleanExpired(prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty()).keys
+    private fun loadDeletedIds(): Set<String> = capById(loadAll()).keys
 
-    private fun cleanExpired(entries: Set<String>, now: Long = System.currentTimeMillis()): Map<String, Long> {
-        val cutoff = now - TOMBSTONE_RETENTION_MS
-        val parsed = entries.mapNotNull { entry ->
+    /** Reads every stored tombstone with no time-based pruning. Legacy entries (no
+     * timestamp) get a 0 timestamp so the count cap evicts them first. */
+    private fun loadAll(): Map<String, Long> = prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty()
+        .mapNotNull { entry ->
             val split = entry.lastIndexOf('|')
-            // Legacy entries had no timestamp. Retain them for one cleanup window rather than forever.
             val id = if (split > 0) entry.substring(0, split) else entry
-            val timestamp = if (split > 0) entry.substring(split + 1).toLongOrNull() else now
+            val timestamp = if (split > 0) entry.substring(split + 1).toLongOrNull() else 0L
             timestamp?.let { id to it }
-        }.filter { (_, timestamp) -> timestamp >= cutoff }
-        return parsed.toMap()
+        }
+        .toMap()
+
+    /** Bounds the tombstone set by count, evicting the OLDEST ids by stored timestamp. */
+    private fun capById(entries: Map<String, Long>): Map<String, Long> {
+        if (entries.size <= MAX_TOMBSTONES) return entries
+        val byAge = entries.entries.sortedBy { it.value }
+        return byAge.takeLast(MAX_TOMBSTONES).associate { it.key to it.value }
     }
 
     private fun persist(ids: Set<String>) {
-        val existing = cleanExpired(prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty())
+        val existing = loadAll()
         val now = System.currentTimeMillis()
-        val merged = existing + ids.associateWith { now }
+        val merged = capById(existing + ids.associateWith { now })
+        // With up to MAX_TOMBSTONES entries the prefs string grows to a few hundred KB;
+        // apply() persists asynchronously so the main thread is not blocked, and the cap
+        // keeps the storage bounded.
         prefs.edit().putStringSet("deleted_message_ids", merged.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
         _deletedIds.value = merged.keys
     }
@@ -84,7 +96,7 @@ class WhisperDeletedMessagesStore @Inject constructor(
     fun unmarkMessagesDeleted(messageIds: Collection<String>) {
         if (messageIds.isEmpty()) return
         synchronized(lock) {
-            val existing = cleanExpired(prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty()) - messageIds.toSet()
+            val existing = loadAll() - messageIds.toSet()
             prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
             _deletedIds.value = existing.keys
         }
@@ -97,14 +109,17 @@ class WhisperDeletedMessagesStore @Inject constructor(
         return _deletedIds.value.contains(messageId)
     }
 
-    /** Bounds the local delete-for-me index so it cannot grow indefinitely. */
+    /**
+     * Enforces the count cap only — tombstones never expire by age, so deleted messages
+     * can never resurrect. Evicts the OLDEST ids when the cap is exceeded.
+     */
     fun purgeExpired(): Int = synchronized(lock) {
-        val raw = prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty()
-        val cleaned = cleanExpired(raw)
-        val removed = raw.size - cleaned.size
+        val raw = loadAll()
+        val capped = capById(raw)
+        val removed = raw.size - capped.size
         if (removed > 0) {
-            prefs.edit().putStringSet("deleted_message_ids", cleaned.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
-            _deletedIds.value = cleaned.keys
+            prefs.edit().putStringSet("deleted_message_ids", capped.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
+            _deletedIds.value = capped.keys
         }
         removed
     }
@@ -116,6 +131,6 @@ class WhisperDeletedMessagesStore @Inject constructor(
     }
 
     private companion object {
-        const val TOMBSTONE_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
+        const val MAX_TOMBSTONES = 5_000
     }
 }
