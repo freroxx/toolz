@@ -1096,7 +1096,7 @@ class WhisperRepository @Inject constructor(
                 val decryptedContent = if (row.lastContent.startsWith("[deleted_by_sender")) {
                     "Message deleted"
                 } else if (row.lastContentIv != null && profile.publicKey != null) {
-                    crypto.decryptMessage(row.lastContent, row.lastContentIv, profile.publicKey)
+                    crypto.decryptMessage(row.lastContent, row.lastContentIv, profile.publicKey) ?: "🔒 Encrypted message"
                 } else if (row.lastContentIv != null) {
                     "🔒 Encrypted message"
                 } else row.lastContent
@@ -1142,7 +1142,7 @@ class WhisperRepository @Inject constructor(
                 val decryptedContent = if (lastMsg.isDeletedForEveryone) {
                     "Message deleted"
                 } else if (lastMsg.contentIv != null && profile.publicKey != null) {
-                    crypto.decryptMessage(lastMsg.content, lastMsg.contentIv, profile.publicKey)
+                    crypto.decryptMessage(lastMsg.content, lastMsg.contentIv, profile.publicKey) ?: "🔒 Encrypted message"
                 } else if (lastMsg.contentIv != null) {
                     "🔒 Encrypted message"
                 } else lastMsg.content
@@ -1543,18 +1543,51 @@ class WhisperRepository @Inject constructor(
         val channelKey = conversationKey(myId, otherUserId)
         val name = "presence_$channelKey"
         val channel = getOrJoinBroadcastChannel(name)
+        
+        // 1. Instant Realtime Broadcasts (app in foreground status)
         val broadcasts = channel.broadcastFlow<JsonObject>("presence")
-        val job = launch { broadcasts.collect { json ->
-            try {
-                val senderId = json["sender_id"]?.jsonPrimitive?.content
-                val isOnline = json["is_online"]?.jsonPrimitive?.booleanOrNull ?: false
-                val ts = json["timestamp"]?.jsonPrimitive?.content
-                if (senderId == otherUserId && !isUserBlockedByMe(otherUserId)) {
-                    trySend(Pair(isOnline, ts))
-                }
-            } catch (_: Exception) { }
-        } }
-        awaitClose { job.cancel(); launch { removeCachedChannel(name, channel) } }
+        val bJob = launch { 
+            broadcasts.collect { json ->
+                try {
+                    val senderId = json["sender_id"]?.jsonPrimitive?.content
+                    val isOnline = json["is_online"]?.jsonPrimitive?.booleanOrNull ?: false
+                    val ts = json["timestamp"]?.jsonPrimitive?.content
+                    if (senderId == otherUserId && !isUserBlockedByMe(otherUserId)) {
+                        trySend(Pair(isOnline, ts))
+                    }
+                } catch (_: Exception) { }
+            } 
+        }
+
+        // 2. Database Changes (last_seen_at updates)
+        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = "profiles"
+        }
+        val dbJob = launch {
+            changes.collect { action ->
+                try {
+                    val profile = when (action) {
+                        is PostgresAction.Insert -> action.decodeRecord<WhisperProfile>()
+                        is PostgresAction.Update -> action.decodeRecord<WhisperProfile>()
+                        else -> null
+                    }
+                    if (profile != null && profile.id == otherUserId) {
+                        val lastSeen = profile.lastSeenAt
+                        if (lastSeen != null) {
+                            val lastSeenTs = java.time.OffsetDateTime.parse(lastSeen).toInstant()
+                            val isOnline = java.time.Instant.now().minusSeconds(120).isBefore(lastSeenTs)
+                            trySend(Pair(isOnline, lastSeen))
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        awaitClose { 
+            bJob.cancel()
+            dbJob.cancel()
+            launch { removeCachedChannel(name, channel) } 
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
