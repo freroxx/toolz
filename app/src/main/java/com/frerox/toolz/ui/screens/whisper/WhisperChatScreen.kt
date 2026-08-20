@@ -1582,4 +1582,125 @@ private fun readBoundedImageBytes(input: java.io.InputStream, context: Context):
     return output.toByteArray()
 }
 
+@Composable
+private fun WhisperFullScreenImageViewer(
+    imageBytes: ByteArray,
+    mimeType: String,
+    onDismiss: () -> Unit,
+    onShowToast: (String, WhisperToastType) -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = rememberToolzHapticFeedback()
+    val bitmap = remember(imageBytes) {
+        runCatching { BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) }.getOrNull()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.92f))
+        ) {
+            if (bitmap != null) {
+                var scale by remember { mutableStateOf(1f) }
+                var offset by remember { mutableStateOf(Offset.Zero) }
+
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 5f)
+                                offset += pan
+                            }
+                        }
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.st_Whisper_Error_ReadImage), color = Color.White)
+                }
+            }
+
+            // Controls overlay
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(16.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ToolzExpressiveIconButton(
+                    onClick = { haptic.click(); onDismiss() },
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color.Black.copy(alpha = 0.4f),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.cd_Back))
+                }
+
+                ToolzExpressiveIconButton(
+                    onClick = {
+                        haptic.click()
+                        val saved = saveImageToGallery(context, imageBytes, mimeType)
+                        if (saved) {
+                            onShowToast(context.getString(R.string.st_BackgroundRemover_Success), WhisperToastType.SUCCESS)
+                        } else {
+                            onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
+                        }
+                    },
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color.Black.copy(alpha = 0.4f),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Rounded.Download, contentDescription = "Save")
+                }
+            }
+        }
+    }
+}
+
+private fun saveImageToGallery(context: Context, bytes: ByteArray, mimeType: String): Boolean {
+    return try {
+        val filename = "Whisper_${System.currentTimeMillis()}.${if (mimeType == "image/png") "png" else "jpg"}"
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Whisper")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            ?: return false
+
+        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+
+        contentValues.clear()
+        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(uri, contentValues, null, null)
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+
 private const val MAX_LOCAL_IMAGE_BYTES = 22 * 1024 * 1024
