@@ -67,12 +67,25 @@ class WhisperChatViewModel @Inject constructor(
     private var isCurrentlyTyping = false
 
     private val deletedMessagesUndoBuffer = mutableListOf<WhisperMessage>()
+    private var pendingIdCounter = 0L
+    // Per-message in-flight reactions prevent double-tap races against the server.
+    private val pendingReactions = mutableMapOf<String, MutableSet<String>>()
+
+    companion object {
+        private const val MAX_DECRYPTED_IMAGES = 20
+    }
 
     init {
         notificationManager.currentChatId = otherUserId
         notificationManager.cancelMessageNotification(otherUserId)
         hiddenChatsStore.unhideChat(otherUserId)
         _uiState.update { it.copy(isMuted = mutePrefs.isMuted(otherUserId)) }
+        // Keep the mute flag in sync when a timed mute expires while the chat is open.
+        viewModelScope.launch {
+            mutePrefs.mutedUsers.collect { muted ->
+                _uiState.update { it.copy(isMuted = otherUserId in muted) }
+            }
+        }
         loadInitialData()
         subscribeToChat()
         subscribeToTyping()
@@ -162,13 +175,15 @@ class WhisperChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     // CRITICAL: Preserve transient metadata (decrypted content, reactions,
                     // enriched reply data) that isn't persisted in the basic message entity.
+                    // A tombstone must never be reverted to stale plaintext, so deletions
+                    // always win over any cached content.
                     val existingById = state.messages.associateBy { it.id }
                     val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
                     val merged = newMessages.map { newMsg ->
                         val existing = existingById[newMsg.id]
                         if (existing != null) {
                             newMsg.copy(
-                                content = existing.content,
+                                content = if (newMsg.isDeletedForEveryone || existing.isDeletedForEveryone) newMsg.content else existing.content,
                                 reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
                                 replyToContent = newMsg.replyToContent ?: existing.replyToContent,
                                 replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
@@ -177,11 +192,15 @@ class WhisperChatViewModel @Inject constructor(
                         } else newMsg
                     } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
 
+                    // Strict chronological order (ISO timestamps sort lexicographically),
+                    // with unsent pending messages pinned to the bottom of the list.
+                    val sorted = merged.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
+
                     state.copy(
-                        messages = merged,
+                        messages = sorted,
                         isLoading = false,
                         matchingMessageIds = if (state.searchQuery.isNotBlank()) {
-                            merged.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                            sorted.filter { it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
                         } else emptySet()
                     )
                 }
@@ -212,6 +231,9 @@ class WhisperChatViewModel @Inject constructor(
     // ── EMOJI REACTIONS ──
     fun toggleReaction(message: WhisperMessage, emoji: String) {
         if (message.id.isBlank() || message.isPending) return
+        // Guard against double-taps: only one in-flight toggle per message/emoji.
+        val inFlight = pendingReactions.getOrPut(message.id) { mutableSetOf() }
+        if (!inFlight.add(emoji)) return
         // Optimistic local state update
         _uiState.update { state ->
             val updatedMsgs = state.messages.map { msg ->
@@ -256,8 +278,12 @@ class WhisperChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.toggleReaction(message.id, emoji, otherUserId = otherUserId)
                 .onFailure { err ->
+                    pendingReactions[message.id]?.remove(emoji)
                     handleError(err, "toggleReaction")
                     loadMessages()
+                }
+                .onSuccess {
+                    pendingReactions[message.id]?.remove(emoji)
                 }
         }
     }
@@ -329,7 +355,7 @@ class WhisperChatViewModel @Inject constructor(
         }
 
         val optimisticMsg = WhisperMessage(
-            id = "pending_${System.currentTimeMillis()}",
+            id = "pending_${System.currentTimeMillis()}_${pendingIdCounter++}",
             senderId = myUserId,
             receiverId = otherUserId,
             content = trimmedContent,
@@ -356,11 +382,15 @@ class WhisperChatViewModel @Inject constructor(
                     }
                 }
                 .onFailure { err ->
-                    _draftText.value = originalText
-                    // Restore the reply quote the user was composing so nothing is silently lost
+                    // Only restore the draft if the user hasn't already typed something
+                    // newer; the reply target likewise survives only if still unset.
+                    if (_draftText.value.isBlank()) _draftText.value = originalText
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id }
-                        state.copy(messages = filtered, replyingToMessage = replyTarget)
+                        state.copy(
+                            messages = filtered,
+                            replyingToMessage = if (state.replyingToMessage == null) replyTarget else state.replyingToMessage
+                        )
                     }
                     handleError(err, "sendMessage")
                 }
@@ -390,21 +420,42 @@ class WhisperChatViewModel @Inject constructor(
     fun loadEncryptedImage(message: WhisperMessage) {
         if (_uiState.value.decryptedImageBytes.containsKey(message.id)) return
         val attachment = WhisperImageAttachment.fromMessageContent(message.content) ?: return
+        // Never cache bytes for a disappearing image that has already expired.
+        if (attachment.expiresAtEpochSeconds != null &&
+            java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds
+        ) {
+            _uiState.update { it.copy(decryptedImageBytes = it.decryptedImageBytes - message.id) }
+            return
+        }
         viewModelScope.launch {
             // Ensure we have a public key for decryption. If it's a message from 'me', 
             // we need the receiver's key (since we encrypted it for them). 
             // If it's from someone else, we need the sender's key.
             val peerId = if (message.senderId == myUserId) message.receiverId else message.senderId
             
-            val key = partnerPublicKey.takeIf { peerId == otherUserId } 
+            val key = partnerPublicKey.takeIf { peerId == otherUserId }
                 ?: repository.getProfile(peerId).getOrNull()?.publicKey
+                // Fall back to the key this device last accepted for that peer so
+                // cached ciphertext stays decryptable after a process restart.
+                ?: repository.getDecryptionKey(peerId)
             
             if (key != null && peerId == otherUserId) {
                 partnerPublicKey = key
             }
             
             repository.downloadEncryptedImage(attachment, key)
-                .onSuccess { bytes -> _uiState.update { state -> state.copy(decryptedImageBytes = state.decryptedImageBytes + (message.id to bytes)) } }
+                .onSuccess { bytes ->
+                    _uiState.update { state ->
+                        // Bound the in-memory image cache so long chats can't exhaust memory.
+                        val cache = state.decryptedImageBytes.toMutableMap()
+                        while (cache.size >= MAX_DECRYPTED_IMAGES) {
+                            val oldest = cache.keys.firstOrNull() ?: break
+                            cache.remove(oldest)
+                        }
+                        cache[message.id] = bytes
+                        state.copy(decryptedImageBytes = cache)
+                    }
+                }
                 .onFailure { error -> handleError(error, "downloadEncryptedImage") }
         }
     }
@@ -493,13 +544,14 @@ class WhisperChatViewModel @Inject constructor(
 
             repository.clearMessagesForRange(otherUserId, fromIso, toIso)
                 .onSuccess { deletedList ->
-                    deletedMessagesUndoBuffer.clear()
+                    // Accumulate: a second clear while the first undo window is open must
+                    // not destroy the earlier batch — undo restores everything together.
                     deletedMessagesUndoBuffer.addAll(deletedList)
                     _uiState.update { state ->
                         val deletedIds = deletedList.map { it.id }.toSet()
                         state.copy(messages = state.messages.filter { it.id !in deletedIds })
                     }
-                    _undoState.value = WhisperUndoUiState(clearedCount = deletedList.size, secondsRemaining = 30)
+                    _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
 
                     undoTimerJob?.cancel()
                     undoTimerJob = viewModelScope.launch {
@@ -531,6 +583,16 @@ class WhisperChatViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     handleError(err, "restoreMessages")
+                    // Keep the undo bar alive so the user can retry within the window.
+                    _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
+                    undoTimerJob = viewModelScope.launch {
+                        for (sec in 30 downTo 1) {
+                            _undoState.update { it.copy(secondsRemaining = sec) }
+                            delay(1_000)
+                        }
+                        deletedMessagesUndoBuffer.clear()
+                        _undoState.value = WhisperUndoUiState()
+                    }
                 }
         }
     }
@@ -603,6 +665,10 @@ class WhisperChatViewModel @Inject constructor(
             repository.sendTypingStatus(otherUserId, isTyping)
         }
     }
+
+    /** Chronological order (ISO timestamps sort lexicographically), pending pinned last. */
+    private fun sortedMessages(messages: List<WhisperMessage>): List<WhisperMessage> =
+        messages.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
 
     private fun sendPresenceSignal(isOnline: Boolean) {
         viewModelScope.launch {
@@ -677,7 +743,7 @@ class WhisperChatViewModel @Inject constructor(
                                             it.id != enrichedMsg.id
                                         }
                                     }
-                                    state.copy(messages = filtered + enrichedMsg)
+                                    state.copy(messages = sortedMessages(filtered + enrichedMsg))
                                 }
                             }
                             if (newMsg.senderId == otherUserId) {
@@ -786,5 +852,6 @@ class WhisperChatViewModel @Inject constructor(
         typingDebounceJob?.cancel()
         presenceJob?.cancel()
         undoTimerJob?.cancel()
+        reactionSyncJob?.cancel()
     }
 }

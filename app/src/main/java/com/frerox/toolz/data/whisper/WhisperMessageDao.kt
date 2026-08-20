@@ -39,4 +39,7 @@ interface WhisperMessageDao {
 
     @Query("UPDATE whisper_messages SET isRead = 1 WHERE senderId = :senderId AND receiverId = :myId")
     suspend fun markAsRead(senderId: String, myId: String)
+
+    @Query("DELETE FROM whisper_messages")
+    suspend fun clearAll()
 }

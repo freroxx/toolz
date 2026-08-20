@@ -12,10 +12,16 @@ import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.postgrest
+import com.frerox.toolz.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.inject.Inject
@@ -53,7 +59,7 @@ class WhisperAuthManager @Inject constructor(
         get() = supabase.auth.currentUserOrNull()?.email?.endsWith("@whisper.toolz.app") == true
 
     val isCurrentEmailVerified: Boolean
-        get() = supabase.auth.currentUserOrNull() != null
+        get() = supabase.auth.currentUserOrNull()?.emailConfirmedAt != null
 
     suspend fun deleteAccount(password: String? = null): Result<Unit> = runCatching {
         val user = supabase.auth.currentUserOrNull() ?: error("Not authenticated")
@@ -68,8 +74,29 @@ class WhisperAuthManager @Inject constructor(
                 this.password = password
             }
         }
-        
-        // ... (rest of deletion logic remains)
+
+        // Ask the edge function (service role, JWT-verified) to permanently delete the
+        // GoTrue user. The caller wipes local data after this returns.
+        val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before deleting your account.")
+        withContext(Dispatchers.IO) {
+            val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-delete-account").openConnection() as HttpURLConnection)
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 30_000
+                connection.doOutput = true
+                connection.setFixedLengthStreamingMode(0)
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                connection.setRequestProperty("Content-Type", "application/json")
+                if (connection.responseCode !in 200..299) {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    error(errorBody.take(200).ifBlank { "HTTP ${connection.responseCode}" })
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
 
         // Delete user's profile and friends entries
         try {
@@ -212,6 +239,8 @@ class WhisperAuthManager @Inject constructor(
                 if (ex != null && !isInvalidCredentials(ex)) {
                     throw ex
                 }
+                // Slow down brute-force attempts over the derivation candidates.
+                delay(TOKEN_ATTEMPT_DELAY_MS)
             }
         }
         throw lastException ?: Exception("Invalid login credentials")
@@ -234,6 +263,7 @@ class WhisperAuthManager @Inject constructor(
 
     private companion object {
         const val MIN_PASSWORD_LENGTH = 10
+        const val TOKEN_ATTEMPT_DELAY_MS = 700L
         val EMAIL_PATTERN = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
         val USERNAME_PATTERN = Regex("^[a-z0-9](?:[a-z0-9_]{1,18}[a-z0-9])?$")
     }

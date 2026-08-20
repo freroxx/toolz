@@ -187,6 +187,10 @@
     <string name="st_Whisper_SearchLabel">Pesquisar</string>
     <string name="st_Whisper_ViewProfile">Ver Perfil</string>
     <string name="st_Whisper_ClearHistory">Limpar Histórico</string>
+    <string name="st_Whisper_ClearHistoryConfirmTitle">Limpar histórico do chat?</string>
+    <string name="st_Whisper_ClearHistoryConfirmDesc">Todas as mensagens com %s serão excluídas permanentemente neste dispositivo. Isso não pode ser desfeito.</string>
+    <string name="st_Whisper_ChatHistoryCleared">Histórico do chat limpo</string>
+    <string name="st_Whisper_Delete">Excluir</string>
     <string name="st_Whisper_UndoClearCount">Desfazer Limpeza (%d)</string>
     <string name="st_Whisper_Unmute">Ativar som</string>
     <string name="st_Whisper_Mute">Silenciar</string>
@@ -216,6 +220,7 @@
     <string name="st_Whisper_Accept">Aceitar</string>
     <string name="st_Whisper_AddFriendToChat">Adicione para começar a conversar</string>
     <string name="st_Whisper_YouDeleted">Você excluiu esta mensagem</string>
+    <string name="st_Whisper_MessageDeleted">Mensagem excluída</string>
     <string name="st_Whisper_PartnerDeleted">%s excluiu esta mensagem</string>
     <string name="st_Whisper_ImageExpired">Imagem expirada</string>
     <string name="st_Whisper_LoadingImage">Carregando imagem criptografada…</string>
@@ -292,6 +297,7 @@
     <string name="cd_Whisper_Options">Opções da conversa</string>
     <string name="cd_Whisper_ScrollBottom">Rolar para o final</string>
     <string name="cd_Whisper_SendImage">Enviar imagem criptografada</string>
+    <string name="cd_Whisper_SendMessage">Enviar mensagem</string>
     <string name="cd_Whisper_Reply">Responder</string>
     <string name="cd_Whisper_EncryptedImage">Imagem criptografada</string>
     <string name="st_Tool_Calendar">Calendário</string>

@@ -144,6 +144,9 @@ class WhisperNotificationManager @Inject constructor(
             .setSmallIcon(R.drawable.ic_whisper_notif)
             .setContentTitle("New Friend Request")
             .setContentText("$fromName wants to be your friend on Whisper")
+            // Sender names and requests stay off the lock screen like message notifications.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setGroup(GROUP_KEY)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .build()

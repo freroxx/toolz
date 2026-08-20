@@ -109,6 +109,12 @@ class WhisperDeletedMessagesStore @Inject constructor(
         removed
     }
 
+    /** Wipe every tombstone on this device (account deletion). */
+    fun clearAll() = synchronized(lock) {
+        prefs.edit().remove("deleted_message_ids").apply()
+        _deletedIds.value = emptySet()
+    }
+
     private companion object {
         const val TOMBSTONE_RETENTION_MS = 30L * 24 * 60 * 60 * 1000
     }

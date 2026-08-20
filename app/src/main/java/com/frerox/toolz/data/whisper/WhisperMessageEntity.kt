@@ -40,7 +40,9 @@ data class WhisperMessageEntity(
         isRead = isRead,
         createdAt = createdAt,
         replyToContent = replyToContent,
-        replyToSenderName = replyToSenderName
+        replyToSenderName = replyToSenderName,
+        // Cached pending rows render as a neutral placeholder instead of a real bubble.
+        isPending = content == "[message pending sync]"
     )
 }
 

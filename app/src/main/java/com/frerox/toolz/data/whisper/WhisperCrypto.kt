@@ -47,7 +47,8 @@ class WhisperCrypto @Inject constructor() {
         private const val IV_LEN = 12
         private const val MAX_MESSAGE_CHARS = 8_192
         // ImgBB accepts 32 MB base64 input; ciphertext and base64 expansion require headroom.
-        private const val MAX_ATTACHMENT_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES
+        // AES-GCM appends a 16-byte tag, so plaintext must stay below the transport cap.
+        private const val MAX_ATTACHMENT_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES - (AES_GCM_TAG_LEN / 8)
         private val ATTACHMENT_AAD = "whisper-attachment-v1".toByteArray(Charsets.UTF_8)
     }
 
@@ -221,4 +222,15 @@ class WhisperCrypto @Inject constructor() {
 
     fun isCurrentPublicKey(publicKeyBase64: String?): Boolean =
         !publicKeyBase64.isNullOrBlank() && publicKeyBase64 == getPublicKeyBase64()
+
+    /** Destroys the local key pair and generates a fresh one (account deletion). */
+    fun resetKeyPair() {
+        try {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
+        } catch (e: Exception) {
+            android.util.Log.w("WhisperCrypto", "Key pair deletion failed", e)
+        }
+        ensureKeyPairExists()
+    }
 }

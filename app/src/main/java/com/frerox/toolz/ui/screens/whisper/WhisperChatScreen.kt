@@ -16,6 +16,7 @@
  */
 package com.frerox.toolz.ui.screens.whisper
 
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 
@@ -24,6 +25,7 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.WindowManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -64,7 +66,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -126,10 +130,15 @@ fun WhisperChatScreen(
     var quickReactionTargetMessage by remember { mutableStateOf<WhisperMessage?>(null) }
     var showKeyVerifyDialog by remember { mutableStateOf(false) }
     var showImageOptions by remember { mutableStateOf(false) }
-    var selectedImageExpiry by remember { mutableStateOf<Long?>(null) }
+    // One-shot expiry: consumed by the next picker result, then cleared so a stale
+    // choice never silently applies to a later image.
+    var pendingImageExpiry by remember { mutableStateOf<Long?>(null) }
     var fullScreenImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     var fullScreenImageMimeType by remember { mutableStateOf("image/jpeg") }
     val context = LocalContext.current
+
+    // E2EE content never appears in screenshots or recent-app previews.
+    SecureWindow()
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -140,10 +149,13 @@ fun WhisperChatScreen(
             toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
         } else {
             val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+            val expiry = pendingImageExpiry
             // Compress before encrypt to stay within the edge-function body limit
             scope.launch {
                 val compressed = compressImageForUpload(bytes, mimeType)
-                viewModel.sendImage(compressed, "image/jpeg", selectedImageExpiry)
+                // If compression succeeded the bytes are JPEG; otherwise keep the source mime.
+                val outMime = if (compressed === bytes) mimeType else "image/jpeg"
+                viewModel.sendImage(compressed, outMime, expiry)
             }
         }
     }
@@ -444,7 +456,7 @@ fun WhisperChatScreen(
                         ) {
                             itemsIndexed(reversedMessages, key = { _, m -> m.id }) { index, message ->
                                 val isMine = message.isSentByMe(viewModel.myUserId)
-                                val isPending = message.id.startsWith("pending_")
+                                val isPending = message.isPending || message.id.startsWith("pending_")
                                 
                                 val showDateSeparator = index == reversedMessages.lastIndex ||
                                     reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
@@ -559,7 +571,7 @@ fun WhisperChatScreen(
                 // Input bar
                 val draftText by viewModel.draftText.collectAsStateWithLifecycle()
                 var sendPulse by remember { mutableIntStateOf(0) }
-                LaunchedEffect(messages.size) { if (messages.lastOrNull()?.id?.startsWith("pending_") == true) sendPulse++ }
+                LaunchedEffect(messages.size) { if (messages.lastOrNull()?.isPending == true) sendPulse++ }
                 
                 MessageInputBar(
                     enabled = uiState.friendStatus == FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther,
@@ -639,7 +651,7 @@ fun WhisperChatScreen(
         ImageExpirySheet(
             onDismiss = { showImageOptions = false },
             onSelect = { expiry ->
-                selectedImageExpiry = expiry
+                pendingImageExpiry = expiry
                 showImageOptions = false
                 imagePicker.launch("image/*")
             },
@@ -715,7 +727,7 @@ private fun ReplyPreviewBar(
             val attachment = WhisperImageAttachment.fromMessageContent(replyTarget.content)
             if (attachment != null) {
                 val bitmap = remember(decryptedImageBytes) {
-                    decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                    decryptedImageBytes?.let { decodeBoundedBitmap(it, 34, 34) }
                 }
                 if (bitmap != null) {
                     Image(
@@ -750,7 +762,9 @@ private fun ReplyPreviewBar(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    if (attachment != null) stringResource(R.string.st_Whisper_Image) else replyTarget.content,
+                    if (attachment != null) stringResource(R.string.st_Whisper_Image)
+                    else if (replyTarget.isDeletedForEveryone) stringResource(R.string.st_Whisper_MessageDeleted)
+                    else replyTarget.content,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -930,14 +944,22 @@ private fun DeleteMessageSheet(
                 }
             }
 
-            // Message Preview (Subtle tinted bubble)
+            // Message Preview (Subtle tinted bubble).
+            // Ciphertext envelopes are never shown raw: images preview as a label.
+            val previewText = if (message.isDeletedForEveryone) {
+                stringResource(R.string.st_Whisper_MessageDeleted)
+            } else if (WhisperImageAttachment.fromMessageContent(message.content) != null) {
+                "📷 " + stringResource(R.string.st_Whisper_Image)
+            } else {
+                message.content.take(100)
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    message.content.take(100),
+                    previewText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(14.dp),
@@ -1318,8 +1340,13 @@ private fun MessageBubble(
                                 Column {
                                     Text(message.replyToSenderName ?: stringResource(R.string.st_Whisper_UserDefault), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     val isImage = message.replyToContent == stringResource(R.string.st_Whisper_Image) || message.replyToContent == "📷 Image"
+                                    val isDeletedQuote = message.replyToContent?.startsWith("[deleted_by_sender") == true || message.replyToContent == stringResource(R.string.st_Whisper_MessageDeleted)
                                     Text(
-                                        if (isImage) "📷 " + stringResource(R.string.st_Whisper_Image) else message.replyToContent ?: "",
+                                        when {
+                                            isImage -> "📷 " + stringResource(R.string.st_Whisper_Image)
+                                            isDeletedQuote -> stringResource(R.string.st_Whisper_MessageDeleted)
+                                            else -> message.replyToContent ?: ""
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -1340,7 +1367,7 @@ private fun MessageBubble(
                         if (attachment != null) {
                             LaunchedEffect(message.id) { onLoadImage() }
                             val bitmap = remember(decryptedImageBytes) {
-                                decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                                decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
                             }
                             if (bitmap != null) {
                                 Image(
@@ -1359,8 +1386,9 @@ private fun MessageBubble(
                                 }
                             }
                         } else {
+                        val parsedContent = remember(message.content) { message.content.parseMarkdown() }
                         Text(
-                            text = message.content.parseMarkdown(),
+                            text = parsedContent,
                             color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                         )
                         }
@@ -1435,8 +1463,9 @@ private fun MessageInputBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp)
-            .navigationBarsPadding(),
+            .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp),
+        // NOTE: no navigationBarsPadding here — the parent Column already applies
+        // imePadding, so adding a second inset would double the gap above the navbar.
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -1537,12 +1566,13 @@ private fun MessageInputBar(
                     if (targetHasText) {
                         Icon(
                             Icons.AutoMirrored.Rounded.Send,
-                            contentDescription = "Send",
+                            contentDescription = stringResource(R.string.cd_Whisper_SendMessage),
                             modifier = Modifier.size(22.dp)
                         )
                     } else {
+                        // No voice feature exists; a mic would be a dead affordance.
                         Icon(
-                            Icons.Rounded.Mic,
+                            Icons.Rounded.ChatBubbleOutline,
                             contentDescription = null,
                             modifier = Modifier.size(22.dp)
                         )
@@ -1558,7 +1588,8 @@ private fun MessageInputBar(
 private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
     withContext(Dispatchers.Default) {
         runCatching {
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext bytes
+            // Sample-decode huge sources first so the pipeline never allocates a full-size bitmap.
+            val bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
             val maxDimension = 1920
             val width = bitmap.width
             val height = bitmap.height
@@ -1603,6 +1634,19 @@ private fun String.parseMarkdown(): AnnotatedString {
     var i = 0
     while (i < this.length) {
         when {
+            // Bold italic: ***text***
+            startsWith("***", i) -> {
+                val end = indexOf("***", i + 3)
+                if (end != -1 && end > i + 3) {
+                    builder.pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic))
+                    builder.append(substring(i + 3, end))
+                    builder.pop()
+                    i = end + 3
+                } else {
+                    builder.append("***")
+                    i += 3
+                }
+            }
             // Bold: **text**
             startsWith("**", i) -> {
                 val end = indexOf("**", i + 2)
@@ -1658,6 +1702,18 @@ private fun readBoundedImageBytes(input: java.io.InputStream, context: Context):
     return output.toByteArray()
 }
 
+/** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
+private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= maxWidth && bounds.outHeight / (sample * 2) >= maxHeight) {
+        sample *= 2
+    }
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+}
+
 @Composable
 private fun WhisperFullScreenImageViewer(
     imageBytes: ByteArray,
@@ -1668,8 +1724,13 @@ private fun WhisperFullScreenImageViewer(
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
+    val screen = LocalConfiguration.current
     val bitmap = remember(imageBytes) {
-        runCatching { BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size) }.getOrNull()
+        runCatching { decodeBoundedBitmap(imageBytes, screen.screenWidthDp * 2, screen.screenHeightDp * 2) }.getOrNull()
+    }
+    // Release the decoded bitmap when the viewer closes instead of leaking it.
+    DisposableEffect(bitmap) {
+        onDispose { bitmap?.recycle() }
     }
 
     Dialog(
@@ -1759,6 +1820,7 @@ private fun WhisperFullScreenImageViewer(
 
 private suspend fun saveImageToGallery(context: Context, bytes: ByteArray, mimeType: String): Boolean =
     withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
         try {
             val filename = "Whisper_${System.currentTimeMillis()}.${if (mimeType == "image/png") "png" else "jpg"}"
             val contentValues = ContentValues().apply {
@@ -1768,19 +1830,36 @@ private suspend fun saveImageToGallery(context: Context, bytes: ByteArray, mimeT
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
 
-            val resolver = context.contentResolver
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                 ?: return@withContext false
 
-            resolver.openOutputStream(uri)?.use { it.write(bytes) }
-
-            contentValues.clear()
-            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, contentValues, null, null)
+            try {
+                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
+                contentValues.clear()
+                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, contentValues, null, null)
+            } catch (e: Exception) {
+                // A failed write must not leave a phantom pending media item behind.
+                runCatching { resolver.delete(uri, null, null) }
+                return@withContext false
+            }
             true
         } catch (e: Exception) {
             false
         }
     }
 
-private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024
+/** Sets FLAG_SECURE on the hosting window so sensitive content never appears in
+ *  screenshots, screen recordings, or the recents preview. */
+@Composable
+private fun SecureWindow() {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+}
+
+private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024 - 16 // transport cap minus AES-GCM tag

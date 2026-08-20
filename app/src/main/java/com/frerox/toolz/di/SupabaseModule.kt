@@ -17,10 +17,12 @@
 
 package com.frerox.toolz.di
 
+import android.content.Context
 import com.frerox.toolz.BuildConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
@@ -36,13 +38,15 @@ object SupabaseModule {
 
     @Provides
     @Singleton
-    fun provideSupabaseClient(): SupabaseClient = createSupabaseClient(
+    fun provideSupabaseClient(@ApplicationContext context: Context): SupabaseClient = createSupabaseClient(
         supabaseUrl = BuildConfig.SUPABASE_URL,
         supabaseKey = BuildConfig.SUPABASE_ANON_KEY,
     ) {
         install(Auth) {
             host = "login"
             scheme = "whisper-auth"
+            // Persist the session encrypted with a Keystore key instead of plaintext.
+            sessionManager = KeystoreSessionManager(context)
         }
         install(Postgrest)
         install(Realtime)

@@ -69,4 +69,10 @@ class WhisperHiddenChatsStore @Inject constructor(
     fun hideTime(userId: String): Long? = _hiddenChats.value[userId]
 
     fun isHidden(userId: String): Boolean = _hiddenChats.value.containsKey(userId)
+
+    /** Wipe every hidden-chat record on this device (account deletion). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+        _hiddenChats.value = emptyMap()
+    }
 }

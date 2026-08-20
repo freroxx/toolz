@@ -32,6 +32,11 @@ class WhisperOutgoingQueue @Inject constructor(
         save(entries().filterNot { it.clientId == clientId })
     }
 
+    /** Drop the whole outbox (account deletion). */
+    fun clearAll() = synchronized(lock) {
+        save(emptyList())
+    }
+
     private fun save(entries: List<WhisperQueuedMessage>) {
         prefs.edit().putString(KEY, json.encodeToString(entries.takeLast(MAX_ENTRIES))).apply()
     }

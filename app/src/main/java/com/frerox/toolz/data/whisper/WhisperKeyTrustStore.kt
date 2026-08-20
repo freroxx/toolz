@@ -54,4 +54,9 @@ class WhisperKeyTrustStore @Inject constructor(
     fun forgetUser(userId: String) {
         prefs.edit().remove("known_$userId").remove("verified_$userId").apply()
     }
+
+    /** Wipe every trust record on this device (account deletion). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+    }
 }

@@ -107,8 +107,11 @@ fun WhisperMainScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // Conversation previews contain decrypted content — never allow screenshots/recents capture.
+    SecureWindow()
+
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
-    var isLoggingOut by remember { mutableStateOf(false) }
+    var isLoggingOut by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(isAuthenticated) {
         if (isAuthenticated == false && !isLoggingOut) {
@@ -128,6 +131,7 @@ fun WhisperMainScreen(
 
     var selectedFriendForOptions by remember { mutableStateOf<WhisperProfile?>(null) }
     var selectedConvoForOptions by remember { mutableStateOf<WhisperConversation?>(null) }
+    var convoPendingClear by remember { mutableStateOf<WhisperConversation?>(null) }
     var showAvatarOptions by remember { mutableStateOf(false) }
     var profileForFullView by remember { mutableStateOf<WhisperProfile?>(null) }
 
@@ -176,6 +180,7 @@ fun WhisperMainScreen(
                         }
                     },
                     actions = {
+                        // Computed once and shared by the top bar and nav badge.
                         val totalUnread = uiState.conversations.sumOf { it.unreadCount }
                         if (totalUnread > 0 && pagerState.currentPage != 0) {
                             Badge { Text(totalUnread.coerceAtMost(99).toString()) }
@@ -187,7 +192,8 @@ fun WhisperMainScreen(
             bottomBar = {
                 ExpressiveNavigationBar {
                     tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
-                        val unread = if (index == 0) uiState.conversations.sumOf { it.unreadCount } else 0
+                        val totalUnread = uiState.conversations.sumOf { it.unreadCount }
+                        val unread = if (index == 0) totalUnread else 0
                         val pendingCount = if (index == 0) uiState.pendingIncoming.size else 0
                         ExpressiveNavigationBarItem(
                             selected = pagerState.currentPage == index,
@@ -299,10 +305,50 @@ fun WhisperMainScreen(
                     haptic.click()
                     viewModel.deleteAvatar()
                     showAvatarOptions = false
-                    toastState.show("Profile photo removed", WhisperToastType.INFO)
+                    // No optimistic toast: failures surface through the shared error handler.
                 }
             )
         }
+    }
+
+    // Clear-history confirmation (destructive and permanent)
+    convoPendingClear?.let { convo ->
+        AlertDialog(
+            onDismissRequest = { convoPendingClear = null },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(28.dp))
+                }
+            },
+            title = { Text(stringResource(R.string.st_Whisper_ClearHistoryConfirmTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge) },
+            text = { Text(stringResource(R.string.st_Whisper_ClearHistoryConfirmDesc, convo.otherUser.effectiveName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        val uId = convo.otherUser.id
+                        convoPendingClear = null
+                        haptic.success()
+                        viewModel.clearChatHistory(uId)
+                        toastState.show(stringResource(R.string.st_Whisper_ChatHistoryCleared), WhisperToastType.SUCCESS)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
+                ) { Text(stringResource(R.string.st_Whisper_Delete), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(onClick = { convoPendingClear = null }) {
+                    Text(stringResource(R.string.st_Whisper_Cancel))
+                }
+            },
+            properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+        )
     }
 
     // Material 3 Expressive Friend Options Bottom Sheet
@@ -346,11 +392,12 @@ fun WhisperMainScreen(
                 onNavigateToProfile(uId)
             },
             onClearChat = {
-                val uId = convo.otherUser.id
+                val convo = convo
                 selectedConvoForOptions = null
                 haptic.click()
-                viewModel.clearChatHistory(uId)
-                toastState.show("Chat history cleared", WhisperToastType.INFO)
+                // Clearing is permanent and cannot be undone from this screen, so it
+                // always asks for confirmation first.
+                convoPendingClear = convo
             },
             onToggleMute = {
                 val uId = convo.otherUser.id
@@ -466,7 +513,7 @@ fun WhisperMainScreen(
     // Whisper Beta Warning Dialog
     if (betaWarningShown == false) {
         AlertDialog(
-            onDismissRequest = { /* Must accept to enter */ },
+            onDismissRequest = { viewModel.markBetaWarningAsShown() },
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             icon = {
@@ -665,16 +712,22 @@ private fun ConversationCard(
     val unread = conversation.unreadCount > 0
     val isOnline = conversation.otherUser.onlineStatus == "Online"
 
-    // Animated online dot pulse
+    // Animated online dot pulse — only runs for contacts that are actually online,
+    // so offline conversations never burn battery with an infinite animation.
+    val performanceMode = LocalPerformanceMode.current
     val infiniteTransition = rememberInfiniteTransition(label = "onlinePulse")
-    val onlineDotScale by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot"
-    )
+    val onlineDotScale by if (isOnline && !performanceMode) {
+        infiniteTransition.animateFloat(
+            initialValue = 1f, targetValue = 1.3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "dot"
+        )
+    } else {
+        remember { mutableStateOf(1f) }
+    }
 
     // Fix: pass onLongClick to ExpressiveCard directly (no duplicate combinedClickable)
     ExpressiveCard(
@@ -835,7 +888,7 @@ private fun FriendRequestCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = if (profile != null) "@${profile.effectiveUsername}" else friendship.userA.take(8) + "…",
+                    text = if (profile != null) "@${profile.effectiveUsername}" else stringResource(R.string.st_Whisper_UserDefault),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1158,12 +1211,12 @@ private fun ProfileTab(
     val initialIsPrivate = profile.isPrivate
     val initialIsHidden = profile.isHiddenFromDiscover
 
-    // Reset the form when the refreshed profile arrives after a successful save, not only
-    // when the account ID changes.
-    var displayName by remember(profile.id, initialDisplayName) { mutableStateOf(initialDisplayName) }
-    var bio by remember(profile.id, initialBio) { mutableStateOf(initialBio) }
-    var isPrivate by remember(profile.id, initialIsPrivate) { mutableStateOf(initialIsPrivate) }
-    var isHidden by remember(profile.id, initialIsHidden) { mutableStateOf(initialIsHidden) }
+    // Reset the form only when a different account loads; refreshed profile data after a
+    // save should not wipe edits the user is still making.
+    var displayName by remember(profile.id) { mutableStateOf(initialDisplayName) }
+    var bio by remember(profile.id) { mutableStateOf(initialBio) }
+    var isPrivate by remember(profile.id) { mutableStateOf(initialIsPrivate) }
+    var isHidden by remember(profile.id) { mutableStateOf(initialIsHidden) }
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
@@ -1219,7 +1272,8 @@ private fun ProfileTab(
     ) { uri ->
         uri?.let {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                val bytes = stream.readBytes()
+                // Bound the read so a huge picker image can never exhaust memory.
+                val bytes = stream.readBounded(MAX_AVATAR_READ_BYTES)
                 val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
                 viewModel.uploadAvatar(bytes, mimeType)
             }
@@ -1532,22 +1586,11 @@ private fun ProfileTab(
             Text("Delete Account", fontWeight = FontWeight.Bold)
         }
 
-        // Logout
-        val logoutInteractionSource = remember { MutableInteractionSource() }
-        val isLogoutPressed by logoutInteractionSource.collectIsPressedAsState()
-
-        LaunchedEffect(isLogoutPressed) {
-            if (isLogoutPressed) {
-                delay(3000.milliseconds)
-                haptic.success()
-                viewModel.resetOnboarding()
-            }
-        }
-
+        // Logout — plain tap opens the confirmation dialog; the old hidden "hold 3s"
+        // gesture is gone because it silently reset onboarding without signing out.
         ToolzOutlinedExpressiveButton(
             onClick = { haptic.click(); showLogoutDialog = true },
             modifier = Modifier.fillMaxWidth().height(50.dp),
-            interactionSource = logoutInteractionSource,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) {
             Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
@@ -2361,14 +2404,33 @@ private fun DiscoverSkeleton() {
 fun String.formatTimestamp(): String {
     val yesterday = stringResource(R.string.st_Whisper_Chat_Yesterday)
     return try {
+        // Server timestamps are absolute; render them in the device's local timezone.
         val dt = java.time.OffsetDateTime.parse(this)
-        val now = java.time.OffsetDateTime.now()
-        val days = java.time.temporal.ChronoUnit.DAYS.between(dt.toLocalDate(), now.toLocalDate())
+        val local = dt.atZoneSameInstant(java.time.ZoneId.systemDefault())
+        val now = java.time.ZonedDateTime.now()
+        val days = java.time.temporal.ChronoUnit.DAYS.between(local.toLocalDate(), now.toLocalDate())
         when {
-            days == 0L -> "${dt.hour.toString().padStart(2, '0')}:${dt.minute.toString().padStart(2, '0')}"
+            days == 0L -> "${local.hour.toString().padStart(2, '0')}:${local.minute.toString().padStart(2, '0')}"
             days == 1L -> yesterday
-            days < 7L  -> dt.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-            else       -> "${dt.dayOfMonth}/${dt.monthValue}"
+            days < 7L  -> local.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+            else       -> "${local.dayOfMonth}/${local.monthValue}"
         }
     } catch (_: Exception) { "" }
 }
+
+/** Reads at most [maxBytes] from the stream, throwing when the source exceeds it. */
+private fun java.io.InputStream.readBounded(maxBytes: Int): ByteArray {
+    val output = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val read = this.read(buffer)
+        if (read < 0) break
+        total += read
+        require(total <= maxBytes) { "Avatar file is too large." }
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
+}
+
+private const val MAX_AVATAR_READ_BYTES = 10 * 1024 * 1024

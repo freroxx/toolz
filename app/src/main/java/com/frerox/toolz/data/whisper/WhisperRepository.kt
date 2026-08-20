@@ -67,6 +67,8 @@ class WhisperRepository @Inject constructor(
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val messageDao: WhisperMessageDao,
     private val keyTrustStore: WhisperKeyTrustStore,
+    private val hiddenChatsStore: WhisperHiddenChatsStore,
+    private val mutePrefs: WhisperMutePreferences,
 ) {
     private companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -94,6 +96,9 @@ class WhisperRepository @Inject constructor(
             peerKeys.update { it + (userId to publicKey) }
         }
     }
+
+    // Users this account has blocked, kept in memory for flow-level filtering of cached history.
+    private val blockedIds = MutableStateFlow<Set<String>>(emptySet())
 
     private fun peerKeyFor(userId: String): String? =
         peerKeys.value[userId] ?: keyTrustStore.knownKey(userId)
@@ -272,6 +277,7 @@ class WhisperRepository @Inject constructor(
                     }
                     neq("id", myId)
                     eq("hide_from_discover", false)
+                    eq("is_private", false)
                 }
                 limit(30)
             }
@@ -289,7 +295,19 @@ class WhisperRepository @Inject constructor(
         val currentId = myId
         if (currentId.isBlank()) error("User not authenticated")
         val pubKey = crypto.getPublicKeyBase64()
-        val updateWithKey = if (update.publicKey == null && pubKey != null) update.copy(publicKey = pubKey) else update
+        // Never overwrite a server-side key with a local mismatch: only push the local key
+        // when it was explicitly requested or when the server row has none to begin with.
+        val updateWithKey = when {
+            update.publicKey != null -> update
+            pubKey != null -> {
+                val serverKey = runCatching {
+                    db.from("profiles").select { filter { eq("id", currentId) } }
+                        .decodeSingleOrNull<WhisperProfile>()?.publicKey
+                }.getOrNull()
+                if (serverKey.isNullOrBlank() && pubKey != null) update.copy(publicKey = pubKey) else update
+            }
+            else -> update
+        }
         db.from("profiles").update(updateWithKey) { filter { eq("id", currentId) } }
         profileCache.remove(currentId)
     }
@@ -320,6 +338,15 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteAvatar(): Result<Unit> = runCatching {
+        // Remove the underlying blob before clearing the reference so failed deletions
+        // never leave an orphaned file behind.
+        runCatching {
+            val current = db.from("profiles").select { filter { eq("id", myId) } }
+                .decodeSingleOrNull<WhisperProfile>()
+            current?.avatarUrl?.substringAfter("whisper-avatars/", "")?.substringBefore("?")?.let { path ->
+                if (path.isNotBlank()) store.from("whisper-avatars").delete(path)
+            }
+        }
         db.from("profiles").update(mapOf("avatar_url" to null as String?)) {
             filter { eq("id", myId) }
         }
@@ -340,12 +367,21 @@ class WhisperRepository @Inject constructor(
         // nothing plaintext ever lands on disk, while the UI still renders full history.
         return combine(
             messageDao.getMessages(currentId, otherUserId),
-            peerKeys.map { it[otherUserId] }
-        ) { entities, inMemoryKey ->
+            peerKeys.map { it[otherUserId] },
+            blockedIds
+        ) { entities, inMemoryKey, blocked ->
             val peerKey = inMemoryKey ?: keyTrustStore.knownKey(otherUserId)
-            entities.map { it.toModel().decryptContent(peerKey) }
+            entities
+                // Never resurrect delete-for-me tombstones from the Room cache.
+                .filterNot { deletedStore.isMessageDeleted(it.id) }
+                // Hidden/blocked partners keep only the user's own outgoing rows.
+                .filter { it.senderId == currentId || otherUserId !in blocked }
+                .map { it.toModel().decryptContent(peerKey) }
         }
     }
+
+    /** Key used to decrypt a partner's cached ciphertext (accepted key, never a changed one). */
+    fun getDecryptionKey(peerId: String): String? = peerKeyFor(peerId)
 
     suspend fun getMessages(otherUserId: String, limit: Int = 100, beforeCreatedAt: String? = null): Result<List<WhisperMessage>> = runCatching {
         val currentId = myId
@@ -664,6 +700,15 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun deleteMessageForEveryone(messageId: String, otherUserId: String, senderDisplayName: String): Result<Unit> = runCatching {
+        // A message still in the local outbox was never delivered server-side: drop it
+        // locally instead of attempting a server tombstone that cannot match a row.
+        if (messageId.startsWith("queued_")) {
+            outgoingQueue.remove(messageId)
+            messageDao.deleteMessage(messageId)
+            invalidateConversationsCache()
+            return@runCatching
+        }
+
         // 1. Fetch message to check for attachments. Room holds ciphertext, so decrypt with
         // the accepted peer key before parsing the attachment envelope.
         val message = messageDao.getMessageById(messageId)
@@ -679,9 +724,10 @@ class WhisperRepository @Inject constructor(
             runCatching { encryptedImageHost.delete(att.url, att.attachmentId) }
         }
 
-        // 3. Update database with tombstone
+        // 3. Update database with tombstone, selecting back the rows it affected so a
+        // mismatch (0 rows) is surfaced instead of silently "succeeding".
         val tombstone = "This message has been deleted"
-        db.from("messages").update(
+        val updated = db.from("messages").update(
             buildJsonObject {
                 put("content", tombstone)
                 put("content_iv", null as String?)
@@ -691,10 +737,16 @@ class WhisperRepository @Inject constructor(
                 eq("id", messageId)
                 eq("sender_id", myId)
             }
-        }
+            select()
+        }.decodeList<WhisperMessage>()
         
-        // 4. Erase from local cache
-        messageDao.deleteMessage(messageId)
+        // 4. Erase from local cache only when the server accepted the tombstone.
+        if (updated.isNotEmpty()) {
+            messageDao.deleteMessage(messageId)
+            invalidateConversationsCache()
+        } else {
+            error("This message could not be deleted. It may have been removed already.")
+        }
     }
 
     suspend fun deleteMessageForMe(messageId: String): Result<Unit> = runCatching {
@@ -752,6 +804,7 @@ class WhisperRepository @Inject constructor(
                     val msg = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperMessage>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperMessage>()
+                        is PostgresAction.Delete -> action.decodeOldRecord<WhisperMessage>()
                         else -> null
                     }
                     if (msg != null && (
@@ -759,6 +812,13 @@ class WhisperRepository @Inject constructor(
                         (msg.senderId == myId && msg.receiverId == otherUserId)
                     )) {
                         if (isUserBlockedByMe(msg.senderId)) return@collect
+
+                        // Hard server-side row deletion: mirror it in the cache immediately.
+                        if (action is PostgresAction.Delete) {
+                            launch { messageDao.deleteMessage(msg.id) }
+                            if (shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.DeleteEvent(msg.id))
+                            return@collect
+                        }
 
                         var otherKey = getProfile(otherUserId).getOrNull()?.publicKey
                         if (otherKey == null) {
@@ -775,16 +835,20 @@ class WhisperRepository @Inject constructor(
                         
                         val finalMsg = msg.copy(content = decrypted)
                         
-                        // Sync ciphertext to cache in background (never the decrypted plaintext)
+                        // Sync ciphertext to cache in background (never the decrypted plaintext).
+                        // Tombstones erase the row; delete-for-me tombstones must never resurrect
+                        // through a realtime Update, so skipped rows are simply not re-inserted.
                         launch {
-                            if (msg.isDeletedForEveryone) {
-                                messageDao.deleteMessage(msg.id)
-                            } else {
-                                messageDao.insertMessage(msg.toEntity())
+                            when {
+                                msg.isDeletedForEveryone -> messageDao.deleteMessage(msg.id)
+                                deletedStore.isMessageDeleted(msg.id) -> Unit
+                                else -> messageDao.insertMessage(msg.toEntity())
                             }
                         }
 
-                        if (shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.MessageEvent(finalMsg))
+                        // Tombstone updates bypass the dedupe window: a message emitted minutes
+                        // earlier must still surface its later deletion to this device.
+                        if (msg.isDeletedForEveryone || shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.MessageEvent(finalMsg))
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("WhisperRepo", "Postgres message realtime error: ${e.message}")
@@ -858,6 +922,8 @@ class WhisperRepository @Inject constructor(
                     }
                     if (msg != null && (msg.receiverId == userId || msg.senderId == userId)) {
                         if (isUserBlockedByMe(msg.senderId)) return@collect
+                        // Never surface or re-notify a message the user deleted for themselves.
+                        if (deletedStore.isMessageDeleted(msg.id)) return@collect
 
                         val otherId = if (msg.senderId == userId) msg.receiverId else msg.senderId
                         var otherKey = getProfile(otherId).getOrNull()?.publicKey
@@ -1078,6 +1144,8 @@ class WhisperRepository @Inject constructor(
 
     suspend fun sendFriendRequest(targetUserId: String): Result<Unit> = runCatching {
         if (targetUserId == myId) return@runCatching
+        if (isUserBlockedByMe(targetUserId)) error("You have blocked this user. Unblock to send a friend request.")
+        if (isUserBlockedByOther(targetUserId)) error("You can't send a friend request to a user who blocked you.")
         val existingPair = getFriendshipStatus(targetUserId).getOrNull()
         val (status, record) = existingPair ?: Pair(FriendStatus.NONE, null)
 
@@ -1128,7 +1196,10 @@ class WhisperRepository @Inject constructor(
 
     suspend fun acceptFriendRequest(friendshipId: String): Result<Unit> = runCatching {
         val existing = db.from("friends").select { filter { eq("id", friendshipId) } }
-            .decodeSingleOrNull<WhisperFriendship>()
+            .decodeSingleOrNull<WhisperFriendship>() ?: error("This friend request no longer exists.")
+        // Only the recipient of a pending request may accept it.
+        if (existing.userB != myId) error("You can only accept friend requests sent to you.")
+        if (existing.status != "pending") return@runCatching
 
         db.from("friends").update({ set("status", "accepted") }) { filter { eq("id", friendshipId) } }
 
@@ -1168,7 +1239,10 @@ class WhisperRepository @Inject constructor(
 
     suspend fun deleteFriendship(friendshipId: String): Result<Unit> = runCatching {
         val existing = db.from("friends").select { filter { eq("id", friendshipId) } }
-            .decodeSingleOrNull<WhisperFriendship>()
+            .decodeSingleOrNull<WhisperFriendship>() ?: error("This friendship no longer exists.")
+        if (existing.userA != myId && existing.userB != myId) {
+            error("This friendship is not yours to remove.")
+        }
         db.from("friends").delete { filter { eq("id", friendshipId) } }
         if (existing != null) {
             val otherId = if (existing.userA == myId) existing.userB else existing.userA
@@ -1312,11 +1386,13 @@ class WhisperRepository @Inject constructor(
         require(targetUserId.isNotBlank() && targetUserId != myId) { "Choose another user to block." }
         db.from("whisper_blocks").insert(WhisperBlockInsert(blockerId = myId, blockedId = targetUserId))
         blockedByMeCache.add(targetUserId)
+        blockedIds.update { it + targetUserId }
     }
 
     suspend fun unblockUser(targetUserId: String): Result<Unit> = runCatching {
         db.from("whisper_blocks").delete { filter { eq("blocker_id", myId); eq("blocked_id", targetUserId) } }
         blockedByMeCache.remove(targetUserId)
+        blockedIds.update { it - targetUserId }
     }
 
     suspend fun isBlockedByMe(otherUserId: String): Boolean = isUserBlockedByMe(otherUserId)
@@ -1489,7 +1565,8 @@ class WhisperRepository @Inject constructor(
      */
     suspend fun getKeyTrustInfo(otherUserId: String): KeyTrustInfo {
         val myFingerprint = crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) }
-        val profile = getProfile(otherUserId).getOrNull() ?: return KeyTrustInfo(myFingerprint = myFingerprint)
+        // Force a fresh read so a changed key is never hidden behind the profile cache.
+        val profile = getProfile(otherUserId, forceRefresh = true).getOrNull() ?: return KeyTrustInfo(myFingerprint = myFingerprint)
         val currentKey = profile.publicKey
         if (currentKey.isNullOrBlank()) return KeyTrustInfo(myFingerprint = myFingerprint)
 
@@ -1512,7 +1589,7 @@ class WhisperRepository @Inject constructor(
 
     /** Mark the partner's current key as verified (fingerprint compared in person). */
     suspend fun verifyUserKey(otherUserId: String): Boolean {
-        val profile = getProfile(otherUserId).getOrNull() ?: return false
+        val profile = getProfile(otherUserId, forceRefresh = true).getOrNull() ?: return false
         val currentKey = profile.publicKey ?: return false
         keyTrustStore.markVerified(otherUserId, currentKey)
         cachePeerKey(otherUserId, currentKey)
@@ -1521,10 +1598,31 @@ class WhisperRepository @Inject constructor(
 
     /** Accept the partner's new key without verifying it in person. */
     suspend fun acceptNewKey(otherUserId: String): Boolean {
-        val profile = getProfile(otherUserId).getOrNull() ?: return false
+        val profile = getProfile(otherUserId, forceRefresh = true).getOrNull() ?: return false
         val currentKey = profile.publicKey ?: return false
         keyTrustStore.rememberKey(otherUserId, currentKey)
         cachePeerKey(otherUserId, currentKey)
         return true
+    }
+
+    /**
+     * Wipes every byte of whisper data this device holds for the signed-in account:
+     * Room cache, tombstones, outbox, key trust records, hidden chats, mutes, caches
+     * and the E2EE key pair. Called after a successful server-side account deletion.
+     */
+    suspend fun clearAllLocalData() {
+        messageDao.clearAll()
+        deletedStore.clearAll()
+        outgoingQueue.clearAll()
+        keyTrustStore.clearAll()
+        hiddenChatsStore.clearAll()
+        mutePrefs.clearAll()
+        profileCache.clear()
+        peerKeys.value = emptyMap()
+        blockedIds.value = emptySet()
+        blockedByMeCache.clear()
+        conversationsCache = null
+        conversationsCacheTime = 0L
+        crypto.resetKeyPair()
     }
 }

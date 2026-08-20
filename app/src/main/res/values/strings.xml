@@ -189,6 +189,10 @@
     <string name="st_Whisper_Chat_Options">Chat Options</string>
     <string name="st_Whisper_ViewProfile">View Profile</string>
     <string name="st_Whisper_ClearHistory">Clear History</string>
+    <string name="st_Whisper_ClearHistoryConfirmTitle">Clear chat history?</string>
+    <string name="st_Whisper_ClearHistoryConfirmDesc">All messages with %s will be permanently deleted on this device. This cannot be undone.</string>
+    <string name="st_Whisper_ChatHistoryCleared">Chat history cleared</string>
+    <string name="st_Whisper_Delete">Delete</string>
     <string name="st_Whisper_UndoClearCount">Undo Clear (%d)</string>
     <string name="st_Whisper_Unmute">Unmute</string>
     <string name="st_Whisper_Mute">Mute</string>
@@ -219,6 +223,7 @@
     <string name="st_Whisper_AddFriendToChat">Add them to start chatting</string>
     <string name="st_Whisper_YouDeleted">You deleted this message</string>
     <string name="st_Whisper_PartnerDeleted">%s deleted this message</string>
+    <string name="st_Whisper_MessageDeleted">Message deleted</string>
     <string name="st_Whisper_Image">Image</string>
     <string name="st_Whisper_ImageExpired">Image expired</string>
     <string name="st_Whisper_LoadingImage">Loading encrypted image…</string>
@@ -295,6 +300,7 @@
     <string name="cd_Whisper_Options">Chat options</string>
     <string name="cd_Whisper_ScrollBottom">Scroll to bottom</string>
     <string name="cd_Whisper_SendImage">Send encrypted image</string>
+    <string name="cd_Whisper_SendMessage">Send message</string>
     <string name="cd_Whisper_Reply">Reply</string>
     <string name="cd_Whisper_EncryptedImage">Encrypted image</string>
     <!-- Accessibility content descriptions -->

@@ -4,11 +4,14 @@
  */
 package com.frerox.toolz.ui.screens.whisper
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.retry
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -90,8 +94,14 @@ class WhisperViewModel @Inject constructor(
                     subscribeToMessages()
                     subscribeToFriends()
                     startHeartbeat()
-                } else {
+                } else if (auth == false) {
+                    // Tear down every subscription and cached account state so a dead
+                    // session never keeps retrying against the network.
+                    messagesJob?.cancel()
+                    friendsJob?.cancel()
+                    loadAllJob?.cancel()
                     stopHeartbeat()
+                    _uiState.update { WhisperUiState() }
                 }
             }
         }
@@ -101,7 +111,10 @@ class WhisperViewModel @Inject constructor(
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch {
             while (true) {
-                repository.updateLastSeen()
+                // Don't burn battery or write last_seen while the app is backgrounded.
+                if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    repository.updateLastSeen()
+                }
                 delay(60_000) // Update every minute
             }
         }
@@ -401,6 +414,9 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             authManager.deleteAccount(password)
                 .onSuccess {
+                    // Permanently wipe every local trace of the account after the server
+                    // side confirmed deletion.
+                    repository.clearAllLocalData()
                     onComplete()
                 }
                 .onFailure { handleError(it, "deleteAccount") }
@@ -409,7 +425,10 @@ class WhisperViewModel @Inject constructor(
 
     fun uploadAvatar(imageBytes: ByteArray, mimeType: String) {
         viewModelScope.launch {
-            val optimizedBytes = com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
+            // Compression is CPU-heavy; never run it on the main thread.
+            val optimizedBytes = withContext(Dispatchers.Default) {
+                com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
+            }
             repository.uploadAvatar(optimizedBytes, mimeType)
                 .onSuccess { url ->
                     repository.getMyProfile(forceRefresh = true).onSuccess { p ->
@@ -457,14 +476,25 @@ class WhisperViewModel @Inject constructor(
         messagesJob = viewModelScope.launch {
             repository.subscribeToIncomingMessages(myId)
                 .retry { cause ->
-                    android.util.Log.e("WhisperVM", "Incoming messages realtime error: ${cause.message}. Retrying in 3s...")
-                    delay(3000)
-                    true
+                    // Stop retrying once the session is gone or the server rejects the token;
+                    // infinite retries against a dead session only churn the network.
+                    if (authManager.currentUserId == null || WhisperErrorMapper.isSessionExpired(cause) ||
+                        (cause is io.github.jan.supabase.exceptions.RestException && cause.statusCode in 401..403)
+                    ) {
+                        false
+                    } else {
+                        android.util.Log.e("WhisperVM", "Incoming messages realtime error: ${cause.message}. Retrying in 3s...")
+                        delay(3000)
+                        true
+                    }
                 }
                 .collect { msg ->
                     // Force refresh conversations from server on new incoming message
                     loadConversationsInternal(forceRefresh = true)
-                    if (msg.senderId != myId) {
+                    if (msg.senderId != myId && !msg.isDeletedForEveryone) {
+                        // Hidden and muted chats never notify.
+                        if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
+                        if (mutePrefs.isMuted(msg.senderId)) return@collect
                         val senderProfile = repository.getProfile(msg.senderId).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
                         notificationManager.showMessageNotification(
@@ -481,15 +511,22 @@ class WhisperViewModel @Inject constructor(
         friendsJob = viewModelScope.launch {
             repository.subscribeToFriendUpdates()
                 .retry { cause ->
-                    android.util.Log.e("WhisperVM", "Friends realtime error: ${cause.message}. Retrying in 3s...")
-                    delay(3000)
-                    true
+                    if (authManager.currentUserId == null || WhisperErrorMapper.isSessionExpired(cause) ||
+                        (cause is io.github.jan.supabase.exceptions.RestException && cause.statusCode in 401..403)
+                    ) {
+                        false
+                    } else {
+                        android.util.Log.e("WhisperVM", "Friends realtime error: ${cause.message}. Retrying in 3s...")
+                        delay(3000)
+                        true
+                    }
                 }
                 .collect { friendship ->
                     loadFriendsInternal()
                     loadRecommendationsInternal()
                     val myId = authManager.currentUserId
                     if (friendship.userB == myId && friendship.status == "pending") {
+                        if (mutePrefs.isMuted(friendship.userA)) return@collect
                         val senderProfile = repository.getProfile(friendship.userA).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
                         notificationManager.showFriendRequestNotification(senderName)

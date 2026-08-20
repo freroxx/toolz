@@ -187,6 +187,10 @@
     <string name="st_Whisper_SearchLabel">Rechercher</string>
     <string name="st_Whisper_ViewProfile">Voir le profil</string>
     <string name="st_Whisper_ClearHistory">Effacer l\'historique</string>
+    <string name="st_Whisper_ClearHistoryConfirmTitle">Effacer l'historique du chat ?</string>
+    <string name="st_Whisper_ClearHistoryConfirmDesc">Tous les messages avec %s seront définitivement supprimés sur cet appareil. Cette action est irréversible.</string>
+    <string name="st_Whisper_ChatHistoryCleared">Historique du chat effacé</string>
+    <string name="st_Whisper_Delete">Supprimer</string>
     <string name="st_Whisper_UndoClearCount">Annuler l\'effacement (%d)</string>
     <string name="st_Whisper_Unmute">Réactiver le son</string>
     <string name="st_Whisper_Mute">Muet</string>
@@ -216,6 +220,7 @@
     <string name="st_Whisper_Accept">Accepter</string>
     <string name="st_Whisper_AddFriendToChat">Ajoutez-les pour commencer à discuter</string>
     <string name="st_Whisper_YouDeleted">Vous avez supprimé ce message</string>
+    <string name="st_Whisper_MessageDeleted">Message supprimé</string>
     <string name="st_Whisper_PartnerDeleted">%s a supprimé ce message</string>
     <string name="st_Whisper_ImageExpired">Imagen expirée</string>
     <string name="st_Whisper_LoadingImage">Chargement de l\'image chiffrée…</string>
@@ -292,6 +297,7 @@
     <string name="cd_Whisper_Options">Options du chat</string>
     <string name="cd_Whisper_ScrollBottom">Faire défiler vers le bas</string>
     <string name="cd_Whisper_SendImage">Envoyer une image chiffrée</string>
+    <string name="cd_Whisper_SendMessage">Envoyer un message</string>
     <string name="cd_Whisper_Reply">Répondre</string>
     <string name="cd_Whisper_EncryptedImage">Image chiffrée</string>
     <!-- Accessibility content descriptions -->
