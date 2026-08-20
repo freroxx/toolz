@@ -14,12 +14,16 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 package com.frerox.toolz.ui.screens.whisper
 
+import android.content.ContentValues
 import android.content.Context
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -31,6 +35,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -51,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -58,6 +65,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -113,7 +123,10 @@ fun WhisperChatScreen(
     var showKeyVerifyDialog by remember { mutableStateOf(false) }
     var showImageOptions by remember { mutableStateOf(false) }
     var selectedImageExpiry by remember { mutableStateOf<Long?>(null) }
+    var fullScreenImageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var fullScreenImageMimeType by remember { mutableStateOf("image/jpeg") }
     val context = LocalContext.current
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         val bytes = runCatching {
@@ -438,6 +451,11 @@ fun WhisperChatScreen(
                                         partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
                                         decryptedImageBytes = uiState.decryptedImageBytes[message.id],
                                         onLoadImage = { viewModel.loadEncryptedImage(message) },
+                                        onImageClick = { bytes, mime ->
+                                            haptic.click()
+                                            fullScreenImageBytes = bytes
+                                            fullScreenImageMimeType = mime
+                                        },
                                         onReply = { haptic.click(); viewModel.setReplyTarget(message) },
                                         onQuotedClick = { targetId ->
                                             val targetIndex = reversedMessages.indexOfFirst { it.id == targetId }
@@ -450,6 +468,7 @@ fun WhisperChatScreen(
                                         onReactionClick = { emoji -> haptic.click(); viewModel.toggleReaction(message, emoji) },
                                         onLongClick = { if (!message.isDeletedForEveryone && !isPending) { haptic.longClick(); selectedMessageForDelete = message } }
                                     )
+
                                 }
 
                                 if (showDateSeparator) {
@@ -611,7 +630,17 @@ fun WhisperChatScreen(
     quickReactionTargetMessage?.let { targetMsg ->
         QuickReactionDialog(onDismiss = { quickReactionTargetMessage = null }, onEmojiSelected = { quickReactionTargetMessage = null; viewModel.toggleReaction(targetMsg, it) })
     }
+
+    fullScreenImageBytes?.let { bytes ->
+        WhisperFullScreenImageViewer(
+            imageBytes = bytes,
+            mimeType = fullScreenImageMimeType,
+            onDismiss = { fullScreenImageBytes = null },
+            onShowToast = { text, type -> toastState.show(text, type) }
+        )
+    }
 }
+
 
 @Composable
 private fun BouncingDotsIndicator(modifier: Modifier = Modifier) {
@@ -1143,6 +1172,7 @@ private fun MessageBubble(
     partnerName: String,
     decryptedImageBytes: ByteArray?,
     onLoadImage: () -> Unit,
+    onImageClick: (ByteArray, String) -> Unit,
     onReply: () -> Unit,
     onQuotedClick: (String) -> Unit,
     onDoubleTap: () -> Unit,
@@ -1247,7 +1277,11 @@ private fun MessageBubble(
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
                                     contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
-                                    modifier = Modifier.widthIn(max = 256.dp).heightIn(max = 320.dp).clip(RoundedCornerShape(12.dp)),
+                                    modifier = Modifier
+                                        .widthIn(max = 256.dp)
+                                        .heightIn(max = 320.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onImageClick(decryptedImageBytes, attachment.mimeType) },
                                 )
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1262,6 +1296,7 @@ private fun MessageBubble(
                         )
                         }
                     }
+
                     
                     Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                         Text(message.createdAt.formatWhisperTime(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.6f))

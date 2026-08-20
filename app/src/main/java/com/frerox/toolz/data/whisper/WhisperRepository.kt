@@ -478,8 +478,8 @@ class WhisperRepository @Inject constructor(
                 )
             )
 
-            // Direct instant notification broadcast to receiver's dedicated channel
-            val notifChannel = getOrJoinBroadcastChannel("whisper-notifs-$receiverId")
+            // Direct instant notification broadcast to receiver's dedicated inbox channel
+            val notifChannel = getOrJoinBroadcastChannel("whisper-user-inbox-$receiverId")
             val myProfile = getMyProfile().getOrNull()
             notifChannel.broadcast(
                 event = "incoming_notification",
@@ -496,6 +496,7 @@ class WhisperRepository @Inject constructor(
                 )
             )
         }
+
 
         // Invalidate conversation cache so the chats list refreshes
         invalidateConversationsCache()
@@ -907,9 +908,17 @@ class WhisperRepository @Inject constructor(
             return@callbackFlow
         }
 
-        // Listen for direct instant push broadcast notifications (<50ms)
-        val notifChannel = supabase.channel("whisper-notifs-$userId")
-        val notifBroadcastFlow = notifChannel.broadcastFlow<JsonObject>("incoming_notification")
+        val channelName = "whisper-user-inbox-$userId"
+        channelMutex.withLock {
+            broadcastChannelCache[channelName]?.let { runCatching { realtime.removeChannel(it) } }
+            broadcastChannelCache.remove(channelName)
+        }
+        runCatching { realtime.removeChannel(supabase.channel(channelName)) }
+
+        val channel = supabase.channel(channelName)
+
+        // 1. Listen for direct instant push broadcast notifications (<50ms)
+        val notifBroadcastFlow = channel.broadcastFlow<JsonObject>("incoming_notification")
         val notifJob = launch {
             notifBroadcastFlow.collect { json ->
                 try {
@@ -933,12 +942,9 @@ class WhisperRepository @Inject constructor(
                 }
             }
         }
-        notifChannel.subscribe()
-        broadcastChannelCache["whisper-notifs-$userId"] = notifChannel
 
-        // Also listen to database messages table changes
-        val dbChannel = supabase.channel("whisper-messages-$userId")
-        val changes = dbChannel.postgresChangeFlow<PostgresAction>(schema = "public") {
+        // 2. Also listen to database messages table changes
+        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "messages"
         }
         val dbJob = launch {
@@ -969,17 +975,21 @@ class WhisperRepository @Inject constructor(
                 }
             }
         }
-        dbChannel.subscribe()
+
+        channel.subscribe()
+        channelMutex.withLock {
+            broadcastChannelCache[channelName] = channel
+        }
 
         awaitClose {
             notifJob.cancel()
             dbJob.cancel()
             launch {
-                removeCachedChannel("whisper-notifs-$userId", notifChannel)
-                runCatching { realtime.removeChannel(dbChannel) }
+                removeCachedChannel(channelName, channel)
             }
         }
     }
+
 
     // CLEAR CHAT
     suspend fun clearMessagesForRange(
@@ -1192,7 +1202,7 @@ class WhisperRepository @Inject constructor(
                 )
             )
 
-            val notifChannel = getOrJoinBroadcastChannel("whisper-notifs-$targetUserId")
+            val notifChannel = getOrJoinBroadcastChannel("whisper-user-inbox-$targetUserId")
             notifChannel.broadcast(
                 event = "incoming_notification",
                 payload = BroadcastPayload.Json(

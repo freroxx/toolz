@@ -78,10 +78,12 @@ class WhisperEncryptedImageHost @Inject constructor(
         // 2. Direct Supabase Storage fallback if Edge Function is unconfigured (503 / missing ImgBB key)
         val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
         val storageResult = runCatching {
-            val path = "$myUserId/attachments/${java.util.UUID.randomUUID()}.png"
+            val randomToken = java.util.UUID.randomUUID().toString().replace("-", "")
+            val path = "vault/$randomToken.bin"
             supabase.storage.from("whisper-avatars").upload(path, cipherBytes) { upsert = true }
             supabase.storage.from("whisper-avatars").publicUrl(path)
         }
+
 
         if (storageResult.isSuccess) {
             return@runCatching storageResult.getOrThrow()
