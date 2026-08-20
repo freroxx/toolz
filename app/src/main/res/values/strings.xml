@@ -218,6 +218,7 @@
     <string name="st_Whisper_AddFriendToChat">Add them to start chatting</string>
     <string name="st_Whisper_YouDeleted">You deleted this message</string>
     <string name="st_Whisper_PartnerDeleted">%s deleted this message</string>
+    <string name="st_Whisper_Image">Image</string>
     <string name="st_Whisper_ImageExpired">Image expired</string>
     <string name="st_Whisper_LoadingImage">Loading encrypted image…</string>
     <string name="st_Whisper_ImageExpiryDesc">Images are encrypted before upload. Choose when this image should disappear.</string>

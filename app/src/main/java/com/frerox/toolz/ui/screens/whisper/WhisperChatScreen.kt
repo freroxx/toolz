@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -442,7 +443,7 @@ fun WhisperChatScreen(
                                 val showDateSeparator = index == reversedMessages.lastIndex ||
                                     reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
 
-                                StaggeredEntrance(index = index) {
+                                Box(modifier = Modifier.animateItem()) {
                                     MessageBubble(
                                         message = message,
                                         isMine = isMine,
@@ -468,11 +469,10 @@ fun WhisperChatScreen(
                                         onReactionClick = { emoji -> haptic.click(); viewModel.toggleReaction(message, emoji) },
                                         onLongClick = { if (!message.isDeletedForEveryone && !isPending) { haptic.longClick(); selectedMessageForDelete = message } }
                                     )
-
                                 }
 
                                 if (showDateSeparator) {
-                                    StaggeredEntrance(index = index + 100) {
+                                    Box(modifier = Modifier.animateItem()) {
                                         DateSeparator(message.createdAt.extractDate())
                                     }
                                 }
@@ -533,8 +533,20 @@ fun WhisperChatScreen(
                 }
 
                 // Reply bar
-                uiState.replyingToMessage?.let { replyTarget ->
-                    ReplyPreviewBar(replyTarget = replyTarget, partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault), myUserId = viewModel.myUserId, onDismiss = { viewModel.clearReplyTarget() })
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = uiState.replyingToMessage != null,
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut()
+                ) {
+                    uiState.replyingToMessage?.let { replyTarget ->
+                        ReplyPreviewBar(
+                            replyTarget = replyTarget,
+                            partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
+                            myUserId = viewModel.myUserId,
+                            decryptedImageBytes = uiState.decryptedImageBytes[replyTarget.id],
+                            onDismiss = { viewModel.clearReplyTarget() }
+                        )
+                    }
                 }
 
                 // Input bar
@@ -665,7 +677,13 @@ private fun BouncingDotsIndicator(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, myUserId: String, onDismiss: () -> Unit) {
+private fun ReplyPreviewBar(
+    replyTarget: WhisperMessage,
+    partnerName: String,
+    myUserId: String,
+    decryptedImageBytes: ByteArray? = null,
+    onDismiss: () -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(20.dp),
@@ -685,6 +703,33 @@ private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, my
                     .height(34.dp)
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
+            
+            // Thumbnail for image replies
+            val attachment = WhisperImageAttachment.fromMessageContent(replyTarget.content)
+            if (attachment != null) {
+                val bitmap = decryptedImageBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Image, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     stringResource(
@@ -696,7 +741,7 @@ private fun ReplyPreviewBar(replyTarget: WhisperMessage, partnerName: String, my
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    replyTarget.content,
+                    if (attachment != null) stringResource(R.string.st_Whisper_Image) else replyTarget.content,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1256,7 +1301,13 @@ private fun MessageBubble(
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(message.replyToSenderName ?: stringResource(R.string.st_Whisper_UserDefault), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                    Text(message.replyToContent ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val isImage = message.replyToContent == stringResource(R.string.st_Whisper_Image) || message.replyToContent == "📷 Image"
+                                    Text(
+                                        if (isImage) "📷 " + stringResource(R.string.st_Whisper_Image) else message.replyToContent ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }

@@ -312,13 +312,22 @@ class WhisperChatViewModel @Inject constructor(
         clearReplyTarget()
         sendTypingSignal(false)
         val trimmedContent = content.trim()
+        val replySnippet = replyTarget?.let { target ->
+            val content = if (target.content.startsWith("whisper:image:")) {
+                "📷 Image"
+            } else {
+                target.content.take(100)
+            }
+            content
+        }
+
         val optimisticMsg = WhisperMessage(
             id = "pending_${System.currentTimeMillis()}",
             senderId = myUserId,
             receiverId = otherUserId,
             content = trimmedContent,
             replyToId = replyTarget?.id,
-            replyToContent = replyTarget?.content?.take(100),
+            replyToContent = replySnippet,
             replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User",
             isPending = true
         )
@@ -333,7 +342,7 @@ class WhisperChatViewModel @Inject constructor(
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id && it.id != newMsg.id }
                         val enrichedMsg = newMsg.copy(
-                            replyToContent = replyTarget?.content?.take(100),
+                            replyToContent = replySnippet,
                             replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User"
                         )
                         state.copy(messages = filtered + enrichedMsg)
@@ -617,11 +626,16 @@ class WhisperChatViewModel @Inject constructor(
                                     state.copy(messages = mutableList)
                                 } else {
                                     // Enrich reply metadata for live message
-                                    val enrichedMsg = if (newMsg.replyToId != null && newMsg.replyToContent == null) {
+                                    val enrichedMsg = if (newMsg.replyToId != null && (newMsg.replyToContent == null || newMsg.replyToContent.startsWith("whisper:image:"))) {
                                         val replyTarget = state.messages.find { it.id == newMsg.replyToId }
                                         if (replyTarget != null) {
+                                            val content = if (replyTarget.content.startsWith("whisper:image:")) {
+                                                "📷 Image"
+                                            } else {
+                                                replyTarget.content.take(100)
+                                            }
                                             newMsg.copy(
-                                                replyToContent = replyTarget.content.take(100),
+                                                replyToContent = content,
                                                 replyToSenderName = if (replyTarget.senderId == myId) "You" else state.otherUser?.effectiveName ?: "User"
                                             )
                                         } else newMsg

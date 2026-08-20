@@ -165,16 +165,16 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
-    fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String {
+    fun decryptMessage(cipherTextBase64: String, ivBase64: String?, senderPublicKeyBase64: String?): String? {
         // If message is unencrypted (no IV) or missing public key, return as-is
         if (ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) {
             return cipherTextBase64
         }
-        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return "🔒 [Encrypted message]"
+        val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
         return try {
             val iv = Base64.decode(ivBase64.trim(), Base64.DEFAULT)
             val cipherBytes = Base64.decode(cipherTextBase64.trim(), Base64.DEFAULT)
-            if (iv.size != IV_LEN || cipherBytes.size < 16) return "🔒 [Encrypted message]"
+            if (iv.size != IV_LEN || cipherBytes.size < 16) return null
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
@@ -182,7 +182,7 @@ class WhisperCrypto @Inject constructor() {
             String(plainBytes, Charsets.UTF_8)
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Decryption failed: ${e.message}")
-            "🔒 [Encrypted message]"
+            null
         }
     }
 

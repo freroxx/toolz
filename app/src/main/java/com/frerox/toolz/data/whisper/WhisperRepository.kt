@@ -199,9 +199,8 @@ class WhisperRepository @Inject constructor(
             val cleanUsername = if (isUglyHexUsername) "anon_${existing.username.take(6)}" else null
             
             val needsDisplayName = existing.displayName.isNullOrBlank() && !metaDisplayName.isNullOrBlank()
-            // Never silently replace a published key. A keystore reset otherwise makes every
-            // peer encrypt to a key this installation cannot read, and destroys old history.
-            val needsKey = existing.publicKey.isNullOrBlank() && pubKey != null
+            // If local key exists but differs from server, update server (happens on reinstall/clear data)
+            val needsKey = pubKey != null && existing.publicKey != pubKey
 
             if (needsKey || cleanUsername != null || needsDisplayName) {
                 val update = WhisperProfileUpdate(
@@ -355,6 +354,7 @@ class WhisperRepository @Inject constructor(
                     msg
                 } else if (msg.contentIv != null && partnerPubKey != null) {
                     val decrypted = crypto.decryptMessage(msg.content, msg.contentIv, partnerPubKey)
+                        ?: "[Encrypted message]"
                     msg.copy(content = decrypted)
                 } else msg
             }
@@ -374,7 +374,12 @@ class WhisperRepository @Inject constructor(
                     } else {
                         partnerProfile?.effectiveName ?: "User"
                     }
-                    Pair(target.content.take(100), senderName)
+                    val content = if (target.content.startsWith("whisper:image:")) {
+                        "Image"
+                    } else {
+                        target.content.take(100)
+                    }
+                    Pair(content, senderName)
                 }
             }
             msg.copy(
@@ -766,6 +771,8 @@ class WhisperRepository @Inject constructor(
                         rawContent
                     } else if (contentIv != null && otherKey != null) {
                         crypto.decryptMessage(rawContent, contentIv, otherKey)
+                            ?: crypto.decryptMessage(rawContent, contentIv, getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey)
+                            ?: "[Encrypted message]"
                     } else rawContent
 
                     val msg = WhisperMessage(
@@ -850,6 +857,8 @@ class WhisperRepository @Inject constructor(
                             msg.content
                         } else if (msg.contentIv != null && otherKey != null) {
                             crypto.decryptMessage(msg.content, msg.contentIv, otherKey)
+                                ?: crypto.decryptMessage(msg.content, msg.contentIv, getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey)
+                                ?: "[Encrypted message]"
                         } else msg.content
                         
                         val finalMsg = msg.copy(content = decrypted)
@@ -977,6 +986,8 @@ class WhisperRepository @Inject constructor(
                             msg.content
                         } else if (msg.contentIv != null && otherKey != null) {
                             crypto.decryptMessage(msg.content, msg.contentIv, otherKey)
+                                ?: crypto.decryptMessage(msg.content, msg.contentIv, getProfile(otherId, forceRefresh = true).getOrNull()?.publicKey)
+                                ?: "[Encrypted message]"
                         } else msg.content
 
                         if (shouldEmitMessage(msg.id)) trySend(msg.copy(content = decrypted))

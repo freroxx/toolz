@@ -216,6 +216,7 @@
     <string name="st_Whisper_AddFriendToChat">Añádelo para empezar a chatear</string>
     <string name="st_Whisper_YouDeleted">Eliminaste este mensaje</string>
     <string name="st_Whisper_PartnerDeleted">%s eliminó este mensaje</string>
+    <string name="st_Whisper_Image">Imagen</string>
     <string name="st_Whisper_ImageExpired">Imagen caducada</string>
     <string name="st_Whisper_LoadingImage">Cargando imagen cifrada…</string>
     <string name="st_Whisper_ImageExpiryDesc">Las imágenes se cifran antes de subirse. Elige cuándo debe desaparecer esta imagen.</string>
