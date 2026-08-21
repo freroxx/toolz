@@ -26,10 +26,8 @@ import javax.inject.Singleton
 class DnsBenchmarkEngine @Inject constructor() {
     var reachableChecker: (String, Int) -> Boolean = { address, timeout ->
         try {
-            InetAddress.getByName(address).isReachable(timeout)
-        } catch (e: Exception) {
-            false
-        }
+            java.net.Socket().use { s -> s.connect(java.net.InetSocketAddress(address, 53), timeout); true }
+        } catch (_: Exception) { false }
     }
 
     fun benchmark(provider: DnsProvider): Long {

@@ -84,6 +84,9 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
+    fun unbindService() {
+        try { userService = null } catch (_: Exception) {}
+    }
     private fun isServiceAlive(): Boolean {
         return try {
             userService?.asBinder()?.pingBinder() == true
@@ -92,14 +95,17 @@ class ShizukuShellExecutor @Inject constructor(
         }
     }
 
+    @Volatile private var binding = false
     suspend fun ensureService(forceRebind: Boolean = false): Boolean {
         if (!forceRebind && isServiceAlive()) return true
+        if (binding) { repeat(20) { kotlinx.coroutines.delay(100); if (isServiceAlive()) return true }; return false }
         if (!isShizukuAvailable()) return false
 
         if (forceRebind) {
             userService = null
         }
-        bindService()
+        binding = true
+        try { bindService() } finally { binding = false }
 
         // Wait up to 2 seconds for binding
         for (i in 1..20) {

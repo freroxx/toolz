@@ -160,7 +160,7 @@ class NetworkViewModel @Inject constructor(
                 emitEvent("This provider needs a Private DNS hostname for one-tap apply.")
                 return@launch
             }
-            appendLog("> settings put global private_dns_spec ${provider.hostname}")
+            val safe = provider.hostname.replace("'",""); appendLog("> settings put global private_dns_spec $safe")
             val summary = privilegedNetworkManager.setPrivateDns(provider.hostname)
             val cache = privilegedNetworkManager.flushDnsCache()
             updateState {
@@ -184,7 +184,7 @@ class NetworkViewModel @Inject constructor(
                 emitEvent("Private DNS hostname cannot be empty.")
                 return@launch
             }
-            appendLog("> settings put global private_dns_spec $hostname")
+            val safeH = hostname.replace("'",""); appendLog("> settings put global private_dns_spec $safeH")
             val summary = privilegedNetworkManager.setPrivateDns(hostname)
             val cache = privilegedNetworkManager.flushDnsCache()
             updateState {
@@ -228,18 +228,20 @@ class NetworkViewModel @Inject constructor(
     fun fetchPublicIp() {
         viewModelScope.launch {
             updateState { copy(isRefreshingPublicIp = true) }
-            val apis = listOf(
-                "https://api.ipify.org?format=json",
-                "https://ipapi.co/json/",
-                "https://ifconfig.me/all.json"
-            )
-            val resolved = apis.firstNotNullOfOrNull { apiUrl ->
-                runCatching {
-                    val payload = withContext(Dispatchers.IO) { URL(apiUrl).readText() }
-                    parsePublicIp(payload)
+            val apis = listOf("https://api.ipify.org?format=json", "https://ipapi.co/json/")
+            var resolved: PublicIpInfo? = null
+            for (apiUrl in apis) {
+                resolved = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val conn = (URL(apiUrl).openConnection() as java.net.HttpURLConnection).apply {
+                            connectTimeout = 3500; readTimeout = 3500; setRequestProperty("User-Agent","Toolz/2.0")
+                        }
+                        if (conn.responseCode in 200..299) parsePublicIp(conn.inputStream.bufferedReader().readText()) else null
+                    }
                 }.getOrNull()
-            } ?: PublicIpInfo(ip = "Check Internet", isp = "Unavailable")
-            updateState { copy(publicIpInfo = resolved, isRefreshingPublicIp = false) }
+                if (resolved != null) break
+            }
+            updateState { copy(publicIpInfo = resolved ?: PublicIpInfo(ip = "Check Internet", isp = "Unavailable"), isRefreshingPublicIp = false) }
         }
     }
 
@@ -344,11 +346,12 @@ class NetworkViewModel @Inject constructor(
     }
 
     fun runTraceRoute(target: String = "1.1.1.1") {
+        val safeTarget = target.trim().takeIf { Regex("^[0-9A-Za-z._-]+$").matches(it) } ?: "1.1.1.1"
         viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to run traceroute.")) {
                 return@launch
             }
-            val hops = privilegedNetworkManager.runTraceRoute(target)
+            val hops = privilegedNetworkManager.runTraceRoute(safeTarget)
             if (hops.isNotEmpty()) {
                 updateState { copy(traceHops = hops) }
             }
@@ -403,7 +406,7 @@ class NetworkViewModel @Inject constructor(
         viewModelScope.launch {
             while (isActive) {
                 refreshPrivilegedSnapshot()
-                delay(2_000)
+                delay(3_500)
             }
         }
     }
@@ -438,7 +441,7 @@ class NetworkViewModel @Inject constructor(
                         }
                     }
                 }
-                delay(if (performanceMode.value) 12_000 else 6_000)
+                delay(if (performanceMode.value) 15_000 else 8_000)
             }
         }
     }
@@ -473,12 +476,11 @@ class NetworkViewModel @Inject constructor(
     }
 
     private suspend fun measurePing(host: String): Long? = withContext(Dispatchers.IO) {
+        if (host == "0.0.0.0" || host.isBlank()) return@withContext null
         runCatching {
             val address = InetAddress.getByName(host)
             var reachable = false
-            val elapsed = measureTimeMillis {
-                reachable = address.isReachable(750)
-            }
+            val elapsed = measureTimeMillis { reachable = address.isReachable(650) }
             if (reachable) elapsed.coerceAtLeast(1L) else null
         }.getOrNull()
     }

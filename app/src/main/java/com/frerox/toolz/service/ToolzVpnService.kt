@@ -85,12 +85,12 @@ class ToolzVpnService : VpnService() {
             val input = FileInputStream(fd)
             val output = FileOutputStream(fd)
             
-            // 16KB Aligned Direct ByteBuffer
-            val buffer = ByteBuffer.allocateDirect(BUFFER_SIZE)
+            // 16KB buffer: use heap array for FileStream; direct buffer not compatible with FileInputStream.read(byte[])
             
             try {
                 while (isActive) {
-                    val readBytes = input.read(buffer.array())
+                    val packet = ByteArray(BUFFER_SIZE)
+                    val readBytes = input.read(packet)
                     if (readBytes > 0) {
                         // Simulated packet processing/forwarding
                         // In a real implementation, you would encrypt/decrypt and send to a remote server
@@ -99,7 +99,7 @@ class ToolzVpnService : VpnService() {
                         
                         // Loop back packets or process them if needed
                         // For now, we just drain the input to keep the interface alive
-                        buffer.clear()
+                        // packet processed; nothing to clear - heap array reused
                     } else if (readBytes == 0) {
                         delay(10)
                     } else {

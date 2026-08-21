@@ -1,27 +1,11 @@
-/*
- * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 package com.frerox.toolz.util.network
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -31,86 +15,84 @@ import javax.inject.Singleton
 @Singleton
 class SpeedTestEngine @Inject constructor() {
 
-    // 50MB test payload URL from Cloudflare edge
-    private val testUrl = "https://speed.cloudflare.com/__down?bytes=52428800"
+    private val mirrors = listOf(
+        "https://speed.cloudflare.com/__down?bytes=25000000",
+        "https://proof.ovh.net/files/10Mb.dat",
+        "https://speed.hetzner.de/100MB.bin"
+    )
 
     fun runDownloadTest(): Flow<Pair<Float, Double>> = flow {
-        var connection: HttpURLConnection? = null
-        var inputStream: InputStream? = null
-        try {
-            val url = URL(testUrl)
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 8000
-            connection.readTimeout = 8000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 Toolz/2.0")
-            connection.connect()
-
-            val contentLength = connection.contentLengthLong.takeIf { it > 0 } ?: 52428800L
-            inputStream = connection.inputStream
-
-            val buffer = ByteArray(32768) // 32KB buffer
-            var totalBytesRead = 0L
-            val testStartTime = System.currentTimeMillis()
-            var lastEmitTime = testStartTime
-            var bytesSinceLastEmit = 0L
-
-            var smoothedSpeedMbps = 0.0
-            val alpha = 0.1 // Smoother EMA for speed calculation
-
-            // Target duration: 15 seconds test length for high precision
-            val targetDurationMs = 15_000L
-            val warmupMs = 800L
-
-            while (true) {
-                val read = inputStream.read(buffer)
-                if (read == -1) break
-
-                totalBytesRead += read
-                bytesSinceLastEmit += read
-
-                val now = System.currentTimeMillis()
-                val elapsedSinceStart = now - testStartTime
-                val elapsedSinceEmit = now - lastEmitTime
-
-                // Emit progress every 50ms for ultra-smooth UI progress updates
-                if (elapsedSinceEmit >= 50L) {
-                    val durationSeconds = elapsedSinceEmit / 1000.0
-                    val currentSpeedMbps = (bytesSinceLastEmit * 8.0) / (durationSeconds * 1_000_000.0)
-
-                    // Skip warmup period from throughput calculation
-                    if (elapsedSinceStart > warmupMs) {
-                        smoothedSpeedMbps = if (smoothedSpeedMbps == 0.0) {
-                            currentSpeedMbps
-                        } else {
-                            alpha * currentSpeedMbps + (1 - alpha) * smoothedSpeedMbps
-                        }
-                    }
-
-                    // Progress calculation: take the higher of byte progress or time progress for "moving" feel
-                    // but capped at 1.0. We use a linear interpolation for a smoother feel.
-                    val byteProgress = totalBytesRead.toFloat() / contentLength.toFloat()
-                    val timeProgress = (elapsedSinceStart.toFloat() / targetDurationMs.toFloat())
-                    val smoothProgress = (byteProgress * 0.7f + timeProgress * 0.3f).coerceIn(0f, 0.99f)
-
-                    emit(smoothProgress to (smoothedSpeedMbps.coerceAtLeast(0.0)))
-
-                    bytesSinceLastEmit = 0L
-                    lastEmitTime = now
-                }
-
-                if (elapsedSinceStart >= targetDurationMs) {
-                    break
-                }
+        var lastError: Exception? = null
+        for (urlString in mirrors) {
+            try {
+                emitAllFromUrl(urlString)
+                return@flow
+            } catch (e: Exception) {
+                lastError = e
+                if (!currentCoroutineContext().isActive) throw e
+                // try next mirror
             }
+        }
+        throw lastError ?: IllegalStateException("No mirror available")
+    }.flowOn(Dispatchers.IO)
 
-            // Emit final result at 100% progress
-            emit(1.0f to (smoothedSpeedMbps.coerceAtLeast(0.0)))
-        } catch (e: Exception) {
-            throw e
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<Pair<Float, Double>>.emitAllFromUrl(urlString: String) {
+        var connection: HttpURLConnection? = null
+        var input: InputStream? = null
+        try {
+            val url = URL(urlString)
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8000
+                readTimeout = 8000
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "Toolz/2.0 (SpeedTest)")
+                instanceFollowRedirects = true
+                connect()
+            }
+            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
+
+            val contentLength = connection.contentLengthLong.takeIf { it > 0 } ?: 25_000_000L
+            input = connection.inputStream
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            val start = System.currentTimeMillis()
+            var lastEmit = start
+            var windowBytes = 0L
+            var ema = 0.0
+            val alpha = 0.18
+            val warmupMs = 700L
+            val targetMs = 12_000L
+
+            while (currentCoroutineContext().isActive) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                total += read
+                windowBytes += read
+                val now = System.currentTimeMillis()
+                val elapsedStart = now - start
+                val elapsedWindow = now - lastEmit
+                if (elapsedWindow >= 120L) {
+                    val secs = elapsedWindow / 1000.0
+                    val instant = (windowBytes * 8.0) / (secs * 1_000_000.0)
+                    if (elapsedStart > warmupMs) {
+                        ema = if (ema == 0.0) instant else alpha * instant + (1 - alpha) * ema
+                    }
+                    val byteProgress = (total.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
+                    val timeProgress = (elapsedStart.toFloat() / targetMs).coerceIn(0f, 1f)
+                    val progress = (byteProgress * 0.65f + timeProgress * 0.35f).coerceIn(0f, 0.99f)
+                    emit(progress to ema.coerceAtLeast(0.0))
+                    windowBytes = 0L
+                    lastEmit = now
+                }
+                if (elapsedStart >= targetMs) break
+            }
+            // final emit: compute total average excluding warmup for stability
+            val totalSecs = ((System.currentTimeMillis() - start - warmupMs).coerceAtLeast(500L)) / 1000.0
+            val avg = if (totalSecs > 0) (total * 8.0) / (totalSecs * 1_000_000.0) else ema
+            emit(1f to (ema.takeIf { it > 0 } ?: avg).coerceAtLeast(0.0))
         } finally {
-            runCatching { inputStream?.close() }
+            runCatching { input?.close() }
             runCatching { connection?.disconnect() }
         }
-    }.flowOn(Dispatchers.IO)
+    }
 }

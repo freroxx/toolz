@@ -355,39 +355,37 @@ fun WifiTweaksScreen(
             }
         }
 
+        // Floating controls are now hosted inside Scaffold to respect insets and avoid overlap
         Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            FloatingActionButton(
-                onClick = { 
-                    vibrationManager?.vibrateClick()
-                    sideNavVisible = !sideNavVisible
-                },
-                modifier = Modifier.align(Alignment.BottomStart),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = CircleShape
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                AnimatedContent(
-                    targetState = sideNavVisible,
-                    transitionSpec = {
-                        (fadeIn() + scaleIn()).togetherWith(fadeOut() + scaleOut())
-                    }
-                ) { visible ->
+                SmallFloatingActionButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        sideNavVisible = !sideNavVisible
+                    },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
                     Icon(
-                        if (visible) Icons.Rounded.ArrowBackIosNew else Icons.Rounded.ArrowForwardIos,
-                        contentDescription = "Toggle Navigation"
+                        if (sideNavVisible) Icons.Rounded.ArrowBackIosNew else Icons.Rounded.ArrowForwardIos,
+                        contentDescription = if (sideNavVisible) "Hide navigation" else "Show navigation"
                     )
                 }
-            }
-
-            FloatingActionButton(
-                onClick = { 
-                    vibrationManager?.vibrateClick()
-                    showTerminalSheet = true 
-                },
-                modifier = Modifier.align(Alignment.BottomEnd),
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                shape = CircleShape
-            ) {
-                Icon(Icons.Rounded.Terminal, "Diagnostics Terminal")
+                FloatingActionButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        showTerminalSheet = true
+                    },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Icon(Icons.Rounded.Terminal, contentDescription = "Open diagnostics console")
+                }
             }
         }
 
@@ -461,38 +459,38 @@ private fun VerticalExpressiveTabs(
 ) {
     Column(
         modifier = modifier
-            .width(64.dp)
+            .width(84.dp)
             .fillMaxHeight()
             .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         options.forEachIndexed { index, (label, icon) ->
             val selected = selectedIndex == index
             val containerColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                 label = "tab_bg"
             )
             val contentColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 label = "tab_content"
             )
-            
             Surface(
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
                     .clickable { onOptionSelected(index) },
                 color = containerColor,
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(20.dp),
+                tonalElevation = if (selected) 2.dp else 0.dp
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        tint = contentColor,
-                        modifier = Modifier.size(24.dp)
-                    )
+                Column(
+                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(imageVector = icon, contentDescription = label, tint = contentColor, modifier = Modifier.size(22.dp))
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = contentColor, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
                 }
             }
         }
@@ -847,61 +845,44 @@ private fun PingHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
-    val points = remember(history) { history.filter { it > 0 } }
-    
+    val errorColor = MaterialTheme.colorScheme.error
+    val points = remember(history) { history.takeLast(50) }
+    val valid = remember(points) { points.filter { it > 0 } }
+
     Canvas(modifier = modifier) {
-        if (points.size < 2) {
-            // Draw a subtle placeholder line if not enough data
+        if (valid.size < 2) {
+            // dashed placeholder + empty label handled by caller; draw baseline
             drawLine(
-                color = lineColor.copy(alpha = 0.1f),
+                color = lineColor.copy(alpha = 0.12f),
                 start = Offset(0f, size.height / 2),
                 end = Offset(size.width, size.height / 2),
-                strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                strokeWidth = 1.2.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
             )
+            // faint dots for packet loss
+            points.forEachIndexed { i, v ->
+                if (v <= 0) {
+                    val x = (i.toFloat() / 49f) * size.width
+                    drawCircle(color = errorColor.copy(alpha = 0.35f), radius = 2.2.dp.toPx(), center = Offset(x, size.height * 0.72f))
+                }
+            }
             return@Canvas
         }
-
         val width = size.width
         val height = size.height
-        val minPing = points.minOrNull()?.toFloat() ?: 0f
-        val maxPing = (points.maxOrNull() ?: 100L).coerceAtLeast(100L).toFloat()
+        val minPing = valid.minOrNull()!!.toFloat()
+        val maxPing = valid.maxOrNull()!!.coerceAtLeast((minPing + 30).toLong()).toFloat()
         val range = (maxPing - minPing).coerceAtLeast(1f)
-        
-        val linePath = Path()
-
-        points.forEachIndexed { index, ping ->
-            val x = (index.toFloat() / (points.lastIndex.coerceAtLeast(1))) * width
-            // Invert Y so higher ping is higher on screen? No, higher ping should be lower? 
-            // Usually higher latency is "worse", so maybe higher y value (lower on screen).
-            // Let's stick to standard: higher is higher value.
-            val y = height - ((ping.toFloat() - minPing) / range).coerceIn(0f, 1f) * height * 0.8f - (height * 0.1f)
-            if (index == 0) {
-                linePath.moveTo(x, y)
-            } else {
-                linePath.lineTo(x, y)
-            }
+        val path = Path()
+        valid.forEachIndexed { idx, ping ->
+            val x = (idx.toFloat() / (valid.lastIndex.coerceAtLeast(1).toFloat())) * width
+            val y = height - ((ping.toFloat() - minPing) / range).coerceIn(0f, 1f) * height * 0.78f - (height * 0.11f)
+            if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-
-        drawPath(
-            path = linePath,
-            color = lineColor,
-            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-        
-        // Fill area under the curve
-        val fillPath = Path().apply {
-            addPath(linePath)
-            lineTo(width, height)
-            lineTo(0f, height)
-            close()
-        }
-        drawPath(
-            path = fillPath,
-            brush = Brush.verticalGradient(
-                listOf(lineColor.copy(alpha = 0.2f), Color.Transparent)
-            )
-        )
+        // area fill first
+        val fill = Path().apply { addPath(path); lineTo(width, height); lineTo(0f, height); close() }
+        drawPath(fill, brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.18f), Color.Transparent)))
+        drawPath(path, color = lineColor, style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
@@ -1012,12 +993,12 @@ private fun OverviewHeroCard(
     onScan: () -> Unit,
     onOpenWifiSettings: () -> Unit
 ) {
-    val score = remember(state) {
+    val score = remember(state) { state.advice.healthScore.takeIf { it != 0 } ?: run {
         val rssiBonus = ((state.currentRssi + 100) / 70f * 40f).coerceIn(0f, 40f)
         val stabilityBonus = (1.0 - state.stability.packetLossRate) * 40f
         val jitterBonus = (1.0 - (state.stability.jitterMs / 50.0).coerceIn(0.0, 1.0)) * 20f
         (rssiBonus + stabilityBonus + jitterBonus).roundToInt().coerceIn(0, 100)
-    }
+    } }
     
     val color = when {
         score >= 75 -> Color(0xFF2E9D66)
@@ -1401,14 +1382,26 @@ private fun AnalyzerTab(
         }
 
         item {
+            ChannelSpectrumCard(state = state)
+        }
+        item {
+            SecurityAuditCard(state = state)
+        }
+        item {
+            ExportActionsCard()
+        }
+        item {
             ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
+                shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.elevatedCardColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                 )
             ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.st_WifiTweaksScreen_a1b2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.BarChart, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Text("Channel Utilization", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    }
                     if (state.congestion.isEmpty()) {
                         Text(
                             "Scan nearby networks to see congestion by channel.",
@@ -1416,12 +1409,103 @@ private fun AnalyzerTab(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        state.congestion.forEach { item ->
+                        state.congestion.sortedByDescending { it.networkCount }.forEach { item ->
                             CongestionRow(item)
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChannelSpectrumCard(state: WifiTweaksUiState) {
+    ElevatedCard(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("Spectrum Map", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text("${state.scanResults.size} networks • ${state.congestion.count { it.isRecommended }} recommended", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Icon(Icons.Rounded.Hub, null, modifier = Modifier.padding(10.dp).size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            Box(modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.35f)).padding(12.dp)) {
+                SpectrumVisualizer(results = state.scanResults, currentBssid = state.networkConfig.bssid)
+                if (state.isScanning) ScanningPulse()
+            }
+            // Expressive band pills
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.congestion.filter { it.isRecommended }.forEach { rec ->
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("Ch ${rec.channel} • ${rec.band} ✓") },
+                        leadingIcon = { Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp)) },
+                        colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                    )
+                }
+                if (state.congestion.none { it.isRecommended }) {
+                    AssistChip(onClick = {}, label = { Text("Scanning…") }, enabled = false)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportActionsCard() {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val vm: WifiTweaksViewModel = hiltViewModel()
+    val state by vm.uiState.collectAsStateWithLifecycle()
+    ElevatedCard(shape = RoundedCornerShape(28.dp), colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.exportScanCsv())); android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy CSV")
+            }
+            FilledTonalButton(onClick = { clipboard.setText(AnnotatedString(vm.exportDiagnosticJson())); android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+                Icon(Icons.Rounded.Share, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy JSON")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecurityAuditCard(state: WifiTweaksUiState) {
+    val open = state.scanResults.count { it.security == "Open" }
+    val wpa3 = state.scanResults.count { it.security.contains("WPA3") }
+    val score = when {
+        state.scanResults.isEmpty() -> null
+        open == 0 && wpa3 > 0 -> 92
+        open == 0 -> 78
+        open <= 2 -> 55
+        else -> 30
+    }
+    ElevatedCard(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = if ((score ?: 100) < 50) MaterialTheme.colorScheme.errorContainer.copy(alpha=0.7f) else MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(if ((score ?: 100) >= 70) Color(0xFF2E9D66).copy(alpha=0.15f) else Color(0xFFC84B4B).copy(alpha=0.15f)), contentAlignment = Alignment.Center) {
+                Icon(if ((score ?:100) >=70) Icons.Rounded.VerifiedUser else Icons.Rounded.Warning, null, tint = if ((score ?:100) >=70) Color(0xFF2E9D66) else Color(0xFFC84B4B))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Security Audit", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                Text(
+                    when {
+                        state.scanResults.isEmpty() -> "Scan to audit nearby networks."
+                        open == 0 -> "No open networks nearby. ${wpa3} WPA3 networks found."
+                        else -> "$open open networks nearby — avoid auto-joining."
+                    },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (score != null) Text("$score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (score >=70) Color(0xFF2E9D66) else Color(0xFFC84B4B))
         }
     }
 }

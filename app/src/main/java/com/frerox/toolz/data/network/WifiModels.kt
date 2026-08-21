@@ -111,7 +111,24 @@ data class ChannelCongestion(
     val networkCount: Int,
     val averageRssi: Double,
     val isRecommended: Boolean = false,
-    val band: String = "2.4 GHz"
+    val band: String = "2.4 GHz",
+    val maxRssi: Int = -100,
+    val utilizationScore: Int = 0 // 0-100
+)
+
+data class WifiSecurityAudit(
+    val grade: Int, // 0-100
+    val label: String, // Excellent/Bad/Open
+    val findings: List<String>,
+    val isPmfSupported: Boolean = false
+)
+
+data class WifiChannelReport(
+    val congestion: List<ChannelCongestion>,
+    val spectrumBands: List<com.frerox.toolz.util.network.WifiSpectrumAnalyzer.SpectrumBand> = emptyList(),
+    val best24Ghz: Int? = null,
+    val best5Ghz: Int? = null,
+    val best6Ghz: Int? = null
 )
 
 data class NetworkConfigInfo(
@@ -128,6 +145,8 @@ data class NetworkConfigInfo(
     val bssid: String = "-",
     val macAddress: String = "-",
     val security: String = "-",
+    val channelWidthMhz: Int = 20,
+    val securityAudit: WifiSecurityAudit? = null,
     val privateDnsActive: Boolean = false,
     val privateDnsServerName: String = "-",
     val isConnected: Boolean = false,

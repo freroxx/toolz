@@ -104,9 +104,9 @@ fun HealthGauge(
     )
     
     val color = when {
-        score > 80 -> Color(0xFF4CAF50)
-        score > 50 -> Color(0xFFFF9800)
-        else -> Color(0xFFF44336)
+        score >= 80 -> MaterialTheme.colorScheme.primary
+        score >= 55 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.error
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {

@@ -1,18 +1,5 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.util.network
@@ -45,85 +32,60 @@ class NetworkMonitor @Inject constructor(
 
     fun observeWifiInfo(): Flow<WifiInfoState> = callbackFlow {
         val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    trySend(getWifiInfo())
-                }
-            }
-
-            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                 trySend(getWifiInfo())
             }
-
+            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
+                trySend(getWifiInfo())
+            }
             override fun onLost(network: Network) {
                 trySend(WifiInfoState())
             }
+            override fun onAvailable(network: Network) {
+                trySend(getWifiInfo())
+            }
         }
-
-        connectivityManager.registerDefaultNetworkCallback(callback)
+        try {
+            connectivityManager.registerDefaultNetworkCallback(callback)
+        } catch (_: Exception) {
+            // fallback: still try to emit initial state
+        }
         trySend(getWifiInfo())
-
         awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
+            try { connectivityManager.unregisterNetworkCallback(callback) } catch (_: Exception) {}
         }
-    }.distinctUntilChanged()
+    }.distinctUntilChanged { a, b ->
+        // Ignore rssiHistory for distinct check to allow frequent updates
+        a.copy(rssiHistory = emptyList()) == b.copy(rssiHistory = emptyList())
+    }
 
     fun getWifiInfo(): WifiInfoState {
-        val wifiInfo: WifiInfo? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val network = connectivityManager.activeNetwork
-            val capabilities = connectivityManager.getNetworkCapabilities(network)
-            capabilities?.transportInfo as? WifiInfo
-        } else {
-            @Suppress("DEPRECATION")
-            wifiManager.connectionInfo
-        }
-
-        val linkProperties = connectivityManager.getLinkProperties(connectivityManager.activeNetwork)
+        val wifiInfo: WifiInfo? = runCatching { resolveWifiInfo() }.getOrNull()
+        val linkProperties = runCatching { connectivityManager.getLinkProperties(connectivityManager.activeNetwork) }.getOrNull()
         val gateway = linkProperties?.routes?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress ?: "0.0.0.0"
-        val dnsServers = linkProperties?.dnsServers?.mapNotNull(InetAddress::getHostAddress).orEmpty()
+        val dnsServers = linkProperties?.dnsServers?.mapNotNull { runCatching { it.hostAddress }.getOrNull() }.orEmpty()
 
         val frequency = wifiInfo?.frequency ?: 0
-        val band = when {
-            frequency in 2400..2500 -> "2.4 GHz"
-            frequency in 4900..5900 -> "5 GHz"
-            frequency in 5925..7125 -> "6 GHz"
-            else -> "Unknown"
-        }
-
-        val wifiStandard = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            when (wifiInfo?.wifiStandard) {
-                ScanResult.WIFI_STANDARD_LEGACY -> "Wi-Fi 1/2/3"
-                ScanResult.WIFI_STANDARD_11N -> "Wi-Fi 4 (n)"
-                ScanResult.WIFI_STANDARD_11AC -> "Wi-Fi 5 (ac)"
-                ScanResult.WIFI_STANDARD_11AX -> "Wi-Fi 6 (ax)"
-                ScanResult.WIFI_STANDARD_11BE -> "Wi-Fi 7 (be)"
-                else -> "Legacy/Auto"
-            }
-        } else "Legacy/Auto"
-
+        val band = frequencyToBand(frequency)
+        val wifiStandard = resolveWifiStandard(wifiInfo)
         val channel = frequencyToChannel(frequency)
-        val signalLevel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            wifiManager.calculateSignalLevel(wifiInfo?.rssi ?: -100)
-        } else {
-            @Suppress("DEPRECATION")
-            WifiManager.calculateSignalLevel(wifiInfo?.rssi ?: -100, 5)
-        }
+        val signalLevel = resolveSignalLevel(wifiInfo)
 
-        // SSID Fix: On Android 10+, SSID is <unknown ssid> if location permission is not granted
         var ssid = wifiInfo?.ssid?.removeSurrounding("\"") ?: "Unknown"
-        if (ssid == "<unknown ssid>" || ssid == "0x") {
-            // Try to get from NetworkCapabilities if possible (requires location)
-            ssid = "Protected/Hidden"
-        }
+        val isUnknownSsid = ssid == "<unknown ssid>" || ssid == "0x" || ssid.isBlank()
+        if (isUnknownSsid) ssid = "Unknown"
+
+        val ipString = formatIpAddress(wifiInfo?.ipAddress ?: 0).takeIf { it != "0.0.0.0" } ?: "0.0.0.0"
+        val bssid = wifiInfo?.bssid?.takeIf { it != "02:00:00:00:00:00" && it.isNotBlank() } ?: "Unavailable"
 
         return WifiInfoState(
-            rssi = wifiInfo?.rssi ?: 0,
+            rssi = wifiInfo?.rssi ?: -100,
             linkSpeed = wifiInfo?.linkSpeed ?: 0,
             gateway = gateway,
             ssid = ssid,
-            bssid = wifiInfo?.bssid ?: "Unavailable",
+            bssid = bssid,
             frequency = frequency,
-            ipAddress = formatIpAddress(wifiInfo?.ipAddress ?: 0),
+            ipAddress = ipString,
             wifiStandard = wifiStandard,
             band = band,
             channel = channel,
@@ -132,17 +94,63 @@ class NetworkMonitor @Inject constructor(
         )
     }
 
-    private fun frequencyToChannel(freq: Int): Int {
-        return when {
-            freq == 2484 -> 14
-            freq in 2401..2483 -> (freq - 2407) / 5
-            freq in 5170..5825 -> (freq - 5170) / 5 + 34
-            freq in 5945..7105 -> (freq - 5945) / 5 + 1
-            else -> 0
+    private fun resolveWifiInfo(): WifiInfo? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val network = connectivityManager.activeNetwork ?: return legacyWifiInfo()
+            val caps = connectivityManager.getNetworkCapabilities(network) ?: return legacyWifiInfo()
+            (caps.transportInfo as? WifiInfo) ?: legacyWifiInfo()
+        } else {
+            legacyWifiInfo()
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun legacyWifiInfo(): WifiInfo? = runCatching { wifiManager.connectionInfo }.getOrNull()
+
+    private fun resolveWifiStandard(wifiInfo: WifiInfo?): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return when (wifiInfo?.wifiStandard) {
+                ScanResult.WIFI_STANDARD_LEGACY -> "Wi-Fi 1/2/3"
+                ScanResult.WIFI_STANDARD_11N -> "Wi-Fi 4 (n)"
+                ScanResult.WIFI_STANDARD_11AC -> "Wi-Fi 5 (ac)"
+                ScanResult.WIFI_STANDARD_11AX -> "Wi-Fi 6 (ax)"
+                ScanResult.WIFI_STANDARD_11AD -> "Wi-Fi AD"
+                ScanResult.WIFI_STANDARD_11BE -> "Wi-Fi 7 (be)"
+                else -> "Legacy/Auto"
+            }
+        }
+        return "Legacy/Auto"
+    }
+
+    private fun resolveSignalLevel(wifiInfo: WifiInfo?): Int {
+        val rssi = wifiInfo?.rssi ?: return 0
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching { wifiManager.calculateSignalLevel(rssi) }.getOrDefault(legacyLevel(rssi))
+        } else {
+            legacyLevel(rssi)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun legacyLevel(rssi: Int) = WifiManager.calculateSignalLevel(rssi, 5)
+
+    private fun frequencyToBand(freq: Int): String = when {
+        freq in 2400..2500 -> "2.4 GHz"
+        freq in 4900..5900 -> "5 GHz"
+        freq in 5925..7125 -> "6 GHz"
+        else -> "Unknown"
+    }
+
+    private fun frequencyToChannel(freq: Int): Int = when {
+        freq == 2484 -> 14
+        freq in 2401..2483 -> (freq - 2407) / 5
+        freq in 5170..5825 -> (freq - 5170) / 5 + 34
+        freq in 5945..7105 -> (freq - 5945) / 5 + 1
+        else -> 0
+    }
+
     private fun formatIpAddress(ip: Int): String {
+        if (ip == 0) return "0.0.0.0"
         return String.format(
             "%d.%d.%d.%d",
             ip and 0xff,

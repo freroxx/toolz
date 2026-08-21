@@ -138,16 +138,7 @@ class DnsEngine @Inject constructor() {
             description = "Privacy resolver with aggressive ad and tracker blocking.",
             badge = "Full Block"
         ),
-        DnsProvider(
-            id = "cleanbrowsing_security",
-            name = "CleanBrowsing Security",
-            addresses = listOf("185.228.168.168", "185.228.169.168"),
-            hostname = "security-filter-dns.cleanbrowsing.org",
-            dohUrl = "https://doh.cleanbrowsing.org/doh/security-filter/",
-            categories = setOf(DnsCategory.SECURITY),
-            description = "Filters malware, phishing, and other malicious sites.",
-            badge = "Hardened"
-        ),
+
         DnsProvider(
             id = "comodo",
             name = "Comodo Secure DNS",
@@ -159,7 +150,7 @@ class DnsEngine @Inject constructor() {
         )
     )
 
-    fun providerLibrary(): List<DnsProvider> = providers
+    fun providerLibrary(): List<DnsProvider> = providers.distinctBy { it.hostname ?: it.id }
 
     fun customProvider(
         label: String,
@@ -295,7 +286,7 @@ class DnsEngine @Inject constructor() {
         packetLossPercent: Float
     ): Int {
         if (latencyMs == null) return 0
-        val latencyScore = (100 - ((latencyMs - 10) * 0.85f)).coerceIn(0f, 100f)
+        val latencyScore = (100 - ((latencyMs.coerceAtLeast(5L) - 10) * 0.9f)).coerceIn(0f, 100f)
         val jitterScore = (100 - ((jitterMs ?: 0L) * 3f)).coerceIn(0f, 100f)
         val packetScore = (100 - (packetLossPercent * 2f)).coerceIn(0f, 100f)
         return (

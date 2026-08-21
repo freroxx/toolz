@@ -57,6 +57,14 @@ class PrivilegedNetworkManager @Inject constructor(
         )
     }
 
+    private fun sanitizeHostname(host: String): String {
+        // Allow only hostname-ish characters to prevent shell injection
+        require(host.length in 3..253) { "hostname length invalid" }
+        require(Regex("^[A-Za-z0-9._-]+$").matches(host)) { "hostname contains illegal characters" }
+        require(!host.contains("..")) { "hostname invalid" }
+        return host
+    }
+
     suspend fun setPrivateDns(hostname: String?): String = withContext(Dispatchers.IO) {
         if (hostname.isNullOrBlank()) {
             val modeRes = runCommand("settings put global private_dns_mode opportunistic")
@@ -68,7 +76,8 @@ class PrivilegedNetworkManager @Inject constructor(
             }
         } else {
             val modeRes = runCommand("settings put global private_dns_mode hostname")
-            val hostRes = runCommand("settings put global private_dns_spec $hostname")
+            val safe = sanitizeHostname(hostname)
+            val hostRes = runCommand("settings put global private_dns_spec '$safe'")
             if (!modeRes.isSuccess || !hostRes.isSuccess) {
                 "Failed to set Private DNS: ${(modeRes.stderr + " " + hostRes.stderr).trim()}"
             } else {
@@ -298,14 +307,14 @@ class PrivilegedNetworkManager @Inject constructor(
     }
 
     private fun isPrivateAddress(host: String): Boolean {
-        return host.startsWith("10.") ||
-            host.startsWith("192.168.") ||
-            host.startsWith("172.16.") ||
-            host.startsWith("172.17.") ||
-            host.startsWith("172.18.") ||
-            host.startsWith("172.19.") ||
-            host.startsWith("172.2") ||
-            host.startsWith("127.")
+        val h = host.trim()
+        if (h.startsWith("10.") || h.startsWith("192.168.") || h.startsWith("127.") || h.startsWith("::1") || h == "localhost") return true
+        // 172.16.0.0/12
+        if (h.startsWith("172.")) {
+            val second = h.split(".").getOrNull(1)?.toIntOrNull() ?: return false
+            if (second in 16..31) return true
+        }
+        return false
     }
 
     private fun com.frerox.toolz.util.shizuku.ShellCommandResult.lineOrBlank(): String {

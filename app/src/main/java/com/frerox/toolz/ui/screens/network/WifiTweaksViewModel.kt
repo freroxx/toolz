@@ -58,9 +58,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.network.*
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.network.DnsRealBenchmark
+import com.frerox.toolz.util.network.NetworkHealthEngine
 import com.frerox.toolz.util.network.NetworkMonitor
 import com.frerox.toolz.util.network.PrivilegedNetworkManager
 import com.frerox.toolz.util.network.SpeedTestEngine
+import com.frerox.toolz.util.network.WifiSpectrumAnalyzer
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -79,6 +82,9 @@ class WifiTweaksViewModel @Inject constructor(
     private val shizukuExecutor: ShizukuShellExecutor,
     private val speedTestEngine: SpeedTestEngine,
     private val privilegedNetworkManager: PrivilegedNetworkManager,
+    private val healthEngine: NetworkHealthEngine,
+    private val spectrumAnalyzer: WifiSpectrumAnalyzer,
+    private val dnsRealBenchmark: DnsRealBenchmark,
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
@@ -419,6 +425,31 @@ class WifiTweaksViewModel @Inject constructor(
         return sb.toString()
     }
 
+    fun exportScanCsv(): String {
+        val sb = StringBuilder()
+        sb.appendLine("ssid,bssid,rssi,frequency,channel,band,security,hidden")
+        _uiState.value.scanResults.forEach { r ->
+            sb.appendLine("\"${r.ssid}\",${r.bssid},${r.rssi},${r.frequency},${r.channel},${r.band},${r.security},${r.isHidden}")
+        }
+        return sb.toString()
+    }
+
+    fun exportDiagnosticJson(): String {
+        val s = _uiState.value
+        return """
+        {
+          "ssid": "${s.currentSsid}",
+          "rssi": ${s.currentRssi},
+          "health": ${s.advice.healthScore},
+          "gateway": "${s.networkConfig.gateway}",
+          "channel": ${s.networkConfig.channel},
+          "band": "${s.networkConfig.band}",
+          "scanCount": ${s.scanResults.size},
+          "timestamp": ${System.currentTimeMillis()}
+        }
+        """.trimIndent()
+    }
+
     fun clearLastActionMessage() {
         _uiState.update { it.copy(lastActionMessage = null) }
     }
@@ -464,16 +495,28 @@ class WifiTweaksViewModel @Inject constructor(
         viewModelScope.launch {
             emitMessage("Resetting all tweaks...")
             addLog("RESET", "Reverting all optimization tweaks", LogLevel.WARNING)
-            
             tweakCatalog.forEach { tweak ->
                 if (tweak.revertCommands.isNotEmpty()) {
-                    undoTweak(tweak)
+                    // directly await revert instead of fire-and-forget
+                    val res = runCatching { revertTweakInternal(tweak) }.getOrDefault(false)
+                    if (!res) addLog("RESET", "Revert skipped/failed for ${tweak.title}", LogLevel.WARNING)
                 }
             }
-            
             emitMessage("All settings reset to default.")
             refreshEnvironment()
         }
+    }
+    private suspend fun revertTweakInternal(tweak: WifiTweak): Boolean {
+        if (!requireShizukuFor(tweak)) return false
+        setTweakResult(tweak.id, status = TweakStatus.RUNNING, message = "Reverting...")
+        val result = runCommands(tweak.revertCommands)
+        if (!result.first) {
+            setTweakResult(tweak.id, status = TweakStatus.FAILED, message = result.second.ifBlank { "Revert failed." })
+            return false
+        }
+        val applied = isTweakApplied(tweak)
+        setTweakResult(tweak.id, status = if (applied) TweakStatus.SUCCESS else TweakStatus.IDLE, message = if (applied) "Still active" else "Default restored", isApplied = applied)
+        return true
     }
 
     fun addLog(tag: String, message: String, level: LogLevel = LogLevel.INFO) {
@@ -512,31 +555,23 @@ class WifiTweaksViewModel @Inject constructor(
 
     fun benchmarkDns() {
         viewModelScope.launch {
-            if (!_uiState.value.shizukuStatus.isServiceReady) {
-                emitMessage("Shizuku required for benchmarking.")
-                return@launch
-            }
-
             val selectedIds = _uiState.value.selectedBenchmarkProviders
             val candidateProviders = dnsProviders.filter { it.first in selectedIds }
-            
-            _uiState.update { 
+            if (candidateProviders.isEmpty()) { emitMessage("Select at least one provider."); return@launch }
+            _uiState.update {
                 it.copy(
                     isBenchmarkingDns = true,
                     dnsBenchmarkStatus = BenchmarkStatus.RUNNING,
                     dnsBenchmarkResults = candidateProviders.map { p -> WifiDnsBenchmarkResult(p.first, p.second, p.third) }
                 )
             }
-            
-            addLog("DNS", "Starting DNS benchmark with ${candidateProviders.size} providers...", LogLevel.INFO)
-            
-            val results = mutableListOf<WifiDnsBenchmarkResult>()
-            candidateProviders.forEach { (id, name, host) ->
-                val latency = pingHost(host)
-                results.add(WifiDnsBenchmarkResult(id, name, host, latency))
-                _uiState.update { it.copy(dnsBenchmarkResults = results.toList()) }
+            addLog("DNS", "Starting real DoH + TCP benchmark: ${candidateProviders.size} providers", LogLevel.INFO)
+            val results = candidateProviders.map { (id, name, host) ->
+                val stub = com.frerox.toolz.data.network.DnsProvider(id, name, listOf(host), host, "https://$host/dns-query")
+                val bench = runCatching { dnsRealBenchmark.benchmark(stub, samples = 2) }.getOrNull()
+                val latency = bench?.metrics?.latencyMs ?: pingHost(host)
+                WifiDnsBenchmarkResult(id, name, host, latency)
             }
-            
             val best = results.filter { it.latencyMs != null }.minByOrNull { it.latencyMs!! }
             _uiState.update { state ->
                 state.copy(
@@ -545,8 +580,7 @@ class WifiTweaksViewModel @Inject constructor(
                     dnsBenchmarkResults = results.map { it.copy(isRecommended = it.providerId == best?.providerId) }
                 )
             }
-            
-            addLog("DNS", "Benchmark complete. Best: ${best?.name ?: "None"}", LogLevel.SUCCESS)
+            addLog("DNS", "Benchmark complete. Best: ${best?.name ?: "None"} (${best?.latencyMs ?: "?"}ms)", LogLevel.SUCCESS)
         }
     }
 
@@ -584,11 +618,11 @@ class WifiTweaksViewModel @Inject constructor(
                 restoreAutomaticPrivateDns()
                 return@launch
             }
-
-            emitMessage("Applying custom DNS: $hostname...")
+            val safeHost = try { sanitizeHost(hostname) } catch (e: Exception) { emitMessage("Invalid hostname: ${e.message}"); return@launch }
+            emitMessage("Applying custom DNS: $safeHost...")
             val success = runCommands(listOf(
                 "settings put global private_dns_mode hostname",
-                "settings put global private_dns_spec $hostname"
+                "settings put global private_dns_spec '$safeHost'"
             )).first
             
             if (success) {
@@ -633,19 +667,25 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
+    private fun sanitizeHost(host: String): String {
+        require(host.isNotBlank() && host.length <= 253) { "invalid host" }
+        require(Regex("^[A-Za-z0-9._:-]+$").matches(host)) { "host illegal chars" }
+        return host
+    }
     suspend fun pingHost(host: String): Long? {
+        val safeHost = try { sanitizeHost(host) } catch (_: Exception) { return null }
         // Try Shizuku first if ready
         if (uiState.value.shizukuStatus.isServiceReady) {
-            val result = runCatching { shizukuExecutor.executeForResult("ping -c 1 -W 1 $host") }.getOrNull()
+            val result = runCatching { shizukuExecutor.executeForResult("ping -c 1 -W 1 $safeHost") }.getOrNull()
             if (result?.isSuccess == true) {
                 val match = "time=([\\d.]+)".toRegex().find(result.stdout)
                 return match?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()
             }
         }
         
-        // Fallback to standard ping (works for many hosts even without root/shizuku)
+        // Fallback to standard ping
         return try {
-            val process = Runtime.getRuntime().exec("ping -c 1 -W 1 $host")
+            val process = Runtime.getRuntime().exec("ping -c 1 -W 1 $safeHost")
             val output = process.inputStream.bufferedReader().use { it.readText() }
             val match = "time=([\\d.]+)".toRegex().find(output)
             match?.groupValues?.get(1)?.toDoubleOrNull()?.toLong()
@@ -835,37 +875,16 @@ class WifiTweaksViewModel @Inject constructor(
     }
 
     private fun calculateCongestion(results: List<WifiScanResult>) {
-        val grouped = results.groupBy { it.channel }
-        val congestion = grouped.map { (channel, networks) ->
-            val count = networks.size
-            val totalWeight = networks.sumOf { (it.rssi + 100.0).coerceAtLeast(0.0) / 10.0 }
-            val averageRssi = networks.map { it.rssi }.average()
-            
-            ChannelCongestion(
-                channel = channel,
-                networkCount = count,
-                averageRssi = averageRssi,
-                band = networks.firstOrNull()?.band ?: "2.4 GHz",
-                isRecommended = false 
-            )
-        }.sortedBy { it.channel }
-
-        val best24 = congestion
-            .filter { it.band == "2.4 GHz" && it.channel in listOf(1, 6, 11) }
-            .minByOrNull { it.networkCount * 100 - it.averageRssi.roundToInt() }
-        val best5 = congestion
-            .filter { it.band == "5 GHz" }
-            .minByOrNull { it.networkCount * 100 - it.averageRssi.roundToInt() }
-
-        _uiState.update {
-            it.copy(
-                congestion = congestion.map { item ->
-                    item.copy(
-                        isRecommended = item.channel == best24?.channel || item.channel == best5?.channel
-                    )
-                }
-            )
+        val bands = spectrumAnalyzer.analyze(results)
+        val flat = bands.flatMap { it.channels }
+        // Enrich with utilizationScore + maxRssi
+        val enriched = flat.map { c ->
+            val netsOnCh = results.filter { it.channel == c.channel && it.band == c.band }
+            val maxR = netsOnCh.maxOfOrNull { it.rssi } ?: -100
+            val util = ((1.0 - (netsOnCh.size / 12.0).coerceIn(0.0,1.0))*0.4 + ((maxR+90)/60.0).coerceIn(0.0,1.0)*0.6)
+            c.copy(maxRssi = maxR, utilizationScore = (util*100).toInt().coerceIn(0,100))
         }
+        _uiState.update { it.copy(congestion = enriched.sortedBy { it.channel }) }
     }
 
     private fun updateAdvice() {
@@ -875,19 +894,17 @@ class WifiTweaksViewModel @Inject constructor(
         val hiddenNetworks = rawScanResults.count { it.isHidden }
         val best24 = state.congestion.firstOrNull { it.isRecommended && it.band == "2.4 GHz" }?.channel
         val best5 = state.congestion.firstOrNull { it.isRecommended && it.band == "5 GHz" }?.channel
-
-        val healthScore = calculateHealthScore(state)
-
+        val breakdown = healthEngine.calculate(state.currentRssi, state.stability, state.networkConfig.isThrottlingEnabled, openNetworks)
         val summary = when {
-            healthScore > 80 -> "Your connection is excellent and stable."
-            healthScore > 50 -> "Decent signal, but some congestion detected."
-            else -> "Poor connection. Consider moving closer or switching channels."
+            breakdown.score >= 85 -> "Excellent — your link is clean and responsive."
+            breakdown.score >= 70 -> "Good — minor congestion or jitter detected."
+            breakdown.score >= 50 -> "Fair — crowded spectrum or weak signal."
+            else -> "Poor — move closer, switch channel, or enable fixes."
         }
-
         _uiState.update {
             it.copy(
                 advice = NetworkAdvice(
-                    healthScore = healthScore,
+                    healthScore = breakdown.score,
                     summary = summary,
                     strongestNetwork = strongest?.ssid ?: "-",
                     best24GhzChannel = best24,
@@ -895,23 +912,22 @@ class WifiTweaksViewModel @Inject constructor(
                     openNetworks = openNetworks,
                     hiddenNetworks = hiddenNetworks,
                     totalNetworks = rawScanResults.size,
-                    recommendation = "Use Channel ${best5 ?: best24 ?: "Auto"} for best performance."
+                    recommendation = buildRecommendation(best24, best5, breakdown)
                 )
             )
         }
     }
-
-    private fun calculateHealthScore(state: WifiTweaksUiState): Int {
-        val rssiWeight = 0.4
-        val jitterWeight = 0.3
-        val packetLossWeight = 0.3
-
-        val rssiScore = ((state.currentRssi + 100).coerceIn(0, 60) / 60.0) * 100
-        val jitterScore = (1.0 - (state.stability.jitterMs.coerceIn(0.0, 50.0) / 50.0)) * 100
-        val packetLossScore = (1.0 - state.stability.packetLossRate) * 100
-
-        return (rssiScore * rssiWeight + jitterScore * jitterWeight + packetLossScore * packetLossWeight).roundToInt()
+    private fun buildRecommendation(best24: Int?, best5: Int?, bd: NetworkHealthEngine.HealthBreakdown): String {
+        val ch = best5 ?: best24
+        return when {
+            ch != null -> "Switch to channel $ch for lower contention (${bd.label})."
+            bd.penalties.isNotEmpty() -> bd.penalties.joinToString("; ")
+            else -> "Scan nearby networks to get channel guidance."
+        }
     }
+
+    private fun calculateHealthScore(state: WifiTweaksUiState): Int =
+        healthEngine.calculate(state.currentRssi, state.stability, state.networkConfig.isThrottlingEnabled).score
 
     private fun startSignalMonitoring() {
         viewModelScope.launch {
@@ -944,7 +960,8 @@ class WifiTweaksViewModel @Inject constructor(
                 shizukuExecutor.executeSingle("settings get global wifi_scan_throttle_enabled") == "1"
             }.getOrDefault(true)
 
-            if (isThrottling) {
+            // throttling log is emitted at most once per refresh to avoid spam
+            if (isThrottling && _uiState.value.diagnosticLogs.none { it.message.contains("Scan Throttling is ACTIVE") && System.currentTimeMillis() - it.timestamp < 60_000 }) {
                 addLog("SYSTEM", "Wi-Fi Scan Throttling is ACTIVE. Scans may be delayed.", LogLevel.WARNING)
             }
 
@@ -1125,7 +1142,7 @@ class WifiTweaksViewModel @Inject constructor(
 
     private fun playSignalTone(rssi: Int) {
         if (toneGenerator == null) {
-            toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+            toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70) }.getOrNull() ?: return
         }
         val now = System.currentTimeMillis()
         val interval = (kotlin.math.abs(rssi + 30) * 10).coerceIn(200, 2000).toLong()
@@ -1160,9 +1177,24 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
+    private var scanReceiverRegistered = false
     private fun registerScanReceiver() {
+        if (scanReceiverRegistered) return
         val filter = IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
-        context.registerReceiver(scanReceiver, filter)
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(scanReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(scanReceiver, filter)
+            }
+            scanReceiverRegistered = true
+        } catch (_: Exception) {}
+    }
+    private fun unregisterScanReceiver() {
+        if (!scanReceiverRegistered) return
+        try { context.unregisterReceiver(scanReceiver) } catch (_: Exception) {}
+        scanReceiverRegistered = false
     }
 
     private fun scanComparator(mode: WifiScanSortMode): Comparator<WifiScanResult> {
@@ -1547,14 +1579,14 @@ class WifiTweaksViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        unregisterScanReceiver()
         try {
-            context.unregisterReceiver(scanReceiver)
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
             Shizuku.removeBinderDeadListener(shizukuBinderDeathListener)
             Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
-        } catch (_: Exception) {
-        }
-        toneGenerator?.release()
+        } catch (_: Exception) {}
+        runCatching { toneGenerator?.release() }
+        toneGenerator = null
     }
 
     companion object {

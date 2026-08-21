@@ -39,6 +39,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -146,6 +147,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -288,6 +290,7 @@ fun NetworkPowerSuiteScreen(
             containerColor = Color.Transparent,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
+                val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
                 ExpressiveTopAppBar(
                     title = stringResource(R.string.st_NetworkPowerSuiteScreen_f1a2),
                     subtitle = if (uiState.wifiState.ssid.isNotEmpty()) uiState.wifiState.ssid else "Scanning connectivity",
@@ -295,7 +298,7 @@ fun NetworkPowerSuiteScreen(
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
                             onBack()
-                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_NetworkPowerSuiteScreen_3d5b))
                         }
                     },
@@ -303,13 +306,14 @@ fun NetworkPowerSuiteScreen(
                         IconButton(onClick = {
                             vibrationManager?.vibrateClick()
                             viewModel.refreshSuite()
-                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                        }, modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
                             Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_NetworkPowerSuiteScreen_9e2c))
                         }
                     },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha=0.85f), scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer),
                     largeFlexible = true,
-                    modifier = Modifier.statusBarsPadding()
+                    modifier = Modifier.statusBarsPadding(),
+                    scrollBehavior = scrollBehavior
                 )
             },
             bottomBar = {
@@ -517,45 +521,28 @@ fun NetworkPowerSuiteScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TabStrip(
     selectedTab: Int,
     onSelected: (Int) -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+    // M3 Expressive: pill-shaped segmented control with spring motion
+    val shape = RoundedCornerShape(28.dp)
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp, shadowElevation = 1.dp) {
+        Row(modifier = Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SuiteTab.entries.forEachIndexed { index, tab ->
                 val selected = index == selectedTab
-                val container by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    label = "network_tab_bg"
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(container)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onSelected(index) }
-                        .padding(horizontal = 12.dp, vertical = 14.dp),
-                    contentAlignment = Alignment.Center
+                val bg by animateColorAsState(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, label="tab_bg")
+                val fg by animateColorAsState(if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant, label="tab_fg")
+                val scale by animateFloatAsState(if (selected) 1f else 0.96f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow), label="scale")
+                Surface(
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelected(index) },
+                    color = bg, shape = RoundedCornerShape(22.dp), tonalElevation = if (selected) 3.dp else 0.dp
                 ) {
-                    Text(
-                        tab.label,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Box(modifier = Modifier.padding(vertical = 14.dp).graphicsLayer(scaleX = scale, scaleY = scale), contentAlignment = Alignment.Center) {
+                        Text(tab.label, style = MaterialTheme.typography.labelLarge, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, color = fg, textAlign = TextAlign.Center)
+                    }
                 }
             }
         }
