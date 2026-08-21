@@ -188,12 +188,11 @@ internal fun DiagnosticLogSheet(
 
 @Composable
 internal fun PermissionGate(onGrant: () -> Unit) {
-    ElevatedCard(
+    Card(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = 16.dp),
-        shape = RoundedCornerShape(36.dp),
-        colors = CardDefaults.elevatedCardColors(
+            .fillMaxWidth(),
+        shape = NetTokens.CardShape,
+        colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
@@ -336,7 +335,7 @@ internal fun OverviewTab(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            state.currentSsid,
+                            if (!state.networkConfig.isConnected) "Not connected" else state.currentSsid,
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -344,7 +343,7 @@ internal fun OverviewTab(
                         )
                         Text(
                             when {
-                                !state.networkConfig.isConnected -> "Not connected"
+                                !state.networkConfig.isConnected -> "Connect to Wi-Fi to see details"
                                 else -> "${state.networkConfig.wifiStandard} · ${state.networkConfig.band}"
                             },
                             style = MaterialTheme.typography.bodyMedium,
@@ -441,6 +440,32 @@ internal fun OverviewTab(
                     StatTile("Jitter", "%.0f".format(state.stability.jitterMs), subvalue = "ms", modifier = Modifier.weight(1f))
                 }
                 PingSparkline(history = state.pingHistory, modifier = Modifier.fillMaxWidth().height(56.dp))
+                Text(
+                    "${state.stability.history.count { it > 0 }}/${state.stability.history.size} pings ok · loss ${"%.0f".format(state.stability.packetLossRate * 100)}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // ── THIS NETWORK ────────────────────────────────────────────────────
+        if (state.networkConfig.isConnected) {
+            item {
+                NetCard(title = "This network", icon = Icons.Rounded.Settings, subtitle = state.currentSsid) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailRowNet("IP address", state.networkConfig.ip)
+                        DetailRowNet("Subnet", state.networkConfig.subnet)
+                        DetailRowNet("Gateway", state.networkConfig.gateway)
+                        DetailRowNet("DNS 1", state.networkConfig.dns1)
+                        if (state.networkConfig.dns2 != "-") DetailRowNet("DNS 2", state.networkConfig.dns2)
+                        DetailRowNet("BSSID", state.networkConfig.bssid)
+                        val widthLabel = state.networkConfig.channelWidthMhz.takeIf { it != 20 }?.let { "${it}MHz" } ?: "20MHz"
+                        DetailRowNet("Channel", "Ch ${state.networkConfig.channel} · $widthLabel")
+                        if (state.networkConfig.privateDnsActive) {
+                            DetailRowNet("Private DNS", state.networkConfig.privateDnsServerName)
+                        }
+                    }
+                }
             }
         }
 
@@ -540,31 +565,41 @@ internal fun AnalyzerTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.st_WifiTweaksScreen_7e8f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
-                        SpectrumVisualizer(
-                            results = state.scanResults,
-                            currentBssid = state.networkConfig.bssid
-                        )
-                        if (state.isScanning) {
-                            ScanningPulse()
-                        }
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_7e8f),
+                subtitle = "${state.scanResults.size} networks in range",
+                icon = Icons.Rounded.Wifi
+            ) {
+                Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
+                    SpectrumVisualizer(
+                        results = state.scanResults,
+                        currentBssid = state.networkConfig.bssid
+                    )
+                    if (state.isScanning) {
+                        ScanningPulse()
                     }
                 }
             }
         }
 
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_9f0a),
+                subtitle = state.lastScanTimestamp?.let { "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}" } ?: "No scan yet",
+                icon = Icons.Rounded.Radar,
+                trailing = {
+                    FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(50), enabled = !state.isScanning) {
+                        if (state.isScanning) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (state.isScanning) "Scanning" else "Scan")
+                    }
+                }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -630,7 +665,7 @@ internal fun AnalyzerTab(
                             selected = state.showHiddenNetworks,
                             onClick = { onToggleHidden(!state.showHiddenNetworks) },
                             label = { Text("Show hidden") },
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(50)
                         )
                     }
                 }
@@ -639,6 +674,22 @@ internal fun AnalyzerTab(
 
         val filteredResults = state.scanResults.filter { 
             ssidFilter == "ALL" || it.ssid == ssidFilter
+        }
+
+        if (filteredResults.isEmpty() && !state.isScanning) {
+            item {
+                NetCard(contentPadding = NetTokens.SpacingXL) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(36.dp))
+                        Text("No networks found", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("Tap Scan to discover nearby access points", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+            }
         }
 
         items(filteredResults, key = { it.bssid }) { result ->
@@ -729,12 +780,12 @@ private fun ExportActionsCard() {
     val clipboard = LocalClipboardManager.current
     val vm: WifiTweaksViewModel = hiltViewModel()
     val state by vm.uiState.collectAsStateWithLifecycle()
-    ElevatedCard(shape = RoundedCornerShape(28.dp), colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+    Card(shape = NetTokens.CardShape, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.exportScanCsv())); android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.exportScanCsv())); android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
                 Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy CSV")
             }
-            FilledTonalButton(onClick = { clipboard.setText(AnnotatedString(vm.exportDiagnosticJson())); android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) {
+            FilledTonalButton(onClick = { clipboard.setText(AnnotatedString(vm.exportDiagnosticJson())); android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
                 Icon(Icons.Rounded.Share, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy JSON")
             }
         }
@@ -980,47 +1031,37 @@ internal fun DnsEngineTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(stringResource(R.string.st_WifiTweaksScreen_a7b8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                            Text("${state.selectedBenchmarkProviders.size} servers selected", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_a7b8),
+                subtitle = "${state.selectedBenchmarkProviders.size} servers • tap Run to measure",
+                icon = Icons.Rounded.Bolt,
+                trailing = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onShowSelection) {
+                            Icon(Icons.Rounded.Tune, contentDescription = "Select servers")
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(onClick = onShowSelection) {
-                                Icon(Icons.Rounded.Settings, "Select Servers")
-                            }
-                            FilledTonalButton(
-                                onClick = onBenchmark,
-                                enabled = !state.isBenchmarkingDns && state.shizukuStatus.isServiceReady,
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                if (state.isBenchmarkingDns) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(18.dp))
-                                }
-                                Spacer(Modifier.width(8.dp))
+                        FilledTonalButton(
+                            onClick = onBenchmark,
+                            enabled = !state.isBenchmarkingDns,
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            if (state.isBenchmarkingDns) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
                                 Text("Run")
                             }
                         }
                     }
-
-                    if (state.dnsBenchmarkResults.isEmpty()) {
-                        Text(
-                            "Benchmark nearby providers to see which has the lowest latency.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
+                }
+            ) {
+                if (state.dnsBenchmarkResults.isEmpty()) {
+                    Text(
+                        "No results yet. Choose providers and run a benchmark.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         state.dnsBenchmarkResults.sortedBy { it.latencyMs ?: 9999L }.forEach { result ->
                             DnsBenchmarkRow(result)
                         }
@@ -1030,40 +1071,52 @@ internal fun DnsEngineTab(
         }
 
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.st_WifiTweaksScreen_c9d0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    OutlinedTextField(
-                        value = customHost,
-                        onValueChange = { customHost = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("dns.example.com") },
-                        shape = RoundedCornerShape(16.dp),
-                        trailingIcon = {
-                            IconButton(onClick = { onApplyCustom(customHost) }, enabled = state.shizukuStatus.isServiceReady) {
-                                Icon(Icons.Rounded.Check, null)
-                            }
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_c9d0),
+                subtitle = "Custom DoT hostname",
+                icon = Icons.Rounded.Public
+            ) {
+                OutlinedTextField(
+                    value = customHost,
+                    onValueChange = { customHost = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("e.g. 1dot1dot1dot1.cloudflare-dns.com") },
+                    supportingText = { Text("Private DNS hostname for DoT") },
+                    shape = RoundedCornerShape(16.dp),
+                    trailingIcon = {
+                        IconButton(onClick = { onApplyCustom(customHost) }, enabled = customHost.isNotBlank()) {
+                            Icon(Icons.Rounded.Check, contentDescription = "Apply")
                         }
-                    )
-                }
+                    }
+                )
             }
         }
 
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_e1f2),
+                subtitle = "Private DNS presets",
+                icon = Icons.Rounded.Public,
+                trailing = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("ALL" to "All", "SEC" to "Secure", "SPD" to "Fast").forEach { (key, label) ->
+                            FilterChip(
+                                selected = dnsFilter == key,
+                                onClick = { dnsFilter = key },
+                                label = { Text(label) },
+                                shape = RoundedCornerShape(50)
+                            )
+                        }
+                    }
+                }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(stringResource(R.string.st_WifiTweaksScreen_e1f2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text("Presets", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                         
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("ALL", "SEC", "SPD").forEach { filter ->
@@ -1253,48 +1306,50 @@ internal fun DiagnosticsTab(
         }
 
         item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(stringResource(R.string.st_WifiTweaksScreen_i9j0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    
-                    OutlinedTextField(
-                        value = traceTarget,
-                        onValueChange = { traceTarget = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(stringResource(R.string.st_WifiTweaksScreen_k1l2)) },
-                        shape = RoundedCornerShape(20.dp),
-                        trailingIcon = {
-                            IconButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing) {
-                                if (state.isTracing) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                else Icon(Icons.Rounded.PlayArrow, null)
-                            }
-                        }
-                    )
-
-
-                    if (state.traceHops.isNotEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(20.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                state.traceHops.forEach { hop ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text("Hop ${hop.hop}", fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp), style = MaterialTheme.typography.bodySmall)
-                                        Text(hop.ip, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(
-                                            text = hop.latencyMs?.let { "${it}ms" } ?: "*",
-                                            fontWeight = FontWeight.Black,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                        )
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_i9j0),
+                subtitle = if (state.isTracing) "Tracing…" else "Path to a target host",
+                icon = Icons.Rounded.Route,
+                trailing = {
+                    FilledTonalButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing, shape = RoundedCornerShape(50)) {
+                        if (state.isTracing) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text("Trace")
+                    }
+                }
+            ) {
+                OutlinedTextField(
+                    value = traceTarget,
+                    onValueChange = { traceTarget = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.st_WifiTweaksScreen_k1l2)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp)
+                )
+                if (state.traceHops.isEmpty()) {
+                    Text("Run a trace to see each hop on the path.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        state.traceHops.forEach { hop ->
+                            Surface(shape = NetTokens.InnerShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(28.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("${hop.hop}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        }
                                     }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(hop.ip, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (hop.label.isNotBlank() && hop.label != "Hop ${hop.hop}") {
+                                            Text(hop.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Text(
+                                        text = hop.latencyMs?.let { "${it}ms" } ?: "*",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else healthTint((90 - (hop.latencyMs ?: 200).coerceIn(0, 180) / 2).toInt())
+                                    )
                                 }
                             }
                         }
@@ -1304,16 +1359,8 @@ internal fun DiagnosticsTab(
         }
 
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.st_WifiTweaksScreen_m3n4), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
-                Card(
-                    
-                    shape = RoundedCornerShape(28.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        ConfigGrid(state.networkConfig)
-                    }
-                }
+            NetCard(title = stringResource(R.string.st_WifiTweaksScreen_m3n4), icon = Icons.Rounded.Settings, subtitle = state.currentSsid) {
+                ConfigGrid(state.networkConfig)
             }
         }
 
@@ -1475,105 +1522,29 @@ private fun ShizukuCockpit(
     onBindShizuku: () -> Unit
 ) {
     val shizuku = state.shizukuStatus
-    val container = when {
-        shizuku.isServiceReady -> MaterialTheme.colorScheme.secondaryContainer
-        shizuku.isReachable || shizuku.isAuthorized -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.errorContainer
-    }
-    val contentColor = when {
-        shizuku.isServiceReady -> MaterialTheme.colorScheme.onSecondaryContainer
-        shizuku.isReachable || shizuku.isAuthorized -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onErrorContainer
-    }
-    Card(
-        
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = container)
-    ) {
-        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.st_WifiTweaksScreen_w3x4), 
-                        style = MaterialTheme.typography.labelSmall, 
-                        fontWeight = FontWeight.Black,
-                        color = contentColor.copy(alpha = 0.6f),
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        if (shizuku.isServiceReady) "Service Active" else "Engine Locked", 
-                        style = MaterialTheme.typography.headlineSmall, 
-                        fontWeight = FontWeight.Black,
-                        color = contentColor
-                    )
-                }
-                
-                Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = CircleShape,
-                    color = contentColor.copy(alpha = 0.1f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (shizuku.isServiceReady) Icons.Rounded.Bolt else Icons.Rounded.Lock,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = if (shizuku.isServiceReady) 
-                    "Full access granted. All advanced networking tweaks and real-time process audits are available." 
-                    else "Shizuku is required for advanced features like Private DNS management and TraceRoute.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = contentColor.copy(alpha = 0.8f)
-            )
-
-            if (!shizuku.isServiceReady) {
-                Button(
-                    onClick = onBindShizuku,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = contentColor, contentColor = container)
-                ) {
-                    Icon(Icons.Rounded.PowerSettingsNew, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Initialize Service")
-                }
-            }
-            
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                StatusBadge("Binder", if (shizuku.isReachable) "Online" else "Offline", shizuku.isReachable)
-                StatusBadge("Permission", if (shizuku.isAuthorized) "Granted" else "Pending", shizuku.isAuthorized)
+    val isReady = shizuku.isServiceReady
+    NetCard(
+        title = if (isReady) "Shizuku connected" else "Shizuku required",
+        subtitle = if (isReady) "Privileged operations enabled" else "Needed for system tweaks and DNS",
+        icon = if (isReady) Icons.Rounded.Bolt else Icons.Rounded.Lock,
+        trailing = {
+            if (!isReady) {
+                Button(onClick = onBindShizuku, shape = RoundedCornerShape(50)) { Text("Enable") }
+            } else {
+                NetPill("Active", emphasized = true)
             }
         }
-    }
-}
-
-@Composable
-private fun StatusBadge(label: String, value: String, success: Boolean) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = (if (success) MaterialTheme.colorScheme.primary else Color.Gray).copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, (if (success) MaterialTheme.colorScheme.primary else Color.Gray).copy(alpha = 0.2f))
     ) {
         Text(
-            text = "$label: $value",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = if (success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            if (isReady) "All tweaks and audits are available."
+            else "Install and start Shizuku to unlock advanced networking controls.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NetPill("Binder " + if (shizuku.isReachable) "online" else "offline", emphasized = shizuku.isReachable)
+            NetPill("Permission " + if (shizuku.isAuthorized) "granted" else "pending", emphasized = shizuku.isAuthorized)
+        }
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
@@ -1793,16 +1764,10 @@ private fun PresetDnsRow(
     enabled: Boolean,
     onApply: () -> Unit
 ) {
-    val borderColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
-    val background = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-    
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = background,
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-            .clickable(enabled = enabled, onClick = onApply)
+        shape = NetTokens.InnerShape,
+        color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onApply)
     ) {
         Row(
             modifier = Modifier
@@ -1893,7 +1858,7 @@ private fun NetworkResultCard(result: WifiScanResult, onClick: () -> Unit) {
                         result.security,
                         emphasized = result.security == "Open"
                     )
-                    NetPill("Ch ${result.channel.takeIf { it != 0 } ?: "?"} · ${result.band}")
+                    NetPill("Ch ${result.channel.takeIf { it != 0 } ?: "?"} · ${result.band}${if (result.channelWidthMhz > 20) " · ${result.channelWidthMhz}MHz" else ""}")
                 }
             }
             Text(
@@ -2361,5 +2326,13 @@ private fun Sparkline(values: List<Double>, modifier: Modifier = Modifier) {
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         drawPath(path, color = lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+private fun DetailRowNet(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

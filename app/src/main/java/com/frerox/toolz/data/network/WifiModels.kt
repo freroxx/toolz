@@ -27,6 +27,8 @@ data class WifiScanResult(
     val channel: Int,
     val band: String,
     val security: String,
+    val channelWidthMhz: Int = 20,
+    val maxRateMbps: Int = 0,
     val isHidden: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )

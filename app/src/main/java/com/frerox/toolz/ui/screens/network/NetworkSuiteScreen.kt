@@ -20,42 +20,27 @@ package com.frerox.toolz.ui.screens.network
 import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -70,19 +55,21 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -95,8 +82,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -107,9 +92,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
-import com.frerox.toolz.data.network.RecommendationSeverity
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
+import com.frerox.toolz.ui.screens.network.suite.CellularAuditCard
+import com.frerox.toolz.ui.screens.network.suite.NetTokens
 import com.frerox.toolz.ui.screens.network.suite.DeviceMeshCard
 import com.frerox.toolz.ui.screens.network.suite.LatencyStreamCard
 import com.frerox.toolz.ui.screens.network.suite.MobileDataCard
@@ -119,7 +105,6 @@ import com.frerox.toolz.ui.screens.network.suite.RoutesAuditCard
 import com.frerox.toolz.ui.screens.network.suite.ShizukuAccessDialog
 import com.frerox.toolz.ui.screens.network.suite.ShizukuPrompt
 import com.frerox.toolz.ui.screens.network.suite.SocketsCard
-import com.frerox.toolz.ui.screens.network.suite.CellularAuditCard
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -128,21 +113,14 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
-/**
- * P3: THE single Network entry point. Merges the retired WifiTweaksScreen and
- * NetworkPowerSuiteScreen behind one adaptive shell:
- *  - expanded width (≥840dp): NavigationRail
- *  - compact: expressive pill bottom bar
- * Sections consume both ViewModels; PowerSuite-only features live in /suite.
- */
+/** Six user-facing sections; Console lives behind the terminal FAB (dev-only). */
 private enum class SuiteSection(val labelRes: Int) {
     OVERVIEW(R.string.st_WifiTweaksScreen_tab_overview),
     ANALYZER(R.string.st_WifiTweaksScreen_tab_analyzer),
     OPTIMIZER(R.string.st_WifiTweaksScreen_tab_profiles),
     DNS(R.string.st_WifiTweaksScreen_tab_dns),
     DIAGNOSTICS(R.string.st_WifiTweaksScreen_tab_diag),
-    TRAFFIC(R.string.st_WifiTweaksScreen_tab_traffic),
-    CONSOLE(R.string.st_WifiTweaksScreen_tab_console)
+    NETWORK(R.string.st_WifiTweaksScreen_tab_traffic)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
@@ -168,19 +146,14 @@ fun NetworkSuiteScreen(
     var shizukuPrompt by rememberSaveable { mutableStateOf<ShizukuPrompt?>(null) }
 
     val privilegedReady = power.privilegedState.isAuthorized && power.privilegedState.isServiceReady
-    // P6: pause polling loops while this screen is not visible (battery)
+
+    // P6 battery gate
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
-                    tweaksVm.setScreenActive(true)
-                    powerVm.setScreenActive(true)
-                }
-                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
-                    tweaksVm.setScreenActive(false)
-                    powerVm.setScreenActive(false)
-                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> { tweaksVm.setScreenActive(true); powerVm.setScreenActive(true) }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> { tweaksVm.setScreenActive(false); powerVm.setScreenActive(false) }
                 else -> {}
             }
         }
@@ -188,15 +161,9 @@ fun NetworkSuiteScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-
-    // events from BOTH viewmodels feed one snackbar
     LaunchedEffect(Unit) {
-        launch {
-            tweaksVm.events.collect { snackbarHostState.showSnackbar(it) }
-        }
-        launch {
-            powerVm.events.collect { snackbarHostState.showSnackbar(it) }
-        }
+        launch { tweaksVm.events.collect { snackbarHostState.showSnackbar(it) } }
+        launch { powerVm.events.collect { snackbarHostState.showSnackbar(it) } }
     }
 
     val permissions = remember {
@@ -207,12 +174,13 @@ fun NetworkSuiteScreen(
         }
     }
     val permissionState = rememberMultiplePermissionsState(permissions)
-    val fineGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_FINE_LOCATION && it.status.isGranted }
-    val coarseGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_COARSE_LOCATION && it.status.isGranted }
+    val fineOrCoarse = permissionState.permissions.any {
+        (it.permission == Manifest.permission.ACCESS_FINE_LOCATION || it.permission == Manifest.permission.ACCESS_COARSE_LOCATION) && it.status.isGranted
+    }
     val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         permissionState.permissions.any { it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted }
     } else true
-    val hasWifiPermission = (fineGranted || coarseGranted) && nearbyGranted
+    val hasWifiPermission = fineOrCoarse && nearbyGranted
 
     fun requestShizukuAccess(featureName: String, supportingText: String) {
         when {
@@ -232,196 +200,206 @@ fun NetworkSuiteScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().toolzBackground()) {
-        Scaffold(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                Surface(
-                    shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    tonalElevation = 3.dp,
+    Scaffold(
+        modifier = Modifier.fillMaxSize().toolzBackground(),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            ExpressiveTopAppBar(
+                title = stringResource(R.string.st_NetworkPowerSuiteScreen_f1a2),
+                navigationIcon = {
+                    IconButton(onClick = {
+                        vibrationManager?.vibrateClick()
+                        onBack()
+                    }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        vibrationManager?.vibrateClick()
+                        tweaksVm.refreshEnvironment()
+                        powerVm.refreshSuite()
+                    }) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_WifiTweaksScreen_1a2b))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent
+                )
+            )
+        },
+        bottomBar = {
+            if (!hasWifiPermission) return@Scaffold
+            if (isExpanded()) {
+                // rail occupies the Row below instead
+            } else {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 2.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    ExpressiveTopAppBar(
-                        title = stringResource(R.string.st_NetworkPowerSuiteScreen_f1a2),
-                        navigationIcon = {
-                            IconButton(onClick = {
-                                vibrationManager?.vibrateClick()
-                                onBack()
-                            }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = {
-                                vibrationManager?.vibrateClick()
-                                tweaksVm.refreshEnvironment()
-                                powerVm.refreshSuite()
-                            }) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_WifiTweaksScreen_1a2b))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                            scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent
+                    SuiteSection.entries.forEachIndexed { index, section ->
+                        NavigationBarItem(
+                            selected = index == selectedSection,
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                selectedSection = index
+                            },
+                            icon = { Icon(SuiteSectionIcon(section), contentDescription = null) },
+                            label = { Text(stringResource(section.labelRes), maxLines = 1) }
                         )
-                    )
-                }
-            },
-            bottomBar = {
-                if (!hasWifiPermission) return@Scaffold
-                SuiteBottomBar(
-                    selected = selectedSection,
-                    onSelect = {
-                        vibrationManager?.vibrateTick()
-                        selectedSection = it
-                    },
-                    modifier = Modifier.navigationBarsPadding()
-                )
-            }
-        ) { padding ->
-            Row(modifier = Modifier.fillMaxSize().padding(padding)) {
-                // Adaptive rail for expanded widths
-                if (hasWifiPermission && isExpanded()) {
-                    SuiteRail(
-                        selected = selectedSection,
-                        onSelect = {
-                            vibrationManager?.vibrateTick()
-                            selectedSection = it
-                        }
-                    )
-                }
-
-                AnimatedContent(
-                    targetState = selectedSection,
-                    transitionSpec = {
-                        if (targetState > initialState) {
-                            (slideInHorizontally { it / 6 } + fadeIn(tween(220))) togetherWith
-                                (slideOutHorizontally { -it / 6 } + fadeOut(tween(180)))
-                        } else {
-                            (slideInHorizontally { -it / 6 } + fadeIn(tween(220))) togetherWith
-                                (slideOutHorizontally { it / 6 } + fadeOut(tween(180)))
-                        }
-                    },
-                    label = "suite_section",
-                    modifier = Modifier.weight(1f)
-                ) { sectionOrdinal ->
-                    val section = SuiteSection.entries[sectionOrdinal]
-                    if (!hasWifiPermission) {
-                        PermissionGate(onGrant = {
-                            vibrationManager?.vibrateClick()
-                            permissionState.launchMultiplePermissionRequest()
-                        })
-                        return@AnimatedContent
-                    }
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(modifier = Modifier.weight(1f)) {
-                            when (section) {
-                                SuiteSection.OVERVIEW -> OverviewTab(
-                                    state = uiState,
-                                    onScan = { vibrationManager?.vibrateClick(); tweaksVm.startScan() },
-                                    onFixConnection = { vibrationManager?.vibrateClick(); tweaksVm.fixMyConnection() },
-                                    onReset = { vibrationManager?.vibrateClick(); tweaksVm.resetAllSettings() },
-                                    onToggleAudio = tweaksVm::setAudioFeedback,
-                                    onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
-                                    extraCards = {
-                                        PublicIpCard(state = power, onRefresh = { powerVm.fetchPublicIp() })
-                                        Spacer(Modifier.height(20.dp))
-                                        DeviceMeshCard(state = power, onScanDevices = { powerVm.scanSubnet() })
-                                        Spacer(Modifier.height(20.dp))
-                                        MobileDataCard(
-                                            state = power,
-                                            privilegedReady = privilegedReady,
-                                            onToggle = { enabled ->
-                                                if (privilegedReady) powerVm.toggleMobileData(enabled)
-                                                else requestShizukuAccess("Mobile data toggle", "System radio controls are protected. Connect Shizuku to unlock one-tap mobile data toggles.")
-                                            }
-                                        )
-                                        Spacer(Modifier.height(20.dp))
-                                        PortScanCard(state = power, onScanPorts = { powerVm.scanGatewayPorts() })
-                                    }
-                                )
-
-                                SuiteSection.ANALYZER -> AnalyzerTab(
-                                    state = uiState,
-                                    onScan = { vibrationManager?.vibrateClick(); tweaksVm.startScan() },
-                                    onSortSelected = tweaksVm::setScanSortMode,
-                                    onToggleHidden = tweaksVm::setShowHiddenNetworks,
-                                    onSelectAP = { showDetailSheet = it }
-                                )
-
-                                SuiteSection.OPTIMIZER -> ProfilesTab(
-                                    state = uiState,
-                                    onBindShizuku = { requestShizuku(context) },
-                                    onApplyProfile = { vibrationManager?.vibrateClick(); tweaksVm.applyProfile(it) },
-                                    onApplyTweak = { vibrationManager?.vibrateClick(); tweaksVm.applyTweak(it) },
-                                    onUndoTweak = { vibrationManager?.vibrateClick(); tweaksVm.undoTweak(it) }
-                                )
-
-                                SuiteSection.DNS -> DnsEngineTab(
-                                    state = uiState,
-                                    onBenchmark = { vibrationManager?.vibrateClick(); tweaksVm.benchmarkDns() },
-                                    onApplyTweak = { vibrationManager?.vibrateClick(); tweaksVm.applyTweak(it) },
-                                    onRestoreAutomatic = { vibrationManager?.vibrateClick(); tweaksVm.restoreAutomaticPrivateDns() },
-                                    onApplyCustom = { vibrationManager?.vibrateClick(); tweaksVm.applyCustomDns(it) },
-                                    onShowSelection = { showBenchmarkSheet = true }
-                                )
-
-                                SuiteSection.DIAGNOSTICS -> DiagnosticsTab(
-                                    state = uiState,
-                                    onCopySummary = {
-                                        clipboard.setText(AnnotatedString(tweaksVm.buildDiagnosticSummary()))
-                                        scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
-                                    },
-                                    onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
-                                    onOpenDevSettings = { launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) },
-                                    onRunSpeedTest = { tweaksVm.runSpeedTest() },
-                                    onRunTraceRoute = { target ->
-                                        if (privilegedReady) powerVm.runTraceRoute(target)
-                                        else requestShizukuAccess("Traceroute", "Traceroute uses shell networking tools that are only available through the privileged Shizuku layer.")
-                                    },
-                                    extraCards = {
-                                        LatencyStreamCard(state = power)
-                                        Spacer(Modifier.height(20.dp))
-                                        SpeedHistoryCard(
-                                            history = tweaksVm.speedHistory.collectAsStateWithLifecycle().value,
-                                            onClear = { tweaksVm.clearSpeedHistory() }
-                                        )
-                                    }
-                                )
-
-                                SuiteSection.TRAFFIC -> TrafficColumn(power)
-
-                                SuiteSection.CONSOLE -> NetworkConsoleView(
-                                    logs = uiState.diagnosticLogs,
-                                    isShizukuReady = uiState.shizukuStatus.isServiceReady,
-                                    consoleEnabled = uiState.consoleEnabled,
-                                    onToggleConsole = tweaksVm::setConsoleEnabled,
-                                    onExecuteRawCommand = tweaksVm::executeRawCommand,
-                                    onClearLogs = tweaksVm::clearLogs
-                                )
-                            }
-                        }
                     }
                 }
             }
         }
+    ) { padding ->
+        Row(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (hasWifiPermission && isExpanded()) {
+                NavigationRail(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
+                    Spacer(Modifier.height(8.dp))
+                    SuiteSection.entries.forEachIndexed { index, section ->
+                        NavigationRailItem(
+                            selected = index == selectedSection,
+                            onClick = {
+                                vibrationManager?.vibrateTick()
+                                selectedSection = index
+                            },
+                            icon = { Icon(SuiteSectionIcon(section), contentDescription = null) },
+                            label = { Text(stringResource(section.labelRes), maxLines = 1) }
+                        )
+                    }
+                }
+            }
 
-        // Floating console launcher
-        FloatingActionButton(
-            onClick = {
-                vibrationManager?.vibrateClick()
-                showTerminalSheet = true
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = if (hasWifiPermission) 96.dp else 24.dp),
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            shape = CircleShape
-        ) {
-            Icon(Icons.Rounded.Terminal, contentDescription = "Open diagnostics console")
+            Box(modifier = Modifier.weight(1f)) {
+                AnimatedContent(
+                    targetState = selectedSection,
+                    transitionSpec = {
+                        if (targetState > initialState) {
+                            (slideInHorizontally { it / 8 } + fadeIn(tween(200))) togetherWith
+                                (slideOutHorizontally { -it / 8 } + fadeOut(tween(160)))
+                        } else {
+                            (slideInHorizontally { -it / 8 } + fadeIn(tween(200))) togetherWith
+                                (slideOutHorizontally { it / 8 } + fadeOut(tween(160)))
+                        }
+                    },
+                    label = "suite_section",
+                    modifier = Modifier.fillMaxSize()
+                ) { sectionOrdinal ->
+                    val section = SuiteSection.entries[sectionOrdinal]
+                    if (!hasWifiPermission) {
+                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                            PermissionGate(onGrant = {
+                                vibrationManager?.vibrateClick()
+                                permissionState.launchMultiplePermissionRequest()
+                            })
+                        }
+                        return@AnimatedContent
+                    }
+                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = NetTokens.SpacingL)) {
+                        when (section) {
+                            SuiteSection.OVERVIEW -> OverviewTab(
+                                state = uiState,
+                                onScan = { vibrationManager?.vibrateClick(); tweaksVm.startScan() },
+                                onFixConnection = { vibrationManager?.vibrateClick(); tweaksVm.fixMyConnection() },
+                                onReset = { vibrationManager?.vibrateClick(); tweaksVm.resetAllSettings() },
+                                onToggleAudio = tweaksVm::setAudioFeedback,
+                                onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
+                                extraCards = {
+                                    Spacer(Modifier.height(NetTokens.SpacingL))
+                                    PublicIpCard(state = power, onRefresh = { powerVm.fetchPublicIp() })
+                                    Spacer(Modifier.height(NetTokens.SpacingL))
+                                    val hostPorts by powerVm.hostPortResults.collectAsStateWithLifecycle()
+                                    val hostScanning by powerVm.hostPortScanning.collectAsStateWithLifecycle()
+                                    DeviceMeshCard(
+                                        state = power,
+                                        onScanDevices = { powerVm.scanSubnet() },
+                                        onScanPortsForHost = { ip -> powerVm.scanPortsForHost(ip) },
+                                        hostPortResults = hostPorts,
+                                        hostPortScanning = hostScanning
+                                    )
+                                    Spacer(Modifier.height(NetTokens.SpacingL))
+                                    MobileDataCard(
+                                        state = power,
+                                        privilegedReady = privilegedReady,
+                                        onToggle = { enabled ->
+                                            if (privilegedReady) powerVm.toggleMobileData(enabled)
+                                            else requestShizukuAccess("Mobile data toggle", "System radio controls are protected. Connect Shizuku to unlock one-tap mobile data toggles.")
+                                        }
+                                    )
+                                    Spacer(Modifier.height(NetTokens.SpacingXL))
+                                }
+                            )
+
+                            SuiteSection.ANALYZER -> AnalyzerTab(
+                                state = uiState,
+                                onScan = { vibrationManager?.vibrateClick(); tweaksVm.startScan() },
+                                onSortSelected = tweaksVm::setScanSortMode,
+                                onToggleHidden = tweaksVm::setShowHiddenNetworks,
+                                onSelectAP = { showDetailSheet = it }
+                            )
+
+                            SuiteSection.OPTIMIZER -> ProfilesTab(
+                                state = uiState,
+                                onBindShizuku = { requestShizuku(context) },
+                                onApplyProfile = { vibrationManager?.vibrateClick(); tweaksVm.applyProfile(it) },
+                                onApplyTweak = { vibrationManager?.vibrateClick(); tweaksVm.applyTweak(it) },
+                                onUndoTweak = { vibrationManager?.vibrateClick(); tweaksVm.undoTweak(it) }
+                            )
+
+                            SuiteSection.DNS -> DnsEngineTab(
+                                state = uiState,
+                                onBenchmark = { vibrationManager?.vibrateClick(); tweaksVm.benchmarkDns() },
+                                onApplyTweak = { vibrationManager?.vibrateClick(); tweaksVm.applyTweak(it) },
+                                onRestoreAutomatic = { vibrationManager?.vibrateClick(); tweaksVm.restoreAutomaticPrivateDns() },
+                                onApplyCustom = { vibrationManager?.vibrateClick(); tweaksVm.applyCustomDns(it) },
+                                onShowSelection = { showBenchmarkSheet = true }
+                            )
+
+                            SuiteSection.DIAGNOSTICS -> DiagnosticsTab(
+                                state = uiState,
+                                onCopySummary = {
+                                    clipboard.setText(AnnotatedString(tweaksVm.buildDiagnosticSummary()))
+                                    scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
+                                },
+                                onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
+                                onOpenDevSettings = { launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) },
+                                onRunSpeedTest = { tweaksVm.runSpeedTest() },
+                                onRunTraceRoute = { target ->
+                                    if (privilegedReady) powerVm.runTraceRoute(target)
+                                    else requestShizukuAccess("Traceroute", "Traceroute runs through the privileged Shizuku shell.")
+                                },
+                                extraCards = {
+                                    LatencyStreamCard(state = power)
+                                    Spacer(Modifier.height(NetTokens.SpacingL))
+                                    SpeedHistoryCard(
+                                        history = tweaksVm.speedHistory.collectAsStateWithLifecycle().value,
+                                        onClear = { tweaksVm.clearSpeedHistory() }
+                                    )
+                                }
+                            )
+
+                            SuiteSection.NETWORK -> TrafficColumn(power)
+                        }
+                    }
+                }
+
+                // Terminal FAB — opens the dev console sheet
+                FloatingActionButton(
+                    onClick = {
+                        vibrationManager?.vibrateClick()
+                        showTerminalSheet = true
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = NetTokens.SpacingL, bottom = NetTokens.SpacingL),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Icon(Icons.Rounded.Terminal, contentDescription = "Open diagnostics console")
+                }
+            }
         }
     }
 
@@ -466,21 +444,19 @@ fun NetworkSuiteScreen(
                 Button(onClick = {
                     vibrationManager?.vibrateClick()
                     tweaksVm.dismissDisclaimer()
-                }, shape = RoundedCornerShape(16.dp)) { Text("Got it") }
+                }, shape = RoundedCornerShape(50)) { Text("Got it") }
             },
+            dismissButton = { TextButton(onClick = { tweaksVm.dismissDisclaimer() }) { Text("Skip") } },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.tertiary)
-                    Text("Powerful tool ahead", fontWeight = FontWeight.Black)
+                    Text("Powerful tool ahead", fontWeight = FontWeight.Bold)
                 }
             },
             text = {
-                Text(
-                    "This suite can change real system network behavior via Shizuku. Every change is journaled and revertible from Optimizer → Undo.\n\n" +
-                        "Diagnostics work without Shizuku; system-level optimizations need it."
-                )
+                Text("Changes via Shizuku alter real system behavior but are journaled and revertible from Optimizer → Undo.\n\nDiagnostics work without Shizuku; system-level optimizations need it.")
             },
-            shape = RoundedCornerShape(32.dp),
+            shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )
     }
@@ -495,92 +471,18 @@ private fun SuiteSectionIcon(section: SuiteSection) = when (section) {
     SuiteSection.OPTIMIZER -> Icons.Rounded.AutoAwesome
     SuiteSection.DNS -> Icons.Rounded.Public
     SuiteSection.DIAGNOSTICS -> Icons.Rounded.Analytics
-    SuiteSection.TRAFFIC -> Icons.Rounded.Lan
-    SuiteSection.CONSOLE -> Icons.Rounded.Terminal
+    SuiteSection.NETWORK -> Icons.Rounded.Lan
 }
-
 
 @Composable
 private fun TrafficColumn(power: com.frerox.toolz.data.network.NetworkPowerUiState) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(20.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL), contentPadding = PaddingValues(top = NetTokens.SpacingM, bottom = 96.dp)) {
         item { SocketsCard(power) }
         item { CellularAuditCard(power) }
         item { RoutesAuditCard(power) }
     }
 }
 
-// ── Navigation ──────────────────────────────────────────────────────────────
-
 @Composable
 private fun isExpanded(): Boolean =
     androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 840
-
-
-@Composable
-private fun SuiteRail(selected: Int, onSelect: (Int) -> Unit) {
-    NavigationRail(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
-        Spacer(Modifier.height(8.dp))
-        SuiteSection.entries.forEachIndexed { index, section ->
-            NavigationRailItem(
-                selected = index == selected,
-                onClick = { onSelect(index) },
-                icon = { Icon(SuiteSectionIcon(section), contentDescription = null) },
-                label = { Text(stringResource(section.labelRes), maxLines = 1) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun SuiteBottomBar(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 2.dp,
-        shadowElevation = 1.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            SuiteSection.entries.forEachIndexed { index, section ->
-                val isSelected = index == selected
-                val bg by animateColorAsState(
-                    if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-                    label = "suite_tab_bg"
-                )
-                val scale by animateFloatAsState(
-                    if (isSelected) 1f else 0.94f,
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                    label = "suite_tab_scale"
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(bg)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                            onSelect(index)
-                        }
-                        .padding(vertical = 12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Icon(
-                            SuiteSectionIcon(section),
-                            contentDescription = stringResource(section.labelRes),
-                            tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp).graphicsLayer(scaleX = scale, scaleY = scale)
-                        )
-                        Text(
-                            stringResource(section.labelRes),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-    }
-}

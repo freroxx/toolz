@@ -32,7 +32,9 @@ data class WifiInfoState(
     val dnsServers: List<String> = emptyList(),
     val rssiHistory: List<Int> = emptyList(),
     /** True when the active network actually has WIFI transport (not an SSID-text guess). */
-    val isConnected: Boolean = false
+    val isConnected: Boolean = false,
+    val subnetCidr: String = "",
+    val prefixLength: Int = 0
 )
 
 data class ProcessNetworkUsage(

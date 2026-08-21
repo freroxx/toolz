@@ -29,6 +29,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.ConnectivityManager
 import android.net.LinkAddress
+import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.compose.material.icons.Icons
@@ -246,7 +247,9 @@ class WifiTweaksViewModel @Inject constructor(
                             it.copy(
                                 networkConfig = it.networkConfig.copy(
                                     ip = ipAudit.interfaces.firstOrNull() ?: it.networkConfig.ip,
-                                    gateway = ipAudit.defaultRoute.ifBlank { it.networkConfig.gateway }
+                                    gateway = ipAudit.defaultRoute.ifBlank { it.networkConfig.gateway },
+                                    privateDnsActive = dnsConfig.first.equals("hostname", true) && dnsConfig.second.isNotBlank(),
+                                    privateDnsServerName = dnsConfig.second.ifBlank { "Automatic" }
                                 ),
                                 activeProcesses = processes,
                                 privateDnsMode = dnsConfig.first.replaceFirstChar(Char::titlecase),
@@ -990,6 +993,16 @@ class WifiTweaksViewModel @Inject constructor(
                         channel = frequencyToChannel(accessPoint.frequency),
                         band = frequencyToBand(accessPoint.frequency),
                         security = parseSecurityType(accessPoint.capabilities),
+                        channelWidthMhz = runCatching {
+                            when (accessPoint.channelWidth) {
+                                ScanResult.CHANNEL_WIDTH_20MHZ -> 20
+                                ScanResult.CHANNEL_WIDTH_40MHZ -> 40
+                                ScanResult.CHANNEL_WIDTH_80MHZ -> 80
+                                ScanResult.CHANNEL_WIDTH_160MHZ -> 160
+                                ScanResult.CHANNEL_WIDTH_80MHZ_PLUS_MHZ -> 80
+                                else -> 20
+                            }
+                        }.getOrDefault(20),
                         isHidden = accessPoint.SSID.isBlank()
                     )
                 }
@@ -1119,6 +1132,7 @@ class WifiTweaksViewModel @Inject constructor(
                     networkConfig = it.networkConfig.copy(
                         ip = info.ipAddress,
                         gateway = info.gateway,
+                        subnet = info.subnetCidr.ifBlank { "-" },
                         dns1 = info.dnsServers.getOrNull(0) ?: "-",
                         dns2 = info.dnsServers.getOrNull(1) ?: "-",
                         wifiStandard = info.wifiStandard,

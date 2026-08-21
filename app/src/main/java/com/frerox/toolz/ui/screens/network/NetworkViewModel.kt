@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
@@ -322,6 +323,25 @@ class NetworkViewModel @Inject constructor(
             appendLog("> port scan: $gateway")
             val ports = networkScanner.scanPorts(gateway)
             updateState { copy(scannedPorts = ports, isScanningPorts = false) }
+        }
+    }
+
+    /** Per-host port scan from the mesh device sheet. */
+    private val _hostPortResults = MutableStateFlow<Map<String, List<com.frerox.toolz.data.network.ScannedPort>>>(emptyMap())
+    val hostPortResults: kotlinx.coroutines.flow.StateFlow<Map<String, List<com.frerox.toolz.data.network.ScannedPort>>> = _hostPortResults.asStateFlow()
+    private val _hostPortScanning = MutableStateFlow<Set<String>>(emptySet())
+    val hostPortScanning: kotlinx.coroutines.flow.StateFlow<Set<String>> = _hostPortScanning.asStateFlow()
+
+    fun scanPortsForHost(ip: String) {
+        if (_hostPortScanning.value.contains(ip)) return
+        viewModelScope.launch {
+            _hostPortScanning.update { it + ip }
+            appendLog("> port scan: $ip")
+            val ports = networkScanner.scanPorts(ip)
+            _hostPortResults.update { it + (ip to ports) }
+            _hostPortScanning.update { it - ip }
+            val openCount = ports.count { it.isOpen }
+            emitEvent("$ip: $openCount open port${if (openCount == 1) "" else "s"}")
         }
     }
 

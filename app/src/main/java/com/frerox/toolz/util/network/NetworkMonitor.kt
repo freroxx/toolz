@@ -82,6 +82,12 @@ class NetworkMonitor @Inject constructor(
             connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
         }.getOrNull()
         val wifiConnected = activeCaps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        val linkProps = linkProperties
+        val inetAddr = linkProps?.linkAddresses?.firstOrNull { it.address is java.net.Inet4Address }
+        val prefixLen = inetAddr?.prefixLength ?: 0
+        val subnetCidr = if (inetAddr != null && wifiConnected) {
+            "${inetAddr.address.hostAddress}/$prefixLen"
+        } else ""
 
         return WifiInfoState(
             isConnected = wifiConnected,
@@ -96,7 +102,9 @@ class NetworkMonitor @Inject constructor(
             band = band,
             channel = channel,
             signalLevel = signalLevel,
-            dnsServers = dnsServers
+            dnsServers = dnsServers,
+            subnetCidr = subnetCidr,
+            prefixLength = prefixLen
         )
     }
 
