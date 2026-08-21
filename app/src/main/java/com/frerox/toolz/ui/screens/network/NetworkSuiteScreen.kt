@@ -114,13 +114,18 @@ import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
 /** Six user-facing sections; Console lives behind the terminal FAB (dev-only). */
-private enum class SuiteSection(val labelRes: Int) {
+private enum class SuiteSection(val labelRes: Int, val inNav: Boolean = true) {
     OVERVIEW(R.string.st_WifiTweaksScreen_tab_overview),
     ANALYZER(R.string.st_WifiTweaksScreen_tab_analyzer),
     OPTIMIZER(R.string.st_WifiTweaksScreen_tab_profiles),
     DNS(R.string.st_WifiTweaksScreen_tab_dns),
     DIAGNOSTICS(R.string.st_WifiTweaksScreen_tab_diag),
-    NETWORK(R.string.st_WifiTweaksScreen_tab_traffic)
+    NETWORK(R.string.st_WifiTweaksScreen_tab_traffic),
+    CONSOLE(R.string.st_WifiTweaksScreen_tab_console, inNav = false);
+
+    companion object {
+        val navEntries: List<SuiteSection> = entries.filter { it.inNav }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
@@ -240,7 +245,7 @@ fun NetworkSuiteScreen(
                     tonalElevation = 2.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    SuiteSection.entries.forEachIndexed { index, section ->
+                    SuiteSection.navEntries.forEachIndexed { index, section ->
                         NavigationBarItem(
                             selected = index == selectedSection,
                             onClick = {
@@ -259,7 +264,7 @@ fun NetworkSuiteScreen(
             if (hasWifiPermission && isExpanded()) {
                 NavigationRail(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
                     Spacer(Modifier.height(8.dp))
-                    SuiteSection.entries.forEachIndexed { index, section ->
+                    SuiteSection.navEntries.forEachIndexed { index, section ->
                         NavigationRailItem(
                             selected = index == selectedSection,
                             onClick = {
@@ -382,22 +387,52 @@ fun NetworkSuiteScreen(
                             )
 
                             SuiteSection.NETWORK -> TrafficColumn(power)
+
+                            SuiteSection.CONSOLE -> NetworkConsoleView(
+                                logs = uiState.diagnosticLogs,
+                                isShizukuReady = uiState.shizukuStatus.isServiceReady,
+                                consoleEnabled = uiState.consoleEnabled,
+                                onToggleConsole = tweaksVm::setConsoleEnabled,
+                                onExecuteRawCommand = tweaksVm::executeRawCommand,
+                                onClearLogs = tweaksVm::clearLogs
+                            )
                         }
                     }
                 }
 
-                // Terminal FAB — opens the dev console sheet
+                // Terminal FAB — tap: log sheet · hold ~2s: developer console
+                val scope2 = rememberCoroutineScope()
+                var holding by remember { mutableStateOf(false) }
                 FloatingActionButton(
                     onClick = {
                         vibrationManager?.vibrateClick()
                         showTerminalSheet = true
                     },
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        .also { interactionSource ->
+                            LaunchedEffect(interactionSource) {
+                                interactionSource.interactions.collect { interaction ->
+                                    if (interaction is androidx.compose.foundation.interaction.PressInteraction.Press) {
+                                        holding = true
+                                        kotlinx.coroutines.delay(2000)
+                                        if (holding) {
+                                            vibrationManager?.vibrateTick()
+                                            selectedSection = SuiteSection.CONSOLE.ordinal
+                                            holding = false
+                                        }
+                                    } else if (interaction is androidx.compose.foundation.interaction.PressInteraction.Release ||
+                                               interaction is androidx.compose.foundation.interaction.PressInteraction.Cancel) {
+                                        holding = false
+                                    }
+                                }
+                            }
+                        },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = NetTokens.SpacingL, bottom = NetTokens.SpacingL),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    containerColor = if (holding) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
                 ) {
-                    Icon(Icons.Rounded.Terminal, contentDescription = "Open diagnostics console")
+                    Icon(Icons.Rounded.Terminal, contentDescription = "Hold for console, tap for logs")
                 }
             }
         }
@@ -472,6 +507,7 @@ private fun SuiteSectionIcon(section: SuiteSection) = when (section) {
     SuiteSection.DNS -> Icons.Rounded.Public
     SuiteSection.DIAGNOSTICS -> Icons.Rounded.Analytics
     SuiteSection.NETWORK -> Icons.Rounded.Lan
+    SuiteSection.CONSOLE -> Icons.Rounded.Terminal
 }
 
 @Composable

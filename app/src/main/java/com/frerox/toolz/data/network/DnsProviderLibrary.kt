@@ -125,6 +125,66 @@ object DnsProviderLibrary {
             protocols = setOf(DnsProtocol.DOH),
             description = "Legacy malware-focused filtering resolver.",
             badge = "Security"
+        ),
+        DnsProvider(
+            id = "cloudflare_family",
+            name = "Cloudflare Family",
+            addresses = listOf("1.1.1.3", "1.0.0.3"),
+            hostname = "family.cloudflare-dns.com",
+            dohUrl = "https://family.cloudflare-dns.com/dns-query",
+            categories = setOf(DnsCategory.FAMILY, DnsCategory.SECURITY),
+            description = "Blocks malware + adult content.",
+            badge = "Family"
+        ),
+        DnsProvider(
+            id = "adguard_family",
+            name = "AdGuard Family",
+            addresses = listOf("94.140.14.15", "94.140.15.15"),
+            hostname = "family.adguard-dns.com",
+            dohUrl = "https://family.adguard-dns.com/dns-query",
+            categories = setOf(DnsCategory.FAMILY, DnsCategory.SECURITY),
+            description = "Ad/tracker blocking + adult-content filter.",
+            badge = "Family"
+        ),
+        DnsProvider(
+            id = "quad9_unsecured",
+            name = "Quad9 (unfiltered)",
+            addresses = listOf("9.9.9.10", "149.112.112.10"),
+            hostname = "dns10.quad9.net",
+            dohUrl = "https://dns10.quad9.net/dns-query",
+            categories = setOf(DnsCategory.PRIVACY, DnsCategory.SPEED),
+            description = "No blocking — pure privacy resolver.",
+            badge = "Unfiltered"
+        ),
+        DnsProvider(
+            id = "opendns_familyshield",
+            name = "OpenDNS FamilyShield",
+            addresses = listOf("208.67.222.123", "208.67.220.123"),
+            hostname = "doh.familyshield.opendns.com",
+            dohUrl = "https://doh.familyshield.opendns.com/dns-query",
+            categories = setOf(DnsCategory.FAMILY),
+            description = "Pre-configured adult-content blocking.",
+            badge = "Family"
+        ),
+        DnsProvider(
+            id = "dns_sb",
+            name = "DNS.SB",
+            addresses = listOf("185.222.222.222", "45.11.45.11"),
+            hostname = "dot.sb",
+            dohUrl = "https://doh.sb/dns-query",
+            categories = setOf(DnsCategory.PRIVACY, DnsCategory.SPEED),
+            description = "Non-profit, no logging, no filtering.",
+            badge = "No logs"
+        ),
+        DnsProvider(
+            id = "yandex",
+            name = "Yandex DNS",
+            addresses = listOf("77.88.8.8", "77.88.8.1"),
+            hostname = "common.dot.dns.yandex.net",
+            dohUrl = "https://common.dot.dns.yandex.net/dns-query",
+            categories = setOf(DnsCategory.SPEED),
+            description = "Fast resolver with strong EU/Asia presence.",
+            badge = "Global"
         )
     )
 

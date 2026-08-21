@@ -9,6 +9,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -90,10 +91,43 @@ class NetworkScanner @Inject constructor(
         found.toMap()
     }
 
+    /** All ARP entries with a valid MAC — includes devices that block ICMP. */
+    private fun arpTable(): Map<String, String> {
+        return try {
+            java.io.File("/proc/net/arp").readLines()
+                .drop(1) // header
+                .mapNotNull { line ->
+                    val parts = line.trim().split(Regex("\\s+"))
+                    if (parts.size < 6) return@mapNotNull null
+                    val ip = parts[0]
+                    val mac = OuiDatabase.normalize(parts[3]) ?: return@mapNotNull null
+                    // skip incomplete entries (0.0.0.0 or flags 0x0 pending)
+                    if (ip == "0.0.0.0") return@mapNotNull null
+                    ip to mac
+                }
+                .toMap()
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
     fun scanSubnetDelta(gateway: String): Flow<NetworkDevice> = channelFlow {
         val subnet = gateway.substringBeforeLast(".", missingDelimiterValue = "")
         if (subnet.isEmpty() || !gateway.contains(".")) return@channelFlow
-        // Only /24 scanning - for other masks we'd need netmask detection via LinkProperties, omitted for safety
+
+        // Prime the ARP cache: a cheap TCP touch to common ports makes kernel record
+        // neighbors even when they drop ICMP.
+        coroutineScope {
+            listOf(gateway, "$subnet.1", "$subnet.254").forEach { seed ->
+                launch(Dispatchers.IO) {
+                    runCatching { InetAddress.getByName(seed).isReachable(120) }
+                    measurePortLatency(seed, 80, timeoutMs = 150)
+                }
+            }
+        }
+
+        val arpNow = arpTable()
+
         coroutineScope {
             val jobs = (1..254).map { hostIdx ->
                 async(Dispatchers.IO) {
@@ -103,6 +137,23 @@ class NetworkScanner @Inject constructor(
                 }
             }
             jobs.awaitAll()
+        }
+
+        // Second pass: devices present in ARP but missed by ping sweep
+        arpNow.forEach { (ip, mac) ->
+            if (!ip.startsWith("$subnet.")) return@forEach
+            trySend(
+                NetworkDevice(
+                    ip = ip,
+                    mac = mac,
+                    hostname = runCatching { InetAddress.getByName(ip).canonicalHostName }.getOrNull()?.takeIf { it != ip } ?: "Unknown",
+                    vendor = OuiDatabase.vendor(mac),
+                    typeLabel = "ARP only",
+                    latencyMs = null,
+                    lastSeenEpochMs = System.currentTimeMillis(),
+                    isGateway = ip == gateway
+                )
+            )
         }
     }
 

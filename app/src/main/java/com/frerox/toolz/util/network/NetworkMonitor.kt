@@ -30,6 +30,9 @@ class NetworkMonitor @Inject constructor(
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
+    /** Last known-good SSID — survives masked reads so the UI never flickers to Unknown. */
+    @Volatile private var lastKnownSsid: String? = null
+
     fun observeWifiInfo(): Flow<WifiInfoState> = callbackFlow {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -71,9 +74,16 @@ class NetworkMonitor @Inject constructor(
         val channel = frequencyToChannel(frequency)
         val signalLevel = resolveSignalLevel(wifiInfo)
 
-        var ssid = wifiInfo?.ssid?.removeSurrounding("\"") ?: "Unknown"
-        val isUnknownSsid = ssid == "<unknown ssid>" || ssid == "0x" || ssid.isBlank()
-        if (isUnknownSsid) ssid = "Unknown"
+        var ssid = wifiInfo?.ssid?.removeSurrounding("\"") ?: ""
+        val isMasked = ssid == "<unknown ssid>" || ssid == "0x" || ssid.isBlank()
+        if (isMasked) {
+            // Fallback chain: legacy connectionInfo often still resolves with location granted
+            ssid = runCatching { wifiManager.connectionInfo?.ssid?.removeSurrounding("\"") }.getOrNull().orEmpty()
+            if (ssid == "<unknown ssid>" || ssid.isBlank()) {
+                ssid = lastKnownSsid ?: "Unknown"
+            }
+        }
+        if (ssid != "Unknown" && ssid.isNotBlank()) lastKnownSsid = ssid
 
         val ipString = formatIpAddress(wifiInfo?.ipAddress ?: 0).takeIf { it != "0.0.0.0" } ?: "0.0.0.0"
         val bssid = wifiInfo?.bssid?.takeIf { it != "02:00:00:00:00:00" && it.isNotBlank() } ?: "Unavailable"

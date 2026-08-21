@@ -28,6 +28,10 @@ import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
@@ -165,17 +169,37 @@ class PrivilegedNetworkManager @Inject constructor(
         val dump = runCommand("dumpsys telephony.registry").combinedOutput
         if (dump.isBlank()) return@withContext CellularAuditInfo()
         val tech = when {
-            dump.contains("nrState=CONNECTED", ignoreCase = true) -> "5G"
+            dump.contains("nrState=CONNECTED", ignoreCase = true) -> "5G NR"
+            dump.contains("networkType=NR", ignoreCase = true) -> "5G NR"
             dump.contains("networkType=LTE", ignoreCase = true) -> "LTE"
             dump.contains("networkType=HSPAP", ignoreCase = true) -> "HSPA+"
+            dump.contains("networkType=UMTS", ignoreCase = true) -> "3G"
             else -> "Cellular"
+        }
+        fun intOf(pattern: String): Int? =
+            Regex(pattern, RegexOption.IGNORE_CASE).find(dump)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+        val rsrp = intOf("""\brsrp=(-?\d+)""")
+        val rsrq = intOf("""\brsrq=(-?\d+)""")
+        val rssi = intOf("""\brssi=(-?\d+)""")
+        val snrDb = intOf("""\brssnr=(-?\d+)""")
+
+        // Clean human summary instead of the raw dumpsys blob
+        val signalSummary = when {
+            rsrp != null -> "$rsrp dBm"
+            rssi != null -> "$rssi dBm"
+            else -> "Unknown"
         }
         CellularAuditInfo(
             tech = tech,
-            cellId = Regex("mCid=(\\d+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
-            tac = Regex("mTac=(\\d+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
-            snr = Regex("ssRsrq=(-?\\d+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
-            signalStrength = Regex("mSignalStrength=(.+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
+            cellId = Regex("(?:mCid|mPhysicalCellId|Ci)=(\\d+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
+            tac = Regex("(?:mTac|mAreaTac)=(\\d+)").find(dump)?.groupValues?.getOrNull(1) ?: "Unknown",
+            snr = snrDb?.toString() ?: "Unknown",
+            signalStrength = signalSummary,
+            rsrpDbm = rsrp,
+            rsrqDb = rsrq,
+            rssiDbm = rssi,
+            snrDb = snrDb,
             mobileDataEnabled = readMobileDataEnabled(),
             airplaneModeEnabled = runCommand("settings get global airplane_mode_on").lineOrBlank() == "1",
             preferredNetworkMode = runCommand("settings get global preferred_network_mode").lineOrBlank().ifBlank { "Unknown" },
@@ -242,28 +266,36 @@ class PrivilegedNetworkManager @Inject constructor(
     }
 
     suspend fun runTraceRoute(target: String): List<TraceHop> = withContext(Dispatchers.IO) {
-        val output = listOf(
-            "traceroute -n -m 20 -w 2 $target",
-            "toybox traceroute -n -m 20 -w 2 $target",
-            "busybox traceroute -n -m 20 -w 2 $target"
-        ).firstNotNullOfOrNull { command ->
-            runCommand(command).combinedOutput.takeIf { it.lineSequence().any { line -> Regex("^\\s*\\d+\\s+").containsMatchIn(line) } }
-        }.orEmpty()
-        val parsed = parseTraceOutput(output)
-        parsed.ifEmpty {
-            // P4: fire TTL probes concurrently (was serial → up to ~24 s); then trim
-            // everything past the first hop that already reached the target.
-            kotlinx.coroutines.coroutineScope {
-                val limited = Dispatchers.IO.limitedParallelism(6)
-                (1..15).map { ttl ->
-                    async(limited) {
-                        val ping = runCommand("ping -c 1 -W 2 -t $ttl $target").combinedOutput
-                        parsePingTtlHop(ttl, ping)
-                    }
-                }.awaitAll()
-            }.filterNotNull().let { hops ->
-                val reachedAt = hops.firstOrNull { it.ip == target }?.hop ?: Int.MAX_VALUE
-                hops.filter { it.hop <= reachedAt }.sortedBy { it.hop }
+        traceRouteStreaming(target).toList()
+    }
+
+    /**
+     * Streaming ping-TTL traceroute: emits each hop as its probe returns so the UI
+     * fills in live. Uses only `ping -t` (toybox/busybox compatible — no traceroute
+     * binary needed, which most Android ROMs don't ship).
+     */
+    fun traceRouteStreaming(target: String, maxHops: Int = 15): Flow<TraceHop> = flow {
+        kotlinx.coroutines.coroutineScope {
+            val limited = Dispatchers.IO.limitedParallelism(4)
+            val channels = mutableListOf<kotlinx.coroutines.channels.Channel<TraceHop?>>()
+            repeat(maxHops) { idx ->
+                val ttl = idx + 1
+                val ch = kotlinx.coroutines.channels.Channel<TraceHop?>(1)
+                channels += ch
+                launch(limited) {
+                    val out = runCatching {
+                        runCommand("ping -c 1 -W 2 -t $ttl $target").combinedOutput
+                    }.getOrDefault("")
+                    ch.send(parsePingTtlHop(ttl, out))
+                    ch.close()
+                }
+            }
+            var reached = false
+            for (ch in channels) {
+                if (reached) break
+                val hop = ch.receiveCatching().getOrNull() ?: continue
+                emit(hop)
+                if (hop.ip == target) reached = true
             }
         }
     }

@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -404,16 +405,25 @@ class NetworkViewModel @Inject constructor(
         }
     }
 
+    private var traceJob: Job? = null
     fun runTraceRoute(target: String = "1.1.1.1") {
         val safeTarget = target.trim().takeIf { Regex("^[0-9A-Za-z._-]+$").matches(it) } ?: "1.1.1.1"
-        viewModelScope.launch {
+        traceJob?.cancel()
+        traceJob = viewModelScope.launch {
             if (!ensurePrivilegedAccess("Shizuku access is required to run traceroute.")) {
                 return@launch
             }
-            val hops = privilegedNetworkManager.runTraceRoute(safeTarget)
-            if (hops.isNotEmpty()) {
-                updateState { copy(traceHops = hops) }
+            updateState { copy(traceHops = emptyList()) }
+            var count = 0
+            privilegedNetworkManager.traceRouteStreaming(safeTarget).collect { hop ->
+                updateState { copy(traceHops = traceHops + hop) }
+                count++
+                if (hop.ip == safeTarget) {
+                    appendLog("TRACE · reached $safeTarget in $count hops")
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                }
             }
+            if (count == 0) emitEvent("No hops responded — check Shizuku and target.")
         }
     }
 

@@ -556,6 +556,7 @@ internal fun AnalyzerTab(
     )
     
     var ssidFilter by remember { mutableStateOf("ALL") }
+    var bandFilter by remember { mutableStateOf("ALL") }
 
     LazyColumn(
         modifier = Modifier
@@ -664,16 +665,37 @@ internal fun AnalyzerTab(
                         FilterChip(
                             selected = state.showHiddenNetworks,
                             onClick = { onToggleHidden(!state.showHiddenNetworks) },
-                            label = { Text("Show hidden") },
+                            label = { Text("Hidden") },
                             shape = RoundedCornerShape(50)
                         )
+                    }
+
+                    // Band filter
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("ALL" to "All bands", "2.4" to "2.4 GHz", "5" to "5 GHz", "6" to "6 GHz").forEach { (key, label) ->
+                            FilterChip(
+                                selected = bandFilter == key,
+                                onClick = { bandFilter = key },
+                                label = { Text(label) },
+                                shape = RoundedCornerShape(50)
+                            )
+                        }
+                    }
+
+                    // Quick stats row
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        val openCount = state.scanResults.count { it.security == "Open" }
+                        StatTile("Networks", "${state.scanResults.size}", modifier = Modifier.weight(1f))
+                        StatTile("Open", "$openCount", tint = if (openCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                        StatTile("Hidden", "${state.scanResults.count { it.isHidden }}", modifier = Modifier.weight(1f))
                     }
                 }
             }
         }
 
-        val filteredResults = state.scanResults.filter { 
-            ssidFilter == "ALL" || it.ssid == ssidFilter
+        val filteredResults = state.scanResults.filter {
+            (ssidFilter == "ALL" || it.ssid == ssidFilter) &&
+            (bandFilter == "ALL" || it.band.startsWith(bandFilter))
         }
 
         if (filteredResults.isEmpty() && !state.isScanning) {
@@ -975,27 +997,26 @@ internal fun ProfilesTab(
         }
 
         item {
-            Text(stringResource(R.string.st_WifiTweaksScreen_y5z6), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                state.profiles.forEach { profile ->
-                    ProfileCard(
-                        profile = profile,
-                        active = profile.tweakIds.all { state.tweakResults[it]?.isApplied == true },
-                        onApply = { onApplyProfile(profile) }
-                    )
-                }
-            }
+            SectionLabel("READY-TO-USE PROFILES")
+            Spacer(Modifier.height(4.dp))
+        }
+        items(state.profiles, key = { "profile_${it.id}" }) { profile ->
+            ProfileCard(
+                profile = profile,
+                active = profile.tweakIds.all { state.tweakResults[it]?.isApplied == true },
+                appliedCount = profile.tweakIds.count { state.tweakResults[it]?.isApplied == true },
+                totalCount = profile.tweakIds.size,
+                onApply = { onApplyProfile(profile) }
+            )
+        }
+        item {
+            SectionLabel("INDIVIDUAL TWEAKS")
+            Spacer(Modifier.height(4.dp))
         }
 
         groupedTweaks.forEach { (category, tweaks) ->
             item {
-                Text(
-                    text = categoryTitle(category),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-                )
+                SectionLabel(categoryTitle(category).uppercase())
             }
             items(tweaks, key = { it.id }) { tweak ->
                 TweakCard(
@@ -1080,8 +1101,8 @@ internal fun DnsEngineTab(
                     value = customHost,
                     onValueChange = { customHost = it },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. 1dot1dot1dot1.cloudflare-dns.com") },
-                    supportingText = { Text("Private DNS hostname for DoT") },
+                    placeholder = { Text("your-id.dns.nextdns.io") },
+                    supportingText = { Text("NextDNS users: paste your assigned hostname from nextdns.io → Setup") },
                     shape = RoundedCornerShape(16.dp),
                     trailingIcon = {
                         IconButton(onClick = { onApplyCustom(customHost) }, enabled = customHost.isNotBlank()) {
@@ -1095,48 +1116,47 @@ internal fun DnsEngineTab(
         item {
             NetCard(
                 title = stringResource(R.string.st_WifiTweaksScreen_e1f2),
-                subtitle = "Private DNS presets",
+                subtitle = "One tap to switch resolver",
                 icon = Icons.Rounded.Public,
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("ALL" to "All", "SEC" to "Secure", "SPD" to "Fast").forEach { (key, label) ->
-                            FilterChip(
-                                selected = dnsFilter == key,
-                                onClick = { dnsFilter = key },
-                                label = { Text(label) },
-                                shape = RoundedCornerShape(50)
-                            )
-                        }
-                    }
+                    TextButton(
+                        onClick = onRestoreAutomatic,
+                        enabled = state.shizukuStatus.isServiceReady
+                    ) { Text("Auto") }
                 }
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Presets", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("ALL", "SEC", "SPD").forEach { filter ->
-                                FilterChip(
-                                    selected = dnsFilter == filter,
-                                    onClick = { dnsFilter = filter },
-                                    label = { Text(filter) },
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                            }
+                if (!state.shizukuStatus.isServiceReady) {
+                    Text(
+                        "Enable Shizuku to apply presets system-wide.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                val groups = listOf(
+                    "Secure" to listOf("private_dns_quad9", "private_dns_adguard"),
+                    "Fast" to listOf("private_dns_cloudflare", "private_dns_google"),
+                    "Family" to emptyList<String>()
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // All known presets, ordered: Secure → Fast → Family (extras fall into Fast)
+                    val ordered = dnsTweaks.sortedBy { tw ->
+                        when {
+                            tw.id.contains("quad9") || tw.id.contains("adguard") -> 0
+                            tw.id.contains("cloudflare") || tw.id.contains("google") -> 1
+                            else -> 2
                         }
                     }
-                    
-                    val filteredTweaks = when(dnsFilter) {
-                        "SEC" -> dnsTweaks.filter { it.id.contains("quad9") || it.id.contains("adguard") }
-                        "SPD" -> dnsTweaks.filter { it.id.contains("cloudflare") || it.id.contains("google") }
-                        else -> dnsTweaks
-                    }
-
-                    filteredTweaks.forEach { tweak ->
+                    ordered.forEachIndexed { idx, tweak ->
+                        val prevGroup = ordered.getOrNull(idx - 1)?.let { groupOf(it.id) }
+                        val thisGroup = groupOf(tweak.id)
+                        if (idx > 0 && prevGroup != thisGroup) {
+                            Text(
+                                thisGroup.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = NetTokens.SpacingS)
+                            )
+                        }
                         PresetDnsRow(
                             tweak = tweak,
                             active = state.tweakResults[tweak.id]?.isApplied == true,
@@ -1144,19 +1164,16 @@ internal fun DnsEngineTab(
                             onApply = { onApplyTweak(tweak) }
                         )
                     }
-                    OutlinedButton(
-                        onClick = onRestoreAutomatic,
-                        shape = RoundedCornerShape(18.dp),
-                        enabled = state.shizukuStatus.isServiceReady,
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Restore automatic")
-                    }
                 }
             }
         }
     }
+}
+
+private fun groupOf(id: String): String = when {
+    id.contains("quad9") || id.contains("adguard") -> "secure"
+    id.contains("cloudflare") || id.contains("google") -> "fast"
+    else -> "more"
 }
 
 @Composable
@@ -1547,85 +1564,61 @@ private fun ShizukuCockpit(
         }
     }
 }
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileCard(
     profile: WifiOptimizationProfile,
     active: Boolean,
+    appliedCount: Int,
+    totalCount: Int,
     onApply: () -> Unit
 ) {
-    var showDetails by remember { mutableStateOf(false) }
-
     Surface(
         shape = NetTokens.CardShape,
         color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onApply,
-                onLongClick = { showDetails = true }
-            )
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(NetTokens.SpacingL), verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)) {
                 Surface(
                     shape = NetTokens.InnerShape,
-                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f)
-                            else MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(44.dp)
+                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             profile.icon,
                             contentDescription = null,
                             tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(profile.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(profile.accentLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(profile.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(profile.accentLabel, style = MaterialTheme.typography.labelMedium, color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (active) NetPill("Active", emphasized = true)
+                if (active) NetPill("ACTIVE", emphasized = true)
             }
 
-            Text(
-                profile.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Text(profile.description, style = MaterialTheme.typography.bodySmall, color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onApply,
-                    shape = RoundedCornerShape(50),
-                    colors = if (active) ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.secondaryContainer
-                    ) else ButtonDefaults.buttonColors()
-                ) {
-                    Text(if (active) "Re-apply" else "Apply")
-                }
-                FilledTonalButton(onClick = { showDetails = true }, shape = RoundedCornerShape(50)) {
-                    Text("Details")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "$appliedCount of $totalCount steps applied",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onApply, shape = RoundedCornerShape(50)) {
+                        Text(if (active) "Re-apply" else "Apply profile")
+                    }
                 }
             }
         }
-    }
-
-    if (showDetails) {
-        AlertDialog(
-            onDismissRequest = { showDetails = false },
-            title = { Text(profile.title, fontWeight = FontWeight.Bold) },
-            text = { Text(profile.description) },
-            confirmButton = {
-                TextButton(onClick = { showDetails = false }) { Text("Close") }
-            },
-            shape = NetTokens.CardShape
-        )
     }
 }
 
@@ -1770,47 +1763,40 @@ private fun PresetDnsRow(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onApply)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(horizontal = NetTokens.SpacingM, vertical = NetTokens.SpacingM),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)
         ) {
+            // radio indicator
+            Surface(shape = RoundedCornerShape(50), color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(18.dp)) {
+                if (active) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.size(8.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(50)))
+                    }
+                }
+            }
             Icon(
                 imageVector = tweak.icon,
                 contentDescription = null,
-                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
+                tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = tweak.title.replace("Private DNS: ", ""),
                     style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Black
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = tweak.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (active) {
-                Icon(
-                    imageVector = Icons.Rounded.CheckCircle,
-                    contentDescription = "Active",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            } else {
-                Text(
-                    text = "USE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+            if (active) Icon(Icons.Rounded.CheckCircle, contentDescription = "Active", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -2303,10 +2289,11 @@ internal fun SpeedHistoryCard(
                     modifier = Modifier.fillMaxWidth().height(72.dp)
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    MiniMetric("Now", "${history.first().downloadMbps.roundToInt()} Mbps")
-                    MiniMetric("Best", "${history.maxOf { it.downloadMbps }.roundToInt()} Mbps")
+                    MiniMetric("Latest", "${history.first().downloadMbps.roundToInt()}")
+                    MiniMetric("Best", "${history.maxOf { it.downloadMbps }.roundToInt()}")
+                    MiniMetric("Average", "${history.map { it.downloadMbps }.average().roundToInt()}")
                     val grades = history.mapNotNull { it.bloatGrade }
-                    if (grades.isNotEmpty()) MiniMetric("Bloat mode", grades.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: "-")
+                    if (grades.isNotEmpty()) MiniMetric("Bloat", grades.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: "-")
                 }
             }
         }

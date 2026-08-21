@@ -332,14 +332,21 @@ internal fun MobileDataCard(
                 NetPill(if (isEnabled) "Active" else "Off", emphasized = isEnabled)
                 if (audit.isAvailable) NetPill("Available") else NetPill("Unavailable")
             }
-            if (audit.signalStrength != "Unknown" && audit.signalStrength.isNotBlank()) {
-                Text("Signal: ${audit.signalStrength}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (audit.cellId != "Unknown" && audit.cellId.isNotBlank()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Cell ${audit.cellId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (audit.tac != "Unknown") Text("TAC ${audit.tac}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Clean parsed radio metrics — no raw dumpsys blobs
+            if (audit.rsrpDbm != null || audit.rssiDbm != null || audit.snrDb != null || audit.rsrqDb != null) {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        audit.rsrpDbm?.let { DetailRowSimple("RSRP", "$it dBm") }
+                        audit.rsrqDb?.let { DetailRowSimple("RSRQ", "$it dB") }
+                        audit.rssiDbm?.let { DetailRowSimple("RSSI", "$it dBm") }
+                        audit.snrDb?.let { DetailRowSimple("SNR", "$it dB") }
+                        if (audit.cellId != "Unknown" && audit.cellId.isNotBlank()) {
+                            DetailRowSimple("Cell", audit.cellId)
+                        }
+                    }
                 }
+            } else if (audit.signalStrength != "Unknown" && audit.signalStrength.isNotBlank()) {
+                Text("Signal: ${audit.signalStrength}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!privilegedReady) {
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
@@ -415,18 +422,19 @@ internal fun LatencyStreamCard(state: NetworkPowerUiState) {
 @Composable
 internal fun CellularAuditCard(state: NetworkPowerUiState) {
     val a = state.cellularAudit
-    NetCard(title = "Cellular", icon = Icons.Rounded.CellTower, subtitle = "Radio details") {
+    NetCard(title = "Cellular", icon = Icons.Rounded.CellTower, subtitle = a.tech.takeIf { it != "Unknown" } ?: "Radio details") {
         if (!a.isAvailable) {
-            Text("No cellular data available", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No cellular radio reported", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailRowSimple("Tech", a.tech)
-                DetailRowSimple("Cell", a.cellId)
-                DetailRowSimple("TAC", a.tac)
-                DetailRowSimple("Signal", a.signalStrength)
+                if (a.rsrpDbm != null) DetailRowSimple("RSRP", "${a.rsrpDbm} dBm")
+                if (a.rsrqDb != null) DetailRowSimple("RSRQ", "${a.rsrqDb} dB")
+                if (a.rssiDbm != null) DetailRowSimple("RSSI", "${a.rssiDbm} dBm")
+                if (a.snrDb != null) DetailRowSimple("SNR", "${a.snrDb} dB")
+                if (a.cellId != "Unknown") DetailRowSimple("Cell ID", a.cellId)
+                if (a.tac != "Unknown") DetailRowSimple("TAC", a.tac)
                 a.mobileDataEnabled?.let { DetailRowSimple("Mobile data", if (it) "Enabled" else "Disabled") }
-                a.airplaneModeEnabled?.let { DetailRowSimple("Airplane", if (it) "On" else "Off") }
-                if (a.preferredNetworkMode != "Unknown") DetailRowSimple("Pref mode", a.preferredNetworkMode)
+                a.airplaneModeEnabled?.let { DetailRowSimple("Airplane mode", if (it) "On" else "Off") }
             }
         }
     }

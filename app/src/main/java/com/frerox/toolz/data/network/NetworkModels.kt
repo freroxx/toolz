@@ -235,6 +235,11 @@ data class CellularAuditInfo(
     val tac: String = "Unknown",
     val snr: String = "Unknown",
     val signalStrength: String = "Unknown",
+    /** Clean parsed metrics — null when the radio didn't report them. */
+    val rsrpDbm: Int? = null,
+    val rsrqDb: Int? = null,
+    val rssiDbm: Int? = null,
+    val snrDb: Int? = null,
     val mobileDataEnabled: Boolean? = null,
     val airplaneModeEnabled: Boolean? = null,
     val preferredNetworkMode: String = "Unknown",
