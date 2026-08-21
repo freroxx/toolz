@@ -99,12 +99,6 @@ internal data class ShizukuPrompt(
     val supportingText: String
 ) : Parcelable
 
-internal fun healthColor(score: Int): Color = when {
-    score >= 80 -> Color(0xFF2E9D66)
-    score >= 55 -> Color(0xFFE0A12E)
-    else -> Color(0xFFCF5252)
-}
-
 internal fun categoryTitle(category: DnsCategory): String = when (category) {
     DnsCategory.PRIVACY -> "Privacy"
     DnsCategory.SPEED -> "Speed"

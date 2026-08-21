@@ -67,6 +67,13 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
+import com.frerox.toolz.ui.screens.network.suite.NetCard
+import com.frerox.toolz.ui.screens.network.suite.healthTint
+import com.frerox.toolz.ui.screens.network.suite.NetPill
+import com.frerox.toolz.ui.screens.network.suite.NetTokens
+import com.frerox.toolz.ui.screens.network.suite.ScoreArc
+import com.frerox.toolz.ui.screens.network.suite.SectionLabel
+import com.frerox.toolz.ui.screens.network.suite.StatTile
 import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
 import com.frerox.toolz.ui.screens.network.suite.MiniMetric
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -159,9 +166,9 @@ internal fun DiagnosticLogSheet(
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = when (log.level) {
-                                    LogLevel.ERROR -> Color(0xFFC84B4B)
-                                    LogLevel.WARNING -> Color(0xFFD97D2C)
-                                    LogLevel.SUCCESS -> Color(0xFF2E9D66)
+                                    LogLevel.ERROR -> MaterialTheme.colorScheme.error
+                                    LogLevel.WARNING -> MaterialTheme.colorScheme.tertiary
+                                    LogLevel.SUCCESS -> MaterialTheme.colorScheme.primary
                                     else -> MaterialTheme.colorScheme.primary
                                 }
                             )
@@ -319,502 +326,193 @@ internal fun OverviewTab(
     extraCards: (@Composable () -> Unit)? = null
 ) {
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize(),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
     ) {
+        item { SectionLabel(stringResource(R.string.st_WifiTweaksScreen_7c4d).uppercase()) }
+
+        // ── HERO ────────────────────────────────────────────────────────────
         item {
-            Text(
-                text = stringResource(R.string.st_WifiTweaksScreen_7c4d),
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-        }
-
-        item {
-            OverviewHeroCard(
-                state = state,
-                onScan = onScan,
-                onOpenWifiSettings = onOpenWifiSettings
-            )
-        }
-        
-        item {
-            SmartFixHeaderCard(
-                state = state,
-                onFixConnection = onFixConnection
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(modifier = Modifier.weight(1f)) {
-                    PerformanceTrendCard(state = state)
-                }
-                Box(modifier = Modifier.weight(1f)) {
-                    StabilityMonitorCard(state = state)
-                }
-            }
-        }
-
-        item {
-            QuickActionFloatingCard(onFix = onFixConnection, onReset = onReset)
-        }
-
-        item {
-            InsightStrip(state = state)
-        }
-
-        item {
-            LiveFeedbackCard(
-                state = state,
-                onToggleAudio = onToggleAudio
-            )
-        }
-
-        if (extraCards != null) {
-            item { Column(verticalArrangement = Arrangement.spacedBy(20.dp)) { extraCards() } }
-        }
-    }
-}
-
-@Composable
-private fun PerformanceTrendCard(state: WifiTweaksUiState) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.st_WifiTweaksScreen_5f6e), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                state.stability.publicPingMs?.let {
-                    Text("${it}ms", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                }
-            }
-            
-            Box(modifier = Modifier.fillMaxWidth().height(60.dp)) {
-                PingHistoryChart(
-                    history = state.pingHistory,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PingHistoryChart(
-    history: List<Long>,
-    modifier: Modifier = Modifier
-) {
-    val lineColor = MaterialTheme.colorScheme.primary
-    val errorColor = MaterialTheme.colorScheme.error
-    val points = remember(history) { history.takeLast(50) }
-    val valid = remember(points) { points.filter { it > 0 } }
-
-    Canvas(modifier = modifier) {
-        if (valid.size < 2) {
-            // dashed placeholder + empty label handled by caller; draw baseline
-            drawLine(
-                color = lineColor.copy(alpha = 0.12f),
-                start = Offset(0f, size.height / 2),
-                end = Offset(size.width, size.height / 2),
-                strokeWidth = 1.2.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
-            )
-            // faint dots for packet loss
-            points.forEachIndexed { i, v ->
-                if (v <= 0) {
-                    val x = (i.toFloat() / 49f) * size.width
-                    drawCircle(color = errorColor.copy(alpha = 0.35f), radius = 2.2.dp.toPx(), center = Offset(x, size.height * 0.72f))
-                }
-            }
-            return@Canvas
-        }
-        val width = size.width
-        val height = size.height
-        val minPing = valid.minOrNull()!!.toFloat()
-        val maxPing = valid.maxOrNull()!!.coerceAtLeast((minPing + 30).toLong()).toFloat()
-        val range = (maxPing - minPing).coerceAtLeast(1f)
-        val path = Path()
-        valid.forEachIndexed { idx, ping ->
-            val x = (idx.toFloat() / (valid.lastIndex.coerceAtLeast(1).toFloat())) * width
-            val y = height - ((ping.toFloat() - minPing) / range).coerceIn(0f, 1f) * height * 0.78f - (height * 0.11f)
-            if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        // area fill first
-        val fill = Path().apply { addPath(path); lineTo(width, height); lineTo(0f, height); close() }
-        drawPath(fill, brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.18f), Color.Transparent)))
-        drawPath(path, color = lineColor, style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-    }
-}
-
-@Composable
-private fun QuickActionFloatingCard(onFix: () -> Unit, onReset: () -> Unit) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilledTonalButton(
-                onClick = onFix,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 12.dp)
-            ) {
-                Icon(Icons.Rounded.FlashOn, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.st_WifiTweaksScreen_2b8a))
-            }
-            OutlinedButton(
-                onClick = onReset,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                contentPadding = PaddingValues(vertical = 12.dp)
-            ) {
-                Icon(Icons.Rounded.SettingsBackupRestore, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.st_WifiTweaksScreen_4d9c))
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiveFeedbackCard(
-    state: WifiTweaksUiState,
-    onToggleAudio: (Boolean) -> Unit
-) {
-    ElevatedCard(
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.st_WifiTweaksScreen_6a1b), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Text(
-                        stringResource(R.string.st_WifiTweaksScreen_1b2c),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.audioFeedbackEnabled,
-                    onCheckedChange = onToggleAudio,
-                    thumbContent = {
-                        Icon(
-                            if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
-                            null,
-                            Modifier.size(12.dp)
-                        )
-                    }
-                )
-            }
-            
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-            ) {
-                SignalHistoryChart(
-                    history = state.rssiHistory,
-                    modifier = Modifier.fillMaxSize().padding(16.dp)
-                )
-                
-                // Visual peak indicator
-                val peakRssi = state.rssiHistory.maxByOrNull { it.rssi }?.rssi ?: -100
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp)
-                ) {
-                    StatusPill("Peak", "$peakRssi dBm")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OverviewHeroCard(
-    state: WifiTweaksUiState,
-    onScan: () -> Unit,
-    onOpenWifiSettings: () -> Unit
-) {
-    val score = remember(state) { state.advice.healthScore.takeIf { it != 0 } ?: run {
-        val rssiBonus = ((state.currentRssi + 100) / 70f * 40f).coerceIn(0f, 40f)
-        val stabilityBonus = (1.0 - state.stability.packetLossRate) * 40f
-        val jitterBonus = (1.0 - (state.stability.jitterMs / 50.0).coerceIn(0.0, 1.0)) * 20f
-        (rssiBonus + stabilityBonus + jitterBonus).roundToInt().coerceIn(0, 100)
-    } }
-    
-    val color = when {
-        score >= 75 -> Color(0xFF2E9D66)
-        score >= 55 -> Color(0xFFD97D2C)
-        else -> Color(0xFFC84B4B)
-    }
-
-    ElevatedCard(
-        shape = RoundedCornerShape(36.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = Color.Transparent)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f),
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
-                        ),
-                        start = Offset.Zero,
-                        end = Offset(1200f, 700f)
-                    )
-                )
-                .padding(24.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+            NetCard(contentPadding = NetTokens.SpacingXL) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = state.currentSsid,
+                            state.currentSsid,
                             style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Black
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = state.advice.summary,
+                            when {
+                                !state.networkConfig.isConnected -> "Not connected"
+                                else -> "${state.networkConfig.wifiStandard} · ${state.networkConfig.band}"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Spacer(Modifier.width(12.dp))
-                    SignalQualityGauge(
-                        score = score,
-                        rssi = state.currentRssi
+                    Spacer(Modifier.width(NetTokens.SpacingM))
+                    ScoreArc(score = state.advice.healthScore)
+                }
+
+                if (state.advice.summary.isNotBlank()) {
+                    Text(state.advice.summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
+                    StatTile("Signal", "${state.currentRssi}", subvalue = "dBm", modifier = Modifier.weight(1f))
+                    StatTile("Link", "${state.networkConfig.linkSpeed}", subvalue = "Mbps", modifier = Modifier.weight(1f))
+                    StatTile(
+                        "Channel",
+                        state.networkConfig.channel.takeIf { it != 0 }?.toString() ?: "—",
+                        subvalue = state.networkConfig.band.takeIf { it != "-" && it != "Unknown" },
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    InsightChip(Icons.Rounded.Wifi, "${state.currentRssi} dBm")
-                    InsightChip(Icons.Rounded.Speed, "${state.networkConfig.linkSpeed} Mbps")
-                    InsightChip(Icons.Rounded.Route, "Ch ${state.networkConfig.channel.takeIf { it != 0 } ?: "-"}")
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
                     Button(
                         onClick = onScan,
-                        shape = RoundedCornerShape(20.dp),
                         enabled = !state.isScanning,
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = NetTokens.SpacingXL, vertical = 12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         if (state.isScanning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Rounded.NetworkCheck, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Radar, contentDescription = null, modifier = Modifier.size(18.dp))
                         }
                         Spacer(Modifier.width(8.dp))
-                        Text(if (state.isScanning) "Scanning" else stringResource(R.string.st_WifiTweaksScreen_c3d4), style = MaterialTheme.typography.labelLarge)
+                        Text(if (state.isScanning) "Scanning…" else stringResource(R.string.st_WifiTweaksScreen_c3d4))
                     }
-                    OutlinedButton(
-                        onClick = onOpenWifiSettings, 
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+                    FilledTonalIconButton(
+                        onClick = onOpenWifiSettings,
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.st_WifiTweaksScreen_e5f6), style = MaterialTheme.typography.labelLarge)
+                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = stringResource(R.string.st_WifiTweaksScreen_e5f6))
                     }
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun SignalQualityGauge(score: Int, rssi: Int) {
-    val progress = (score / 100f).coerceIn(0f, 1f)
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress, 
-        animationSpec = tween(1500, easing = FastOutSlowInEasing),
-        label = "health_gauge"
-    )
-
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(140.dp)) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawArc(
-                color = Color.White.copy(alpha = 0.25f),
-                startAngle = 140f,
-                sweepAngle = 260f,
-                useCenter = false,
-                style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
-            )
-            drawArc(
-                brush = Brush.sweepGradient(
-                    listOf(Color(0xFFC84B4B), Color(0xFFD97D2C), Color(0xFF2E9D66), Color(0xFF2E9D66))
-                ),
-                startAngle = 140f,
-                sweepAngle = 260f * animatedProgress,
-                useCenter = false,
-                style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("$score", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
-            Text("$rssi dBm", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-private fun StabilityMonitorCard(state: WifiTweaksUiState) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(stringResource(R.string.st_WifiTweaksScreen_3c4d), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StabilityItem("Gateway", state.stability.gatewayPingMs?.toString() ?: "--", "ms")
-                StabilityItem("DNS", state.stability.dnsPingMs?.toString() ?: "--", "ms")
-                StabilityItem("Public", state.stability.publicPingMs?.toString() ?: "--", "ms")
-            }
-            
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 4.dp),
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
-            )
-            
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StabilityItem("Jitter", "%.1f".format(state.stability.jitterMs), "ms")
-                StabilityItem("Packet Loss", "%.1f".format(state.stability.packetLossRate * 100), "%")
+        // ── QUICK FIXES ─────────────────────────────────────────────────────
+        val hasAdvice = state.advice.recommendation.isNotBlank() &&
+            !state.advice.recommendation.startsWith("Scan nearby")
+        if (hasAdvice || state.stability.packetLossRate > 0.05 || state.stability.jitterMs > 15.0) {
+            item {
+                NetCard(
+                    title = stringResource(R.string.st_WifiTweaksScreen_2b8a),
+                    subtitle = state.advice.recommendation.ifBlank { "Latency or loss above healthy thresholds." },
+                    icon = Icons.Rounded.AutoFixHigh,
+                    trailing = null
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
+                        FilledTonalButton(
+                            onClick = onFixConnection,
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Run fixes")
+                        }
+                        OutlinedButton(
+                            onClick = onReset,
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("Reset all")
+                        }
+                    }
+                }
             }
         }
-    }
-}
 
-@Composable
-private fun StabilityItem(label: String, value: String, unit: String) {
-    Column {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(2.dp))
-            Text(unit, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(bottom = 2.dp))
+        // ── STABILITY ───────────────────────────────────────────────────────
+        item {
+            NetCard(title = "Stability", icon = Icons.Rounded.QueryStats, trailing = {
+                state.stability.publicPingMs?.let {
+                    NetPill("${it} ms public", emphasized = it < 80)
+                }
+            }) {
+                Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
+                    StatTile("Gateway", state.stability.gatewayPingMs?.toString() ?: "—", subvalue = "ms", modifier = Modifier.weight(1f))
+                    StatTile("DNS", state.stability.dnsPingMs?.toString() ?: "—", subvalue = "ms", modifier = Modifier.weight(1f))
+                    StatTile("Jitter", "%.0f".format(state.stability.jitterMs), subvalue = "ms", modifier = Modifier.weight(1f))
+                }
+                PingSparkline(history = state.pingHistory, modifier = Modifier.fillMaxWidth().height(56.dp))
+            }
         }
-    }
-}
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun InsightStrip(state: WifiTweaksUiState) {
-    ElevatedCard(
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.st_WifiTweaksScreen_5d6e), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-            Text(
-                text = state.advice.recommendation,
-                style = MaterialTheme.typography.bodyLarge
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        // ── LIVE SIGNAL ─────────────────────────────────────────────────────
+        item {
+            NetCard(
+                title = "Live signal",
+                icon = Icons.Rounded.Wifi,
+                trailing = {
+                    Switch(
+                        checked = state.audioFeedbackEnabled,
+                        onCheckedChange = onToggleAudio,
+                        thumbContent = {
+                            Icon(
+                                if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    )
+                }
             ) {
-                AssistChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text("Strongest: ${state.advice.strongestNetwork}") },
-                    leadingIcon = { Icon(Icons.Rounded.Wifi, contentDescription = null) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-                        disabledLeadingIconContentColor = MaterialTheme.colorScheme.primary
-                    )
-                )
-                AssistChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text("Open: ${state.advice.openNetworks}") },
-                    leadingIcon = { Icon(Icons.Rounded.Security, contentDescription = null) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-                        disabledLeadingIconContentColor = MaterialTheme.colorScheme.tertiary
-                    )
-                )
-                AssistChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text("Visible: ${state.advice.totalNetworks}") },
-                    leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-                        disabledLeadingIconContentColor = MaterialTheme.colorScheme.secondary
-                    )
-                )
-                
-                if (state.networkConfig.wifi6ECapable || state.networkConfig.wifi7Capable) {
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = { Text(state.networkConfig.wifiStandard) },
-                        leadingIcon = { Icon(Icons.Rounded.Bolt, contentDescription = null) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                            disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-                            disabledLeadingIconContentColor = MaterialTheme.colorScheme.primary
-                        )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .clip(NetTokens.InnerShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    SignalHistoryChart(history = state.rssiHistory, modifier = Modifier.fillMaxSize().padding(12.dp))
+                    NetPill(
+                        "peak ${state.rssiHistory.maxByOrNull { it.rssi }?.rssi ?: -100} dBm",
+                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
                     )
                 }
             }
         }
+
+        if (extraCards != null) {
+            item { Column(verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)) { extraCards() } }
+        }
+    }
+}
+
+/** Tiny single-color ping trend; dashes when data is insufficient. */
+@Composable
+private fun PingSparkline(history: List<Long>, modifier: Modifier = Modifier) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier.clip(NetTokens.InnerShape)) {
+        val valid = history.filter { it > 0 }.takeLast(40)
+        if (valid.size < 2) {
+            drawLine(
+                color = lineColor.copy(alpha = 0.25f),
+                start = Offset(0f, size.height / 2),
+                end = Offset(size.width, size.height / 2),
+                strokeWidth = 1.5.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
+            )
+            return@Canvas
+        }
+        val minV = valid.min().toFloat()
+        val maxV = valid.max().coerceAtLeast((minV + 20).toLong()).toFloat()
+        val range = (maxV - minV).coerceAtLeast(1f)
+        val path = Path()
+        valid.forEachIndexed { i, v ->
+            val x = i.toFloat() / (valid.lastIndex.coerceAtLeast(1)) * size.width
+            val y = size.height - (((v.toFloat() - minV) / range).coerceIn(0f, 1f)) * size.height * 0.86f - size.height * 0.07f
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color = lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
     }
 }
 
@@ -998,7 +696,7 @@ internal fun AnalyzerTab(
 private fun ChannelSpectrumCard(state: WifiTweaksUiState) {
     ElevatedCard(
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1066,8 +764,8 @@ private fun SecurityAuditCard(state: WifiTweaksUiState) {
         colors = CardDefaults.elevatedCardColors(containerColor = if ((score ?: 100) < 50) MaterialTheme.colorScheme.errorContainer.copy(alpha=0.7f) else MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
         Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(if ((score ?: 100) >= 70) Color(0xFF2E9D66).copy(alpha=0.15f) else Color(0xFFC84B4B).copy(alpha=0.15f)), contentAlignment = Alignment.Center) {
-                Icon(if ((score ?:100) >=70) Icons.Rounded.VerifiedUser else Icons.Rounded.Warning, null, tint = if ((score ?:100) >=70) Color(0xFF2E9D66) else Color(0xFFC84B4B))
+            Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(if ((score ?: 100) >= 70) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.error.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                Icon(if ((score ?:100) >=70) Icons.Rounded.VerifiedUser else Icons.Rounded.Warning, null, tint = if ((score ?:100) >=70) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text("Security Audit", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
@@ -1080,7 +778,7 @@ private fun SecurityAuditCard(state: WifiTweaksUiState) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (score != null) Text("$score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (score >=70) Color(0xFF2E9D66) else Color(0xFFC84B4B))
+            if (score != null) Text("$score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (score >=70) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -1422,45 +1120,43 @@ internal fun DnsEngineTab(
 
 @Composable
 private fun DnsBenchmarkRow(result: WifiDnsBenchmarkResult) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+    Surface(
+        shape = NetTokens.InnerShape,
+        color = if (result.isRecommended) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column {
-            Text(result.name, fontWeight = FontWeight.Bold)
-            Text(result.hostname, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.padding(horizontal = NetTokens.SpacingM, vertical = NetTokens.SpacingM),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)
+        ) {
             if (result.isRecommended) {
-                Icon(Icons.Rounded.Star, null, tint = Color(0xFFFFB700), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(
-                text = result.latencyMs?.let { "${it}ms" } ?: "Timeout",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Black,
-                color = when {
-                    result.latencyMs == null -> MaterialTheme.colorScheme.error
-                    result.latencyMs < 50 -> Color(0xFF2E9D66)
-                    result.latencyMs < 100 -> Color(0xFFD97D2C)
-                    else -> MaterialTheme.colorScheme.error
-                }
-            )
-            if (result.dotLatencyMs != null) {
-                Spacer(Modifier.width(6.dp))
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
+                Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary) {
                     Text(
-                        "DoT ${result.dotLatencyMs}ms",
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        "★ BEST",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(result.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                NetPill(if (result.dotLatencyMs != null) "DoT ✓" else "DoT —")
+            }
+            Text(
+                text = result.latencyMs?.let { "${it}ms" } ?: "Timeout",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = when {
+                    result.latencyMs == null -> MaterialTheme.colorScheme.error
+                    result.latencyMs < 50 -> healthTint(90)
+                    result.latencyMs < 100 -> healthTint(60)
+                    else -> healthTint(30)
+                }
+            )
         }
     }
 }
@@ -1492,53 +1188,78 @@ internal fun DiagnosticsTab(
         }
 
         item {
-            ExpressiveCard(
-                onClick = onRunSpeedTest,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                shape = RoundedCornerShape(32.dp)
-            ) {
-                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_i5j6),
+                subtitle = if (state.speedTest.isRunning) state.speedTest.phaseLabel else "Full test · download, upload & bufferbloat",
+                icon = Icons.Rounded.Speed,
+                trailing = {
+                    Button(
+                        onClick = onRunSpeedTest,
+                        enabled = !state.speedTest.isRunning,
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Column {
-                            Text(stringResource(R.string.st_WifiTweaksScreen_i5j6), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (state.speedTest.isRunning) state.speedTest.phaseLabel else "Last result: ${state.speedTest.downloadSpeedMbps.roundToInt()} Mbps",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
-                        
-                        ToolzExpressiveButton(
-                            onClick = onRunSpeedTest,
-                            enabled = !state.speedTest.isRunning,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            if (state.speedTest.isRunning) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Rounded.Speed, null, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(Modifier.width(8.dp))
+                        if (state.speedTest.isRunning) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
                             Text(stringResource(R.string.st_WifiTweaksScreen_g7h8))
                         }
                     }
-
-                    Box(contentAlignment = Alignment.Center) {
-                        LinearProgressIndicator(
-                            progress = { state.speedTest.progress },
-                            modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
+                ) {
+                    Column {
+                        Text(
+                            "${state.speedTest.downloadSpeedMbps.roundToInt()}",
+                            style = MaterialTheme.typography.displaySmall,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text("Mbps down", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (state.speedTest.uploadSpeedMbps > 0 || !state.speedTest.isRunning) {
+                        Column {
+                            Text(
+                                "${state.speedTest.uploadSpeedMbps.roundToInt()}",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text("up", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    val grade = state.speedTest.bloatGrade
+                    if (grade != null && !state.speedTest.isRunning) {
+                        Spacer(Modifier.weight(1f))
+                        StatTile(
+                            label = "bufferbloat",
+                            value = grade.letter,
+                            subvalue = "${state.speedTest.idleLatencyMs ?: "-"}→${state.speedTest.loadedLatencyMs ?: "-"} ms",
+                            tint = when (grade) {
+                                com.frerox.toolz.data.network.BloatGrade.A_PLUS,
+                                com.frerox.toolz.data.network.BloatGrade.A -> MaterialTheme.colorScheme.primary
+                                com.frerox.toolz.data.network.BloatGrade.B,
+                                com.frerox.toolz.data.network.BloatGrade.C -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.error
+                            }
                         )
                     }
+                }
+
+                LinearProgressIndicator(
+                    progress = { state.speedTest.progress },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+
+                if (!state.speedTest.isRunning && state.speedTest.error != null) {
+                    Text(
+                        state.speedTest.error ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
@@ -1566,14 +1287,7 @@ internal fun DiagnosticsTab(
                             }
                         }
                     )
-                    if (!state.speedTest.isRunning && state.speedTest.bloatGrade != null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            MiniMetric("Idle", "${state.speedTest.idleLatencyMs ?: "-"}ms")
-                            MiniMetric("Loaded", "${state.speedTest.loadedLatencyMs ?: "-"}ms")
-                            val g = state.speedTest.bloatGrade!!
-                            MiniMetric("Bloat", g.letter)
-                        }
-                    }
+
 
                     if (state.traceHops.isNotEmpty()) {
                         Surface(
@@ -1681,7 +1395,7 @@ internal fun TrafficTab(
                     ) {
                         Column {
                             Text("Download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${state.activeProcesses.sumOf { it.rxKbps }.roundToInt()} Kbps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color(0xFF2E9D66))
+                            Text("${state.activeProcesses.sumOf { it.rxKbps }.roundToInt()} Kbps", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("Upload", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1766,7 +1480,7 @@ private fun TrafficProcessCard(process: ProcessNetworkUsage) {
                     Text(
                         text = "${process.rxKbps.roundToInt()} ↓",
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF2E9D66),
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -1782,17 +1496,15 @@ private fun ShizukuCockpit(
 ) {
     val shizuku = state.shizukuStatus
     val container = when {
-        shizuku.isServiceReady -> Color(0xFFDBF3E6)
-        shizuku.isReachable -> MaterialTheme.colorScheme.secondaryContainer
+        shizuku.isServiceReady -> MaterialTheme.colorScheme.secondaryContainer
+        shizuku.isReachable || shizuku.isAuthorized -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.errorContainer
     }
-    
     val contentColor = when {
-        shizuku.isServiceReady -> Color(0xFF1E5D3F)
-        shizuku.isReachable -> MaterialTheme.colorScheme.onSecondaryContainer
+        shizuku.isServiceReady -> MaterialTheme.colorScheme.onSecondaryContainer
+        shizuku.isReachable || shizuku.isAuthorized -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onErrorContainer
     }
-
     ElevatedCard(
         shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = container.copy(alpha = 0.95f))
@@ -1871,15 +1583,15 @@ private fun ShizukuCockpit(
 private fun StatusBadge(label: String, value: String, success: Boolean) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = (if (success) Color(0xFF2E9D66) else Color.Gray).copy(alpha = 0.1f),
-        border = BorderStroke(1.dp, (if (success) Color(0xFF2E9D66) else Color.Gray).copy(alpha = 0.2f))
+        color = (if (success) MaterialTheme.colorScheme.primary else Color.Gray).copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, (if (success) MaterialTheme.colorScheme.primary else Color.Gray).copy(alpha = 0.2f))
     ) {
         Text(
             text = "$label: $value",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = if (success) Color(0xFF1E5D3F) else Color.DarkGray
+            color = if (success) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -1933,8 +1645,8 @@ private fun ProfileCard(
                     label = { Text(if (active) "Active" else profile.accentLabel) },
                     shape = RoundedCornerShape(12.dp),
                     colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = if (active) Color(0xFF2E9D66).copy(alpha = 0.12f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-                        disabledLabelColor = if (active) Color(0xFF2E9D66) else MaterialTheme.colorScheme.secondary
+                        disabledContainerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                        disabledLabelColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                     )
                 )
             }
@@ -1961,7 +1673,7 @@ private fun ProfileCard(
                     Text("Included Tweaks:", fontWeight = FontWeight.Bold)
                     profile.tweakIds.forEach { id ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Check, null, tint = Color(0xFF2E9D66), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(id.replace("_", " ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall)
                         }
@@ -2012,10 +1724,28 @@ private fun TweakCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusPill(
-                    label = statusLabel(result),
-                    value = result?.message?.takeIf { it.isNotBlank() } ?: if (result?.isApplied == true) "Active" else "Ready"
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        statusLabel(result),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (result?.verified) {
+                            true -> MaterialTheme.colorScheme.primary
+                            null -> MaterialTheme.colorScheme.onSurfaceVariant
+                            false -> MaterialTheme.colorScheme.error
+                        }
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NetPill(
+                            text = result?.message?.takeIf { it.isNotBlank() }
+                                ?: if (result?.isApplied == true) "Active" else "Ready",
+                            emphasized = result?.verified == true
+                        )
+                        if (result?.verified == false && result.isApplied) {
+                            NetPill("not verified")
+                        }
+                    }
+                }
                 if (tweak.riskNote != null) {
                     Text(
                         tweak.riskNote,
@@ -2167,43 +1897,49 @@ private fun ConfigGrid(config: NetworkConfigInfo) {
 
 @Composable
 private fun NetworkResultCard(result: WifiScanResult, onClick: () -> Unit) {
-    val strength = signalStrengthPercent(result.rssi)
-    ElevatedCard(
-        shape = RoundedCornerShape(28.dp),
-        modifier = Modifier.clickable { onClick() },
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
+    Surface(
+        onClick = onClick,
+        shape = NetTokens.InnerShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(result.ssid, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Text(result.bssid, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            modifier = Modifier.padding(horizontal = NetTokens.SpacingM, vertical = NetTokens.SpacingM),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)
+        ) {
+            SignalBars(rssi = result.rssi)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    if (result.isHidden) "Hidden network" else result.ssid,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    NetPill(
+                        result.security,
+                        emphasized = result.security == "Open"
+                    )
+                    NetPill("Ch ${result.channel.takeIf { it != 0 } ?: "?"} · ${result.band}")
                 }
-                SignalBars(result.rssi)
             }
-            LinearMeter(strength = strength)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                StatusPill("Band", result.band)
-                StatusPill("Channel", result.channel.toString())
-                StatusPill("Security", result.security)
-                StatusPill("Signal", "${result.rssi} dBm")
-            }
+            Text(
+                "${result.rssi}",
+                style = MaterialTheme.typography.labelLarge,
+                color = healthTint(
+                    ((result.rssi + 90) * 100 / 60).coerceIn(0, 100)
+                ),
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
 
 @Composable
 private fun CongestionRow(item: ChannelCongestion) {
-    val accent = if (item.isRecommended) Color(0xFF2E9D66) else MaterialTheme.colorScheme.primary
+    val accent = if (item.isRecommended) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = accent.copy(alpha = if (item.isRecommended) 0.12f else 0.06f)
@@ -2349,7 +2085,7 @@ private fun LinearMeter(strength: Float) {
                 .clip(RoundedCornerShape(999.dp))
                 .background(
                     Brush.horizontalGradient(
-                        listOf(Color(0xFFC84B4B), Color(0xFFD97D2C), Color(0xFF2E9D66))
+                        listOf(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.primary)
                     )
                 )
         )
@@ -2458,7 +2194,7 @@ private fun signalStrengthPercent(rssi: Int): Float {
 private fun statusLabel(result: TweakResult?): String {
     return when (result?.status) {
         TweakStatus.RUNNING -> "Working"
-        TweakStatus.SUCCESS -> "Applied"
+        TweakStatus.SUCCESS -> if (result.verified == true) "Verified" else "Applied"
         TweakStatus.FAILED -> "Failed"
         TweakStatus.UNSUPPORTED -> "Locked"
         TweakStatus.MANUAL -> "Manual"
@@ -2610,7 +2346,7 @@ internal fun SpeedHistoryCard(
 ) {
     ElevatedCard(
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

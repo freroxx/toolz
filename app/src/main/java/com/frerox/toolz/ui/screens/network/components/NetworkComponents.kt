@@ -301,7 +301,7 @@ fun TerminalOverlay(
                     Icon(
                         Icons.Rounded.Terminal,
                         contentDescription = null,
-                        tint = Color(0xFF4CAF50),
+                        tint = Color(0xFF81C784), // terminal green on dark overlay
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
@@ -333,7 +333,7 @@ fun TerminalOverlay(
                     items(logs.reversed()) { log ->
                         Text(
                             text = log,
-                            color = if (log.startsWith(">")) Color(0xFF81C784) else if (log.contains("Err")) Color(0xFFE57373) else Color.White.copy(alpha = 0.8f),
+                            color = if (log.startsWith(">")) Color(0xFF81C784) else if (log.contains("Err") || log.contains("Fail")) Color(0xFFE57373) else Color.White.copy(alpha = 0.8f),
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp

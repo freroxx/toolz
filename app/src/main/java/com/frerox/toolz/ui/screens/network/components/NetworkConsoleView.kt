@@ -138,7 +138,7 @@ fun NetworkConsoleView(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (isShizukuReady) Color(0xFF2E9D66) else MaterialTheme.colorScheme.error)
+                            .background(if (isShizukuReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                     )
                     Text(
                         text = if (isShizukuReady) "Privileged Shell Active" else "Shell Restricted",
@@ -251,7 +251,7 @@ private fun ConsoleLogItem(log: DiagnosticLog) {
     val (tagColor, tagBg) = when (log.level) {
         LogLevel.ERROR -> MaterialTheme.colorScheme.error to MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
         LogLevel.WARNING -> MaterialTheme.colorScheme.tertiary to MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
-        LogLevel.SUCCESS -> Color(0xFF2E9D66) to Color(0xFF2E9D66).copy(alpha = 0.1f)
+        LogLevel.SUCCESS -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         LogLevel.INFO -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f)
     }
 
