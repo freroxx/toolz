@@ -46,13 +46,34 @@ data class ProcessNetworkUsage(
     val countryFlag: String = ""
 )
 
+/** Waveform-style bufferbloat grade from latency increase under load. */
+enum class BloatGrade(val letter: String, val maxDeltaMs: Long) {
+    A_PLUS("A+", 5),
+    A("A", 15),
+    B("B", 25),
+    C("C", 40),
+    D("D", 70),
+    F("F", Long.MAX_VALUE);
+
+    companion object {
+        /** Pure & testable: grade = f(loadedLatency − idleLatency). Null-safe for missing samples. */
+        fun fromDelta(deltaMs: Long?): BloatGrade? {
+            if (deltaMs == null) return null
+            return entries.firstOrNull { deltaMs <= it.maxDeltaMs } ?: F
+        }
+    }
+}
+
 data class SpeedTestResult(
     val downloadSpeedMbps: Double = 0.0,
     val uploadSpeedMbps: Double = 0.0,
     val isRunning: Boolean = false,
     val progress: Float = 0f,
     val phaseLabel: String = "Idle",
-    val error: String? = null
+    val error: String? = null,
+    val idleLatencyMs: Long? = null,
+    val loadedLatencyMs: Long? = null,
+    val bloatGrade: BloatGrade? = null
 )
 
 data class StabilityInfo(

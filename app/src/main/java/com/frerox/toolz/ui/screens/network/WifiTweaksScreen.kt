@@ -68,6 +68,7 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
+import com.frerox.toolz.ui.screens.network.suite.MiniMetric
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.ui.components.fadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -1448,6 +1449,18 @@ private fun DnsBenchmarkRow(result: WifiDnsBenchmarkResult) {
                     else -> MaterialTheme.colorScheme.error
                 }
             )
+            if (result.dotLatencyMs != null) {
+                Spacer(Modifier.width(6.dp))
+                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
+                    Text(
+                        "DoT ${result.dotLatencyMs}ms",
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
         }
     }
 }
@@ -1553,6 +1566,14 @@ internal fun DiagnosticsTab(
                             }
                         }
                     )
+                    if (!state.speedTest.isRunning && state.speedTest.bloatGrade != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            MiniMetric("Idle", "${state.speedTest.idleLatencyMs ?: "-"}ms")
+                            MiniMetric("Loaded", "${state.speedTest.loadedLatencyMs ?: "-"}ms")
+                            val g = state.speedTest.bloatGrade!!
+                            MiniMetric("Bloat", g.letter)
+                        }
+                    }
 
                     if (state.traceHops.isNotEmpty()) {
                         Surface(
@@ -2579,5 +2600,58 @@ private fun SmartFixHeaderCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun SpeedHistoryCard(
+    history: List<com.frerox.toolz.data.network.SpeedHistoryEntity>,
+    onClear: () -> Unit
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("Speed history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text("${history.size} runs · last 90 days", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onClear, enabled = history.isNotEmpty()) {
+                    Icon(Icons.Rounded.Delete, contentDescription = "Clear history")
+                }
+            }
+            if (history.size < 2) {
+                Text("Run a few speed tests to build a trend.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Sparkline(
+                    values = history.reversed().map { it.downloadMbps },
+                    modifier = Modifier.fillMaxWidth().height(72.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    MiniMetric("Now", "${history.first().downloadMbps.roundToInt()} Mbps")
+                    MiniMetric("Best", "${history.maxOf { it.downloadMbps }.roundToInt()} Mbps")
+                    val grades = history.mapNotNull { it.bloatGrade }
+                    if (grades.isNotEmpty()) MiniMetric("Bloat mode", grades.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: "-")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Sparkline(values: List<Double>, modifier: Modifier = Modifier) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        if (values.size < 2) return@Canvas
+        val maxV = (values.maxOrNull() ?: 1.0).coerceAtLeast(1.0)
+        val path = Path()
+        values.forEachIndexed { i, v ->
+            val x = i.toFloat() / (values.lastIndex.coerceAtLeast(1)) * size.width
+            val y = size.height - ((v / maxV).toFloat().coerceIn(0f, 1f)) * size.height * 0.9f - size.height * 0.05f
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color = lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
     }
 }

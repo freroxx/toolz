@@ -168,6 +168,26 @@ fun NetworkSuiteScreen(
     var shizukuPrompt by rememberSaveable { mutableStateOf<ShizukuPrompt?>(null) }
 
     val privilegedReady = power.privilegedState.isAuthorized && power.privilegedState.isServiceReady
+    // P6: pause polling loops while this screen is not visible (battery)
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    tweaksVm.setScreenActive(true)
+                    powerVm.setScreenActive(true)
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                    tweaksVm.setScreenActive(false)
+                    powerVm.setScreenActive(false)
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
 
     // events from BOTH viewmodels feed one snackbar
     LaunchedEffect(Unit) {
@@ -357,13 +377,18 @@ fun NetworkSuiteScreen(
                                     },
                                     onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
                                     onOpenDevSettings = { launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) },
-                                    onRunSpeedTest = { powerVm.runSpeedTest() },
+                                    onRunSpeedTest = { tweaksVm.runSpeedTest() },
                                     onRunTraceRoute = { target ->
                                         if (privilegedReady) powerVm.runTraceRoute(target)
                                         else requestShizukuAccess("Traceroute", "Traceroute uses shell networking tools that are only available through the privileged Shizuku layer.")
                                     },
                                     extraCards = {
                                         LatencyStreamCard(state = power)
+                                        Spacer(Modifier.height(20.dp))
+                                        SpeedHistoryCard(
+                                            history = tweaksVm.speedHistory.collectAsStateWithLifecycle().value,
+                                            onClear = { tweaksVm.clearSpeedHistory() }
+                                        )
                                     }
                                 )
 

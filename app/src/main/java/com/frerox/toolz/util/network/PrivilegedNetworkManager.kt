@@ -26,6 +26,8 @@ import com.frerox.toolz.data.network.ProcessNetworkUsage
 import com.frerox.toolz.data.network.TraceHop
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
@@ -249,9 +251,19 @@ class PrivilegedNetworkManager @Inject constructor(
         }.orEmpty()
         val parsed = parseTraceOutput(output)
         parsed.ifEmpty {
-            (1..12).mapNotNull { ttl ->
-                val ping = runCommand("ping -c 1 -W 2 -t $ttl $target").combinedOutput
-                parsePingTtlHop(ttl, ping)
+            // P4: fire TTL probes concurrently (was serial → up to ~24 s); then trim
+            // everything past the first hop that already reached the target.
+            kotlinx.coroutines.coroutineScope {
+                val limited = Dispatchers.IO.limitedParallelism(6)
+                (1..15).map { ttl ->
+                    async(limited) {
+                        val ping = runCommand("ping -c 1 -W 2 -t $ttl $target").combinedOutput
+                        parsePingTtlHop(ttl, ping)
+                    }
+                }.awaitAll()
+            }.filterNotNull().let { hops ->
+                val reachedAt = hops.firstOrNull { it.ip == target }?.hop ?: Int.MAX_VALUE
+                hops.filter { it.hop <= reachedAt }.sortedBy { it.hop }
             }
         }
     }

@@ -45,6 +45,28 @@ class DnsRealBenchmark @Inject constructor(
         )
     }
 
+    /**
+     * P4: DNS-over-TLS reachability — TLS handshake on :853, returns RTT ms or null.
+     * Non-null ⇒ provider is "DoT-capable" (what Android Private DNS actually uses).
+     */
+    suspend fun dotProbe(hostname: String?, timeoutMs: Int = 1500): Long? = withContext(Dispatchers.IO) {
+        if (hostname.isNullOrBlank()) return@withContext null
+        try {
+            val factory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+            val socket = factory.createSocket(hostname, 853) as javax.net.ssl.SSLSocket
+            try {
+                val t0 = System.nanoTime()
+                socket.soTimeout = timeoutMs
+                socket.startHandshake()
+                ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1L)
+            } finally {
+                runCatching { socket.close() }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun dohQuery(provider: DnsProvider, timeoutMs: Int): Long? {
         val doh = provider.dohUrl ?: return null
         // Use ?name=google.com&type=A minimal query; add cache-bust

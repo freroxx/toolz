@@ -67,6 +67,9 @@ import com.frerox.toolz.util.network.WifiSpectrumAnalyzer
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.*
@@ -87,6 +90,7 @@ class WifiTweaksViewModel @Inject constructor(
     private val healthEngine: NetworkHealthEngine,
     private val spectrumAnalyzer: WifiSpectrumAnalyzer,
     private val dnsRealBenchmark: DnsRealBenchmark,
+    private val speedHistoryDao: com.frerox.toolz.data.network.SpeedHistoryDao,
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
@@ -113,6 +117,13 @@ class WifiTweaksViewModel @Inject constructor(
     )
 
     @Volatile private var tweakJournal: Map<String, JournalEntry> = emptyMap()
+
+    /** P6: loops pause when the suite screen is not visible (battery). */
+    @Volatile private var screenActive = true
+
+    fun setScreenActive(active: Boolean) {
+        screenActive = active
+    }
 
 
     private val _uiState = MutableStateFlow(
@@ -224,6 +235,7 @@ class WifiTweaksViewModel @Inject constructor(
     private fun startTelemetryRefresh() {
         viewModelScope.launch {
             while (isActive) {
+                if (!screenActive) { delay(3_000); continue }
                 if (uiState.value.shizukuStatus.isServiceReady) {
                     try {
                         val ipAudit = privilegedNetworkManager.readIpAudit()
@@ -253,25 +265,61 @@ class WifiTweaksViewModel @Inject constructor(
         if (uiState.value.speedTest.isRunning) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = true, progress = 0f, phaseLabel = "Warming up...")) }
+            _uiState.update {
+                it.copy(
+                    speedTest = SpeedTestResult(isRunning = true, phaseLabel = "Starting…")
+                )
+            }
             try {
-                speedTestEngine.runDownloadTest().collect { (progress, speed) ->
-                    _uiState.update {
-                        it.copy(
-                            speedTest = it.speedTest.copy(
-                                downloadSpeedMbps = speed,
-                                progress = progress,
-                                phaseLabel = "Downloading..."
-                            )
-                        )
+                speedTestEngine.runFullTest().collect { event ->
+                    when (event) {
+                        is com.frerox.toolz.util.network.SpeedEvent.Progress -> _uiState.update {
+                            it.copy(speedTest = it.speedTest.copy(progress = event.progress, phaseLabel = event.phaseLabel))
+                        }
+                        is com.frerox.toolz.util.network.SpeedEvent.Done -> {
+                            val grade = com.frerox.toolz.util.network.SpeedTestEngine.grade(event.idleLatencyMs, event.loadedLatencyMs)
+                            _uiState.update {
+                                it.copy(
+                                    speedTest = it.speedTest.copy(
+                                        isRunning = false,
+                                        progress = 1f,
+                                        downloadSpeedMbps = event.downloadMbps,
+                                        uploadSpeedMbps = event.uploadMbps,
+                                        idleLatencyMs = event.idleLatencyMs,
+                                        loadedLatencyMs = event.loadedLatencyMs,
+                                        bloatGrade = grade,
+                                        phaseLabel = "Complete",
+                                        error = null
+                                    )
+                                )
+                            }
+                            addLog("SPEED", "Down ${"%.1f".format(event.downloadMbps)} / Up ${"%.1f".format(event.uploadMbps)} Mbps · bloat ${grade?.letter ?: "n/a"}", LogLevel.SUCCESS)
+                            runCatching {
+                                speedHistoryDao.insert(
+                                    com.frerox.toolz.data.network.SpeedHistoryEntity(
+                                        timestampMs = System.currentTimeMillis(),
+                                        downloadMbps = event.downloadMbps,
+                                        uploadMbps = event.uploadMbps,
+                                        idleLatencyMs = event.idleLatencyMs,
+                                        loadedLatencyMs = event.loadedLatencyMs,
+                                        bloatGrade = grade?.letter,
+                                        ssid = _uiState.value.currentSsid
+                                    )
+                                )
+                                speedHistoryDao.purgeOlderThan(System.currentTimeMillis() - com.frerox.toolz.data.network.SpeedHistoryDao.RETENTION_MS)
+                            }
+                        }
+                        is com.frerox.toolz.util.network.SpeedEvent.Failed -> _uiState.update {
+                            it.copy(speedTest = it.speedTest.copy(isRunning = false, error = event.message, phaseLabel = "Failed"))
+                        }
                     }
                 }
-                _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = false, progress = 1f, phaseLabel = "Completed")) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = false, error = e.message, phaseLabel = "Error")) }
             }
         }
     }
+
 
     fun runTraceRoute(target: String = "1.1.1.1") {
         viewModelScope.launch {
@@ -431,6 +479,23 @@ class WifiTweaksViewModel @Inject constructor(
             }
         }
         return sb.toString()
+    }
+
+    val speedHistory: StateFlow<List<com.frerox.toolz.data.network.SpeedHistoryEntity>> =
+        speedHistoryDao.observeRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun clearSpeedHistory() {
+        viewModelScope.launch { speedHistoryDao.clearAll() }
+    }
+
+    /** p50/p95 of loaded-latency samples over the last 30 days (pure Kotlin percentile math). */
+    suspend fun latencyStats30d(): com.frerox.toolz.data.network.LatencyStats {
+        val since = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        val rows = runCatching { speedHistoryDao.since(since) }.getOrDefault(emptyList())
+        val lat = rows.mapNotNull { it.loadedLatencyMs ?: it.idleLatencyMs }.sorted()
+        if (lat.isEmpty()) return com.frerox.toolz.data.network.LatencyStats(0, null, null)
+        fun pct(p: Double): Long = lat[((lat.size - 1).coerceAtLeast(0) * p).toInt()]
+        return com.frerox.toolz.data.network.LatencyStats(lat.size, pct(0.50), pct(0.95))
     }
 
     fun exportScanCsv(): String {
@@ -645,11 +710,17 @@ class WifiTweaksViewModel @Inject constructor(
                 )
             }
             addLog("DNS", "Starting real DoH + TCP benchmark: ${candidateProviders.size} providers", LogLevel.INFO)
-            val results = candidateProviders.map { (id, name, host) ->
-                val stub = com.frerox.toolz.data.network.DnsProvider(id, name, listOf(host), host, "https://$host/dns-query")
-                val bench = runCatching { dnsRealBenchmark.benchmark(stub, samples = 2) }.getOrNull()
-                val latency = bench?.metrics?.latencyMs ?: pingHost(host)
-                WifiDnsBenchmarkResult(id, name, host, latency)
+            val results = kotlinx.coroutines.coroutineScope {
+                candidateProviders.map { (id, name, host) ->
+                    async {
+                        val stub = com.frerox.toolz.data.network.DnsProvider(id, name, listOf(host), host, "https://$host/dns-query")
+                        val bench = runCatching { dnsRealBenchmark.benchmark(stub, samples = 2) }.getOrNull()
+                        val latency = bench?.metrics?.latencyMs ?: pingHost(host)
+                        // P4: DoT capability probe (what Private DNS actually uses)
+                        val dot = runCatching { dnsRealBenchmark.dotProbe(if (host.matches(Regex("[0-9.]+"))) null else host) }.getOrNull()
+                        WifiDnsBenchmarkResult(id, name, host, latency, dotLatencyMs = dot)
+                    }
+                }.awaitAll()
             }
             val best = results.filter { it.latencyMs != null }.minByOrNull { it.latencyMs!! }
             _uiState.update { state ->
@@ -705,6 +776,7 @@ class WifiTweaksViewModel @Inject constructor(
     private fun startStabilityCheck() {
         viewModelScope.launch {
             while (isActive) {
+                if (!screenActive) { delay(5_000); continue }
                 val config = _uiState.value.networkConfig
                 if (!config.isConnected) {
                     delay(5000)

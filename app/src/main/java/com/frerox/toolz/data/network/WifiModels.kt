@@ -197,6 +197,8 @@ data class WifiDnsBenchmarkResult(
     val name: String,
     val hostname: String,
     val latencyMs: Long? = null,
+    /** Round-trip of a TLS handshake on :853 — non-null means DoT-capable. */
+    val dotLatencyMs: Long? = null,
     val isRecommended: Boolean = false
 )
 

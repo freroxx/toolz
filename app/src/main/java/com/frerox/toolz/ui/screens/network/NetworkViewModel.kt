@@ -93,6 +93,10 @@ class NetworkViewModel @Inject constructor(
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     private var dnsJob: Job? = null
+
+    /** P6: privileged/ping telemetry pauses when suite is backgrounded. */
+    @Volatile private var screenActive = true
+    fun setScreenActive(active: Boolean) { screenActive = active }
     private var deviceScanJob: Job? = null
 
     init {
@@ -241,6 +245,9 @@ class NetworkViewModel @Inject constructor(
         }
     }
 
+    /** MACs seen on previous scans → powers "new device joined" detection. */
+    private var previouslySeenMacs: Set<String> = emptySet()
+
     fun scanSubnet() {
         deviceScanJob?.cancel()
         deviceScanJob = viewModelScope.launch {
@@ -253,6 +260,11 @@ class NetworkViewModel @Inject constructor(
             appendLog("> subnet scan: $gateway/24")
             val knownDevices = linkedMapOf<String, NetworkDevice>()
             networkScanner.scanSubnetDelta(gateway).collect { device ->
+                // P4 delta detection: flag devices whose MAC we never saw in prior scans
+                if (device.mac != "Unknown" && previouslySeenMacs.isNotEmpty() && device.mac !in previouslySeenMacs) {
+                    appendLog("DISCOVERY · New device joined: ${device.hostname.ifBlank { device.ip }} (${device.vendor})")
+                    emitEvent("New device: ${device.hostname.ifBlank { device.ip }} · ${device.vendor}")
+                }
                 knownDevices[device.ip] = device
                 val merged = knownDevices.values.sortedWith(
                     compareByDescending<NetworkDevice> { it.isGateway }.thenBy { it.ip }
@@ -264,7 +276,35 @@ class NetworkViewModel @Inject constructor(
                     )
                 }
             }
-            updateState { copy(isScanningDevices = false) }
+
+            // P4: passive mDNS sweep enriches labels for discovered hosts
+            runCatching {
+                networkScanner.mdnsDiscover().forEach { (ip, label) ->
+                    knownDevices[ip]?.let { dev ->
+                        knownDevices[ip] = dev.copy(
+                            hostname = if (dev.hostname == "Unknown") label.substringBefore(" (") else dev.hostname,
+                            typeLabel = label.substringAfter(" (").removeSuffix(")").ifBlank { dev.typeLabel }
+                        )
+                        appendLog("mDNS · $ip → $label")
+                    } ?: run {
+                        // host not found by ICMP but visible via mDNS — add it anyway
+                        knownDevices[ip] = NetworkDevice(ip = ip, hostname = label.substringBefore(" ("), typeLabel = label)
+                        appendLog("mDNS · host added: $ip → $label")
+                    }
+                }
+            }
+            previouslySeenMacs = knownDevices.values.mapNotNull { d -> d.mac.takeIf { it != "Unknown" } }.toSet()
+
+            val mergedFinal = knownDevices.values.sortedWith(
+                compareByDescending<NetworkDevice> { it.isGateway }.thenBy { it.ip }
+            )
+            updateState {
+                copy(
+                    scannedDevices = mergedFinal,
+                    topology = buildTopology(mergedFinal),
+                    isScanningDevices = false
+                )
+            }
         }
     }
 
@@ -383,6 +423,7 @@ class NetworkViewModel @Inject constructor(
     private fun startPrivilegedStateMonitor() {
         viewModelScope.launch {
             while (isActive) {
+                if (!screenActive) { delay(5_000); continue }
                 refreshPrivilegedSnapshot()
                 delay(3_500)
             }
@@ -427,6 +468,7 @@ class NetworkViewModel @Inject constructor(
     private fun startPingMonitor() {
         viewModelScope.launch {
             while (isActive) {
+                if (!screenActive) { delay(4_000); continue }
                 val gateway = uiState.value.wifiState.gateway
                 if (gateway != "0.0.0.0") {
                     val latency = measurePing(gateway)

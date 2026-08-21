@@ -19,7 +19,76 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class NetworkScanner @Inject constructor() {
+class NetworkScanner @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context
+) {
+
+    /** P4: ARP-table lookup (no privileges needed — kernel populates /proc/net/arp). */
+    private fun arpMacFor(ip: String): String? {
+        return try {
+            java.io.File("/proc/net/arp").readLines()
+                .firstOrNull { it.trim().startsWith("$ip ") }
+                ?.split(Regex("\\s+"))
+                ?.getOrNull(3)
+                ?.takeIf { OuiDatabase.normalize(it) != null }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * P4: passive mDNS/Bonjour sweep for common service types via NsdManager.
+     * No permissions required. Returns ip → friendly label; failures yield empty map.
+     */
+    suspend fun mdnsDiscover(timeoutMs: Long = 4_000L): Map<String, String> = withContext(Dispatchers.IO) {
+        val types = listOf("_googlecast._tcp", "_airplay._tcp", "_ipp._tcp", "_hap._tcp", "_smb._tcp")
+        val found = java.util.concurrent.ConcurrentHashMap<String, String>()
+        try {
+            val nsd = appContext.getSystemService(android.content.Context.NSD_SERVICE) as android.net.nsd.NsdManager
+            val listeners = mutableListOf<android.net.nsd.NsdManager.DiscoveryListener>()
+            val latch = java.util.concurrent.CountDownLatch(types.size)
+            types.forEach { type ->
+                val listener = object : android.net.nsd.NsdManager.DiscoveryListener {
+                    override fun onDiscoveryStarted(serviceType: String?) {}
+                    override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) { latch.countDown() }
+                    override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) {}
+                    override fun onDiscoveryStopped(serviceType: String?) {}
+                    override fun onServiceFound(serviceInfo: android.net.nsd.NsdServiceInfo?) {
+                        runCatching {
+                            nsd.resolveService(serviceInfo, object : android.net.nsd.NsdManager.ResolveListener {
+                                override fun onResolveFailed(info: android.net.nsd.NsdServiceInfo?, errorCode: Int) {}
+                                override fun onServiceResolved(info: android.net.nsd.NsdServiceInfo?) {
+                                    val host = info?.host?.hostAddress
+                                    if (!host.isNullOrBlank()) found[host] = "${info.serviceName} (${type.substringBefore(".").removePrefix("_")})"
+                                }
+                            })
+                        }
+                    }
+                    override fun onServiceLost(serviceInfo: android.net.nsd.NsdServiceInfo?) {}
+                }
+                listeners += listener
+                runCatching { nsd.discoverServices(type, android.net.nsd.NsdManager.PROTOCOL_DNS_SD, listener) }
+                    .onFailure { latch.countDown() }
+            }
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+                // wait until all types either started or failed; resolution keeps filling map meanwhile
+                while (latch.count > 0) { kotlinx.coroutines.delay(100) }
+            } ?: kotlin.run { /* timeout: proceed with whatever was found */ }
+            listeners.forEach { runCatching { nsd.stopServiceDiscovery(it) } }
+            // small grace window so late resolutions land in the map
+            val deadline = System.currentTimeMillis() + 1_500
+            val before = -1
+            var lastSize = -1
+            while (System.currentTimeMillis() < deadline && System.currentTimeMillis() > 0) {
+                if (found.size == lastSize) break
+                lastSize = found.size
+                kotlinx.coroutines.delay(300)
+            }
+        } catch (_: Exception) {
+            // NSD unavailable (emulator/ROM quirk): silently degrade
+        }
+        found.toMap()
+    }
 
     fun scanSubnetDelta(gateway: String): Flow<NetworkDevice> = channelFlow {
         val subnet = gateway.substringBeforeLast(".", missingDelimiterValue = "")
@@ -64,9 +133,12 @@ class NetworkScanner @Inject constructor() {
             val latency = measureTimeMillis { reachable = addr.isReachable(400) }
             if (!reachable) return@withContext null
             val hostname = runCatching { addr.canonicalHostName }.getOrNull()?.takeIf { it != host } ?: "Unknown"
+            val mac = arpMacFor(host)
             NetworkDevice(
                 ip = host,
+                mac = mac ?: "Unknown",
                 hostname = hostname,
+                vendor = OuiDatabase.vendor(mac),
                 typeLabel = identifyDeviceType(host),
                 latencyMs = latency.coerceAtLeast(1L),
                 lastSeenEpochMs = System.currentTimeMillis(),

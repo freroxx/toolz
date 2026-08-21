@@ -175,4 +175,9 @@ object DatabaseModule {
     fun provideWhisperMessageDao(database: AppDatabase): WhisperMessageDao {
         return database.whisperMessageDao()
     }
+
+    @Provides
+    fun provideSpeedHistoryDao(database: AppDatabase): com.frerox.toolz.data.network.SpeedHistoryDao {
+        return database.speedHistoryDao()
+    }
 }

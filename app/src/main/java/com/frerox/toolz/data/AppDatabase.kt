@@ -65,6 +65,8 @@ import com.frerox.toolz.data.whisper.WhisperMessageDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
+import com.frerox.toolz.data.network.SpeedHistoryEntity
+import com.frerox.toolz.data.network.SpeedHistoryDao
 
 @Database(
     entities = [
@@ -90,9 +92,10 @@ import com.frerox.toolz.data.device.cache.DeviceSpecConverters
         CryptoHistoryEntry::class,
         DeviceSpecCacheEntity::class,
         CatalogSearchEntry::class,
-        WhisperMessageEntity::class
-    ], 
-    version = 45,
+        WhisperMessageEntity::class,
+        SpeedHistoryEntity::class
+    ],
+    version = 46,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
@@ -116,4 +119,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun deviceSpecsDao(): DeviceSpecsDao
     abstract fun catalogSearchDao(): CatalogSearchDao
     abstract fun whisperMessageDao(): WhisperMessageDao
+    abstract fun speedHistoryDao(): SpeedHistoryDao
 }
