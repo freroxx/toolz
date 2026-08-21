@@ -140,7 +140,9 @@ class WhisperEncryptedImageHost @Inject constructor(
         // Anything else (metadata endpoints, internal addresses, redirect targets) is
         // rejected before a connection is even opened.
         val host = runCatching { URL(url).host }.getOrNull() ?: error("Invalid image URL.")
-        if (host != "i.ibb.co" && host != "ibb.co" && !host.endsWith(".supabase.co")) {
+        val supabaseHost = runCatching { URL(BuildConfig.SUPABASE_URL).host }.getOrNull()
+        val allowedSupabase = supabaseHost != null && (host == supabaseHost || host.endsWith(".$supabaseHost"))
+        if (host != "i.ibb.co" && host != "ibb.co" && !allowedSupabase) {
             error("Invalid image host.")
         }
         withContext(Dispatchers.IO) {
@@ -152,7 +154,8 @@ class WhisperEncryptedImageHost @Inject constructor(
                 if (connection.responseCode in 300..399) {
                     val location = connection.getHeaderField("Location") ?: error("Invalid redirect")
                     val redirectHost = runCatching { URL(location).host }.getOrNull() ?: error("Invalid redirect")
-                    if (redirectHost != "i.ibb.co" && redirectHost != "ibb.co" && !redirectHost.endsWith(".supabase.co")) error("Invalid image host.")
+                    val redirectAllowed = supabaseHost != null && (redirectHost == supabaseHost || redirectHost.endsWith(".$supabaseHost"))
+                    if (redirectHost != "i.ibb.co" && redirectHost != "ibb.co" && !redirectAllowed) error("Invalid image host.")
                     error("Redirects not supported for images.")
                 }
                 if (connection.responseCode !in 200..299) error("Image is no longer available.")

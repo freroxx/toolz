@@ -123,6 +123,8 @@ class WhisperViewModel @Inject constructor(
         viewModelScope.launch {
             isAuthenticated.collect { auth ->
                 if (auth == true) {
+                    // Hydrate local tombstones from server so reinstall / new device never resurrects deletes.
+                    launch { runCatching { repository.pullRemoteTombstones() } }
                     loadAll()
                     subscribeToMessages()
                     subscribeToFriends()

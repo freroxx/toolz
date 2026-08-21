@@ -1698,7 +1698,7 @@ private fun ProfileTab(
 
             // Profile Visibility: Public vs Private
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Profile Visibility", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_Whisper_ProfileVisibility), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 ToolzConnectedButtonGroup(
                     selectedIndex = if (isPrivate) 1 else 0,
                     options = listOf(stringResource(R.string.st_Whisper_Public), stringResource(R.string.st_Whisper_Private)),
@@ -1784,7 +1784,7 @@ private fun ProfileTab(
         ) {
             Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Delete Account", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
         }
 
         // Logout — plain tap opens the confirmation dialog; the old hidden "hold 3s"
@@ -1885,7 +1885,7 @@ private fun ProfileTab(
                         OutlinedTextField(
                             value = passwordInput,
                             onValueChange = { passwordInput = it },
-                            label = { Text("Password") },
+                            label = { Text(stringResource(R.string.st_Whisper_Bypass_PasswordLabel)) },
                             leadingIcon = { Icon(Icons.Rounded.Lock, null) },
                             trailingIcon = {
                                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
@@ -1918,7 +1918,7 @@ private fun ProfileTab(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     enabled = isTokenUser || passwordInput.isNotBlank(),
                 ) {
-                    Text("Delete Account", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1950,7 +1950,7 @@ private fun ProfileTab(
                 }
             },
             title = {
-                Text("Hide from Discover?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.st_Whisper_HideDiscoverConfirmTitle), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
             },
             text = {
                 Text(
@@ -1968,7 +1968,7 @@ private fun ProfileTab(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Hide Me", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.st_Whisper_HideMe), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1976,7 +1976,7 @@ private fun ProfileTab(
                     onClick = { showDiscoveryWarningDialog = false },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Keep Visible")
+                    Text(stringResource(R.string.st_Whisper_KeepVisible))
                 }
             }
         )
@@ -2021,8 +2021,8 @@ private fun AvatarOptionsSheet(
                     Icon(Icons.Rounded.CameraAlt, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
                 }
                 Column {
-                    Text("Profile Photo", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("Choose or update your profile picture", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_Whisper_ProfilePhoto), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.st_Whisper_ProfilePhotoDesc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -2034,7 +2034,7 @@ private fun AvatarOptionsSheet(
             ) {
                 Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Choose from Gallery", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.st_Whisper_ChooseFromGallery), fontWeight = FontWeight.SemiBold)
             }
 
             if (!profile.avatarUrl.isNullOrBlank()) {
@@ -2045,7 +2045,7 @@ private fun AvatarOptionsSheet(
                 ) {
                     Icon(Icons.Rounded.Delete, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Remove Current Photo", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.st_Whisper_RemovePhoto), fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -2103,7 +2103,7 @@ private fun FriendOptionsSheet(
             ) {
                 Icon(Icons.Rounded.Person, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("View Full Profile", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.st_Whisper_ViewFullProfile), fontWeight = FontWeight.SemiBold)
             }
 
             ToolzOutlinedExpressiveButton(
@@ -2156,7 +2156,7 @@ private fun ChatOptionsSheet(
                 leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
             ) {
-                Text("View Profile", fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium)
             }
 
             // Clear Chat
@@ -2164,7 +2164,7 @@ private fun ChatOptionsSheet(
                 leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
             ) {
-                Text("Clear chat history", fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium)
             }
 
             // Mute / Unmute
@@ -2332,7 +2332,7 @@ private fun FullScreenAvatarDialog(
                     ) {
                         Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Close", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.st_Whisper_Close), fontWeight = FontWeight.SemiBold)
                     }
                     if (!isSelf) {
                         ToolzExpressiveButton(
@@ -2340,7 +2340,7 @@ private fun FullScreenAvatarDialog(
                         ) {
                             Icon(Icons.AutoMirrored.Rounded.Chat, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Message", fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.st_Whisper_MessageAction), fontWeight = FontWeight.Bold)
                         }
                     }
                 }

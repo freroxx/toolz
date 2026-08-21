@@ -218,7 +218,7 @@ class WhisperChatViewModel @Inject constructor(
                                         newMsg.isDeletedForEveryone -> newMsg.content
                                         else -> existing.content
                                     },
-                                    reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
+                                    reactions = if (pendingReactions[newMsg.id].isNullOrEmpty()) newMsg.reactions else existing.reactions,
                                     replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
                                     replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
                                     isPending = existing.isPending || newMsg.isPending

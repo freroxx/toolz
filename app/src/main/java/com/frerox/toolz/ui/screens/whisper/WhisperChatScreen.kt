@@ -773,15 +773,22 @@ private fun ReplyPreviewBar(
                     .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
             
-            // Thumbnail for image replies
+            // Thumbnail for image replies — decode off Main to avoid jank when replying to image
             val attachment = WhisperImageAttachment.fromMessageContent(replyTarget.content)
             if (attachment != null) {
-                val bitmap = remember(decryptedImageBytes) {
-                    decryptedImageBytes?.let { decodeBoundedBitmap(it, 34, 34) }
+                var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+                LaunchedEffect(decryptedImageBytes) {
+                    val newBitmap = withContext(Dispatchers.Default) {
+                        decryptedImageBytes?.let { decodeBoundedBitmap(it, 34, 34) }
+                    }
+                    val old = bitmap
+                    bitmap = newBitmap
+                    if (old != null && old != newBitmap) old.recycle()
                 }
-                if (bitmap != null) {
+                val bmp = bitmap
+                if (bmp != null) {
                     Image(
-                        bitmap = bitmap.asImageBitmap(),
+                        bitmap = bmp.asImageBitmap(),
                         contentDescription = null,
                         modifier = Modifier
                             .size(34.dp)
@@ -890,29 +897,32 @@ private fun ConversationOptionsSheet(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             ListItem(
-                headlineContent = { Text(stringResource(R.string.st_Whisper_SearchLabel), fontWeight = FontWeight.Medium) },
                 leadingContent = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSearch() }
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium) },
-                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium) },
-                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
-            )
-            if (hasClearedUndo) {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount), fontWeight = FontWeight.Medium) },
-                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onUndoClear() }
-                )
+            ) {
+                Text(stringResource(R.string.st_Whisper_SearchLabel), fontWeight = FontWeight.Medium)
             }
             ListItem(
-                headlineContent = { Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute), fontWeight = FontWeight.Medium) },
+                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
+            ) {
+                Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium)
+            }
+            ListItem(
+                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
+            ) {
+                Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium)
+            }
+            if (hasClearedUndo) {
+                ListItem(
+                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onUndoClear() }
+                ) {
+                    Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount), fontWeight = FontWeight.Medium)
+                }
+            }
+            ListItem(
                 leadingContent = {
                     Icon(
                         if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
@@ -921,18 +931,13 @@ private fun ConversationOptionsSheet(
                     )
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
-            )
+            ) {
+                Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute), fontWeight = FontWeight.Medium)
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             ListItem(
-                headlineContent = {
-                    Text(
-                        if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block),
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
-                },
                 leadingContent = {
                     Icon(
                         if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
@@ -941,7 +946,13 @@ private fun ConversationOptionsSheet(
                     )
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
-            )
+            ) {
+                Text(
+                    if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block),
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1019,25 +1030,28 @@ private fun DeleteMessageSheet(
             }
 
             ListItem(
-                headlineContent = { Text(stringResource(R.string.st_Whisper_Reply), fontWeight = FontWeight.Medium) },
                 leadingContent = { Icon(Icons.AutoMirrored.Rounded.Reply, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onReply() }
-            )
+            ) {
+                Text(stringResource(R.string.st_Whisper_Reply), fontWeight = FontWeight.Medium)
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
             if (isMine) {
                 ListItem(
-                    headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForEveryone), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error) },
                     leadingContent = { Icon(Icons.Rounded.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteForEveryone() }
-                )
+                ) {
+                    Text(stringResource(R.string.st_Whisper_DeleteForEveryone), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                }
             }
             ListItem(
-                headlineContent = { Text(stringResource(R.string.st_Whisper_DeleteForMe), fontWeight = FontWeight.Medium, color = if (isMine) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error) },
                 leadingContent = { Icon(Icons.Rounded.Delete, null, tint = if (isMine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteForMe() }
-            )
+            ) {
+                Text(stringResource(R.string.st_Whisper_DeleteForMe), fontWeight = FontWeight.Medium, color = if (isMine) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1074,7 +1088,7 @@ private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeR
                 }
                 Column {
                     Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("Select how far back to clear", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_Whisper_SelectClearRange), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -1087,13 +1101,6 @@ private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeR
                 Pair(stringResource(R.string.st_Whisper_Clear_AllTime), ClearChatTimeRange.ALL_TIME)
             ).forEach { (label, range) ->
                 ListItem(
-                    headlineContent = {
-                        Text(
-                            label,
-                            fontWeight = if (range == ClearChatTimeRange.ALL_TIME) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (range == ClearChatTimeRange.ALL_TIME) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                        )
-                    },
                     leadingContent = {
                         Icon(
                             if (range == ClearChatTimeRange.ALL_TIME) Icons.Rounded.DeleteForever else Icons.Rounded.Schedule,
@@ -1102,7 +1109,13 @@ private fun ClearChatSheet(onDismiss: () -> Unit, onSelectRange: (ClearChatTimeR
                         )
                     },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelectRange(range) }
-                )
+                ) {
+                    Text(
+                        label,
+                        fontWeight = if (range == ClearChatTimeRange.ALL_TIME) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (range == ClearChatTimeRange.ALL_TIME) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -1153,10 +1166,11 @@ private fun ImageExpirySheet(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
                 Triple(stringResource(R.string.st_Whisper_Expiry_1d), 86_400L, Icons.Rounded.Today),
             ).forEach { (label, expiry, icon) ->
                 ListItem(
-                    headlineContent = { Text(label, fontWeight = FontWeight.Medium) },
                     leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(expiry) }
-                )
+                ) {
+                    Text(label, fontWeight = FontWeight.Medium)
+                }
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -1168,7 +1182,9 @@ private fun ImageExpirySheet(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
 private fun MuteOptionsDialog(onDismiss: () -> Unit, onSelectDuration: (Long) -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.st_Whisper_Mute)) }, text = { Column {
         listOf(Pair(stringResource(R.string.st_Whisper_Mute_1h), 3600000L), Pair(stringResource(R.string.st_Whisper_Mute_8h), 28800000L), Pair(stringResource(R.string.st_Whisper_Mute_1w), 604800000L), Pair(stringResource(R.string.st_Whisper_Mute_Forever), Long.MAX_VALUE)).forEach { (l, d) ->
-            ListItem(headlineContent = { Text(l) }, modifier = Modifier.clickable { onSelectDuration(d) })
+            ListItem(modifier = Modifier.clickable { onSelectDuration(d) }) {
+                Text(l)
+            }
         }
     }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
@@ -1441,9 +1457,12 @@ private fun MessageBubble(
                             }
                             var bitmap by remember { mutableStateOf<Bitmap?>(null) }
                             LaunchedEffect(decryptedImageBytes) {
-                                bitmap = withContext(Dispatchers.Default) {
+                                val newBitmap = withContext(Dispatchers.Default) {
                                     decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
                                 }
+                                val old = bitmap
+                                bitmap = newBitmap
+                                if (old != null && old != newBitmap) old.recycle()
                             }
                             val bmp = bitmap
                             if (bmp != null) {
@@ -1799,10 +1818,13 @@ private fun WhisperFullScreenImageViewer(
             runCatching { decodeBoundedBitmap(imageBytes, maxWidthPx, maxHeightPx) }.getOrNull()
         }
     }
-    // Release the decoded bitmap when the viewer closes or it is replaced,
-    // instead of leaking it.
-    DisposableEffect(bitmap) {
-        onDispose { bitmap?.recycle() }
+    // Release the decoded bitmap when the viewer closes or it is replaced.
+    // Capture the current bitmap value at composition time — the live `bitmap` var
+    // would be read as the *new* bitmap when the old key disposes, recycling the
+    // wrong (new) bitmap and leaking the old one.
+    val bitmapToRecycle = bitmap
+    DisposableEffect(bitmapToRecycle) {
+        onDispose { bitmapToRecycle?.recycle() }
     }
 
     Dialog(

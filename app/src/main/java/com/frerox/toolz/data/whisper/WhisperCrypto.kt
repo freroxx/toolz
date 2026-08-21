@@ -230,15 +230,15 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
-    /** Encrypts binary attachments using the same peer key as messages. The returned IV is stored alongside the blob. */
-    fun encryptAttachment(bytes: ByteArray, recipientPublicKeyBase64: String): Pair<ByteArray, String>? {
+    /** Encrypts binary attachments — AAD-bound to sender/receiver like messages so ciphertext cannot be replayed across chats. */
+    fun encryptAttachment(bytes: ByteArray, recipientPublicKeyBase64: String, senderId: String, receiverId: String): Pair<ByteArray, String>? {
         if (bytes.isEmpty() || bytes.size > MAX_ATTACHMENT_BYTES) return null
         val secretKey = deriveSharedKey(recipientPublicKeyBase64) ?: return null
         return try {
             val iv = ByteArray(IV_LEN).apply { SecureRandom().nextBytes(this) }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
-            cipher.updateAAD(ATTACHMENT_AAD)
+            cipher.updateAAD(aadFor(senderId, receiverId) + ATTACHMENT_AAD)
             cipher.doFinal(bytes) to Base64.encodeToString(iv, Base64.NO_WRAP)
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Attachment encryption failed", e)
@@ -246,7 +246,7 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
-    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?): ByteArray? {
+    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?, senderId: String, receiverId: String): ByteArray? {
         if (cipherBytes.size < 16 || ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) return null
         val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
         return try {
@@ -254,13 +254,31 @@ class WhisperCrypto @Inject constructor() {
             if (iv.size != IV_LEN) return null
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
-            cipher.updateAAD(ATTACHMENT_AAD)
-            cipher.doFinal(cipherBytes)
+            // Try bound AAD first; fall back to legacy constant-only AAD for pre-fix rows.
+            val boundAad = aadFor(senderId, receiverId) + ATTACHMENT_AAD
+            val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
+            val bound = runCatching {
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
+                cipher.updateAAD(boundAad)
+                cipher.doFinal(cipherBytes)
+            }.getOrNull()
+            bound ?: run {
+                val legacy = Cipher.getInstance("AES/GCM/NoPadding")
+                legacy.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
+                legacy.updateAAD(ATTACHMENT_AAD)
+                legacy.doFinal(cipherBytes)
+            }
         } catch (e: Exception) {
             android.util.Log.w("WhisperCrypto", "Attachment decryption failed: ${e.message}")
             null
         }
     }
+
+    // Legacy overloads for callers that haven't migrated yet — delegate to constant AAD so old rows stay decryptable.
+    fun encryptAttachment(bytes: ByteArray, recipientPublicKeyBase64: String): Pair<ByteArray, String>? =
+        encryptAttachment(bytes, recipientPublicKeyBase64, "", "")
+    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?): ByteArray? =
+        decryptAttachment(cipherBytes, ivBase64, senderPublicKeyBase64, "", "")
 
     fun isCurrentPublicKey(publicKeyBase64: String?): Boolean =
         !publicKeyBase64.isNullOrBlank() && publicKeyBase64 == getPublicKeyBase64()

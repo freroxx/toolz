@@ -6,9 +6,12 @@ private const val BYPASS_HASH = "fcfa7be6a471d30b5162f1bf31b6eb7cbeb6b90b126669f
 
 fun isWhisperBypassPassword(input: String): Boolean {
     return try {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return false
         val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-        hash == BYPASS_HASH
+        val hashBytes = digest.digest(trimmed.toByteArray(Charsets.UTF_8))
+        val expected = BYPASS_HASH.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        MessageDigest.isEqual(hashBytes, expected)
     } catch (_: Exception) {
         false
     }

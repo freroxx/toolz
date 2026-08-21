@@ -39,39 +39,31 @@ serve(async (request) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   if (!supabaseUrl || !anonKey) return json({ error: "Server misconfigured" }, 500);
 
-  // Per-user daily quota (best-effort accounting): the table is RLS-scoped to the
-  // caller, so the original bearer token authorizes the REST calls below.
+  // Atomic per-user daily quota via RPC — serializes concurrent bursts, no undercount.
   const today = new Date().toISOString().slice(0, 10);
-  const quotaUrl = `${supabaseUrl}/rest/v1/whisper_upload_quota?user_id=eq.${userId}&day=eq.${today}&select=count`;
   try {
-    const existing = await fetch(quotaUrl, {
-      headers: { apikey: anonKey, Authorization: authHeader },
+    const quotaRes = await fetch(`${supabaseUrl}/rest/v1/rpc/whisper_increment_upload_quota`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_day: today }),
     });
-    if (existing.ok) {
-      const rows = await existing.json();
-      const count = Array.isArray(rows) && rows.length > 0 ? Number(rows[0].count ?? 0) : 0;
-      if (count >= QUOTA_PER_DAY) {
+    if (quotaRes.ok) {
+      const count = Number(await quotaRes.json());
+      if (count > QUOTA_PER_DAY) {
         return json({ error: "Daily upload limit reached" }, 429);
       }
-      // Upsert the incremented count: the unique user_id key makes a first upload of the
-      // day create the row and later ones replace it. Concurrent requests may undercount
-      // slightly; the quota is a coarse abuse bound, not a hard ledger.
-      await fetch(`${supabaseUrl}/rest/v1/whisper_upload_quota`, {
-        method: "POST",
-        headers: {
-          apikey: anonKey,
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates",
-        },
-        body: JSON.stringify({ user_id: userId, day: today, count: count + 1 }),
-      });
+    } else if (quotaRes.status === 401 || quotaRes.status === 403) {
+      console.error("quota RPC auth failed", quotaRes.status);
     } else {
-      // Quota is best-effort; a quota-store failure must not block legitimate uploads.
-      console.error("whisper_upload_quota read failed", existing.status);
+      // Fallback: if RPC not yet migrated, allow upload (best-effort, don't block).
+      console.error("whisper_increment_upload_quota failed", quotaRes.status, await quotaRes.text());
     }
   } catch (quotaError) {
-    console.error("whisper_upload_quota failed", quotaError);
+    console.error("whisper_increment_upload_quota failed", quotaError);
   }
 
   try {

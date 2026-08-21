@@ -38,6 +38,7 @@ class WhisperHiddenChatsStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences("whisper_hidden_chats", Context.MODE_PRIVATE)
+    private val lock = Any()
 
     private val _hiddenChats = MutableStateFlow<Map<String, Long>>(loadHiddenChats())
     val hiddenChats: StateFlow<Map<String, Long>> = _hiddenChats.asStateFlow()
@@ -53,16 +54,16 @@ class WhisperHiddenChatsStore @Inject constructor(
     }
 
     /** Hide a chat from the chats tab, recording when it was hidden. */
-    fun hideChat(userId: String) {
+    fun hideChat(userId: String) = synchronized(lock) {
         val now = System.currentTimeMillis()
-        prefs.edit().putLong("hidden_$userId", now).apply()
+        prefs.edit().putLong("hidden_$userId", now).commit()
         _hiddenChats.update { it + (userId to now) }
     }
 
     /** Bring a chat back to the chats tab. */
-    fun unhideChat(userId: String) {
-        if (userId !in _hiddenChats.value) return
-        prefs.edit().remove("hidden_$userId").apply()
+    fun unhideChat(userId: String) = synchronized(lock) {
+        if (userId !in _hiddenChats.value) return@synchronized
+        prefs.edit().remove("hidden_$userId").commit()
         _hiddenChats.update { it - userId }
     }
 
@@ -72,8 +73,8 @@ class WhisperHiddenChatsStore @Inject constructor(
     fun isHidden(userId: String): Boolean = _hiddenChats.value.containsKey(userId)
 
     /** Wipe every hidden-chat record on this device (account deletion). */
-    fun clearAll() {
-        prefs.edit().clear().apply()
+    fun clearAll() = synchronized(lock) {
+        prefs.edit().clear().commit()
         _hiddenChats.update { emptyMap() }
     }
 }

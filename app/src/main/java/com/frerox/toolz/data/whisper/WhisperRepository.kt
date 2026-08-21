@@ -620,9 +620,11 @@ class WhisperRepository @Inject constructor(
         require(expiresAfterSeconds == null || expiresAfterSeconds in MIN_IMAGE_EXPIRY_SECONDS..MAX_IMAGE_EXPIRY_SECONDS) {
             "Disappearing images must expire between 1 minute and 180 days."
         }
+        val myIdNow = myId
+        if (myIdNow.isBlank()) error("User not authenticated")
         val receiverKey = getProfile(receiverId, forceRefresh = true).getOrNull()?.publicKey
             ?: error("Secure image delivery is unavailable because this user has no encryption key.")
-        val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey)
+        val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey, myIdNow, receiverId)
             ?: error("This image is too large or could not be encrypted.")
         
         val (uploadUrl, attachmentId) = encryptedImageHost.upload(
@@ -653,9 +655,17 @@ class WhisperRepository @Inject constructor(
         val decodedPng = WhisperImageCipherTransport.decode(rawBytes)
         val candidateCipher = decodedPng ?: rawBytes
         
-        // 2. Decrypt with candidateCipher, and fallback to rawBytes if needed
-        val decrypted = crypto.decryptAttachment(candidateCipher, attachment.iv, peerPublicKey)
-            ?: (if (decodedPng != null) crypto.decryptAttachment(rawBytes, attachment.iv, peerPublicKey) else null)
+        // 2. Decrypt bound to the original sender/receiver; fall back once for raw vs PNG.
+        val myIdNow2 = myId
+        // Try bound AAD (sender->receiver); raw download lost direction, so try both orderings.
+        fun tryDecrypt(bytes: ByteArray, sender: String, receiver: String) =
+            crypto.decryptAttachment(bytes, attachment.iv, peerPublicKey, sender, receiver)
+        // Infer other participant from attachment context: decryptAttachment will be called with the peer key,
+        // so sender is the peer if we are receiver and vice-versa; try both to cover legacy + current.
+        val senderGuess = peerPublicKey?.let { myIdNow2 } ?: ""
+        val decrypted = tryDecrypt(candidateCipher, senderGuess, myIdNow2)
+            ?: tryDecrypt(candidateCipher, myIdNow2, senderGuess)
+            ?: (if (decodedPng != null) (tryDecrypt(rawBytes, senderGuess, myIdNow2) ?: tryDecrypt(rawBytes, myIdNow2, senderGuess)) else null)
             ?: error("Unable to decrypt this image on this device.")
             
         decrypted
@@ -863,8 +873,9 @@ class WhisperRepository @Inject constructor(
 
     suspend fun deleteMessageForMe(messageId: String): Result<Unit> = runCatching {
         if (messageId.isBlank()) return@runCatching
-        // 1. Mark as deleted locally in persistent store so it never reappears on reload
-        deletedStore.markMessageDeleted(messageId)
+        // 1. Mark as deleted locally (commit on IO) and mirror remotely so eviction never resurrects
+        deletedStore.markMessageDeletedSuspend(messageId)
+        runCatching { syncDeletedTombstonesRemote(listOf(messageId)) }
         // 2. Erase from local Room cache
         messageDao.deleteMessage(messageId)
         // 3. Invalidate conversation cache
@@ -1105,13 +1116,15 @@ class WhisperRepository @Inject constructor(
             allToDelete.addAll(batch)
             if (batch.size < 500) break
             page++
-            if (page > 20) break // safety cap 10k
+            if (page > 100) break // safety cap 50k — covers hoarders, prevents infinite loop on stable feed
         }
 
         val toDeleteIds = allToDelete.map { it.id }.filter { it.isNotBlank() }
         if (toDeleteIds.isNotEmpty()) {
-            // Tombstone every selected message locally so none resurrect on reload.
-            deletedStore.markMessagesDeleted(toDeleteIds)
+            // Await durability before erasing Room — otherwise reload could resurrect.
+            deletedStore.markMessagesDeletedSuspend(toDeleteIds)
+            // Mirror locally-capped tombstones remotely so eviction never resurrects after reinstall.
+            runCatching { syncDeletedTombstonesRemote(toDeleteIds) }
             toDeleteIds.forEach { messageDao.deleteMessage(it) }
             // Server-side deletion limited by RLS to rows I own (my sent messages).
             // Delete exactly the my-sent subset via id list to keep local/server in sync.
@@ -1129,9 +1142,36 @@ class WhisperRepository @Inject constructor(
         allToDelete
     }
 
+    // ── Server tombstones: mirror local deletes so eviction never resurrects ──
+    @Serializable
+    private data class TombstoneRow(@SerialName("message_id") val messageId: String)
+
+    private suspend fun syncDeletedTombstonesRemote(messageIds: List<String>) {
+        if (messageIds.isEmpty() || myId.isBlank()) return
+        val rows = messageIds.filter { it.isNotBlank() }.map { mapOf("user_id" to myId, "message_id" to it) }
+        // Upsert idempotently; ignore RLS/unique errors (best-effort, local is authoritative)
+        for (chunk in rows.chunked(200)) {
+            runCatching { db.from("whisper_deleted_tombstones").upsert(chunk) }
+        }
+    }
+
+    private suspend fun removeRemoteTombstones(messageIds: List<String>) {
+        if (messageIds.isEmpty() || myId.isBlank()) return
+        for (chunk in messageIds.filter { it.isNotBlank() }.chunked(200)) {
+            runCatching { db.from("whisper_deleted_tombstones").delete { filter { isIn("message_id", chunk) } } }
+        }
+    }
+
+    suspend fun pullRemoteTombstones(): Result<Unit> = runCatching {
+        if (myId.isBlank()) return@runCatching
+        val rows = db.from("whisper_deleted_tombstones").select { filter { eq("user_id", myId) } }.decodeList<TombstoneRow>()
+        if (rows.isNotEmpty()) deletedStore.markMessagesDeletedSuspend(rows.map { it.messageId })
+    }
+
     suspend fun restoreMessages(messages: List<WhisperMessage>): Result<Unit> = runCatching {
         if (messages.isEmpty()) return@runCatching
         deletedStore.unmarkMessagesDeleted(messages.map { it.id })
+        removeRemoteTombstones(messages.map { it.id })
         val inserts = messages.map { msg ->
             WhisperMessageInsert(
                 id = msg.id,
@@ -1226,18 +1266,29 @@ class WhisperRepository @Inject constructor(
                 conversationsCacheTime = System.currentTimeMillis()
             }
         } else {
-            val allMessages = db.from("messages")
-                .select {
-                    filter {
-                        or {
-                            eq("sender_id", myId)
-                            eq("receiver_id", myId)
+            // Fallback when RPC is unavailable: paginate instead of truncating at 200, otherwise
+            // users with >200 messages silently lose conversations.
+            val allMessages = mutableListOf<WhisperMessage>()
+            var fbPage = 0
+            while (allMessages.size < 2000) {
+                val batch = db.from("messages")
+                    .select {
+                        filter {
+                            or {
+                                eq("sender_id", myId)
+                                eq("receiver_id", myId)
+                            }
                         }
+                        order("created_at", Order.DESCENDING)
+                        range((fbPage * 500L), ((fbPage + 1) * 500L - 1))
                     }
-                    order("created_at", Order.DESCENDING)
-                    limit(200)
-                }
-                .decodeList<WhisperMessage>()
+                    .decodeList<WhisperMessage>()
+                if (batch.isEmpty()) break
+                allMessages.addAll(batch)
+                if (batch.size < 500) break
+                fbPage++
+                if (fbPage > 3) break // cap 2000, enough to rebuild convos
+            }
 
             val grouped = allMessages.groupBy { msg ->
                 if (msg.senderId == myId) msg.receiverId else msg.senderId

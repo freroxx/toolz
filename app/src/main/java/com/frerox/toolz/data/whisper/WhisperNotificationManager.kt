@@ -54,8 +54,8 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
-    private var isInForeground = true
-    var currentChatId: String? = null
+    @Volatile private var isInForeground = false
+    @Volatile var currentChatId: String? = null
 
     init {
         createChannel()
@@ -136,10 +136,10 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
-    /** Friend request notification — uses stable sender id to avoid display-name collisions. */
+    /** Friend request notification — uses stable sender id to avoid display-name collisions. Distinct range from messages to avoid overwrite. */
     fun showFriendRequestNotification(fromId: String, fromName: String) {
         if (isInForeground) return
-        val notifId = ((fromId.hashCode() and 0x7FFFFFFF) % 2_000_000_000) + 9500
+        val notifId = ((fromId.hashCode() and 0x7FFFFFFF) % 100_000) + 2_100_000_000
         // Tapping the notification opens MainActivity and surfaces the request list;
         // there is no chat to deep-link into, so only the request flag is passed.
         val intent = Intent(context, MainActivity::class.java).apply {
