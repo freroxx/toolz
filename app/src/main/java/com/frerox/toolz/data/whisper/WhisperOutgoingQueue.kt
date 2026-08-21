@@ -45,7 +45,7 @@ class WhisperOutgoingQueue @Inject constructor(
 
     /** Records that a message was permanently dropped so the UI can surface the loss. */
     fun noteDropped(clientId: String) = synchronized(lock) {
-        _droppedClientIds.value = _droppedClientIds.value + clientId
+        _droppedClientIds.value = (_droppedClientIds.value + clientId).let { if (it.size > 200) it.toList().takeLast(200).toSet() else it }
     }
 
     /** Drop the whole outbox (account deletion). */
@@ -56,9 +56,10 @@ class WhisperOutgoingQueue @Inject constructor(
     private fun save(entries: List<WhisperQueuedMessage>) {
         // Never silently truncate the outbox: when the cap is exceeded, the overflow
         // client ids are surfaced through droppedClientIds instead of vanishing silently.
+        // Cap at 100 to stay under 1 MB Binder limit (500*8KB ≈ 6 MB → TransactionTooLarge).
         val toPersist = if (entries.size > MAX_ENTRIES) {
             val overflow = entries.dropLast(MAX_ENTRIES)
-            _droppedClientIds.value = _droppedClientIds.value + overflow.map { it.clientId }
+            _droppedClientIds.value = (_droppedClientIds.value + overflow.map { it.clientId }).let { if (it.size > 200) it.toList().takeLast(200).toSet() else it }
             entries.takeLast(MAX_ENTRIES)
         } else {
             entries
@@ -70,6 +71,6 @@ class WhisperOutgoingQueue @Inject constructor(
 
     private companion object {
         const val KEY = "ciphertext_outbox"
-        const val MAX_ENTRIES = 500
+        const val MAX_ENTRIES = 100
     }
 }

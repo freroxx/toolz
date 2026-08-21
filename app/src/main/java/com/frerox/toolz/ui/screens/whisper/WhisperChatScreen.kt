@@ -145,9 +145,9 @@ fun WhisperChatScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (password == "SSForWhisperTester") {
+                if (isWhisperBypassPassword(password)) {
                     viewModel.setScreenshotBypass(true)
-                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
                 } else {
                     toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                 }
@@ -174,12 +174,13 @@ fun WhisperChatScreen(
     // Index 0 is now the BOTTOM (newest message).
     val reversedMessages = remember(messages) { messages.asReversed() }
 
-    val isAtBottom by remember {
+    val density = LocalDensity.current
+    val isAtBottom by remember(density) {
         derivedStateOf {
             // In reverseLayout, firstVisibleItemIndex is the index from the BOTTOM.
             // Index 0 is the newest message. The scroll offset must also be near zero:
             // a partially scrolled-away bottom row shouldn't count as "at bottom".
-            listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset < 200
+            listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset < with(density) { 8.dp.toPx() }
         }
     }
 
@@ -193,9 +194,12 @@ fun WhisperChatScreen(
         
         // In reverse layout, item 0 is the newest (bottom).
         // We scroll to 0 if we sent the message or were already at the bottom.
+        // Re-check after delay so a user scroll-up during that window isn't stolen.
         if (isMine || isAtBottom) {
             delay(100.milliseconds)
-            listState.animateScrollToItem(0)
+            if (isMine || isAtBottom) {
+                listState.animateScrollToItem(0)
+            }
         }
     }
 
@@ -238,7 +242,7 @@ fun WhisperChatScreen(
                     modifier = Modifier.screenshotBypassGesture {
                         if (screenshotBypassEnabled) {
                             viewModel.setScreenshotBypass(false)
-                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
                         } else {
                             showBypassDialog = true
                         }
@@ -1435,12 +1439,16 @@ private fun MessageBubble(
                                     imageLoadFailed = false
                                 }
                             }
-                            val bitmap = remember(decryptedImageBytes) {
-                                decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
+                            var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+                            LaunchedEffect(decryptedImageBytes) {
+                                bitmap = withContext(Dispatchers.Default) {
+                                    decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
+                                }
                             }
-                            if (bitmap != null) {
+                            val bmp = bitmap
+                            if (bmp != null) {
                                 Image(
-                                    bitmap = bitmap.asImageBitmap(),
+                                    bitmap = bmp.asImageBitmap(),
                                     contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
                                     modifier = Modifier
                                         .widthIn(max = 256.dp)
@@ -1762,7 +1770,7 @@ private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int)
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (bounds.outWidth / (sample * 2) >= maxWidth && bounds.outHeight / (sample * 2) >= maxHeight) {
+    while (bounds.outWidth / (sample * 2) >= maxWidth || bounds.outHeight / (sample * 2) >= maxHeight) {
         sample *= 2
     }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })

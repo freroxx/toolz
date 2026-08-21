@@ -74,6 +74,6 @@ class WhisperHiddenChatsStore @Inject constructor(
     /** Wipe every hidden-chat record on this device (account deletion). */
     fun clearAll() {
         prefs.edit().clear().apply()
-        _hiddenChats.value = emptyMap()
+        _hiddenChats.update { emptyMap() }
     }
 }

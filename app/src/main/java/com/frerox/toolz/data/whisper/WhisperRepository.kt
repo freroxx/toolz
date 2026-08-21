@@ -1085,52 +1085,48 @@ class WhisperRepository @Inject constructor(
         val currentId = myId
         if (currentId.isBlank()) return Result.success(emptyList())
 
-        // Select ALL messages between the two users in the range (either direction):
-        // "clear history" must remove the partner's messages from this device too,
-        // not just my own sent rows.
-        val toDelete = db.from("messages").select {
-            filter {
-                or {
-                    and { eq("sender_id", currentId); eq("receiver_id", otherUserId) }
-                    and { eq("sender_id", otherUserId); eq("receiver_id", currentId) }
-                }
-                if (fromIso != null) gte("created_at", fromIso)
-                if (toIso != null) lte("created_at", toIso)
-            }
-            limit(500)
-        }.decodeList<WhisperMessage>()
-
-        val toDeleteIds = toDelete.map { it.id }.filter { it.isNotBlank() }
-        if (toDeleteIds.isNotEmpty()) {
-            // Tombstone every selected message locally so none of them resurrect on reload.
-            deletedStore.markMessagesDeleted(toDeleteIds)
-            toDeleteIds.forEach { messageDao.deleteMessage(it) }
-            // Server-side deletion is limited by RLS to rows I own (my sent messages).
-            // My sent messages are purged from the server too — including the partner's
-            // copies of them. The partner's OWN sent messages are cleared locally only:
-            // RLS forbids deleting another user's rows, and their copy remains theirs.
-            val mySentIds = db.from("messages").select {
+        // Paginated select to avoid silent truncation (was single limit 500 → 600-msg history left 100 resurrecting).
+        // "clear history" must remove partner's messages locally too, not just my sent rows.
+        val allToDelete = mutableListOf<WhisperMessage>()
+        var page = 0
+        while (true) {
+            val batch = db.from("messages").select {
                 filter {
-                    eq("sender_id", currentId)
-                    eq("receiver_id", otherUserId)
+                    or {
+                        and { eq("sender_id", currentId); eq("receiver_id", otherUserId) }
+                        and { eq("sender_id", otherUserId); eq("receiver_id", currentId) }
+                    }
                     if (fromIso != null) gte("created_at", fromIso)
                     if (toIso != null) lte("created_at", toIso)
                 }
-                limit(500)
-            }.decodeList<WhisperMessage>().map { it.id }.filter { it.isNotBlank() }
+                range((page * 500L), ((page + 1) * 500L - 1))
+            }.decodeList<WhisperMessage>()
+            if (batch.isEmpty()) break
+            allToDelete.addAll(batch)
+            if (batch.size < 500) break
+            page++
+            if (page > 20) break // safety cap 10k
+        }
+
+        val toDeleteIds = allToDelete.map { it.id }.filter { it.isNotBlank() }
+        if (toDeleteIds.isNotEmpty()) {
+            // Tombstone every selected message locally so none resurrect on reload.
+            deletedStore.markMessagesDeleted(toDeleteIds)
+            toDeleteIds.forEach { messageDao.deleteMessage(it) }
+            // Server-side deletion limited by RLS to rows I own (my sent messages).
+            // Delete exactly the my-sent subset via id list to keep local/server in sync.
+            val mySentIds = allToDelete.filter { it.senderId == currentId }.map { it.id }.filter { it.isNotBlank() }
             if (mySentIds.isNotEmpty()) {
-                db.from("messages").delete {
-                    filter {
-                        eq("sender_id", currentId)
-                        eq("receiver_id", otherUserId)
-                        if (fromIso != null) gte("created_at", fromIso)
-                        if (toIso != null) lte("created_at", toIso)
+                // Batch delete by ids to avoid range mismatch; chunk 200 per request.
+                for (chunk in mySentIds.chunked(200)) {
+                    db.from("messages").delete {
+                        filter { isIn("id", chunk) }
                     }
                 }
             }
         }
         invalidateConversationsCache()
-        toDelete
+        allToDelete
     }
 
     suspend fun restoreMessages(messages: List<WhisperMessage>): Result<Unit> = runCatching {
@@ -1138,6 +1134,7 @@ class WhisperRepository @Inject constructor(
         deletedStore.unmarkMessagesDeleted(messages.map { it.id })
         val inserts = messages.map { msg ->
             WhisperMessageInsert(
+                id = msg.id,
                 senderId = msg.senderId,
                 receiverId = msg.receiverId,
                 content = msg.content,
@@ -1618,16 +1615,11 @@ class WhisperRepository @Inject constructor(
 
         if (fofIds.isEmpty()) return Result.success(emptyList())
 
-        // Resolve profiles for these IDs
-        val recommended = mutableListOf<WhisperProfile>()
-        for (id in fofIds.take(20)) {
-            getProfile(id).getOrNull()?.let { p ->
-                if (!p.isPrivate && !p.isHiddenFromDiscover && !isUserBlockedByMe(p.id)) {
-                    recommended.add(p)
-                }
-            }
-            if (recommended.size >= 15) break
-        }
+        // Resolve profiles in ONE query instead of N+1 per-id getProfile calls.
+        val (blockedIds, profilesById) = batchProfilesById(fofIds.take(20))
+        val recommended = profilesById.values
+            .filter { !it.isPrivate && !it.isHiddenFromDiscover && it.id !in blockedIds }
+            .take(15)
         recommended
     }
 

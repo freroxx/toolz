@@ -78,7 +78,7 @@ class WhisperChatViewModel @Inject constructor(
     private val _undoState = MutableStateFlow(WhisperUndoUiState())
     val undoState: StateFlow<WhisperUndoUiState> = _undoState.asStateFlow()
 
-    private val _sessionExpired = MutableSharedFlow<Unit>(replay = 1)
+    private val _sessionExpired = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
 
     private var partnerPublicKey: String? = null
@@ -87,7 +87,7 @@ class WhisperChatViewModel @Inject constructor(
     private var typingDebounceJob: Job? = null
     private var presenceJob: Job? = null
     private var undoTimerJob: Job? = null
-    private var reactionSyncJob: Job? = null
+    private val reactionSyncJobs = mutableMapOf<String, Job>()
     private var messagesCollectionJob: Job? = null
     private var searchDebounceJob: Job? = null
     private var isCurrentlyTyping = false
@@ -213,7 +213,11 @@ class WhisperChatViewModel @Inject constructor(
                             val existing = existingById[newMsg.id]
                             if (existing != null) {
                                 newMsg.copy(
-                                    content = if (newMsg.isDeletedForEveryone || existing.isDeletedForEveryone) newMsg.content else existing.content,
+                                    content = when {
+                                        existing.isDeletedForEveryone -> existing.content
+                                        newMsg.isDeletedForEveryone -> newMsg.content
+                                        else -> existing.content
+                                    },
                                     reactions = if (newMsg.reactions.isEmpty()) existing.reactions else newMsg.reactions,
                                     replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
                                     replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
@@ -337,8 +341,8 @@ class WhisperChatViewModel @Inject constructor(
      * instead of overwriting, until the pending set drains.
      */
     private fun scheduleReactionSync(messageId: String, delayMs: Long = 400) {
-        reactionSyncJob?.cancel()
-        reactionSyncJob = viewModelScope.launch {
+        reactionSyncJobs[messageId]?.cancel()
+        reactionSyncJobs[messageId] = viewModelScope.launch {
             delay(delayMs)
             if (pendingReactions[messageId].isNullOrEmpty()) {
                 val reactionMap = repository.getReactionsForMessages(listOf(messageId)).getOrNull()
@@ -439,7 +443,8 @@ class WhisperChatViewModel @Inject constructor(
             replyToId = replyTarget?.id,
             replyToContent = replySnippet,
             replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User",
-            isPending = true
+            isPending = true,
+            createdAt = java.time.Instant.now().toString()
         )
 
         _uiState.update { state ->
@@ -1001,7 +1006,8 @@ class WhisperChatViewModel @Inject constructor(
         typingDebounceJob?.cancel()
         presenceJob?.cancel()
         undoTimerJob?.cancel()
-        reactionSyncJob?.cancel()
+        reactionSyncJobs.values.forEach { it.cancel() }
+        reactionSyncJobs.clear()
         messagesCollectionJob?.cancel()
         searchDebounceJob?.cancel()
     }
@@ -1029,7 +1035,7 @@ private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int)
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
-    while (bounds.outWidth / (sample * 2) >= maxWidth && bounds.outHeight / (sample * 2) >= maxHeight) {
+    while (bounds.outWidth / (sample * 2) >= maxWidth || bounds.outHeight / (sample * 2) >= maxHeight) {
         sample *= 2
     }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })

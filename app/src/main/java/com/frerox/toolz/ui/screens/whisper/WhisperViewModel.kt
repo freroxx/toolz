@@ -134,6 +134,12 @@ class WhisperViewModel @Inject constructor(
                     friendsJob?.cancel()
                     loadAllJob?.cancel()
                     stopHeartbeat()
+                    // Clear account-scoped local state so next login doesn't see previous user's hidden chats/mutes.
+                    hiddenChatsStore.clearAll()
+                    // Keep mutePrefs per-account? Clear for now to avoid cross-account leak (review HIGH).
+                    // Mutes are per-device but logically per-account; clear on logout.
+                    runCatching { mutePrefs.clearAll() }
+                    droppedNotifiedClientIds.clear()
                     _uiState.update { WhisperUiState() }
                 }
             }
@@ -197,7 +203,11 @@ class WhisperViewModel @Inject constructor(
 
     fun loadAll(isRefresh: Boolean = false) {
         // Guard against overlapping loads (e.g. refresh + auth-state re-entry)
-        if (loadAllJob?.isActive == true) return
+        // Refresh must not be dropped if a previous load is still active.
+        if (loadAllJob?.isActive == true) {
+            if (!isRefresh) return
+            loadAllJob?.cancel()
+        }
         loadAllJob = viewModelScope.launch {
             try {
                 if (isRefresh) _uiState.update { it.copy(isRefreshing = true) }
@@ -548,6 +558,9 @@ class WhisperViewModel @Inject constructor(
             // Regardless of the network outcome, wipe every session-scoped cache and
             // reset the UI so the user is never left staring at a stale account.
             repository.clearSessionScopedCaches()
+            hiddenChatsStore.clearAll()
+            runCatching { mutePrefs.clearAll() }
+            droppedNotifiedClientIds.clear()
             _uiState.update { WhisperUiState() }
             onComplete()
         }
@@ -557,9 +570,8 @@ class WhisperViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** Fingerprint of my own public key, for sharing with friends to verify in person. */
-    val myFingerprint: String?
-        get() = crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) }
+    /** Fingerprint of my own public key, for sharing with friends to verify in person. Cached to avoid KeyStore I/O on every composition. */
+    val myFingerprint: String? by lazy { crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) } }
 
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return

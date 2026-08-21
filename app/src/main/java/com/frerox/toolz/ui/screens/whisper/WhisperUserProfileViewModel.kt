@@ -20,6 +20,7 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.whisper.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -144,7 +145,7 @@ class WhisperUserProfileViewModel @Inject constructor(
                     } else {
                         // No exception thrown but the key could not be verified (e.g. profile
                         // missing); surface it instead of silently succeeding.
-                        _uiState.update { it.copy(error = UiText.DynamicString("Unable to verify this key.")) }
+                        _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_KeyVerifyFailed)) }
                     }
                 }
                 .onFailure { err -> handleError(err, "verifyKey") }
@@ -158,7 +159,7 @@ class WhisperUserProfileViewModel @Inject constructor(
                     if (accepted) {
                         loadData()
                     } else {
-                        _uiState.update { it.copy(error = UiText.DynamicString("Unable to accept this key.")) }
+                        _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_KeyAcceptFailed)) }
                     }
                 }
                 .onFailure { err -> handleError(err, "acceptNewKey") }

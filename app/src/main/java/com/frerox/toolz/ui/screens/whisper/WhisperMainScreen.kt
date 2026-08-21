@@ -117,9 +117,9 @@ fun WhisperMainScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (password == "SSForWhisperTester") {
+                if (isWhisperBypassPassword(password)) {
                     viewModel.setScreenshotBypass(true)
-                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
                 } else {
                     toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                 }
@@ -182,7 +182,7 @@ fun WhisperMainScreen(
                     modifier = Modifier.screenshotBypassGesture {
                         if (screenshotBypassEnabled) {
                             viewModel.setScreenshotBypass(false)
-                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
                         } else {
                             showBypassDialog = true
                         }
@@ -662,7 +662,7 @@ fun WhisperMainScreen(
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.st_Whisper_Cancel))
                     }
                 }
             }
@@ -1132,6 +1132,7 @@ private fun DiscoverTab(
                 }
             }
         } else {
+            val lazyListState = rememberLazyListState()
             if (uiState.isLoading && uiState.recommendedProfiles.isEmpty()) {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -1141,10 +1142,8 @@ private fun DiscoverTab(
                     items(3) { DiscoverSkeleton() }
                 }
             } else {
-                val lazyListState = rememberLazyListState()
-                
                 // Infinite scroll trigger
-                val shouldLoadMore = remember {
+                val shouldLoadMore = remember(uiState.hasReachedEndOfDiscover, uiState.isDiscoverLoadingNext) {
                     derivedStateOf {
                         val layoutInfo = lazyListState.layoutInfo
                         val totalItems = layoutInfo.totalItemsCount
@@ -1293,7 +1292,7 @@ private fun DiscoverUserCard(
                 ) {
                     Text(profile.effectiveName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
                     if (profile.isPrivate) {
-                        Icon(Icons.Rounded.Lock, "Private", tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Rounded.Lock, stringResource(R.string.st_Whisper_Private), tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
                     }
                     if (isAlreadyFriend) {
                         Icon(Icons.Rounded.VerifiedUser, "Friend", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
@@ -1581,7 +1580,7 @@ private fun ProfileTab(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        if (isPrivate) "Private" else "Public",
+                        if (isPrivate) stringResource(R.string.st_Whisper_Private) else stringResource(R.string.st_Whisper_Public),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1632,13 +1631,13 @@ private fun ProfileTab(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            "My Encryption Fingerprint",
+                            stringResource(R.string.st_Whisper_Fingerprint_Title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Text(
-                        "Share this with friends so they can verify your identity. The fingerprint is generated from the key on this device and never leaves it.",
+                        stringResource(R.string.st_Whisper_Fingerprint_Desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1702,7 +1701,7 @@ private fun ProfileTab(
                 Text("Profile Visibility", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 ToolzConnectedButtonGroup(
                     selectedIndex = if (isPrivate) 1 else 0,
-                    options = listOf("Public", "Private"),
+                    options = listOf(stringResource(R.string.st_Whisper_Public), stringResource(R.string.st_Whisper_Private)),
                     onOptionSelected = { isPrivate = it == 1 },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1736,7 +1735,7 @@ private fun ProfileTab(
                         tint = if (isHidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Hide from Discover", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_Whisper_HideFromDiscover), fontWeight = FontWeight.Bold)
                         Text(
                             "You won't appear in recommendations or search. People can only find you if you add them first.",
                             style = MaterialTheme.typography.bodySmall,
@@ -2154,21 +2153,22 @@ private fun ChatOptionsSheet(
 
             // View Profile
             ListItem(
-                headlineContent = { Text("View Profile", fontWeight = FontWeight.Medium) },
                 leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
-            )
+            ) {
+                Text("View Profile", fontWeight = FontWeight.Medium)
+            }
 
             // Clear Chat
             ListItem(
-                headlineContent = { Text("Clear chat history", fontWeight = FontWeight.Medium) },
                 leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
-            )
+            ) {
+                Text("Clear chat history", fontWeight = FontWeight.Medium)
+            }
 
             // Mute / Unmute
             ListItem(
-                headlineContent = { Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.Medium) },
                 leadingContent = {
                     Icon(
                         if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
@@ -2177,19 +2177,14 @@ private fun ChatOptionsSheet(
                     )
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
-            )
+            ) {
+                Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.Medium)
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             // Block / Unblock
             ListItem(
-                headlineContent = {
-                    Text(
-                        if (isBlocked) "Unblock user" else "Block user",
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
-                },
                 leadingContent = {
                     Icon(
                         if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
@@ -2198,18 +2193,23 @@ private fun ChatOptionsSheet(
                     )
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
-            )
+            ) {
+                Text(
+                    if (isBlocked) "Unblock user" else "Block user",
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                )
+            }
 
             // Hide chat (hides from the chats tab, non-destructive)
             ListItem(
-                headlineContent = {
-                    Text(stringResource(R.string.st_Whisper_HideChat), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
-                },
                 leadingContent = {
                     Icon(Icons.Rounded.VisibilityOff, null, tint = MaterialTheme.colorScheme.error)
                 },
                 modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteChat() }
-            )
+            ) {
+                Text(stringResource(R.string.st_Whisper_HideChat), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+            }
 
             Spacer(Modifier.height(24.dp))
         }

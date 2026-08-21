@@ -100,9 +100,9 @@ fun WhisperAuthScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (password == "SSForWhisperTester") {
+                if (isWhisperBypassPassword(password)) {
                     viewModel.setScreenshotBypass(true)
-                    toastState.show("Succesfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
                 } else {
                     toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                 }
@@ -137,7 +137,7 @@ fun WhisperAuthScreen(
                     modifier = Modifier.screenshotBypassGesture {
                         if (screenshotBypassEnabled) {
                             viewModel.setScreenshotBypass(false)
-                            toastState.show("Succesfully enabled screenshot block", WhisperToastType.SUCCESS)
+                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
                         } else {
                             showBypassDialog = true
                         }

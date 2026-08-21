@@ -107,6 +107,6 @@ class WhisperMutePreferences @Inject constructor(
     /** Wipe every mute record on this device (account deletion). */
     fun clearAll() {
         prefs.edit().clear().apply()
-        _mutedUsers.value = emptySet()
+        _mutedUsers.update { emptySet() }
     }
 }
