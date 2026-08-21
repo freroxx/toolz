@@ -194,7 +194,7 @@ internal fun PermissionGate(onGrant: () -> Unit) {
             .padding(bottom = 16.dp),
         shape = RoundedCornerShape(36.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
     ) {
         Column(
@@ -247,11 +247,10 @@ private fun DisabledServiceCard(
     primaryLabel: String,
     onPrimary: () -> Unit
 ) {
-    ElevatedCard(
+    Card(
+        
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
     ) {
         Row(
             modifier = Modifier
@@ -284,11 +283,10 @@ private fun ServiceWarningCard(
     primaryLabel: String,
     onPrimary: () -> Unit
 ) {
-    ElevatedCard(
+    Card(
+        
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
     ) {
         Row(
             modifier = Modifier
@@ -542,12 +540,10 @@ internal fun AnalyzerTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            ElevatedCard(
+            Card(
+                
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.st_WifiTweaksScreen_7e8f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
@@ -564,12 +560,10 @@ internal fun AnalyzerTab(
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+            Card(
+                
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -664,12 +658,10 @@ internal fun AnalyzerTab(
             ExportActionsCard()
         }
         item {
-            ElevatedCard(
+            Card(
+                
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Rounded.BarChart, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
@@ -694,7 +686,8 @@ internal fun AnalyzerTab(
 
 @Composable
 private fun ChannelSpectrumCard(state: WifiTweaksUiState) {
-    ElevatedCard(
+    Card(
+        
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
@@ -759,9 +752,10 @@ private fun SecurityAuditCard(state: WifiTweaksUiState) {
         open <= 2 -> 55
         else -> 30
     }
-    ElevatedCard(
+    Card(
+        
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = if ((score ?: 100) < 50) MaterialTheme.colorScheme.errorContainer.copy(alpha=0.7f) else MaterialTheme.colorScheme.surfaceContainerHigh)
+        colors = CardDefaults.cardColors(containerColor = if ((score ?: 100) < 50) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(if ((score ?: 100) >= 70) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.error.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
@@ -986,12 +980,10 @@ internal fun DnsEngineTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+            Card(
+                
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1038,12 +1030,10 @@ internal fun DnsEngineTab(
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+            Card(
+                
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.st_WifiTweaksScreen_c9d0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     OutlinedTextField(
@@ -1063,12 +1053,10 @@ internal fun DnsEngineTab(
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+            Card(
+                
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1265,12 +1253,10 @@ internal fun DiagnosticsTab(
         }
 
         item {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                )
-            ) {
+            Card(
+                
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(stringResource(R.string.st_WifiTweaksScreen_i9j0), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     
@@ -1320,12 +1306,10 @@ internal fun DiagnosticsTab(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.st_WifiTweaksScreen_m3n4), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp))
-                ElevatedCard(
-                    shape = RoundedCornerShape(32.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-                    )
-                ) {
+                Card(
+                    
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),                ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         ConfigGrid(state.networkConfig)
                     }
@@ -1381,12 +1365,10 @@ internal fun TrafficTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            ElevatedCard(
+            Card(
+                
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                )
-            ) {
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
                 Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.st_WifiTweaksScreen_u1v2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Row(
@@ -1427,12 +1409,10 @@ internal fun TrafficTab(
 
 @Composable
 private fun TrafficProcessCard(process: ProcessNetworkUsage) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
-    ) {
+    Card(
+        
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),    ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1505,9 +1485,10 @@ private fun ShizukuCockpit(
         shizuku.isReachable || shizuku.isAuthorized -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onErrorContainer
     }
-    ElevatedCard(
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = container.copy(alpha = 0.95f))
+    Card(
+        
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = container)
     ) {
         Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Row(
@@ -1595,7 +1576,6 @@ private fun StatusBadge(label: String, value: String, success: Boolean) {
         )
     }
 }
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileCard(
@@ -1606,49 +1586,61 @@ private fun ProfileCard(
     var showDetails by remember { mutableStateOf(false) }
 
     Surface(
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
-        modifier = Modifier.combinedClickable(
-            onClick = onApply,
-            onLongClick = { showDetails = true }
-        )
+        shape = NetTokens.CardShape,
+        color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onApply,
+                onLongClick = { showDetails = true }
+            )
     ) {
-        Row(
-            modifier = Modifier
-                .width(280.dp)
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(profile.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+        Column(modifier = Modifier.padding(NetTokens.SpacingL), verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)) {
+                Surface(
+                    shape = NetTokens.InnerShape,
+                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            profile.icon,
+                            contentDescription = null,
+                            tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(profile.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(profile.accentLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (active) NetPill("Active", emphasized = true)
             }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(profile.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(
-                    text = profile.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(8.dp))
-                AssistChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text(if (active) "Active" else profile.accentLabel) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = AssistChipDefaults.assistChipColors(
-                        disabledContainerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-                        disabledLabelColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                    )
-                )
+
+            Text(
+                profile.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onApply,
+                    shape = RoundedCornerShape(50),
+                    colors = if (active) ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.secondaryContainer
+                    ) else ButtonDefaults.buttonColors()
+                ) {
+                    Text(if (active) "Re-apply" else "Apply")
+                }
+                FilledTonalButton(onClick = { showDetails = true }, shape = RoundedCornerShape(50)) {
+                    Text("Details")
+                }
             }
         }
     }
@@ -1656,31 +1648,12 @@ private fun ProfileCard(
     if (showDetails) {
         AlertDialog(
             onDismissRequest = { showDetails = false },
+            title = { Text(profile.title, fontWeight = FontWeight.Bold) },
+            text = { Text(profile.description) },
             confirmButton = {
-                Button(onClick = onApply) {
-                    Text("Apply Profile")
-                }
+                TextButton(onClick = { showDetails = false }) { Text("Close") }
             },
-            dismissButton = {
-                TextButton(onClick = { showDetails = false }) {
-                    Text("Close")
-                }
-            },
-            title = { Text(profile.title, fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(profile.description)
-                    Text("Included Tweaks:", fontWeight = FontWeight.Bold)
-                    profile.tweakIds.forEach { id ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(id.replace("_", " ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            },
-            shape = RoundedCornerShape(28.dp)
+            shape = NetTokens.CardShape
         )
     }
 }
@@ -1695,12 +1668,10 @@ private fun TweakCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    ElevatedCard(
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-        )
-    ) {
+    Card(
+        
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),    ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
@@ -1991,7 +1962,7 @@ private fun DetailRow(label: String, value: String) {
 private fun InsightChip(icon: ImageVector, text: String) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -2344,7 +2315,8 @@ internal fun SpeedHistoryCard(
     history: List<com.frerox.toolz.data.network.SpeedHistoryEntity>,
     onClear: () -> Unit
 ) {
-    ElevatedCard(
+    Card(
+        
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {

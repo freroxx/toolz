@@ -239,7 +239,7 @@ fun NetworkSuiteScreen(
             topBar = {
                 Surface(
                     shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 3.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {

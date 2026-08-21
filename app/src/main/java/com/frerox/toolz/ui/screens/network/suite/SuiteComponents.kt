@@ -123,7 +123,7 @@ internal fun GlassCard(
         onClick = {},
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)),
         elevation = 2.dp
     ) {

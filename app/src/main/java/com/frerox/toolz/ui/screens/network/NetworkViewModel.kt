@@ -256,14 +256,16 @@ class NetworkViewModel @Inject constructor(
                 emitEvent("Connect to Wi-Fi before scanning the subnet.")
                 return@launch
             }
-            updateState { copy(isScanningDevices = true, scannedDevices = emptyList(), topology = NetworkTopology()) }
+            updateState { copy(isScanningDevices = true, scannedDevices = emptyList(), newDeviceIps = emptySet(), topology = NetworkTopology()) }
             appendLog("> subnet scan: $gateway/24")
             val knownDevices = linkedMapOf<String, NetworkDevice>()
+            val freshIps = mutableSetOf<String>()
             networkScanner.scanSubnetDelta(gateway).collect { device ->
                 // P4 delta detection: flag devices whose MAC we never saw in prior scans
                 if (device.mac != "Unknown" && previouslySeenMacs.isNotEmpty() && device.mac !in previouslySeenMacs) {
                     appendLog("DISCOVERY · New device joined: ${device.hostname.ifBlank { device.ip }} (${device.vendor})")
                     emitEvent("New device: ${device.hostname.ifBlank { device.ip }} · ${device.vendor}")
+                    freshIps += device.ip
                 }
                 knownDevices[device.ip] = device
                 val merged = knownDevices.values.sortedWith(
@@ -301,6 +303,7 @@ class NetworkViewModel @Inject constructor(
             updateState {
                 copy(
                     scannedDevices = mergedFinal,
+                    newDeviceIps = freshIps.toSet(),
                     topology = buildTopology(mergedFinal),
                     isScanningDevices = false
                 )
@@ -453,6 +456,8 @@ class NetworkViewModel @Inject constructor(
                                 cacheAnalytics = cache,
                                 ipAudit = ipAudit,
                                 cellularAudit = cellular,
+                                // keep the switch truthful once the system tells us the real state
+                                isDataEnabled = cellular.mobileDataEnabled ?: isDataEnabled,
                                 activeProcesses = processes,
                                 privateDnsMode = dnsConfig.first.replaceFirstChar(Char::titlecase),
                                 privateDnsHost = dnsConfig.second

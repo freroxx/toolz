@@ -1127,7 +1127,9 @@ class WifiTweaksViewModel @Inject constructor(
                         linkSpeed = info.linkSpeed,
                         frequency = info.frequency,
                         bssid = info.bssid,
-                        isConnected = info.ssid != "Unknown" && info.ssid != "Protected/Hidden",
+                        isConnected = info.isConnected || (
+                            info.ssid != "Unknown" && info.ssid.isNotBlank() && info.rssi > -99
+                        ),
                         wifi6ECapable = info.frequency > 5925,
                         wifi7Capable = info.wifiStandard.contains("be", ignoreCase = true),
                         isThrottlingEnabled = isThrottling

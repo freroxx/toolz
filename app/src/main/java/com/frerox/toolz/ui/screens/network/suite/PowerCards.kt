@@ -30,7 +30,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.rounded.Hub
+import com.frerox.toolz.ui.screens.network.suite.NetPill
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.Print
+import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Security
@@ -61,7 +69,7 @@ internal fun PublicIpCard(
     state: NetworkPowerUiState,
     onRefresh: () -> Unit
 ) {
-    GlassCard(
+    NetCard(
         title = "Public identity",
         icon = Icons.Rounded.Public,
         subtitle = "Exit IP as the internet sees it",
@@ -88,17 +96,102 @@ internal fun DeviceMeshCard(
     state: NetworkPowerUiState,
     onScanDevices: () -> Unit
 ) {
-    GlassCard(
+    val devices = state.scannedDevices
+    val gateway = devices.firstOrNull { it.isGateway }
+    val named = devices.count { it.hostname != "Unknown" }
+    NetCard(
         title = "Local mesh",
+        subtitle = when {
+            state.isScanningDevices -> "Scanning 254 addresses…"
+            devices.isEmpty() -> "Nothing scanned yet"
+            else -> "${devices.size} device${if (devices.size == 1) "" else "s"} · $named named"
+        },
         icon = Icons.Rounded.Hub,
-        subtitle = "${state.scannedDevices.size} devices discovered",
         trailing = {
-            Button(onClick = onScanDevices, enabled = !state.isScanningDevices, shape = RoundedCornerShape(20.dp)) {
-                Text(if (state.isScanningDevices) "Scanning" else "Scan")
+            Button(onClick = onScanDevices, enabled = !state.isScanningDevices, shape = RoundedCornerShape(50)) {
+                if (state.isScanningDevices) {
+                    CircularProgressIndicator(modifier = Modifier.height(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Scan")
+                }
             }
         }
     ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("Found", "${devices.size}", modifier = Modifier.weight(1f))
+            StatTile(
+                "Gateway",
+                gateway?.ip?.substringAfterLast(".")?.let { "…$it" } ?: "—",
+                subvalue = gateway?.vendor?.takeIf { it != "Unknown" },
+                modifier = Modifier.weight(1f)
+            )
+            StatTile("New", "${state.newDeviceIps.size}", tint = if (state.newDeviceIps.isEmpty()) null else MaterialTheme.colorScheme.tertiary, modifier = Modifier.weight(1f))
+        }
+
         NetworkMap(state)
+
+        if (devices.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                devices.sortedWith(
+                    compareByDescending<com.frerox.toolz.data.network.NetworkDevice> { it.isGateway }
+                        .thenByDescending { it.hostname != "Unknown" }
+                        .thenBy { it.ip }
+                ).take(8).forEach { dev ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                when {
+                                    dev.isGateway -> Icons.Rounded.Router
+                                    dev.typeLabel.contains("Printer", true) -> Icons.Rounded.Print
+                                    dev.typeLabel.contains("Chromecast", true) || dev.typeLabel.contains("cast", true) -> Icons.Rounded.Cast
+                                    else -> Icons.Rounded.Devices
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.height(18.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    dev.hostname.ifBlank { dev.ip }.let { if (it == "Unknown") dev.ip else it },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    buildString {
+                                        append(dev.ip)
+                                        dev.vendor.takeIf { it != "Unknown" }?.let { append(" · "); append(it) }
+                                        dev.latencyMs?.let { append(" · ${it}ms") }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (dev.ip in state.newDeviceIps) NetPill("NEW", emphasized = true)
+                            if (dev.isGateway) NetPill("GW", emphasized = true)
+                        }
+                    }
+                }
+                if (devices.size > 8) {
+                    Text(
+                        "+${devices.size - 8} more on this network",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -108,13 +201,15 @@ internal fun MobileDataCard(
     privilegedReady: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
-    GlassCard(title = "Mobile data", icon = Icons.Rounded.CellTower, subtitle = "Radio control") {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(if (state.isDataEnabled) "Enabled" else "Disabled", fontWeight = FontWeight.Bold)
+    NetCard(
+        title = "Mobile data",
+        subtitle = when {
+            !privilegedReady -> "Requires Shizuku"
+            state.cellularAudit.mobileDataEnabled == null -> "State reported by system"
+            else -> "System reports: " + if (state.isDataEnabled) "enabled" else "disabled"
+        },
+        icon = Icons.Rounded.CellTower,
+        trailing = {
             Switch(
                 checked = state.isDataEnabled,
                 onCheckedChange = onToggle,
@@ -125,8 +220,11 @@ internal fun MobileDataCard(
                 }
             )
         }
-        Spacer(Modifier.height(10.dp))
-        StatusBadge("Privileged", if (privilegedReady) "Bound" else "Locked")
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NetPill(if (privilegedReady) "Shizuku bound" else "Shizuku locked", emphasized = privilegedReady)
+            state.cellularAudit.tech.takeIf { it != "Unknown" }?.let { NetPill(it) }
+        }
     }
 }
 
@@ -135,7 +233,7 @@ internal fun PortScanCard(
     state: NetworkPowerUiState,
     onScanPorts: () -> Unit
 ) {
-    GlassCard(title = "Gateway probe", icon = Icons.Rounded.Security, subtitle = "Common service ports") {
+    NetCard(title = "Gateway probe", icon = Icons.Rounded.Security, subtitle = "Common service ports") {
         OutlinedButton(onClick = onScanPorts, enabled = !state.isScanningPorts, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
             Text(if (state.isScanningPorts) "Probing…" else "Probe gateway")
         }
@@ -152,7 +250,7 @@ internal fun PortScanCard(
 
 @Composable
 internal fun LatencyStreamCard(state: NetworkPowerUiState) {
-    GlassCard(title = "Latency stream", icon = Icons.Rounded.Timeline, subtitle = "Rolling gateway samples with jitter alert") {
+    NetCard(title = "Latency stream", icon = Icons.Rounded.Timeline, subtitle = "Rolling gateway samples with jitter alert") {
         LatencyChart(samples = state.pingSamples, modifier = Modifier.fillMaxWidth().height(148.dp))
         Spacer(Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -169,7 +267,7 @@ internal fun LatencyStreamCard(state: NetworkPowerUiState) {
 
 @Composable
 internal fun CellularAuditCard(state: NetworkPowerUiState) {
-    GlassCard(title = "Cellular audit", icon = Icons.Rounded.CellTower, subtitle = "Access tech and signal context") {
+    NetCard(title = "Cellular audit", icon = Icons.Rounded.CellTower, subtitle = "Access tech and signal context") {
         MetricRow("Tech", state.cellularAudit.tech)
         MetricRow("Cell ID", state.cellularAudit.cellId)
         MetricRow("Signal", state.cellularAudit.signalStrength.take(24))
@@ -179,7 +277,7 @@ internal fun CellularAuditCard(state: NetworkPowerUiState) {
 
 @Composable
 internal fun RoutesAuditCard(state: NetworkPowerUiState) {
-    GlassCard(title = "Routes & peers", icon = Icons.Rounded.Hub, subtitle = "Privileged route-table awareness") {
+    NetCard(title = "Routes & peers", icon = Icons.Rounded.Hub, subtitle = "Privileged route-table awareness") {
         if (state.ipAudit.routes.isEmpty() && state.ipAudit.neighbors.isEmpty()) {
             Text(
                 "Loads automatically when Shizuku access is available.",
@@ -201,7 +299,7 @@ internal fun RoutesAuditCard(state: NetworkPowerUiState) {
 
 @Composable
 internal fun SocketsCard(state: NetworkPowerUiState) {
-    GlassCard(title = "Live sockets", icon = Icons.Rounded.Security, subtitle = "Established connections inventory") {
+    NetCard(title = "Live sockets", icon = Icons.Rounded.Security, subtitle = "Established connections inventory") {
         if (state.activeProcesses.isEmpty()) {
             Text(
                 "Waiting for socket state from the privileged layer.",

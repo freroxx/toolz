@@ -30,7 +30,9 @@ data class WifiInfoState(
     val channel: Int = 0,
     val signalLevel: Int = 0,
     val dnsServers: List<String> = emptyList(),
-    val rssiHistory: List<Int> = emptyList()
+    val rssiHistory: List<Int> = emptyList(),
+    /** True when the active network actually has WIFI transport (not an SSID-text guess). */
+    val isConnected: Boolean = false
 )
 
 data class ProcessNetworkUsage(
@@ -280,6 +282,8 @@ data class NetworkPowerUiState(
     val scannedDevices: List<NetworkDevice> = emptyList(),
     val topology: NetworkTopology = NetworkTopology(),
     val isScanningDevices: Boolean = false,
+    /** IPs first seen during the most recent scan — drives the NEW badge. */
+    val newDeviceIps: Set<String> = emptySet(),
     val scannedPorts: List<ScannedPort> = emptyList(),
     val isScanningPorts: Boolean = false,
     val speedTestResult: SpeedTestResult = SpeedTestResult(),

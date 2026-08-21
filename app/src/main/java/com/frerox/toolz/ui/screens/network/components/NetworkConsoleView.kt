@@ -197,9 +197,8 @@ fun NetworkConsoleView(
         // Terminal
         Surface(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            color = Color.Black.copy(alpha = 0.03f),
-            shape = RoundedCornerShape(24.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            shape = RoundedCornerShape(20.dp)
         ) {
             if (filteredLogs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -222,9 +221,13 @@ fun NetworkConsoleView(
         OutlinedTextField(
             value = commandInput,
             onValueChange = { commandInput = it },
-            placeholder = { Text("Enter shell command...") },
+            placeholder = { Text("Enter shell command…", style = MaterialTheme.typography.bodyMedium) },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(50),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+            ),
             singleLine = true,
             enabled = isShizukuReady,
             textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),

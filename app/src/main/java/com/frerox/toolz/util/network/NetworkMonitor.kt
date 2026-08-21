@@ -78,10 +78,16 @@ class NetworkMonitor @Inject constructor(
         val ipString = formatIpAddress(wifiInfo?.ipAddress ?: 0).takeIf { it != "0.0.0.0" } ?: "0.0.0.0"
         val bssid = wifiInfo?.bssid?.takeIf { it != "02:00:00:00:00:00" && it.isNotBlank() } ?: "Unavailable"
 
+        val activeCaps = runCatching {
+            connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
+        }.getOrNull()
+        val wifiConnected = activeCaps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+
         return WifiInfoState(
-            rssi = wifiInfo?.rssi ?: -100,
-            linkSpeed = wifiInfo?.linkSpeed ?: 0,
-            gateway = gateway,
+            isConnected = wifiConnected,
+            rssi = if (wifiConnected) wifiInfo?.rssi ?: -100 else -100,
+            linkSpeed = if (wifiConnected) wifiInfo?.linkSpeed ?: 0 else 0,
+            gateway = if (wifiConnected) gateway else "0.0.0.0",
             ssid = ssid,
             bssid = bssid,
             frequency = frequency,
