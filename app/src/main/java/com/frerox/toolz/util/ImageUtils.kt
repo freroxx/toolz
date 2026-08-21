@@ -34,15 +34,14 @@ object ImageUtils {
     fun loadOptimizedBitmap(context: Context, uri: Uri, maxDimension: Int = 4096): Bitmap? {
         var pfd: ParcelFileDescriptor? = null
         return try {
-            pfd = context.contentResolver.openFileDescriptor(uri, "r")
-            val fd: FileDescriptor = pfd?.fileDescriptor ?: return null
-
             val options = BitmapFactory.Options().apply {
                 inJustDecodeBounds = true
             }
 
-            // 1. Get dimensions
-            BitmapFactory.decodeFileDescriptor(fd, null, options)
+            // 1. Get dimensions via InputStream (independent descriptor so FD offset is not consumed)
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            } ?: return null
 
             val originalWidth = options.outWidth
             val originalHeight = options.outHeight
@@ -53,17 +52,31 @@ object ImageUtils {
             options.inJustDecodeBounds = false
             options.inPreferredConfig = Bitmap.Config.ARGB_8888
 
-            // 3. Decode scaled bitmap
-            var bitmap = BitmapFactory.decodeFileDescriptor(fd, null, options) ?: return null
+            // 3. Decode scaled bitmap via fresh FD (separate from bounds pass)
+            pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            val fd2 = pfd?.fileDescriptor ?: return null
+            var bitmap = BitmapFactory.decodeFileDescriptor(fd2, null, options) ?: return null
 
-            // 4. Handle EXIF rotation
-            val rotation = getRotationDegrees(fd)
+            // 4. Handle EXIF rotation via fresh InputStream (avoid reusing consumed FD)
+            val rotation = context.contentResolver.openInputStream(uri)?.use { stream ->
+                try {
+                    val exif = ExifInterface(stream)
+                    when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                        else -> 0
+                    }
+                } catch (_: Exception) {
+                    0
+                }
+            } ?: 0
             if (rotation != 0) {
                 bitmap = rotateBitmap(bitmap, rotation)
             }
 
             bitmap
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         } finally {
             try { pfd?.close() } catch (_: Exception) {}
@@ -72,11 +85,8 @@ object ImageUtils {
 
     private fun computeInSampleSize(width: Int, height: Int, maxDim: Int): Int {
         var inSampleSize = 1
-        val larger = maxOf(width, height)
-        if (larger > maxDim) {
-            while (larger / (inSampleSize * 2) >= maxDim) {
-                inSampleSize *= 2
-            }
+        while (maxOf(width, height) / inSampleSize > maxDim) {
+            inSampleSize *= 2
         }
         return inSampleSize
     }

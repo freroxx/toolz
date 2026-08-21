@@ -156,7 +156,7 @@
     <string name="st_Whisper_Profile_KeyVerifiedTitle">Encryption Verified</string>
     <string name="st_Whisper_Profile_KeyUnverifiedTitle">E2EE Security Fingerprint</string>
     <string name="st_Whisper_Profile_KeyVerifiedDesc">You verified this key by comparing fingerprints. This conversation is protected from impersonation.</string>
-    <string name="st_Whisper_Profile_KeyChangedDesc">This key changed since your last conversation. Compare the fingerprint below before trusting it again.</string>
+    <string name="st_Whisper_Profile_KeyChangedDesc">Safety number changed. This usually means they reinstalled. Compare the fingerprint below before trusting it again.</string>
     <string name="st_Whisper_Profile_KeyFingerprintDesc">Compare this key fingerprint with %s to verify your end-to-end encrypted session is secure.</string>
     <string name="st_Whisper_Profile_AcceptNewKey">Accept new key</string>
     <string name="st_Whisper_Profile_NotVerifiedNote">Not verified yet — compare fingerprints in person to confirm this key.</string>
@@ -166,7 +166,7 @@
     <string name="st_Whisper_Chat_FriendGateBlocked">You are blocked or cannot message this user.</string>
     <string name="st_Whisper_Chat_BlockedByOther">You have been blocked by this user.</string>
     <string name="st_Whisper_Chat_BlockedByMe">You have blocked this user.</string>
-    <string name="st_Whisper_Chat_KeyChanged">Encryption key changed — verify before trusting this conversation.</string>
+    <string name="st_Whisper_Chat_KeyChanged">Safety number changed — %s may have reinstalled Whisper</string>
     <string name="st_Whisper_Chat_ClearedMessages">Cleared %d messages</string>
     <string name="st_Whisper_Chat_InputBlocked">You have been blocked</string>
     <string name="st_Whisper_Chat_InputUnblock">Unblock user to send</string>
@@ -213,11 +213,11 @@
     <string name="st_Whisper_Mute_Forever">Forever</string>
     <string name="st_Whisper_BlockConfirmTitle">Block %s?</string>
     <string name="st_Whisper_BlockConfirmDesc">They won\'t be able to message you.</string>
-    <string name="st_Whisper_KeyChanged_Title">Encryption key changed</string>
-    <string name="st_Whisper_KeyChanged_Desc">%s\'s encryption key is different from the one you last used together. Compare the fingerprint below with the one shown on their device before continuing.</string>
+    <string name="st_Whisper_KeyChanged_Title">Safety number changed</string>
+    <string name="st_Whisper_KeyChanged_Desc">%s\'s safety number changed. This usually happens when they reinstall the app or switch devices. If you expected this, you can accept the new key. Otherwise, compare fingerprints in person.</string>
     <string name="st_Whisper_PartnerFingerprint">%s\'s fingerprint</string>
     <string name="st_Whisper_YourFingerprint">Your fingerprint</string>
-    <string name="st_Whisper_KeyChanged_Warning">Only continue if the fingerprint matches the one on their device. If it doesn\'t, the person may be impersonated.</string>
+    <string name="st_Whisper_KeyChanged_Warning">Tip: Ask if they recently reinstalled. If the fingerprint on their device matches, it\'s safe to accept.</string>
     <string name="st_Whisper_Verify">Verify</string>
     <string name="st_Whisper_AcceptAnyway">Accept anyway</string>
     <string name="st_Whisper_FriendRequestSent">Friend request sent</string>

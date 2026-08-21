@@ -23,6 +23,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -62,7 +63,7 @@ class WhisperMutePreferences @Inject constructor(
      */
     fun muteUser(userId: String, untilEpochMs: Long = Long.MAX_VALUE) {
         prefs.edit().putLong("mute_$userId", untilEpochMs).apply()
-        _mutedUsers.value = _mutedUsers.value + userId
+        _mutedUsers.update { it + userId }
     }
 
     /**
@@ -70,18 +71,37 @@ class WhisperMutePreferences @Inject constructor(
      */
     fun unmuteUser(userId: String) {
         prefs.edit().remove("mute_$userId").apply()
-        _mutedUsers.value = _mutedUsers.value - userId
+        _mutedUsers.update { it - userId }
     }
 
     /**
      * Check whether a user is currently muted.
+     * Pure for active mutes; expired entries are cleaned atomically without
+     * blocking the query path via a synchronous update.
      */
     fun isMuted(userId: String): Boolean {
+        if (userId !in _mutedUsers.value) return false
         val until = prefs.getLong("mute_$userId", 0L)
         if (until == 0L) return false
         if (until == Long.MAX_VALUE || until > System.currentTimeMillis()) return true
-        unmuteUser(userId)
+        // Expired — clean up atomically (still inside query but via atomic update).
+        prefs.edit().remove("mute_$userId").apply()
+        _mutedUsers.update { it - userId }
         return false
+    }
+
+    /** Remove expired mute entries from prefs and in-memory state. */
+    fun pruneExpiredMutes() {
+        val now = System.currentTimeMillis()
+        val expired = _mutedUsers.value.filter { uid ->
+            val until = prefs.getLong("mute_$uid", 0L)
+            until != Long.MAX_VALUE && until != 0L && until <= now
+        }
+        if (expired.isEmpty()) return
+        val editor = prefs.edit()
+        expired.forEach { editor.remove("mute_$it") }
+        editor.apply()
+        _mutedUsers.update { it - expired.toSet() }
     }
 
     /** Wipe every mute record on this device (account deletion). */

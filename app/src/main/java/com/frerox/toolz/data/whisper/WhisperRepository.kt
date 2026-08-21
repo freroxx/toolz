@@ -55,6 +55,7 @@ import kotlinx.serialization.json.put
 
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 @Singleton
@@ -94,7 +95,7 @@ class WhisperRepository @Inject constructor(
 
     // Pairs (userId|publicKey) already surfaced through receiveKeyChanged, so a changed
     // key is signalled only once per change instead of on every profile read.
-    private val receiveKeyNotified = mutableSetOf<String>()
+    private val receiveKeyNotified = Collections.synchronizedSet(mutableSetOf<String>())
     private val _receiveKeyChanged = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
     /** Emits a partner userId when their fresh server key differs from the accepted trusted key. */
@@ -317,12 +318,13 @@ class WhisperRepository @Inject constructor(
 
     suspend fun searchProfiles(query: String): Result<List<WhisperProfile>> = runCatching {
         val q = query.trim()
+        val escaped = q.replace("%", "\\%").replace("_", "\\_")
         db.from("profiles")
             .select {
                 filter {
                     or {
-                        ilike("username", "%$q%")
-                        ilike("display_name", "%$q%")
+                        ilike("username", "%$escaped%")
+                        ilike("display_name", "%$escaped%")
                     }
                     neq("id", myId)
                     eq("hide_from_discover", false)
@@ -360,11 +362,11 @@ class WhisperRepository @Inject constructor(
             when {
                 update.publicKey != null -> put("public_key", update.publicKey!!)
                 pubKey != null -> {
-                    val serverKey = runCatching {
+                    val serverKeyResult = runCatching {
                         db.from("profiles").select { filter { eq("id", currentId) } }
                             .decodeSingleOrNull<WhisperProfile>()?.publicKey
-                    }.getOrNull()
-                    if (serverKey.isNullOrBlank()) put("public_key", pubKey)
+                    }
+                    if (serverKeyResult.isSuccess && serverKeyResult.getOrNull().isNullOrBlank()) put("public_key", pubKey)
                 }
             }
         }
@@ -376,7 +378,8 @@ class WhisperRepository @Inject constructor(
         val currentId = myId
         if (currentId.isBlank()) return@runCatching
         val now = java.time.OffsetDateTime.now().toString()
-        db.from("profiles").update(WhisperProfileUpdate(lastSeenAt = now)) {
+        val body = buildJsonObject { put("last_seen_at", now) }
+        db.from("profiles").update(body) {
             filter { eq("id", currentId) }
         }
     }
@@ -577,19 +580,21 @@ class WhisperRepository @Inject constructor(
             outgoingQueue.enqueue(queued)
             deliveryScheduler.scheduleNow()
             
-            val fakeMsg = WhisperMessage(
+            val pendingMsg = WhisperMessage(
                 id = clientId,
                 senderId = currentId,
                 receiverId = receiverId,
-                content = content,
+                content = queued.encryptedContent,
+                contentIv = queued.contentIv,
                 replyToId = replyToId,
                 isPending = true,
                 createdAt = queued.createdAt
             )
-            // Cache pending message
-            messageDao.insertMessage(fakeMsg.toEntity())
-            
-            return@runCatching fakeMsg
+            // Cache pending ciphertext (never plaintext) so Room never holds cleartext;
+            // getMessagesFlow decrypts it on read via peerKeyFor.
+            messageDao.insertMessage(pendingMsg.toEntity())
+            // Return plaintext for immediate UI; only ciphertext is persisted.
+            return@runCatching pendingMsg.copy(content = content, contentIv = null)
         }
         
         val clearMsg = insertedMsg.copy(content = content)
@@ -692,8 +697,21 @@ class WhisperRepository @Inject constructor(
                 }
                 if (result.isSuccess) {
                     outgoingQueue.remove(queued.clientId)
-                    // Remove the pending ghost row from Room: the server row is now authoritative.
+                    // Remove the pending ghost row from Room and insert authoritative ciphertext
+                    // so UI shows it even before getMessages realtime catch-up.
                     runCatching { messageDao.deleteMessage(queued.clientId) }
+                    runCatching {
+                        val authoritative = WhisperMessage(
+                            id = queued.clientId,
+                            senderId = queued.senderId,
+                            receiverId = queued.receiverId,
+                            content = queued.encryptedContent,
+                            contentIv = queued.contentIv,
+                            replyToId = queued.replyToId,
+                            createdAt = queued.createdAt
+                        )
+                        messageDao.insertMessage(authoritative.toEntity())
+                    }
                     delivered++
                 } else {
                     val error = result.exceptionOrNull()
@@ -702,6 +720,18 @@ class WhisperRepository @Inject constructor(
                         // the response was lost): treat as delivered, never duplicate.
                         outgoingQueue.remove(queued.clientId)
                         runCatching { messageDao.deleteMessage(queued.clientId) }
+                        runCatching {
+                            val authoritative = WhisperMessage(
+                                id = queued.clientId,
+                                senderId = queued.senderId,
+                                receiverId = queued.receiverId,
+                                content = queued.encryptedContent,
+                                contentIv = queued.contentIv,
+                                replyToId = queued.replyToId,
+                                createdAt = queued.createdAt
+                            )
+                            messageDao.insertMessage(authoritative.toEntity())
+                        }
                         delivered++
                     } else {
                         outgoingQueue.replace(queued.copy(attempts = queued.attempts + 1))
@@ -801,12 +831,7 @@ class WhisperRepository @Inject constructor(
             WhisperImageAttachment.fromMessageContent(raw)
         }
         
-        // 2. Perform remote attachment deletion if applicable
-        attachment?.let { att ->
-            runCatching { encryptedImageHost.delete(att.url, att.attachmentId) }
-        }
-
-        // 3. Update database with tombstone, selecting back the rows it affected so a
+        // 2. Update database with tombstone, selecting back the rows it affected so a
         // mismatch (0 rows) is surfaced instead of silently "succeeding".
         val tombstone = "This message has been deleted"
         val updated = db.from("messages").update(
@@ -822,10 +847,15 @@ class WhisperRepository @Inject constructor(
             select()
         }.decodeList<WhisperMessage>()
         
-        // 4. Erase from local cache only when the server accepted the tombstone.
+        // 3. Erase from local cache only when the server accepted the tombstone.
         if (updated.isNotEmpty()) {
             messageDao.deleteMessage(messageId)
             invalidateConversationsCache()
+            // 4. Only now delete remote attachment — if tombstone RLS rejects (0 rows),
+            // the blob must remain so a retry can still succeed.
+            attachment?.let { att ->
+                runCatching { encryptedImageHost.delete(att.url, att.attachmentId) }
+            }
         } else {
             error("This message could not be deleted. It may have been removed already.")
         }
@@ -1067,6 +1097,7 @@ class WhisperRepository @Inject constructor(
                 if (fromIso != null) gte("created_at", fromIso)
                 if (toIso != null) lte("created_at", toIso)
             }
+            limit(500)
         }.decodeList<WhisperMessage>()
 
         val toDeleteIds = toDelete.map { it.id }.filter { it.isNotBlank() }
@@ -1085,6 +1116,7 @@ class WhisperRepository @Inject constructor(
                     if (fromIso != null) gte("created_at", fromIso)
                     if (toIso != null) lte("created_at", toIso)
                 }
+                limit(500)
             }.decodeList<WhisperMessage>().map { it.id }.filter { it.isNotBlank() }
             if (mySentIds.isNotEmpty()) {
                 db.from("messages").delete {
@@ -1486,9 +1518,10 @@ class WhisperRepository @Inject constructor(
     }
 
 
-    private val blockedByMeCache = mutableSetOf<String>()
+    private val blockedByMeCache = Collections.synchronizedSet(mutableSetOf<String>())
 
     private suspend fun isUserBlockedByMe(userId: String): Boolean {
+        if (blockedIds.value.contains(userId)) return true
         if (blockedByMeCache.contains(userId)) return true
         val isBlocked = runCatching {
             val blocks = db.from("whisper_blocks").select {
@@ -1499,7 +1532,10 @@ class WhisperRepository @Inject constructor(
             }.decodeList<WhisperBlock>()
             blocks.isNotEmpty()
         }.getOrDefault(false)
-        if (isBlocked) blockedByMeCache.add(userId)
+        if (isBlocked) {
+            blockedByMeCache.add(userId)
+            blockedIds.update { it + userId }
+        }
         return isBlocked
     }
 
@@ -1517,12 +1553,15 @@ class WhisperRepository @Inject constructor(
 
     /** Re-reads the block table for this account so in-memory caches never drift from server truth. */
     private suspend fun refreshBlockCachesFor(targetUserId: String) {
-        val currentlyBlocked = runCatching {
+        runCatching {
             db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
                 .decodeList<WhisperBlock>().map { it.blockedId }.toSet()
-        }.getOrDefault(emptySet())
-        blockedIds.value = currentlyBlocked
-        if (targetUserId in currentlyBlocked) blockedByMeCache.add(targetUserId) else blockedByMeCache.remove(targetUserId)
+        }.onSuccess { currentlyBlocked ->
+            blockedIds.value = currentlyBlocked
+            if (targetUserId in currentlyBlocked) blockedByMeCache.add(targetUserId) else blockedByMeCache.remove(targetUserId)
+        }.onFailure {
+            // Keep existing cache on network failure; optimistic state already applied by caller.
+        }
     }
 
     suspend fun getBlockStatus(otherUserId: String): Pair<Boolean, Boolean> {
@@ -1534,11 +1573,15 @@ class WhisperRepository @Inject constructor(
     suspend fun blockUser(targetUserId: String): Result<Unit> = runCatching {
         require(targetUserId.isNotBlank() && targetUserId != myId) { "Choose another user to block." }
         db.from("whisper_blocks").insert(WhisperBlockInsert(blockerId = myId, blockedId = targetUserId))
+        blockedIds.update { it + targetUserId }
+        blockedByMeCache.add(targetUserId)
         refreshBlockCachesFor(targetUserId)
     }
 
     suspend fun unblockUser(targetUserId: String): Result<Unit> = runCatching {
         db.from("whisper_blocks").delete { filter { eq("blocker_id", myId); eq("blocked_id", targetUserId) } }
+        blockedIds.update { it - targetUserId }
+        blockedByMeCache.remove(targetUserId)
         refreshBlockCachesFor(targetUserId)
     }
 

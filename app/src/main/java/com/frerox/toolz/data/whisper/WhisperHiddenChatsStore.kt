@@ -23,6 +23,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,14 +56,14 @@ class WhisperHiddenChatsStore @Inject constructor(
     fun hideChat(userId: String) {
         val now = System.currentTimeMillis()
         prefs.edit().putLong("hidden_$userId", now).apply()
-        _hiddenChats.value = _hiddenChats.value + (userId to now)
+        _hiddenChats.update { it + (userId to now) }
     }
 
     /** Bring a chat back to the chats tab. */
     fun unhideChat(userId: String) {
         if (userId !in _hiddenChats.value) return
         prefs.edit().remove("hidden_$userId").apply()
-        _hiddenChats.value = _hiddenChats.value - userId
+        _hiddenChats.update { it - userId }
     }
 
     /** Hide timestamp (epoch millis) for a user, or null if the chat is not hidden. */

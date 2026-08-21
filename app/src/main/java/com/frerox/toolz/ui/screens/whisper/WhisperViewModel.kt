@@ -96,6 +96,7 @@ class WhisperViewModel @Inject constructor(
     private var muteJob: Job? = null
     private var hiddenJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var droppedCollectorJob: Job? = null
 
     // Ids already surfaced to the user after their outbox entry was permanently dropped.
     private val droppedNotifiedClientIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -106,7 +107,7 @@ class WhisperViewModel @Inject constructor(
 
         // Surfacing dropped outbox entries: if the delivery scheduler permanently gives
         // up on a queued message, the user must know it never arrived.
-        viewModelScope.launch {
+        droppedCollectorJob = viewModelScope.launch {
             outgoingQueue.droppedClientIds.collect { dropped ->
                 for (clientId in dropped) {
                     // One notice per clientId; later duplicates are ignored.
@@ -143,11 +144,19 @@ class WhisperViewModel @Inject constructor(
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch {
             while (true) {
-                // Don't burn battery or write last_seen while the app is backgrounded.
-                if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                    repository.updateLastSeen()
+                try {
+                    if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                        repository.updateLastSeen()
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (WhisperErrorMapper.isSessionExpired(e) || (e is io.github.jan.supabase.exceptions.RestException && e.statusCode in 401..403)) {
+                        // Stop retrying on dead session
+                        break
+                    }
+                    android.util.Log.w("WhisperVM", "heartbeat failed: ${e.message}")
                 }
-                delay(60_000) // Update every minute
+                delay(60_000)
             }
         }
     }
@@ -190,26 +199,28 @@ class WhisperViewModel @Inject constructor(
         // Guard against overlapping loads (e.g. refresh + auth-state re-entry)
         if (loadAllJob?.isActive == true) return
         loadAllJob = viewModelScope.launch {
-            if (isRefresh) _uiState.update { it.copy(isRefreshing = true) }
-            else _uiState.update { it.copy(isLoading = true) }
+            try {
+                if (isRefresh) _uiState.update { it.copy(isRefreshing = true) }
+                else _uiState.update { it.copy(isLoading = true) }
 
-            coroutineScope {
-                val profileDeferred = async {
-                    repository.getMyProfile(forceRefresh = isRefresh)
-                        .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
-                        .onFailure { err -> handleError(err, "getMyProfile") }
+                coroutineScope {
+                    val profileDeferred = async {
+                        repository.getMyProfile(forceRefresh = isRefresh)
+                            .onSuccess { profile -> _uiState.update { it.copy(currentProfile = profile) } }
+                            .onFailure { err -> handleError(err, "getMyProfile") }
+                    }
+                    val convosDeferred = async { loadConversationsInternal(forceRefresh = isRefresh) }
+                    val friendsDeferred = async { loadFriendsInternal() }
+                    val recommendedDeferred = async { loadRecommendationsInternal() }
+
+                    profileDeferred.await()
+                    convosDeferred.await()
+                    friendsDeferred.await()
+                    recommendedDeferred.await()
                 }
-                val convosDeferred = async { loadConversationsInternal(forceRefresh = isRefresh) }
-                val friendsDeferred = async { loadFriendsInternal() }
-                val recommendedDeferred = async { loadRecommendationsInternal() }
-
-                profileDeferred.await()
-                convosDeferred.await()
-                friendsDeferred.await()
-                recommendedDeferred.await()
+            } finally {
+                _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
             }
-
-            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
         }
     }
 
@@ -221,6 +232,7 @@ class WhisperViewModel @Inject constructor(
             .onSuccess { convos ->
                 val muted = mutePrefs.mutedUsers.value
                 val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
+                val toUnhide = mutableListOf<String>()
                 _uiState.update { state ->
                     // Re-read the hidden-chats snapshot at write time: a chat hidden while
                     // this network call was in flight must not resurrect from a stale map
@@ -233,7 +245,7 @@ class WhisperViewModel @Inject constructor(
                         }.getOrNull()
                         if (lastEpoch != null && lastEpoch > hideTime) {
                             // Partner sent a new message after the chat was hidden → bring it back
-                            viewModelScope.launch { hiddenChatsStore.unhideChat(convo.otherUser.id) }
+                            toUnhide.add(convo.otherUser.id)
                             true
                         } else {
                             false
@@ -241,6 +253,7 @@ class WhisperViewModel @Inject constructor(
                     }
                     state.copy(conversations = filtered)
                 }
+                toUnhide.forEach { viewModelScope.launch { hiddenChatsStore.unhideChat(it) } }
 
                 // Clear notifications for any conversations that have been read (read receipts)
                 for (convo in convos) {
@@ -353,9 +366,9 @@ class WhisperViewModel @Inject constructor(
     val discoverLoadFailed: StateFlow<Boolean> = _discoverLoadFailed.asStateFlow()
 
     fun loadDiscoverProfiles(page: Int) {
-        // The guard runs first: a page-0 reset must never wipe the list while a
-        // next-page fetch is still in flight, or the older response would overwrite it.
-        if (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover) return
+        // Page 0 is a refresh and must never be blocked by pagination state; only
+        // block subsequent pages when already loading or at end.
+        if (page != 0 && (_uiState.value.isDiscoverLoadingNext || _uiState.value.hasReachedEndOfDiscover)) return
         if (page == 0) {
             _uiState.update { it.copy(discoverProfiles = emptyList(), discoverPage = 0, hasReachedEndOfDiscover = false) }
         }
@@ -621,5 +634,8 @@ class WhisperViewModel @Inject constructor(
         muteJob?.cancel()
         hiddenJob?.cancel()
         loadAllJob?.cancel()
+        heartbeatJob?.cancel()
+        profileSearchJob?.cancel()
+        droppedCollectorJob?.cancel()
     }
 }

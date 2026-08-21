@@ -136,21 +136,22 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
-    /** Friend request notification */
-    fun showFriendRequestNotification(fromName: String) {
+    /** Friend request notification — uses stable sender id to avoid display-name collisions. */
+    fun showFriendRequestNotification(fromId: String, fromName: String) {
         if (isInForeground) return
-        val notifId = "friend_req_$fromName".hashCode()
+        val notifId = ((fromId.hashCode() and 0x7FFFFFFF) % 2_000_000_000) + 9500
         // Tapping the notification opens MainActivity and surfaces the request list;
         // there is no chat to deep-link into, so only the request flag is passed.
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("open_friend_requests", true)
         }
-        // Request code stays below REQUEST_CODE_BASE + 1000, the floor used by the
-        // per-sender message PendingIntents, so the two can never collide.
+        // Keep friend-request PendingIntent requestCode below BASE+1000 so it never collides
+        // with per-sender message PendingIntents (which use BASE + senderNotifId >= BASE+1000).
+        // Using notifId % 900 keeps it in 0..899 range.
         val pendingIntent = PendingIntent.getActivity(
             context,
-            REQUEST_CODE_BASE + 1,
+            REQUEST_CODE_BASE + (notifId % 900),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -172,6 +173,11 @@ class WhisperNotificationManager @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Error posting notification", e)
         }
+    }
+
+    /** Legacy overload — delegates to id-based API using display name as fallback id. */
+    fun showFriendRequestNotification(fromName: String) {
+        showFriendRequestNotification(fromName, fromName)
     }
 
     /** Dismiss notification when user opens chat */

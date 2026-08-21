@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
  */
 fun Modifier.screenshotBypassGesture(
     onTrigger: () -> Unit
-): Modifier = pointerInput(Unit) {
+): Modifier = pointerInput(onTrigger) {
     coroutineScope {
         awaitPointerEventScope {
             while (true) {
@@ -60,7 +60,7 @@ fun WhisperScreenshotBypassDialog(
                 value = password,
                 onValueChange = { password = it },
                 label = { Text("Password") },
-                placeholder = { Text("SSForWhisperTester") },
+                placeholder = { Text("Enter password") },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()

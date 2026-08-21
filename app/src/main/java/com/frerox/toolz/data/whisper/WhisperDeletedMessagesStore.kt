@@ -68,9 +68,9 @@ class WhisperDeletedMessagesStore @Inject constructor(
         val now = System.currentTimeMillis()
         val merged = capById(existing + ids.associateWith { now })
         // With up to MAX_TOMBSTONES entries the prefs string grows to a few hundred KB;
-        // apply() persists asynchronously so the main thread is not blocked, and the cap
-        // keeps the storage bounded.
-        prefs.edit().putStringSet("deleted_message_ids", merged.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
+        // commit() ensures tombstones survive process death immediately — delete-for-me
+        // must never resurrect after a crash — and the cap keeps storage bounded.
+        prefs.edit().putStringSet("deleted_message_ids", merged.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
         _deletedIds.value = merged.keys
     }
 
@@ -97,7 +97,7 @@ class WhisperDeletedMessagesStore @Inject constructor(
         if (messageIds.isEmpty()) return
         synchronized(lock) {
             val existing = loadAll() - messageIds.toSet()
-            prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
+            prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
             _deletedIds.value = existing.keys
         }
     }
@@ -118,7 +118,7 @@ class WhisperDeletedMessagesStore @Inject constructor(
         val capped = capById(raw)
         val removed = raw.size - capped.size
         if (removed > 0) {
-            prefs.edit().putStringSet("deleted_message_ids", capped.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).apply()
+            prefs.edit().putStringSet("deleted_message_ids", capped.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
             _deletedIds.value = capped.keys
         }
         removed
@@ -126,7 +126,7 @@ class WhisperDeletedMessagesStore @Inject constructor(
 
     /** Wipe every tombstone on this device (account deletion). */
     fun clearAll() = synchronized(lock) {
-        prefs.edit().remove("deleted_message_ids").apply()
+        prefs.edit().remove("deleted_message_ids").commit()
         _deletedIds.value = emptySet()
     }
 

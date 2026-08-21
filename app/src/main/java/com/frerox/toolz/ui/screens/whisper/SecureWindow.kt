@@ -1,10 +1,14 @@
 package com.frerox.toolz.ui.screens.whisper
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalView
+
+private fun Context.findActivity(): Activity? = generateSequence(this) { (it as? ContextWrapper)?.baseContext }.filterIsInstance<Activity>().firstOrNull()
 
 /** Sets FLAG_SECURE on the hosting window so sensitive content never appears in
  *  screenshots, screen recordings, or the recents preview. FLAG_SECURE applies while
@@ -15,7 +19,7 @@ fun SecureWindow(bypassEnabled: Boolean = false) {
     val view = LocalView.current
     if (!view.isInEditMode) {
         DisposableEffect(bypassEnabled) {
-            val window = (view.context as? Activity)?.window
+            val window = view.context.findActivity()?.window
                 ?: return@DisposableEffect onDispose {}
             
             if (!bypassEnabled) {

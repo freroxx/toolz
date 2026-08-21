@@ -721,9 +721,15 @@ class SettingsRepository @Inject constructor(
     val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
     val appLanguage: Flow<String> = dataStore.data.map { it[APP_LANGUAGE] ?: "en" }
     val catalogOnboardingCompleted: Flow<Boolean> = dataStore.data.map { it[CATALOG_ONBOARDING_COMPLETED] ?: false }
-    val whisperBetaWarningShown: Flow<Boolean> = dataStore.data.map { it[WHISPER_BETA_WARNING_SHOWN] ?: false }
-    val whisperOnboardingShown: Flow<Boolean> = dataStore.data.map { it[WHISPER_ONBOARDING_SHOWN] ?: false }
-    val whisperScreenshotBypass: Flow<Boolean> = dataStore.data.map { it[WHISPER_SCREENSHOT_BYPASS] ?: false }
+    val whisperBetaWarningShown: Flow<Boolean> = dataStore.data.map {
+        try { it[WHISPER_BETA_WARNING_SHOWN] ?: false } catch (e: ClassCastException) { false }
+    }
+    val whisperOnboardingShown: Flow<Boolean> = dataStore.data.map {
+        try { it[WHISPER_ONBOARDING_SHOWN] ?: false } catch (e: ClassCastException) { false }
+    }
+    val whisperScreenshotBypass: Flow<Boolean> = dataStore.data.map {
+        try { it[WHISPER_SCREENSHOT_BYPASS] ?: false } catch (e: ClassCastException) { false }
+    }
     val showCatalogBetaCard: Flow<Boolean> = dataStore.data.map { it[SHOW_CATALOG_BETA_CARD] ?: true }
     val activeDownloadJson: Flow<String?> = dataStore.data.map { it[ACTIVE_DOWNLOAD_JSON] }
 

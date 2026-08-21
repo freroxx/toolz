@@ -450,7 +450,7 @@ fun WhisperChatScreen(
                         Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
                             Text(
-                                stringResource(R.string.st_Whisper_Chat_KeyChanged),
+                                stringResource(R.string.st_Whisper_Chat_KeyChanged, uiState.otherUser?.effectiveName ?: "Partner"),
                                 modifier = Modifier.weight(1f),
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 style = MaterialTheme.typography.bodySmall

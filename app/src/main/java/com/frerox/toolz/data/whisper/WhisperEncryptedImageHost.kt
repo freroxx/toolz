@@ -30,6 +30,8 @@ class WhisperEncryptedImageHost @Inject constructor(
         
         // 1. Try uploading to Edge Function (ImgBB) first
         val edgeFunctionResult = runCatching {
+            // Peak allocation: encode() holds width*height*4 raw + PNG bytes, then Base64 adds ~4/3 expansion.
+            // At MAX_CIPHER_BYTES this can transiently peak at >10 MB; callers must enforce size caps before this point.
             val pngBytes = WhisperImageCipherTransport.encode(cipherBytes)
             val body = buildJsonObject {
                 put("image", Base64.encodeToString(pngBytes, Base64.NO_WRAP))
@@ -142,10 +144,17 @@ class WhisperEncryptedImageHost @Inject constructor(
             error("Invalid image host.")
         }
         withContext(Dispatchers.IO) {
-             val connection = (URL(url).openConnection() as HttpURLConnection)
+              val connection = (URL(url).openConnection() as HttpURLConnection)
+            connection.instanceFollowRedirects = false
             try {
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
+                if (connection.responseCode in 300..399) {
+                    val location = connection.getHeaderField("Location") ?: error("Invalid redirect")
+                    val redirectHost = runCatching { URL(location).host }.getOrNull() ?: error("Invalid redirect")
+                    if (redirectHost != "i.ibb.co" && redirectHost != "ibb.co" && !redirectHost.endsWith(".supabase.co")) error("Invalid image host.")
+                    error("Redirects not supported for images.")
+                }
                 if (connection.responseCode !in 200..299) error("Image is no longer available.")
                 if (connection.contentLength > DOWNLOAD_MAX_BYTES) error("Image is too large.")
                 connection.inputStream.use { input ->

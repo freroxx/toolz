@@ -7,6 +7,7 @@ package com.frerox.toolz.ui.screens.whisper
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
@@ -90,9 +91,11 @@ class WhisperAuthViewModel @Inject constructor(
      * Copies a token to the clipboard for [TOKEN_CLIPBOARD_TTL_MS], then swaps it back
      * to [restoreTo]. The timer runs on the ViewModel, so it survives screen navigation
      * and rotation; the persisted entry covers process death.
+     * NOTE: VM-scoped expiry is best-effort and dies if VM is cleared/navigation away;
+     * a full fix requires WorkManager to guarantee expiry across process death.
      */
     fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager) {
-        val deadline = System.currentTimeMillis() + TOKEN_CLIPBOARD_TTL_MS
+        val deadline = SystemClock.elapsedRealtime() + TOKEN_CLIPBOARD_TTL_MS
         clipboardRestorePrefs.edit()
             .putString(KEY_TOKEN, token)
             .putString(KEY_RESTORE_TO, restoreTo)
@@ -106,11 +109,11 @@ class WhisperAuthViewModel @Inject constructor(
         val restoreTo = clipboardRestorePrefs.getString(KEY_RESTORE_TO, null)
         val deadline = clipboardRestorePrefs.getLong(KEY_DEADLINE, 0L)
         val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java) ?: return
-        val remaining = deadline - System.currentTimeMillis()
+        val remaining = deadline - SystemClock.elapsedRealtime()
         if (remaining <= 0) {
             // The deadline passed while the app was gone: swap the clipboard back now if
             // our token is still the top entry.
-            if (clipboard.primaryClip?.getItemAt(0)?.text?.toString() == token) {
+            if (clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication<Application>())?.toString() == token) {
                 clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo ?: ""))
             }
             clipboardRestorePrefs.edit().clear().apply()
@@ -121,11 +124,13 @@ class WhisperAuthViewModel @Inject constructor(
     }
 
     private fun armClipboardExpiry(token: String, restoreTo: String?, deadline: Long, clipboard: ClipboardManager) {
-        val remaining = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
+        val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
         viewModelScope.launch {
             delay(remaining)
             // Only touch the clipboard if our token is still the top entry.
-            if (clipboard.primaryClip?.getItemAt(0)?.text?.toString() == token) {
+            // Uses coerceToText for AnnotatedString compatibility and elapsedRealtime for monotonic deadline.
+            // NOTE: Best-effort VM-scoped; full fix requires WorkManager to survive VM recreation.
+            if (clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication<Application>())?.toString() == token) {
                 clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo ?: ""))
             }
             clipboardRestorePrefs.edit().clear().apply()

@@ -56,54 +56,60 @@ object WhisperImageCipherTransport {
         }
     }
 
-    fun decode(pngBytes: ByteArray): ByteArray? = runCatching {
-        // Fast-check for PNG header signature
-        if (pngBytes.size < 8 || pngBytes[0] != 0x89.toByte() || pngBytes[1] != 0x50.toByte() || pngBytes[2] != 0x4E.toByte() || pngBytes[3] != 0x47.toByte()) {
-            return null
-        }
-        // Bounds pre-pass: reject dimension bombs before any pixels are allocated. A PNG
-        // header can claim arbitrary width/height; decoding then materializes
-        // width*height*4 bytes (plus the extraction buffers), i.e. ~11 bytes/pixel at
-        // peak. Legit images from the send pipeline are compressed to ~5 MP, so an 8 MP
-        // ceiling cannot reject them. Long math avoids Int overflow that could otherwise
-        // wrap the product negative and slip past the cap.
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        if (bounds.outWidth.toLong() * bounds.outHeight > MAX_PIXELS) return null
-        val options = BitmapFactory.Options().apply {
-            inScaled = false
-            inPremultiplied = false
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-            inMutable = true
-            // Ensure we decode as sRGB to match the encoding
-            inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
-        }
-        val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, options) ?: return null
-        try {
-            val raw = ByteArray(bitmap.width * bitmap.height * 4)
-            bitmap.copyPixelsToBuffer(ByteBuffer.wrap(raw))
-            
-            // Extract 3 data bytes per pixel (skipping every 4th alpha byte)
-            val extracted = ByteArray(bitmap.width * bitmap.height * 3)
-            var srcIdx = 0
-            var dstIdx = 0
-            while (srcIdx < raw.size && dstIdx < extracted.size) {
-                extracted[dstIdx++] = raw[srcIdx++]
-                extracted[dstIdx++] = raw[srcIdx++]
-                extracted[dstIdx++] = raw[srcIdx++]
-                srcIdx++ // Skip alpha byte
+    fun decode(pngBytes: ByteArray): ByteArray? {
+        // Peak allocation: bitmap (w*h*4) + raw buffer (w*h*4) + extracted (w*h*3) can transiently peak at ~11 bytes/pixel;
+        // MAX_PIXELS bounds heap via bounds pre-pass, but OOM is still caught below.
+        return try {
+            // Fast-check for PNG header signature
+            if (pngBytes.size < 8 || pngBytes[0] != 0x89.toByte() || pngBytes[1] != 0x50.toByte() || pngBytes[2] != 0x4E.toByte() || pngBytes[3] != 0x47.toByte()) {
+                return null
             }
+            // Bounds pre-pass: reject dimension bombs before any pixels are allocated. A PNG
+            // header can claim arbitrary width/height; decoding then materializes
+            // width*height*4 bytes (plus the extraction buffers), i.e. ~11 bytes/pixel at
+            // peak. Legit images from the send pipeline are compressed to ~5 MP, so an 8 MP
+            // ceiling cannot reject them. Long math avoids Int overflow that could otherwise
+            // wrap the product negative and slip past the cap.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            if (bounds.outWidth.toLong() * bounds.outHeight > MAX_PIXELS) return null
+            val options = BitmapFactory.Options().apply {
+                inScaled = false
+                inPremultiplied = false
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inMutable = true
+                // Ensure we decode as sRGB to match the encoding
+                inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+            }
+            val bitmap = BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size, options) ?: return null
+            try {
+                val raw = ByteArray(bitmap.width * bitmap.height * 4)
+                bitmap.copyPixelsToBuffer(ByteBuffer.wrap(raw))
+                
+                // Extract 3 data bytes per pixel (skipping every 4th alpha byte)
+                val extracted = ByteArray(bitmap.width * bitmap.height * 3)
+                var srcIdx = 0
+                var dstIdx = 0
+                while (srcIdx < raw.size && dstIdx < extracted.size) {
+                    extracted[dstIdx++] = raw[srcIdx++]
+                    extracted[dstIdx++] = raw[srcIdx++]
+                    extracted[dstIdx++] = raw[srcIdx++]
+                    srcIdx++ // Skip alpha byte
+                }
 
-            val buffer = ByteBuffer.wrap(extracted)
-            if (buffer.remaining() < HEADER_BYTES) return null
-            val size = buffer.int
-            if (size !in 1..MAX_CIPHER_BYTES || size > buffer.remaining()) return null
-            val cipherBytes = ByteArray(size)
-            buffer.get(cipherBytes)
-            cipherBytes
-        } finally {
-            bitmap.recycle()
+                val buffer = ByteBuffer.wrap(extracted)
+                if (buffer.remaining() < HEADER_BYTES) return null
+                val size = buffer.int
+                if (size !in 1..MAX_CIPHER_BYTES || size > buffer.remaining()) return null
+                val cipherBytes = ByteArray(size)
+                buffer.get(cipherBytes)
+                cipherBytes
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (e: Throwable) {
+            null
         }
-    }.getOrNull()
+    }
 }

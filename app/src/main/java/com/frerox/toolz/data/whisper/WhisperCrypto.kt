@@ -149,6 +149,14 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
+    private fun aadFor(senderId: String, receiverId: String): ByteArray {
+        val s = senderId.encodeToByteArray()
+        val r = receiverId.encodeToByteArray()
+        val sLen = byteArrayOf((s.size shr 24).toByte(), (s.size shr 16).toByte(), (s.size shr 8).toByte(), s.size.toByte())
+        val rLen = byteArrayOf((r.size shr 24).toByte(), (r.size shr 16).toByte(), (r.size shr 8).toByte(), r.size.toByte())
+        return MESSAGE_AAD + sLen + s + rLen + r
+    }
+
     /**
      * Encrypts a chat message with AAD binding to the exact conversation direction
      * (senderId/receiverId from the message row), so ciphertext replayed into another
@@ -167,7 +175,7 @@ class WhisperCrypto @Inject constructor() {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, gcmSpec)
-            cipher.updateAAD(MESSAGE_AAD + senderId.encodeToByteArray() + receiverId.encodeToByteArray())
+            cipher.updateAAD(aadFor(senderId, receiverId))
             val cipherBytes = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
             val cipherTextBase64 = Base64.encodeToString(cipherBytes, Base64.NO_WRAP)
             val ivBase64 = Base64.encodeToString(iv, Base64.NO_WRAP)
@@ -202,7 +210,7 @@ class WhisperCrypto @Inject constructor() {
             if (iv.size != IV_LEN || cipherBytes.size < 16) return null
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
 
-            val aad = MESSAGE_AAD + senderId.encodeToByteArray() + receiverId.encodeToByteArray()
+            val aad = aadFor(senderId, receiverId)
             val aadCipher = Cipher.getInstance("AES/GCM/NoPadding")
             aadCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
             aadCipher.updateAAD(aad)

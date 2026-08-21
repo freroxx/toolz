@@ -63,7 +63,9 @@ class WhisperOutgoingQueue @Inject constructor(
         } else {
             entries
         }
-        prefs.edit().putString(KEY, json.encodeToString(toPersist)).apply()
+        // commit() not apply() — the outbox must survive process death immediately after
+        // enqueue; apply() is async and can be lost if the process dies before flush.
+        prefs.edit().putString(KEY, json.encodeToString(toPersist)).commit()
     }
 
     private companion object {
