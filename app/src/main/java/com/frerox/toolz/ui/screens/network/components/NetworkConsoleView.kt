@@ -57,6 +57,8 @@ import java.util.Locale
 fun NetworkConsoleView(
     logs: List<DiagnosticLog>,
     isShizukuReady: Boolean,
+    consoleEnabled: Boolean,
+    onToggleConsole: (Boolean) -> Unit,
     onExecuteRawCommand: (String) -> Unit,
     onClearLogs: () -> Unit,
     modifier: Modifier = Modifier
@@ -89,6 +91,36 @@ fun NetworkConsoleView(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!consoleEnabled) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.secondary)
+                        Text("Raw shell is disabled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    }
+                    Text(
+                        "This console executes privileged commands as the shell user. It can change system behavior. Enable only if you know what you are doing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text("Developer mode", style = MaterialTheme.typography.labelLarge)
+                        Switch(checked = false, onCheckedChange = { onToggleConsole(true) })
+                    }
+                }
+            }
+            return@Column
+        }
+        // Confirmation for destructive commands
         // Header with status and actions
         Row(
             modifier = Modifier.fillMaxWidth(),

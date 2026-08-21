@@ -68,10 +68,12 @@ import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
+import org.json.JSONObject
 import javax.inject.Inject
 import kotlin.math.roundToInt
 
@@ -96,11 +98,22 @@ class WifiTweaksViewModel @Inject constructor(
     private val locationManager =
         context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-    private val tweakCatalog = buildTweaks()
-    private val profileCatalog = buildProfiles()
+    private val tweakCatalog = TweakCatalog.tweaks
+    private val profileCatalog = TweakCatalog.profiles
     private var rawScanResults: List<WifiScanResult> = emptyList()
     private var toneGenerator: ToneGenerator? = null
     private var lastBeepTime = 0L
+
+    // ── Apply journal (P2): {tweakId -> {settingKey -> previousValue|null}} ──
+    // Previous values are captured via `settings get` BEFORE any write, so revert
+    // restores what the device actually had — not an assumed AOSP default.
+    private data class JournalEntry(
+        val previousValues: Map<String, String?>,
+        val ts: Long = System.currentTimeMillis()
+    )
+
+    @Volatile private var tweakJournal: Map<String, JournalEntry> = emptyMap()
+
 
     private val _uiState = MutableStateFlow(
         WifiTweaksUiState(
@@ -169,6 +182,18 @@ class WifiTweaksViewModel @Inject constructor(
                         refreshShizukuState(true)
                     }
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.networkTweakJournal.collect { json ->
+                tweakJournal = parseJournal(json)
+            }
+        }
+
+        viewModelScope.launch {
+            settingsRepository.networkConsoleEnabled.collect { enabled ->
+                _uiState.update { it.copy(consoleEnabled = enabled) }
             }
         }
 
@@ -324,51 +349,34 @@ class WifiTweaksViewModel @Inject constructor(
 
     fun undoTweak(tweak: WifiTweak) {
         viewModelScope.launch {
-            if (!requireShizukuFor(tweak)) return@launch
-
-            setTweakResult(
-                tweak.id,
-                status = TweakStatus.RUNNING,
-                message = "Reverting..."
-            )
-            val result = runCommands(tweak.revertCommands)
-            if (!result.first) {
-                setTweakResult(
-                    tweak.id,
-                    status = TweakStatus.FAILED,
-                    message = result.second.ifBlank { "Revert failed." }
-                )
-                emitMessage("Failed to revert ${tweak.title}.")
-                return@launch
-            }
-
-            val applied = isTweakApplied(tweak)
-            setTweakResult(
-                tweak.id,
-                status = if (applied) TweakStatus.SUCCESS else TweakStatus.IDLE,
-                message = if (applied) "Still active" else "Default restored",
-                isApplied = applied
-            )
+            val ok = revertTweakInternal(tweak)
             refreshEnvironmentInternal(refreshTweakStates = true, runFreshScan = false)
-            emitMessage("${tweak.title} reverted.")
+            if (ok) emitMessage("${tweak.title} reverted.") else emitMessage("Failed to revert ${tweak.title}.")
         }
     }
 
+    /**
+     * Transactional profile apply (P2): any hard failure rolls back the tweaks
+     * already applied in this run using the journal, leaving no half-state.
+     */
     fun applyProfile(profile: WifiOptimizationProfile) {
         viewModelScope.launch {
             emitMessage("Applying profile: ${profile.title}...")
-            var allSuccess = true
+            val appliedThisRun = mutableListOf<WifiTweak>()
+            var failures = 0
             profile.tweakIds.forEach { id ->
-                val tweak = tweakCatalog.find { it.id == id }
-                if (tweak != null) {
-                    val success = applyTweakInternal(tweak, emitStatusMessage = false)
-                    if (!success) allSuccess = false
-                }
+                val tweak = TweakCatalog.byId(id) ?: return@forEach
+                val success = applyTweakInternal(tweak, emitStatusMessage = false)
+                if (success) appliedThisRun += tweak else failures++
             }
-            if (allSuccess) {
-                emitMessage("${profile.title} applied successfully.")
+            if (failures > 0 && appliedThisRun.isNotEmpty()) {
+                addLog("PROFILE", "Rolling back ${appliedThisRun.size} tweak(s) after $failures failure(s)", LogLevel.WARNING)
+                appliedThisRun.reversed().forEach { revertTweakInternal(it) }
+                emitMessage("${profile.title}: failed mid-way — rolled back cleanly.")
+            } else if (failures > 0) {
+                emitMessage("${profile.title}: could not apply ($failures failed). Check Shizuku.")
             } else {
-                emitMessage("${profile.title} applied with some failures.")
+                emitMessage("${profile.title} applied & verified (${appliedThisRun.size} tweaks).")
             }
             refreshEnvironmentInternal(refreshTweakStates = true, runFreshScan = false)
         }
@@ -460,34 +468,68 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
+    /**
+     * P0: diagnose-first. Inspects live state, proposes only relevant fixes,
+     * applies each with journal capture + verification, reports honestly.
+     */
+    fun quickFixDiagnoses(): List<SmartFixRecommendation> {
+        val s = _uiState.value
+        val fixes = mutableListOf<SmartFixRecommendation>()
+        if (s.networkConfig.isThrottlingEnabled) {
+            fixes += SmartFixRecommendation(
+                id = "scan_throttle",
+                title = "Scan throttling is on",
+                description = "Background scans are delayed; discovery and roaming feel sluggish.",
+                tweakIds = listOf("scan_throttle"),
+                severity = RecommendationSeverity.WARNING
+            )
+        }
+        if (s.currentRssi < -70 && s.currentRssi > -100) {
+            fixes += SmartFixRecommendation(
+                id = "weak_signal",
+                title = "Weak signal (${s.currentRssi} dBm)",
+                description = "Let the system leave bad Wi-Fi sooner instead of clinging to it.",
+                tweakIds = listOf("avoid_bad_wifi", "data_stall_logic"),
+                severity = RecommendationSeverity.CRITICAL
+            )
+        }
+        if (s.privateDnsHost.isBlank() && s.privateDnsMode.equals("Automatic", true)) {
+            fixes += SmartFixRecommendation(
+                id = "dns_hardening",
+                title = "Private DNS is automatic",
+                description = "Enable encrypted DNS (Quad9) to stop ISP plaintext snooping.",
+                tweakIds = listOf("private_dns_quad9"),
+                severity = RecommendationSeverity.INFO
+            )
+        }
+        return fixes
+    }
+
     fun fixMyConnection() {
         viewModelScope.launch {
-            emitMessage("Starting Emergency Fix...")
-            addLog("DIAG", "Initiating 'Fix My Connection' macro", LogLevel.INFO)
-            
-            // 1. Disable Throttling
-            val throttleTweak = tweakCatalog.find { it.id == "scan_throttle" }
-            if (throttleTweak != null) {
-                applyTweakInternal(throttleTweak, true)
-                addLog("FIX", "Disabled scan throttling", LogLevel.SUCCESS)
+            val diagnoses = quickFixDiagnoses()
+            if (diagnoses.isEmpty()) {
+                emitMessage("Nothing to fix — connection looks healthy.")
+                return@launch
             }
-            
-            // 2. Enable Aggressive Roaming
-            val roamingTweak = tweakCatalog.find { it.id == "aggressive_roaming" }
-            if (roamingTweak != null) {
-                applyTweakInternal(roamingTweak, true)
-                addLog("FIX", "Enabled aggressive roaming", LogLevel.SUCCESS)
+            addLog("QUICKFIX", "Diagnosed ${diagnoses.size} issue(s)", LogLevel.INFO)
+            var ok = 0
+            var failed = 0
+            diagnoses.forEach { rec ->
+                rec.tweakIds.forEach { id ->
+                    val tweak = TweakCatalog.byId(id) ?: return@forEach
+                    addLog("QUICKFIX", "Applying: ${tweak.title}", LogLevel.INFO)
+                    if (applyTweakInternal(tweak, emitStatusMessage = false)) ok++ else failed++
+                }
             }
-            
-            // 3. Apply Quad9 DNS
-            val dnsTweak = tweakCatalog.find { it.id == "private_dns_quad9" }
-            if (dnsTweak != null) {
-                applyTweakInternal(dnsTweak, true)
-                addLog("FIX", "Applied Quad9 DNS", LogLevel.SUCCESS)
-            }
-            
-            emitMessage("Connection fixes applied.")
-            refreshEnvironment()
+            emitMessage(
+                when {
+                    failed == 0 -> "Quick fixes applied ($ok verified)."
+                    ok == 0 -> "Quick fixes failed — check Shizuku and try again."
+                    else -> "$ok applied, $failed failed. See console."
+                }
+            )
+            refreshEnvironmentInternal(refreshTweakStates = true, runFreshScan = false)
         }
     }
 
@@ -509,13 +551,45 @@ class WifiTweaksViewModel @Inject constructor(
     private suspend fun revertTweakInternal(tweak: WifiTweak): Boolean {
         if (!requireShizukuFor(tweak)) return false
         setTweakResult(tweak.id, status = TweakStatus.RUNNING, message = "Reverting...")
-        val result = runCommands(tweak.revertCommands)
-        if (!result.first) {
-            setTweakResult(tweak.id, status = TweakStatus.FAILED, message = result.second.ifBlank { "Revert failed." })
+
+        // Prefer the journal: restore exactly what the device had before apply.
+        val entry = tweakJournal[tweak.id]
+        var success = true
+        var detail = ""
+        if (entry != null && entry.previousValues.isNotEmpty()) {
+            addLog("REVERT", "Restoring captured values for ${tweak.id}", LogLevel.INFO)
+            entry.previousValues.forEach { (key, prev) ->
+                val cmd = if (prev == null) {
+                    "settings delete global $key"
+                } else {
+                    "settings put global $key \"${prev.replace("\"", "")}\""
+                }
+                addLog("SHELL", cmd, LogLevel.INFO)
+                val res = runCatching { shizukuExecutor.executeForResult(cmd, timeoutMs = 5_000) }.getOrNull()
+                if (res?.isSuccess != true) {
+                    success = false
+                    detail = res?.stderr?.ifBlank { res.stdout } ?: "timeout"
+                }
+            }
+            // static reverts for non-`settings` commands (cmd wifi … etc.)
+            runCommands(tweak.revertCommands.filterNot { it.startsWith("settings put global") || it.startsWith("settings delete global") })
+            if (success) consumeJournal(tweak.id)
+        } else {
+            // no journal → fall back to catalog defaults
+            val result = runCommands(tweak.revertCommands)
+            success = result.first
+            detail = result.second
+        }
+
+        if (!success) {
+            setTweakResult(tweak.id, status = TweakStatus.FAILED, message = detail.ifBlank { "Revert failed." })
             return false
         }
-        val applied = isTweakApplied(tweak)
-        setTweakResult(tweak.id, status = if (applied) TweakStatus.SUCCESS else TweakStatus.IDLE, message = if (applied) "Still active" else "Default restored", isApplied = applied)
+        when (probeTweakState(tweak)) {
+            VerifyState.APPLIED_VERIFIED -> setTweakResult(tweak.id, TweakStatus.SUCCESS, message = "Still active · verified", isApplied = true, verified = true)
+            VerifyState.APPLIED_UNVERIFIED -> setTweakResult(tweak.id, TweakStatus.SUCCESS, message = "Still active · unverified", isApplied = true, verified = null)
+            VerifyState.NOT_APPLIED -> setTweakResult(tweak.id, TweakStatus.IDLE, message = "Default restored", isApplied = false, verified = null)
+        }
         return true
     }
 
@@ -547,6 +621,11 @@ class WifiTweaksViewModel @Inject constructor(
             }
             addLog("COMMAND", output, if (result?.isSuccess == true) LogLevel.SUCCESS else LogLevel.ERROR)
         }
+    }
+
+    fun setConsoleEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setNetworkConsoleEnabled(enabled) }
+        addLog("SYSTEM", if (enabled) "Developer console enabled" else "Developer console disabled", LogLevel.WARNING)
     }
 
     fun clearLogs() {
@@ -592,20 +671,9 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
-    private val dnsProviders = listOf(
-        Triple("cloudflare", "Cloudflare", "1.1.1.1"),
-        Triple("google", "Google", "8.8.8.8"),
-        Triple("quad9", "Quad9", "9.9.9.9"),
-        Triple("adguard", "AdGuard", "94.140.14.14"),
-        Triple("opendns", "OpenDNS", "208.67.222.222"),
-        Triple("mullvad", "Mullvad", "194.242.2.2"),
-        Triple("controld", "Control D", "76.76.2.0"),
-        Triple("nextdns", "NextDNS", "45.90.28.0"),
-        Triple("cleanbrowsing", "CleanBrowsing", "185.228.168.168"),
-        Triple("comodo", "Comodo Secure", "8.26.56.26"),
-        Triple("neustar", "Neustar Ultra", "156.154.70.1"),
-        Triple("gcore", "Gcore", "95.161.212.1")
-    )
+    private val dnsProviders get() = DnsProviderLibrary.benchmarkTriples
+
+    fun benchmarkProviders(): List<Triple<String, String, String>> = dnsProviders
 
     fun applyCustomDns(hostname: String) {
         viewModelScope.launch {
@@ -804,18 +872,25 @@ class WifiTweaksViewModel @Inject constructor(
         val existing = _uiState.value.tweakResults.toMutableMap()
 
         tweakCatalog.forEach { tweak ->
-            val applied = isTweakApplied(tweak)
+            if (tweak.type == TweakType.MANUAL_GUIDE) return@forEach
+            val state = probeTweakState(tweak)
             val previous = existing[tweak.id] ?: TweakResult(id = tweak.id)
-            existing[tweak.id] = previous.copy(
-                status = when {
-                    applied -> TweakStatus.SUCCESS
-                    previous.status == TweakStatus.MANUAL -> TweakStatus.MANUAL
-                    else -> TweakStatus.IDLE
-                },
-                message = if (applied) "Active" else if (previous.status == TweakStatus.MANUAL) previous.message else "",
-                isApplied = applied,
-                lastUpdatedMs = System.currentTimeMillis()
-            )
+            existing[tweak.id] = when (state) {
+                VerifyState.APPLIED_VERIFIED -> previous.copy(
+                    status = TweakStatus.SUCCESS, message = "Active · verified",
+                    isApplied = true, verified = true, lastUpdatedMs = System.currentTimeMillis()
+                )
+                VerifyState.APPLIED_UNVERIFIED -> previous.copy(
+                    status = if (previous.status == TweakStatus.MANUAL) TweakStatus.MANUAL else TweakStatus.IDLE,
+                    message = if (previous.status == TweakStatus.MANUAL) previous.message else "",
+                    isApplied = false, verified = null, lastUpdatedMs = System.currentTimeMillis()
+                )
+                VerifyState.NOT_APPLIED -> previous.copy(
+                    status = if (previous.status == TweakStatus.MANUAL) TweakStatus.MANUAL else TweakStatus.IDLE,
+                    message = if (previous.status == TweakStatus.MANUAL) previous.message else "",
+                    isApplied = false, verified = false, lastUpdatedMs = System.currentTimeMillis()
+                )
+            }
         }
 
         _uiState.update {
@@ -826,7 +901,7 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
-    @SuppressLint("MissingPermission")
+@SuppressLint("MissingPermission")
     private fun updateScanResults() {
         if (!hasWifiPermissions()) {
             _uiState.update { it.copy(isScanning = false) }
@@ -995,17 +1070,17 @@ class WifiTweaksViewModel @Inject constructor(
         emitStatusMessage: Boolean = true
     ): Boolean {
         addLog("TWEAK", "Requesting application of: ${tweak.title}", LogLevel.INFO)
-        
+
+        // OEM guard-rails: surface known vendor quirks before touching anything.
+        val mfr = Build.MANUFACTURER.lowercase()
+        tweak.oemNotes.entries.firstOrNull { mfr.contains(it.key) }?.let { (vendor, note) ->
+            emitMessage("Note for $vendor devices: $note")
+            addLog("OEM", "${tweak.title}: $note", LogLevel.WARNING)
+        }
+
         if (tweak.type == TweakType.MANUAL_GUIDE) {
-            setTweakResult(
-                tweak.id,
-                status = TweakStatus.MANUAL,
-                message = "Manual steps required.",
-                isApplied = false
-            )
-            if (emitStatusMessage) {
-                emitMessage("Manual guide ready for ${tweak.title}.")
-            }
+            setTweakResult(tweak.id, TweakStatus.MANUAL, "Manual steps required.", isApplied = false)
+            if (emitStatusMessage) emitMessage("Manual guide ready for ${tweak.title}.")
             addLog("TWEAK", "Manual guide displayed for ${tweak.title}", LogLevel.SUCCESS)
             return true
         }
@@ -1015,40 +1090,40 @@ class WifiTweaksViewModel @Inject constructor(
             return false
         }
 
-        setTweakResult(
-            tweak.id,
-            status = TweakStatus.RUNNING,
-            message = "Applying..."
-        )
-        
+        // Capture BEFORE writing so revert can restore reality.
+        val captured = capturePreviousValues(tweak)
+        if (captured.isNotEmpty()) persistJournalEntry(tweak.id, captured)
+
+        setTweakResult(tweak.id, TweakStatus.RUNNING, "Applying...")
         addLog("SHELL", "Executing ${tweak.applyCommands.size} commands for ${tweak.id}", LogLevel.INFO)
         val result = runCommands(tweak.applyCommands)
         if (!result.first) {
-            setTweakResult(
-                tweak.id,
-                status = TweakStatus.FAILED,
-                message = result.second.ifBlank { "Command failed." }
-            )
-            if (emitStatusMessage) {
-                emitMessage("${tweak.title} failed to apply.")
-            }
+            setTweakResult(tweak.id, TweakStatus.FAILED, result.second.ifBlank { "Command failed." })
+            if (emitStatusMessage) emitMessage("${'$'}{tweak.title} failed to apply.")
             addLog("TWEAK", "Failed to apply ${tweak.title}: ${result.second}", LogLevel.ERROR)
             return false
         }
 
-        val applied = isTweakApplied(tweak, defaultWhenUnverifiable = true)
-        setTweakResult(
-            tweak.id,
-            status = if (applied) TweakStatus.SUCCESS else TweakStatus.FAILED,
-            message = if (applied) "Active" else "Applied, but could not verify.",
-            isApplied = applied
-        )
-        refreshEnvironmentInternal(refreshTweakStates = true, runFreshScan = false)
-        if (emitStatusMessage) {
-            emitMessage("${tweak.title} applied.")
+        return when (val state = probeTweakState(tweak)) {
+            VerifyState.APPLIED_VERIFIED -> {
+                setTweakResult(tweak.id, TweakStatus.SUCCESS, "Active · verified", isApplied = true, verified = true)
+                if (emitStatusMessage) emitMessage("${tweak.title} applied & verified.")
+                addLog("TWEAK", "Verified ${tweak.title}", LogLevel.SUCCESS)
+                true
+            }
+            VerifyState.APPLIED_UNVERIFIED -> {
+                setTweakResult(tweak.id, TweakStatus.SUCCESS, "Applied · could not verify", isApplied = true, verified = null)
+                if (emitStatusMessage) emitMessage("${tweak.title} applied (unverified).")
+                addLog("TWEAK", "Unverifiable write: ${tweak.title}", LogLevel.WARNING)
+                true
+            }
+            VerifyState.NOT_APPLIED -> {
+                setTweakResult(tweak.id, TweakStatus.FAILED, "Write accepted but setting NOT active (likely OEM override).", isApplied = false, verified = false)
+                if (emitStatusMessage) emitMessage("${tweak.title}: system did not accept the value.")
+                addLog("TWEAK", "Verification mismatch: ${tweak.title}", LogLevel.ERROR)
+                false
+            }
         }
-        addLog("TWEAK", "Successfully applied ${tweak.title}", LogLevel.SUCCESS)
-        return applied
     }
 
     private suspend fun requireShizukuFor(tweak: WifiTweak): Boolean {
@@ -1075,18 +1150,33 @@ class WifiTweaksViewModel @Inject constructor(
         return false
     }
 
-    private suspend fun isTweakApplied(
-        tweak: WifiTweak,
-        defaultWhenUnverifiable: Boolean = false
-    ): Boolean {
-        val verificationCommand = tweak.verificationCommand ?: return defaultWhenUnverifiable
-        if (!_uiState.value.shizukuStatus.isServiceReady) return false
-        val result = try {
-            shizukuExecutor.executeForResult(verificationCommand)
-        } catch (_: Exception) {
-            return defaultWhenUnverifiable
-        }
-        return result.isSuccess
+    /** Read-back probe returning an honest tri-state instead of optimistic booleans. */
+    private suspend fun probeTweakState(tweak: WifiTweak): VerifyState {
+        val verifyCmd = tweak.verificationCommand ?: return VerifyState.APPLIED_UNVERIFIED
+        if (!_uiState.value.shizukuStatus.isServiceReady) return VerifyState.APPLIED_UNVERIFIED
+        val result = withTimeoutOrNull(4_000) {
+            runCatching { shizukuExecutor.executeForResult(verifyCmd, timeoutMs = 4_000) }.getOrNull()
+        } ?: return VerifyState.APPLIED_UNVERIFIED
+        return if (result.isSuccess) VerifyState.APPLIED_VERIFIED else VerifyState.NOT_APPLIED
+    }
+
+    private fun setTweakResult(
+        id: String,
+        status: TweakStatus,
+        message: String,
+        isApplied: Boolean = false,
+        verified: Boolean? = null
+    ) {
+        val current = _uiState.value.tweakResults.toMutableMap()
+        current[id] = TweakResult(
+            id = id,
+            status = status,
+            message = message,
+            isApplied = isApplied,
+            verified = verified,
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        _uiState.update { it.copy(tweakResults = current) }
     }
 
     private suspend fun runCommands(commands: List<String>): Pair<Boolean, String> {
@@ -1151,23 +1241,6 @@ class WifiTweaksViewModel @Inject constructor(
             toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
             lastBeepTime = now
         }
-    }
-
-    private fun setTweakResult(
-        id: String,
-        status: TweakStatus,
-        message: String,
-        isApplied: Boolean = false
-    ) {
-        val current = _uiState.value.tweakResults.toMutableMap()
-        current[id] = TweakResult(
-            id = id,
-            status = status,
-            message = message,
-            isApplied = isApplied,
-            lastUpdatedMs = System.currentTimeMillis()
-        )
-        _uiState.update { it.copy(tweakResults = current) }
     }
 
     private fun emitMessage(message: String) {
@@ -1235,346 +1308,73 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
-    private fun buildTweaks(): List<WifiTweak> {
-        return listOf(
-            WifiTweak(
-                id = "scan_throttle",
-                title = "Disable scan throttling",
-                description = "Lets Android scan more often so roaming and discovery feel snappier.",
-                icon = Icons.Rounded.Speed,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PERFORMANCE,
-                applyCommands = listOf("settings put global wifi_scan_throttle_enabled 0"),
-                revertCommands = listOf("settings put global wifi_scan_throttle_enabled 1"),
-                verificationCommand = "[ \"$(settings get global wifi_scan_throttle_enabled)\" = \"0\" ]",
-                manualSteps = listOf(
-                    "Open Developer options.",
-                    "Find Wi-Fi scan throttling.",
-                    "Turn it off."
-                ),
-                riskNote = "May increase battery use if apps scan often."
-            ),
-            WifiTweak(
-                id = "low_latency_mode",
-                title = "Low latency mode",
-                description = "Forces the Wi-Fi chip into high-performance mode for gaming/streaming.",
-                icon = Icons.Rounded.SportsEsports,
-                type = TweakType.SHIZUKU_ONLY,
-                category = TweakCategory.PERFORMANCE,
-                applyCommands = listOf("cmd wifi set-power-save-mode disabled"),
-                revertCommands = listOf("cmd wifi set-power-save-mode enabled"),
-                riskNote = "Higher battery consumption while active."
-            ),
-            WifiTweak(
-                id = "data_stall_logic",
-                title = "Rapid stall recovery",
-                description = "Enables faster recovery when the connection 'freezes' or stops passing packets.",
-                icon = Icons.Rounded.FlashOn,
-                type = TweakType.SHIZUKU_ONLY,
-                category = TweakCategory.STABILITY,
-                applyCommands = listOf("settings put global wifi_data_stall_recovery_on 1"),
-                revertCommands = listOf("settings put global wifi_data_stall_recovery_on 0"),
-                verificationCommand = "[ \"$(settings get global wifi_data_stall_recovery_on)\" = \"1\" ]"
-            ),
-            WifiTweak(
-                id = "scan_interval",
-                title = "Optimized scan interval",
-                description = "Increases the background scan interval to 5 minutes to reduce interruption and save power.",
-                icon = Icons.Rounded.Timer,
-                type = TweakType.SHIZUKU_ONLY,
-                category = TweakCategory.POWER,
-                applyCommands = listOf("settings put global wifi_framework_scan_interval_ms 300000"),
-                revertCommands = listOf("settings delete global wifi_framework_scan_interval_ms"),
-                verificationCommand = "[ \"$(settings get global wifi_framework_scan_interval_ms)\" = \"300000\" ]"
-            ),
-            WifiTweak(
-                id = "force_wpa3",
-                title = "Prefer WPA3-SAE",
-                description = "Encourages the system to use the latest security protocol where available.",
-                icon = Icons.Rounded.VerifiedUser,
-                type = TweakType.MANUAL_GUIDE,
-                category = TweakCategory.PRIVACY,
-                manualSteps = listOf(
-                    "Open current network settings.",
-                    "Look for 'Security' or 'WPA3' options.",
-                    "Select SAE (WPA3) if your router supports it."
-                )
-            ),
-            WifiTweak(
-                id = "aggressive_roaming",
-                title = "Aggressive AP roaming",
-                description = "Pushes the device to hand off faster between access points in a mesh.",
-                icon = Icons.Rounded.SwapHoriz,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PERFORMANCE,
-                applyCommands = listOf("settings put global wifi_enable_aggressive_handover 1"),
-                revertCommands = listOf("settings put global wifi_enable_aggressive_handover 0"),
-                verificationCommand = "[ \"$(settings get global wifi_enable_aggressive_handover)\" = \"1\" ]",
-                manualSteps = listOf(
-                    "Open Developer options.",
-                    "Enable Wi-Fi verbose logging if your ROM exposes roaming details.",
-                    "Test while walking between access points."
-                ),
-                riskNote = "Can cause extra roaming on noisy networks."
-            ),
-            WifiTweak(
-                id = "wifi_auto_wakeup",
-                title = "Wi-Fi auto wakeup",
-                description = "Turns Wi-Fi back on around saved networks so you do not stay on mobile data longer than needed.",
-                icon = Icons.Rounded.Sync,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.POWER,
-                applyCommands = listOf("settings put global wifi_wakeup_enabled 1"),
-                revertCommands = listOf("settings put global wifi_wakeup_enabled 0"),
-                verificationCommand = "[ \"$(settings get global wifi_wakeup_enabled)\" = \"1\" ]",
-                manualSteps = listOf(
-                    "Open Wi-Fi settings.",
-                    "Go to network preferences.",
-                    "Turn on Wi-Fi automatically."
-                )
-            ),
-            WifiTweak(
-                id = "avoid_bad_wifi",
-                title = "Avoid poor Wi-Fi",
-                description = "Allows Android to bail out of weak Wi-Fi sooner instead of clinging to it.",
-                icon = Icons.Rounded.SignalWifiStatusbarConnectedNoInternet4,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.STABILITY,
-                applyCommands = listOf("settings put global network_avoid_bad_wifi 1"),
-                revertCommands = listOf("settings put global network_avoid_bad_wifi 0"),
-                verificationCommand = "[ \"$(settings get global network_avoid_bad_wifi)\" = \"1\" ]",
-                manualSteps = listOf(
-                    "Open Network settings.",
-                    "Turn on Adaptive connectivity or the equivalent vendor option."
-                )
-            ),
-            WifiTweak(
-                id = "suspend_optimizations",
-                title = "Keep Wi-Fi awake off-screen",
-                description = "Stops deeper Wi-Fi sleep so background sync and notifications stay more reliable.",
-                icon = Icons.Rounded.PowerSettingsNew,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.STABILITY,
-                applyCommands = listOf("settings put global wifi_suspend_optimizations_enabled 0"),
-                revertCommands = listOf("settings put global wifi_suspend_optimizations_enabled 1"),
-                verificationCommand = "[ \"$(settings get global wifi_suspend_optimizations_enabled)\" = \"0\" ]",
-                manualSteps = listOf(
-                    "Open vendor battery management.",
-                    "Exclude Wi-Fi or the affected app from aggressive standby rules."
-                ),
-                riskNote = "Slightly higher idle battery drain."
-            ),
-            WifiTweak(
-                id = "ip_reachability",
-                title = "Relax IP reachability disconnects",
-                description = "Useful for routers that trigger false disconnects during idle or multicast traffic.",
-                icon = Icons.Rounded.Route,
-                type = TweakType.SHIZUKU_ONLY,
-                category = TweakCategory.STABILITY,
-                applyCommands = listOf("settings put global wifi_ip_reachability_disconnect_enabled 0"),
-                revertCommands = listOf("settings put global wifi_ip_reachability_disconnect_enabled 1"),
-                verificationCommand = "[ \"$(settings get global wifi_ip_reachability_disconnect_enabled)\" = \"0\" ]",
-                riskNote = "Use only if you already see random disconnects."
-            ),
-            WifiTweak(
-                id = "mobile_data_always_on",
-                title = "Keep mobile data warm",
-                description = "Maintains fast failover when Wi-Fi drops, especially while moving.",
-                icon = Icons.Rounded.SettingsSuggest,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.POWER,
-                applyCommands = listOf("settings put global mobile_data_always_on 1"),
-                revertCommands = listOf("settings put global mobile_data_always_on 0"),
-                verificationCommand = "[ \"$(settings get global mobile_data_always_on)\" = \"1\" ]",
-                manualSteps = listOf(
-                    "Open Developer options.",
-                    "Turn on Mobile data always active."
-                ),
-                riskNote = "Can use more battery and background cellular data."
-            ),
-            WifiTweak(
-                id = "verbose_logging",
-                title = "Verbose Wi-Fi logging",
-                description = "Turns on deeper Wi-Fi logging so diagnostics and roaming behavior are easier to inspect.",
-                icon = Icons.Rounded.NetworkCheck,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.STABILITY,
-                applyCommands = listOf("cmd wifi set-wifi-verbose-logging-enabled true"),
-                revertCommands = listOf("cmd wifi set-wifi-verbose-logging-enabled false"),
-                manualSteps = listOf(
-                    "Open Developer options.",
-                    "Enable Wi-Fi verbose logging."
-                ),
-                riskNote = "Diagnostic only. Leave off once testing is done."
-            ),
-            WifiTweak(
-                id = "private_dns_cloudflare",
-                title = "Private DNS: Cloudflare",
-                description = "A fast privacy baseline using 1.1.1.1 over DNS-over-TLS.",
-                icon = Icons.Rounded.Public,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PRIVACY,
-                applyCommands = listOf(
-                    "settings put global private_dns_mode hostname",
-                    "settings put global private_dns_spec 1dot1dot1dot1.cloudflare-dns.com"
-                ),
-                revertCommands = listOf(
-                    "settings put global private_dns_mode opportunistic",
-                    "settings delete global private_dns_spec"
-                ),
-                verificationCommand = "[ \"$(settings get global private_dns_mode)\" = \"hostname\" ] && [ \"$(settings get global private_dns_spec)\" = \"1dot1dot1dot1.cloudflare-dns.com\" ]",
-                manualSteps = listOf(
-                    "Open Network and internet settings.",
-                    "Tap Private DNS.",
-                    "Choose Private DNS provider hostname.",
-                    "Enter 1dot1dot1dot1.cloudflare-dns.com."
-                )
-            ),
-            WifiTweak(
-                id = "private_dns_google",
-                title = "Private DNS: Google",
-                description = "Reliable DNS-over-TLS using dns.google.",
-                icon = Icons.Rounded.Public,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PRIVACY,
-                applyCommands = listOf(
-                    "settings put global private_dns_mode hostname",
-                    "settings put global private_dns_spec dns.google"
-                ),
-                revertCommands = listOf(
-                    "settings put global private_dns_mode opportunistic",
-                    "settings delete global private_dns_spec"
-                ),
-                verificationCommand = "[ \"$(settings get global private_dns_mode)\" = \"hostname\" ] && [ \"$(settings get global private_dns_spec)\" = \"dns.google\" ]",
-                manualSteps = listOf(
-                    "Open Network and internet settings.",
-                    "Tap Private DNS.",
-                    "Choose Private DNS provider hostname.",
-                    "Enter dns.google."
-                )
-            ),
-            WifiTweak(
-                id = "private_dns_quad9",
-                title = "Private DNS: Quad9",
-                description = "Strong privacy with malware filtering on dns.quad9.net.",
-                icon = Icons.Rounded.Shield,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PRIVACY,
-                applyCommands = listOf(
-                    "settings put global private_dns_mode hostname",
-                    "settings put global private_dns_spec dns.quad9.net"
-                ),
-                revertCommands = listOf(
-                    "settings put global private_dns_mode opportunistic",
-                    "settings delete global private_dns_spec"
-                ),
-                verificationCommand = "[ \"$(settings get global private_dns_mode)\" = \"hostname\" ] && [ \"$(settings get global private_dns_spec)\" = \"dns.quad9.net\" ]",
-                manualSteps = listOf(
-                    "Open Network and internet settings.",
-                    "Tap Private DNS.",
-                    "Choose Private DNS provider hostname.",
-                    "Enter dns.quad9.net."
-                )
-            ),
-            WifiTweak(
-                id = "private_dns_adguard",
-                title = "Private DNS: AdGuard",
-                description = "Blocks many ads and trackers using dns.adguard-dns.com.",
-                icon = Icons.Rounded.PrivacyTip,
-                type = TweakType.SHIZUKU_OR_GUIDE,
-                category = TweakCategory.PRIVACY,
-                applyCommands = listOf(
-                    "settings put global private_dns_mode hostname",
-                    "settings put global private_dns_spec dns.adguard-dns.com"
-                ),
-                revertCommands = listOf(
-                    "settings put global private_dns_mode opportunistic",
-                    "settings delete global private_dns_spec"
-                ),
-                verificationCommand = "[ \"$(settings get global private_dns_mode)\" = \"hostname\" ] && [ \"$(settings get global private_dns_spec)\" = \"dns.adguard-dns.com\" ]",
-                manualSteps = listOf(
-                    "Open Network and internet settings.",
-                    "Tap Private DNS.",
-                    "Choose Private DNS provider hostname.",
-                    "Enter dns.adguard-dns.com."
-                )
-            ),
-            WifiTweak(
-                id = "manual_mac_randomization",
-                title = "Use randomized MAC",
-                description = "Prevents hotspots and venues from tracking one static Wi-Fi identity.",
-                icon = Icons.Rounded.GppGood,
-                type = TweakType.MANUAL_GUIDE,
-                category = TweakCategory.PRIVACY,
-                manualSteps = listOf(
-                    "Open the current Wi-Fi network details.",
-                    "Open Privacy or MAC address type.",
-                    "Choose randomized MAC."
-                )
-            ),
-            WifiTweak(
-                id = "manual_forget_open_networks",
-                title = "Forget risky open networks",
-                description = "Clean out old open hotspots so the phone does not keep probing for them.",
-                icon = Icons.Rounded.AutoAwesome,
-                type = TweakType.MANUAL_GUIDE,
-                category = TweakCategory.PRIVACY,
-                manualSteps = listOf(
-                    "Open Saved networks.",
-                    "Forget old airport, hotel, and cafe hotspots you no longer need."
-                )
-            ),
-            WifiTweak(
-                id = "manual_metered_hotspot",
-                title = "Mark noisy hotspots as metered",
-                description = "A great fallback when one network should stay connected but not burn bandwidth in the background.",
-                icon = Icons.Rounded.BatterySaver,
-                type = TweakType.MANUAL_GUIDE,
-                category = TweakCategory.POWER,
-                manualSteps = listOf(
-                    "Open the hotspot's Wi-Fi details.",
-                    "Find Network usage or Metered.",
-                    "Set it to Metered."
-                )
-            )
-        )
+    // ── Journal plumbing ──
+
+    private fun parseJournal(json: String): Map<String, JournalEntry> {
+        if (json.isBlank() || json == "{}") return emptyMap()
+        return runCatching {
+            val root = JSONObject(json)
+            root.keys().asSequence().mapNotNull { tweakId ->
+                val obj = root.optJSONObject(tweakId) ?: return@mapNotNull null
+                val vals = mutableMapOf<String, String?>()
+                val arr = obj.optJSONArray("values") ?: return@mapNotNull null
+                for (i in 0 until arr.length()) {
+                    val pair = arr.optJSONObject(i) ?: continue
+                    val key = pair.optString("key")
+                    if (key.isBlank()) continue
+                    vals[key] = if (pair.isNull("value")) null else pair.optString("value")
+                }
+                tweakId to JournalEntry(vals, obj.optLong("ts"))
+            }.toMap()
+        }.getOrDefault(emptyMap())
     }
 
-    private fun buildProfiles(): List<WifiOptimizationProfile> {
-        return listOf(
-            WifiOptimizationProfile(
-                id = "profile_gaming",
-                title = "Gaming Pro",
-                description = "Lowest latency possible. Disables power saving and forces high performance.",
-                icon = Icons.Rounded.SportsEsports,
-                tweakIds = listOf("low_latency_mode", "scan_throttle", "data_stall_logic"),
-                accentLabel = "Pro Performance"
-            ),
-            WifiOptimizationProfile(
-                id = "profile_fast_lane",
-                title = "Fast Lane",
-                description = "Roaming-first profile for mesh routers and busy environments.",
-                icon = Icons.Rounded.Speed,
-                tweakIds = listOf("scan_throttle", "aggressive_roaming", "mobile_data_always_on"),
-                accentLabel = "Speed"
-            ),
-            WifiOptimizationProfile(
-                id = "profile_stability",
-                title = "Steady Link",
-                description = "Best when Wi-Fi drops in the background or sticks to a bad access point.",
-                icon = Icons.Rounded.NetworkCheck,
-                tweakIds = listOf("avoid_bad_wifi", "suspend_optimizations", "ip_reachability"),
-                accentLabel = "Stability"
-            ),
-            WifiOptimizationProfile(
-                id = "profile_privacy",
-                title = "Ghost Mode",
-                description = "Maximum privacy with MAC randomization and secure DNS defaults.",
-                icon = Icons.Rounded.Shield,
-                tweakIds = listOf("manual_mac_randomization", "private_dns_cloudflare", "verbose_logging"),
-                accentLabel = "Privacy"
-            )
-        )
+    private fun serializeJournal(): String {
+        val root = JSONObject()
+        tweakJournal.forEach { (id, entry) ->
+            val obj = JSONObject()
+            obj.put("ts", entry.ts)
+            val arr = org.json.JSONArray()
+            entry.previousValues.forEach { (k, v) ->
+                val p = JSONObject()
+                p.put("key", k)
+                if (v != null) p.put("value", v) else p.put("value", JSONObject.NULL)
+                arr.put(p)
+            }
+            obj.put("values", arr)
+            root.put(id, obj)
+        }
+        return root.toString()
+    }
+
+    private suspend fun persistJournalEntry(tweakId: String, values: Map<String, String?>) {
+        if (values.isEmpty()) return
+        tweakJournal = tweakJournal + (tweakId to JournalEntry(values))
+        settingsRepository.setNetworkTweakJournal(serializeJournal())
+        addLog("JOURNAL", "Captured ${values.size} previous value(s) for $tweakId", LogLevel.INFO)
+    }
+
+    private suspend fun consumeJournal(tweakId: String) {
+        if (!tweakJournal.containsKey(tweakId)) return
+        tweakJournal = tweakJournal - tweakId
+        settingsRepository.setNetworkTweakJournal(serializeJournal())
+    }
+
+    /** Reads current values of every `settings put global KEY …` target so revert can restore truth. */
+    private suspend fun capturePreviousValues(tweak: WifiTweak): Map<String, String?> {
+        val keys = tweak.applyCommands.mapNotNull { cmd ->
+            Regex("^settings put global (\\S+) ").find(cmd)?.groupValues?.get(1)
+        }.distinct()
+        if (keys.isEmpty()) return emptyMap()
+        val out = mutableMapOf<String, String?>()
+        keys.forEach { key ->
+            val res = withTimeoutOrNull(5_000) {
+                runCatching { shizukuExecutor.executeForResult("settings get global $key", timeoutMs = 4_000) }.getOrNull()
+            }
+            val v = res?.stdout?.trim()
+            out[key] = if (res?.isSuccess == true && !v.isNullOrBlank() && v != "null" && v != "-1") v else null
+        }
+        return out
     }
 
     override fun onCleared() {

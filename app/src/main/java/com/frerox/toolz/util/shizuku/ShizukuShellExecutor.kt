@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -159,7 +160,22 @@ class ShizukuShellExecutor @Inject constructor(
         executeForResult(command).combinedOutput
     }
 
-    suspend fun executeForResult(command: String): ShellCommandResult = withContext(Dispatchers.IO) {
+    /**
+     * Runs [command] with a hard client-side timeout. On timeout the returned result has exitCode -1;
+     * note the remote process may still finish server-side (no cancel AIDL), but callers always proceed.
+     */
+    suspend fun executeForResult(command: String, timeoutMs: Long = 8_000): ShellCommandResult =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMs) { executeForResultInternal(command) }
+                ?: ShellCommandResult(
+                    command = command,
+                    exitCode = -1,
+                    stdout = "",
+                    stderr = "Timed out after ${timeoutMs}ms"
+                )
+        }
+
+    private suspend fun executeForResultInternal(command: String): ShellCommandResult = withContext(Dispatchers.IO) {
         if (!ensureService()) {
             return@withContext ShellCommandResult(
                 command = command,

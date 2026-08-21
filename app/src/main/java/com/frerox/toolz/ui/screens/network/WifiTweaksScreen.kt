@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,446 +79,14 @@ import java.text.DateFormat
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class, ExperimentalLayoutApi::class,
-    ExperimentalFoundationApi::class)
-@Composable
-fun WifiTweaksScreen(
-    onBack: () -> Unit,
-    viewModel: WifiTweaksViewModel = hiltViewModel()
-) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    val vibrationManager = LocalVibrationManager.current
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var showDetailSheet by remember { mutableStateOf<WifiScanResult?>(null) }
-    var showTerminalSheet by remember { mutableStateOf(false) }
-    var showBenchmarkSelectionSheet by remember { mutableStateOf(false) }
-    var sideNavVisible by remember { mutableStateOf(true) }
-
-    val permissions = remember {
-        buildList {
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            }
-        }
-    }
-    val permissionState = rememberMultiplePermissionsState(permissions)
-
-    LaunchedEffect(Unit) {
-        viewModel.events.collect { message ->
-            snackbarHostState.showSnackbar(message)
-            viewModel.clearLastActionMessage()
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .toolzBackground()
-    ) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onBackground,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                Surface(
-                    shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                    tonalElevation = 3.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    ExpressiveTopAppBar(
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    stringResource(R.string.st_WifiTweaksScreen_f1a2),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Black
-                                )
-                                Surface(
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        stringResource(R.string.st_WifiTweaksScreen_3d5b),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                                    )
-                                }
-                            }
-                        },
-                        subtitle = {
-                            Text(
-                                uiState.currentSsid,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = {
-                                vibrationManager?.vibrateClick()
-                                onBack()
-                            }) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.st_WifiTweaksScreen_9e2c))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = {
-                                vibrationManager?.vibrateClick()
-                                viewModel.refreshEnvironment()
-                            }) {
-                                if (uiState.isScanning) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.st_WifiTweaksScreen_1a2b))
-                                }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            scrolledContainerColor = Color.Transparent
-                        )
-                    )
-                }
-            }
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp)
-            ) {
-                Spacer(Modifier.height(8.dp))
-
-                val fineGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_FINE_LOCATION && it.status.isGranted }
-                val coarseGranted = permissionState.permissions.any { it.permission == Manifest.permission.ACCESS_COARSE_LOCATION && it.status.isGranted }
-                val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    permissionState.permissions.any { it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted }
-                } else true
-
-                if (!(fineGranted || coarseGranted) || !nearbyGranted) {
-                    PermissionGate(
-                        onGrant = {
-                            vibrationManager?.vibrateClick()
-                            permissionState.launchMultiplePermissionRequest()
-                        }
-                    )
-                } else {
-                    Row(modifier = Modifier.weight(1f)) {
-                        AnimatedVisibility(
-                            visible = sideNavVisible,
-                            enter = slideInHorizontally { -it } + fadeIn(),
-                            exit = slideOutHorizontally { -it } + fadeOut()
-                        ) {
-                            VerticalExpressiveTabs(
-                                selectedIndex = selectedTab,
-                                options = listOf(
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_overview) to Icons.Rounded.Dashboard,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_analyzer) to Icons.Rounded.Wifi,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_profiles) to Icons.Rounded.AutoAwesome,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_dns) to Icons.Rounded.Public,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_diag) to Icons.Rounded.Analytics,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_traffic) to Icons.Rounded.Lan,
-                                    stringResource(R.string.st_WifiTweaksScreen_tab_console) to Icons.Rounded.Terminal
-                                ),
-                                onOptionSelected = { index: Int ->
-                                    vibrationManager?.vibrateClick()
-                                    selectedTab = index
-                                },
-                                modifier = Modifier.padding(end = 12.dp)
-                            )
-                        }
-
-                        AnimatedContent(
-                            targetState = selectedTab,
-                            transitionSpec = {
-                                if (targetState > initialState) {
-                                    (slideInVertically { height -> height } + fadeIn()).togetherWith(
-                                        slideOutVertically { height -> -height } + fadeOut())
-                                } else {
-                                    (slideInVertically { height -> -height } + fadeIn()).togetherWith(
-                                        slideOutVertically { height -> height } + fadeOut())
-                                }.using(SizeTransform(clip = false))
-                            },
-                            label = "wifi_tweaks_tab_content",
-                            modifier = Modifier.weight(1f)
-                        ) { tab ->
-                            when (tab) {
-                                0 -> OverviewTab(
-                                    state = uiState,
-                                    onScan = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.startScan()
-                                    },
-                                    onFixConnection = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.fixMyConnection()
-                                    },
-                                    onReset = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.resetAllSettings()
-                                    },
-                                    onToggleAudio = viewModel::setAudioFeedback,
-                                    onOpenWifiSettings = {
-                                        launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
-                                    }
-                                )
-
-                                1 -> AnalyzerTab(
-                                    state = uiState,
-                                    onScan = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.startScan()
-                                    },
-                                    onSortSelected = viewModel::setScanSortMode,
-                                    onToggleHidden = viewModel::setShowHiddenNetworks,
-                                    onSelectAP = { showDetailSheet = it }
-                                )
-
-                                2 -> ProfilesTab(
-                                    state = uiState,
-                                    onBindShizuku = {
-                                        requestShizuku(context)
-                                    },
-                                    onApplyProfile = { profile ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.applyProfile(profile)
-                                    },
-                                    onApplyTweak = { tweak ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.applyTweak(tweak)
-                                    },
-                                    onUndoTweak = { tweak ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.undoTweak(tweak)
-                                    }
-                                )
-
-                                3 -> DnsEngineTab(
-                                    state = uiState,
-                                    onBenchmark = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.benchmarkDns()
-                                    },
-                                    onApplyTweak = { tweak ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.applyTweak(tweak)
-                                    },
-                                    onRestoreAutomatic = {
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.restoreAutomaticPrivateDns()
-                                    },
-                                    onApplyCustom = { host ->
-                                        vibrationManager?.vibrateClick()
-                                        viewModel.applyCustomDns(host)
-                                    },
-                                    onShowSelection = { showBenchmarkSelectionSheet = true }
-                                )
-
-                                4 -> DiagnosticsTab(
-                                    state = uiState,
-                                    onCopySummary = {
-                                        clipboard.setText(AnnotatedString(viewModel.buildDiagnosticSummary()))
-                                        scope.launch { snackbarHostState.showSnackbar("Diagnostic summary copied.") }
-                                    },
-                                    onOpenWifiSettings = {
-                                        launchSettings(context, Settings.ACTION_WIFI_SETTINGS)
-                                    },
-                                    onOpenDevSettings = {
-                                        launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-                                    },
-                                    onRunSpeedTest = { viewModel.runSpeedTest() },
-                                    onRunTraceRoute = { viewModel.runTraceRoute(it) }
-                                )
-
-                                5 -> TrafficTab(
-                                    state = uiState
-                                )
-
-                                else -> NetworkConsoleView(
-                                    logs = uiState.diagnosticLogs,
-                                    isShizukuReady = uiState.shizukuStatus.isServiceReady,
-                                    onExecuteRawCommand = { cmd -> viewModel.executeRawCommand(cmd) },
-                                    onClearLogs = { viewModel.clearLogs() }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Floating controls are now hosted inside Scaffold to respect insets and avoid overlap
-        Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Row(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SmallFloatingActionButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        sideNavVisible = !sideNavVisible
-                    },
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        if (sideNavVisible) Icons.Rounded.ArrowBackIosNew else Icons.Rounded.ArrowForwardIos,
-                        contentDescription = if (sideNavVisible) "Hide navigation" else "Show navigation"
-                    )
-                }
-                FloatingActionButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        showTerminalSheet = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Icon(Icons.Rounded.Terminal, contentDescription = "Open diagnostics console")
-                }
-            }
-        }
-
-        if (showTerminalSheet) {
-            DiagnosticLogSheet(
-                logs = uiState.diagnosticLogs,
-                onDismiss = { showTerminalSheet = false }
-            )
-        }
-
-        if (showBenchmarkSelectionSheet) {
-            BenchmarkSelectionSheet(
-                state = uiState,
-                onToggle = viewModel::updateBenchmarkSelection,
-                onDismiss = { showBenchmarkSelectionSheet = false }
-            )
-        }
-
-        if (showDetailSheet != null) {
-            APDetailSheet(
-                result = showDetailSheet!!,
-                onDismiss = { showDetailSheet = null },
-                onPing = { target ->
-                    scope.launch {
-                        val latency = viewModel.pingHost(target)
-                        snackbarHostState.showSnackbar("Ping to $target: ${latency ?: "Timeout"}ms")
-                    }
-                }
-            )
-        }
-
-        if (uiState.showDisclaimer) {
-            AlertDialog(
-                onDismissRequest = { },
-                confirmButton = {
-                    Button(
-                        onClick = { 
-                            vibrationManager?.vibrateClick()
-                            viewModel.dismissDisclaimer() 
-                        },
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text("Got it")
-                    }
-                },
-                title = { 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.tertiary)
-                        Text("Experimental Tool", fontWeight = FontWeight.Black)
-                    }
-                },
-                text = {
-                    Text(
-                        "This suite contains advanced networking tweaks that are currently in Beta. Some features may be experimental, and stability might vary depending on your device and Android version.\n\n" +
-                        "Most optimizations require Shizuku for privileged shell access. Use with caution."
-                    )
-                },
-                shape = RoundedCornerShape(32.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            )
-        }
-    }
-}
-
-@Composable
-private fun VerticalExpressiveTabs(
-    selectedIndex: Int,
-    options: List<Pair<String, ImageVector>>,
-    onOptionSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .width(84.dp)
-            .fillMaxHeight()
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        options.forEachIndexed { index, (label, icon) ->
-            val selected = selectedIndex == index
-            val containerColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                label = "tab_bg"
-            )
-            val contentColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                label = "tab_content"
-            )
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable { onOptionSelected(index) },
-                color = containerColor,
-                shape = RoundedCornerShape(20.dp),
-                tonalElevation = if (selected) 2.dp else 0.dp
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(imageVector = icon, contentDescription = label, tint = contentColor, modifier = Modifier.size(22.dp))
-                    Text(label, style = MaterialTheme.typography.labelSmall, color = contentColor, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BenchmarkSelectionSheet(
+internal fun BenchmarkSelectionSheet(
     state: WifiTweaksUiState,
+    providers: List<Triple<String, String, String>>,
     onToggle: (String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val providers = listOf(
-        Triple("cloudflare", "Cloudflare", "1.1.1.1"),
-        Triple("google", "Google", "8.8.8.8"),
-        Triple("quad9", "Quad9", "9.9.9.9"),
-        Triple("adguard", "AdGuard", "94.140.14.14"),
-        Triple("opendns", "OpenDNS", "208.67.222.222"),
-        Triple("mullvad", "Mullvad", "194.242.2.2"),
-        Triple("controld", "Control D", "76.76.2.0"),
-        Triple("nextdns", "NextDNS", "45.90.28.0"),
-        Triple("cleanbrowsing", "CleanBrowsing", "185.228.168.168"),
-        Triple("comodo", "Comodo Secure", "8.26.56.26"),
-        Triple("neustar", "Neustar Ultra", "156.154.70.1"),
-        Triple("gcore", "Gcore", "95.161.212.1")
-    )
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth().padding(24.dp).padding(bottom = 32.dp)) {
@@ -553,7 +122,7 @@ private fun BenchmarkSelectionSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DiagnosticLogSheet(
+internal fun DiagnosticLogSheet(
     logs: List<DiagnosticLog>,
     onDismiss: () -> Unit
 ) {
@@ -610,7 +179,7 @@ private fun DiagnosticLogSheet(
 }
 
 @Composable
-private fun PermissionGate(onGrant: () -> Unit) {
+internal fun PermissionGate(onGrant: () -> Unit) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxSize()
@@ -739,13 +308,14 @@ private fun ServiceWarningCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OverviewTab(
+internal fun OverviewTab(
     state: WifiTweaksUiState,
     onScan: () -> Unit,
     onFixConnection: () -> Unit,
     onReset: () -> Unit,
     onToggleAudio: (Boolean) -> Unit,
-    onOpenWifiSettings: () -> Unit
+    onOpenWifiSettings: () -> Unit,
+    extraCards: (@Composable () -> Unit)? = null
 ) {
     LazyColumn(
         modifier = Modifier
@@ -804,6 +374,10 @@ private fun OverviewTab(
                 state = state,
                 onToggleAudio = onToggleAudio
             )
+        }
+
+        if (extraCards != null) {
+            item { Column(verticalArrangement = Arrangement.spacedBy(20.dp)) { extraCards() } }
         }
     }
 }
@@ -1245,7 +819,7 @@ private fun InsightStrip(state: WifiTweaksUiState) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AnalyzerTab(
+internal fun AnalyzerTab(
     state: WifiTweaksUiState,
     onScan: () -> Unit,
     onSortSelected: (WifiScanSortMode) -> Unit,
@@ -1634,7 +1208,7 @@ private fun ScanningPulse() {
 }
 
 @Composable
-private fun ProfilesTab(
+internal fun ProfilesTab(
     state: WifiTweaksUiState,
     onBindShizuku: () -> Unit,
     onApplyProfile: (WifiOptimizationProfile) -> Unit,
@@ -1693,7 +1267,7 @@ private fun ProfilesTab(
 }
 
 @Composable
-private fun DnsEngineTab(
+internal fun DnsEngineTab(
     state: WifiTweaksUiState,
     onBenchmark: () -> Unit,
     onApplyTweak: (WifiTweak) -> Unit,
@@ -1879,13 +1453,14 @@ private fun DnsBenchmarkRow(result: WifiDnsBenchmarkResult) {
 }
 
 @Composable
-private fun DiagnosticsTab(
+internal fun DiagnosticsTab(
     state: WifiTweaksUiState,
     onCopySummary: () -> Unit,
     onOpenWifiSettings: () -> Unit,
     onOpenDevSettings: () -> Unit,
     onRunSpeedTest: () -> Unit,
-    onRunTraceRoute: (String) -> Unit
+    onRunTraceRoute: (String) -> Unit,
+    extraCards: (@Composable () -> Unit)? = null
 ) {
     var traceTarget by remember(state.lastTraceTarget) { mutableStateOf(state.lastTraceTarget) }
 
@@ -2051,12 +1626,16 @@ private fun DiagnosticsTab(
                 Text(stringResource(R.string.st_WifiTweaksScreen_s9t0))
             }
         }
+
+        if (extraCards != null) {
+            item { Column(verticalArrangement = Arrangement.spacedBy(20.dp)) { extraCards() } }
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrafficTab(
+internal fun TrafficTab(
     state: WifiTweaksUiState
 ) {
     LazyColumn(
@@ -2875,7 +2454,7 @@ private fun categoryTitle(category: TweakCategory): String {
     }
 }
 
-private fun requestShizuku(context: Context) {
+internal fun requestShizuku(context: Context) {
     try {
         if (Shizuku.isPreV11()) {
             (context as? Activity)?.requestPermissions(arrayOf("rikka.shizuku.permission.API_V23"), WifiTweaksViewModel.SHIZUKU_CODE)
@@ -2886,7 +2465,7 @@ private fun requestShizuku(context: Context) {
     }
 }
 
-private fun launchSettings(context: Context, action: String) {
+internal fun launchSettings(context: Context, action: String) {
     runCatching {
         context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }

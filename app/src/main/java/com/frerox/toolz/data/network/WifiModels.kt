@@ -56,7 +56,9 @@ data class WifiTweak(
     val revertCommands: List<String> = emptyList(),
     val verificationCommand: String? = null,
     val manualSteps: List<String> = emptyList(),
-    val riskNote: String? = null
+    val riskNote: String? = null,
+    /** Known vendor quirks keyed by lowercase manufacturer substring. */
+    val oemNotes: Map<String, String> = emptyMap()
 )
 
 data class WifiOptimizationProfile(
@@ -103,8 +105,13 @@ data class TweakResult(
     val status: TweakStatus = TweakStatus.IDLE,
     val message: String = "",
     val isApplied: Boolean = false,
+    /** true = read-back confirmed · false = read-back mismatched · null = not verifiable */
+    val verified: Boolean? = null,
     val lastUpdatedMs: Long = 0L
 )
+
+/** Honest tri-state outcome of probing a tweak's real system state. */
+enum class VerifyState { APPLIED_VERIFIED, APPLIED_UNVERIFIED, NOT_APPLIED }
 
 data class ChannelCongestion(
     val channel: Int,
@@ -234,5 +241,6 @@ data class WifiTweaksUiState(
     val selectedBenchmarkProviders: Set<String> = emptySet(),
     val traceHistory: List<String> = emptyList(),
     val lastTraceTarget: String = "1.1.1.1",
-    val showDisclaimer: Boolean = false
+    val showDisclaimer: Boolean = false,
+    val consoleEnabled: Boolean = false
 )

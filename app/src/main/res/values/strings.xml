@@ -1257,7 +1257,7 @@
     <string name="st_WifiTweaksScreen_1a2b">Refresh</string>
     <string name="st_WifiTweaksScreen_7c4d">Network Snapshot</string>
     <string name="st_WifiTweaksScreen_5f6e">Latency Trend</string>
-    <string name="st_WifiTweaksScreen_2b8a">Fix My Connection</string>
+    <string name="st_WifiTweaksScreen_2b8a">Quick Fixes</string>
     <string name="st_WifiTweaksScreen_4d9c">Reset All</string>
     <string name="st_WifiTweaksScreen_6a1b">Signal Soundscape</string>
     <string name="st_WifiTweaksScreen_1b2c">Frequency changes with signal strength. Walk around to find the peak.</string>

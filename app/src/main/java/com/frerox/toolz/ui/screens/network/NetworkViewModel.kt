@@ -17,7 +17,6 @@
 
 package com.frerox.toolz.ui.screens.network
 
-import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.network.DnsProvider
@@ -30,14 +29,12 @@ import com.frerox.toolz.data.network.StabilityInfo
 import com.frerox.toolz.data.network.TopologyEdge
 import com.frerox.toolz.data.network.TopologyNode
 import com.frerox.toolz.data.network.NetworkTopology
-import com.frerox.toolz.data.network.VpnStatus
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.network.DnsEngine
 import com.frerox.toolz.util.network.NetworkMonitor
 import com.frerox.toolz.util.network.NetworkScanner
 import com.frerox.toolz.util.network.PrivilegedNetworkManager
 import com.frerox.toolz.util.network.SpeedTestEngine
-import com.frerox.toolz.util.network.VpnHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,7 +64,6 @@ import kotlin.system.measureTimeMillis
 class NetworkViewModel @Inject constructor(
     private val networkMonitor: NetworkMonitor,
     private val dnsEngine: DnsEngine,
-    private val vpnHelper: VpnHelper,
     private val networkScanner: NetworkScanner,
     private val speedTestEngine: SpeedTestEngine,
     private val privilegedNetworkManager: PrivilegedNetworkManager,
@@ -367,24 +363,6 @@ class NetworkViewModel @Inject constructor(
                 emitEvent("Shizuku is still unavailable. Start the service in the Shizuku app, then try again.")
             }
         }
-    }
-
-    fun prepareVpn(): Intent? = vpnHelper.prepareVpn()
-
-    fun startVpn(config: String) {
-        viewModelScope.launch {
-            updateState { copy(vpnStatus = VpnStatus.CONNECTING) }
-            delay(800)
-            vpnHelper.startVpn(config)
-            delay(1000)
-            updateState { copy(vpnStatus = VpnStatus.CONNECTED) }
-            emitEvent("VPN tunnel connected.")
-        }
-    }
-
-    fun stopVpn() {
-        vpnHelper.stopVpn()
-        updateState { copy(vpnStatus = VpnStatus.DISCONNECTED) }
     }
 
     private fun observeWifi() {

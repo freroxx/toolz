@@ -110,8 +110,7 @@ import com.frerox.toolz.ui.screens.search.SearchScreen
 import com.frerox.toolz.ui.screens.browser.WebViewScreen
 import com.frerox.toolz.ui.screens.browser.WebViewViewModel
 import com.frerox.toolz.ui.screens.password.PasswordVaultScreen
-import com.frerox.toolz.ui.screens.network.NetworkPowerSuiteScreen
-import com.frerox.toolz.ui.screens.network.WifiTweaksScreen
+import com.frerox.toolz.ui.screens.network.NetworkSuiteScreen
 import com.frerox.toolz.ui.screens.whisper.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.util.NotificationHelper
@@ -1208,10 +1207,10 @@ fun ToolzNavHost(
             ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
         composable(Screen.NetworkPowerSuite.route) {
-            NetworkPowerSuiteScreen(onBack = { navController.popBackStack() })
+            NetworkSuiteScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.WifiTweaks.route) {
-            WifiTweaksScreen(onBack = { navController.popBackStack() })
+            NetworkSuiteScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.FileCleaner.route) {
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()

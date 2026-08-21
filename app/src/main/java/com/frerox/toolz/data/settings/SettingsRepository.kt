@@ -434,6 +434,8 @@ class SettingsRepository @Inject constructor(
     private val NETWORK_BENCHMARK_SERVERS = stringSetPreferencesKey("network_benchmark_servers")
     private val NETWORK_LAST_TRACE_TARGET = stringPreferencesKey("network_last_trace_target")
     private val NETWORK_AUTO_CONNECT_SHIZUKU = booleanPreferencesKey("network_auto_connect_shizuku")
+    private val NETWORK_CONSOLE_ENABLED = booleanPreferencesKey("network_console_enabled")
+    private val NETWORK_TWEAK_JOURNAL = stringPreferencesKey("network_tweak_journal")
     private val NETWORK_DISCLAIMER_SHOWN = booleanPreferencesKey("network_disclaimer_shown")
 
     // BMI Persistence
@@ -805,6 +807,12 @@ class SettingsRepository @Inject constructor(
     }
     val networkLastTraceTarget: Flow<String> = dataStore.data.map { it[NETWORK_LAST_TRACE_TARGET] ?: "1.1.1.1" }
     val networkAutoConnectShizuku: Flow<Boolean> = dataStore.data.map { it[NETWORK_AUTO_CONNECT_SHIZUKU] ?: true }
+
+    /** Raw shell console is dangerous; gated behind an explicit opt-in. */
+    val networkConsoleEnabled: Flow<Boolean> = dataStore.data.map { it[NETWORK_CONSOLE_ENABLED] ?: false }
+
+    /** JSON blob of {tweakId -> captured previous setting values} used for truthful revert. */
+    val networkTweakJournal: Flow<String> = dataStore.data.map { it[NETWORK_TWEAK_JOURNAL] ?: "{}" }
     val networkDisclaimerShown: Flow<Boolean> = dataStore.data.map { it[NETWORK_DISCLAIMER_SHOWN] ?: false }
 
     // BMI Flows
@@ -1200,6 +1208,12 @@ class SettingsRepository @Inject constructor(
     suspend fun setNetworkAutoConnectShizuku(enabled: Boolean) {
         dataStore.edit { it[NETWORK_AUTO_CONNECT_SHIZUKU] = enabled }
     }
+
+    suspend fun setNetworkConsoleEnabled(enabled: Boolean) =
+        dataStore.edit { it[NETWORK_CONSOLE_ENABLED] = enabled }
+
+    suspend fun setNetworkTweakJournal(json: String) =
+        dataStore.edit { it[NETWORK_TWEAK_JOURNAL] = json }
 
     suspend fun setNetworkDisclaimerShown(shown: Boolean) {
         dataStore.edit { it[NETWORK_DISCLAIMER_SHOWN] = shown }
