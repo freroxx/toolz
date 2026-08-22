@@ -58,17 +58,29 @@ data class WhisperToastData(
 class WhisperToastState {
     // Monotonic id so two toasts fired within the same millisecond still trigger
     // distinct (re)composition of the toast host animation.
+    // P2-10 FIX: Queue toasts so rapid errors aren't lost; previously show() overwrote.
     private val idCounter = java.util.concurrent.atomic.AtomicLong(0L)
+    private val queue = ArrayDeque<WhisperToastData>()
     private val _currentToast = MutableStateFlow<WhisperToastData?>(null)
     val currentToast = _currentToast.asStateFlow()
 
     fun show(message: String, type: WhisperToastType = WhisperToastType.ERROR) {
         if (message.isBlank()) return
-        _currentToast.value = WhisperToastData(message, type, id = idCounter.incrementAndGet())
+        val data = WhisperToastData(message, type, id = idCounter.incrementAndGet())
+        if (_currentToast.value == null) {
+            _currentToast.value = data
+        } else {
+            // Cap queue at 5 to avoid spam.
+            if (queue.size < 5) queue.addLast(data)
+        }
     }
 
     fun dismiss() {
-        _currentToast.value = null
+        if (queue.isNotEmpty()) {
+            _currentToast.value = queue.removeFirst()
+        } else {
+            _currentToast.value = null
+        }
     }
 }
 

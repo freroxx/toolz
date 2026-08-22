@@ -61,28 +61,40 @@ object DatabaseModule {
         val passphrase = KeyManager.getOrCreateMasterKey(context)
         val factory = SupportOpenHelperFactory(passphrase)
         
+        // P0-1 FIX (reviewwhisper.md): fallbackToDestructiveMigration(true) would WIPES
+        // E2EE history on any schema drift (version bump). For a messenger this is
+        // catastrophic — pending outbox, tombstones, queued images become unrecoverable.
+        // Replace with explicit migrations only + destructive only on downgrade for dev.
         val builder = Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             dbName
         )
         .openHelperFactory(factory)
-        .fallbackToDestructiveMigration(true)
+        .fallbackToDestructiveMigrationOnDowngrade()
+        // NOTE: Add explicit Migration(46,47) objects here when schema changes.
+        // Do NOT re-introduce fallbackToDestructiveMigration().
 
         val db = builder.build()
-        
-        // Verify database is openable. SQLiteNotADatabaseException occurs when 
+
+        // Verify database is openable. SQLiteNotADatabaseException occurs when
         // the file exists but isn't a SQLCipher database or the key is wrong.
+        // Fixed: do not reuse the same builder after delete (leaks first helper);
+        // create a fresh builder.
         try {
             db.openHelper.writableDatabase
         } catch (e: Exception) {
             if (e is SQLiteNotADatabaseException || (e.message?.contains("file is not a database") == true)) {
                 context.deleteDatabase(dbName)
-                return builder.build()
+                // Fresh builder avoids leaking the first helper's connection.
+                return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
+                    .openHelperFactory(factory)
+                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .build()
             }
             throw e
         }
-        
+
         return db
     }
 

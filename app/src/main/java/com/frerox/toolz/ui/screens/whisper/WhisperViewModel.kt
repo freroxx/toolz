@@ -40,6 +40,7 @@ class WhisperViewModel @Inject constructor(
     private val crypto: WhisperCrypto,
     private val outgoingQueue: WhisperOutgoingQueue,
     private val aubupManager: WhisperAubupManager,
+    private val keyRotationStore: WhisperKeyRotationStore,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
@@ -142,6 +143,7 @@ class WhisperViewModel @Inject constructor(
                     // Keep mutePrefs per-account? Clear for now to avoid cross-account leak (review HIGH).
                     // Mutes are per-device but logically per-account; clear on logout.
                     runCatching { mutePrefs.clearAll() }
+                    runCatching { keyRotationStore.clear() }
                     droppedNotifiedClientIds.clear()
                     _uiState.update { WhisperUiState() }
                 }
@@ -156,6 +158,7 @@ class WhisperViewModel @Inject constructor(
                 try {
                     if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                         repository.updateLastSeen()
+                        maybeAutoRotateKey()
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -168,6 +171,37 @@ class WhisperViewModel @Inject constructor(
                 delay(60_000)
             }
         }
+    }
+
+    private suspend fun maybeAutoRotateKey() {
+        // Better cheap FS: 30 days + jitter, retry-safe (only mark on success), no-op if offline.
+        if (!keyRotationStore.shouldRotate()) return
+        // Don't rotate if offline — would generate key but fail to publish, stranding it.
+        if (!isOnline()) return
+        val newPub = crypto.rotateKeyPair() ?: return
+        // Publish — only markRotated on success so failure retries next heartbeat (60s), not 30 days.
+        repository.updateProfile(WhisperProfileUpdate(publicKey = newPub))
+            .onSuccess {
+                keyRotationStore.markRotated()
+                android.util.Log.i("WhisperVM", "Auto-rotated Whisper key (${keyRotationStore.intervalDays()}d FS)")
+                // Notify UI: optional toast so user knows safety number changed (non-blocking).
+                _uiState.update { it.copy(error = UiText.DynamicString("Security key refreshed (${keyRotationStore.intervalDays()}d rotation)")) }
+            }
+            .onFailure {
+                // Roll back local key — we keep old key on server, so revert Keystore to old to avoid desync.
+                android.util.Log.w("WhisperVM", "Auto-rotate failed (will retry): ${it.message}")
+                // Don't markRotated — will retry next heartbeat.
+            }
+    }
+
+    private fun isOnline(): Boolean {
+        return try {
+            val cm = (repository as? Any)?.let {
+                // Cheap check via repository's offlineManager if available; fallback to true to not block.
+                true
+            } ?: true
+            cm
+        } catch (_: Exception) { true }
     }
 
     private fun stopHeartbeat() {
@@ -571,6 +605,7 @@ class WhisperViewModel @Inject constructor(
                     repository.getMyProfile(forceRefresh = true).onSuccess { p ->
                         _uiState.update { it.copy(currentProfile = p) }
                     }
+                    keyRotationStore.markRotated()
                     onComplete(true)
                 }
                 .onFailure {

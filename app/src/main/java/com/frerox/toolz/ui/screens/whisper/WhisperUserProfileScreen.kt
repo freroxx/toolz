@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
 import com.frerox.toolz.data.whisper.KeyTrustStatus
@@ -297,6 +298,10 @@ fun WhisperUserProfileScreen(
                                                 stringResource(R.string.st_Whisper_Profile_KeyVerifiedDesc)
                                             keyTrust?.status == KeyTrustStatus.CHANGED ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyChangedDesc)
+                                            keyTrust?.status == KeyTrustStatus.ROTATED_AUTO ->
+                                                keyTrust.rotateMessage ?: "Key rotated automatically weekly — verify if you want, not required."
+                                            keyTrust?.status == KeyTrustStatus.ROTATED_MANUAL ->
+                                                keyTrust.rotateMessage ?: "${profile.effectiveName} rotated manually — verify new safety number."
                                             else ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyFingerprintDesc, profile.effectiveName)
                                         },
@@ -321,7 +326,8 @@ fun WhisperUserProfileScreen(
                                     }
 
                                     when {
-                                        keyTrust?.status == KeyTrustStatus.CHANGED -> {
+                                        keyTrust?.status == KeyTrustStatus.CHANGED || keyTrust?.status == KeyTrustStatus.ROTATED_AUTO || keyTrust?.status == KeyTrustStatus.ROTATED_MANUAL -> {
+                                            val isWarning = keyTrust?.status == KeyTrustStatus.CHANGED
                                             Row(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                 modifier = Modifier.fillMaxWidth()
@@ -330,13 +336,13 @@ fun WhisperUserProfileScreen(
                                                     onClick = { haptic.success(); viewModel.verifyKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(stringResource(R.string.st_Whisper_Verify), fontWeight = FontWeight.Bold)
+                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Verify) else "Verify (optional)", fontWeight = FontWeight.Bold)
                                                 }
                                                 ToolzOutlinedExpressiveButton(
                                                     onClick = { haptic.click(); viewModel.acceptNewKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(stringResource(R.string.st_Whisper_Profile_AcceptNewKey), fontWeight = FontWeight.Bold)
+                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Profile_AcceptNewKey) else "Accept", fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -439,16 +445,16 @@ fun WhisperUserProfileScreen(
  * hex chars — byte-for-byte the same algorithm as WhisperCrypto.fingerprint. Kept
  * as a file-level function because this screen has no crypto instance; WhisperCrypto
  * should eventually delegate to this single implementation.
+ * P1-17 FIX: Previously hashed the base64 STRING bytes (trimmed UTF-8), not the
+ * DER bytes. Now correctly decodes base64 then hashes, matching WhisperCrypto.fingerprint
+ * (8 groups of 4). Fallback to 4 groups kept only for legacy imports.
  */
-internal fun whisperFingerprint(base64Key: String): String {
-    val digest = MessageDigest.getInstance("SHA-256").digest(base64Key.trim().toByteArray(Charsets.UTF_8))
+internal fun whisperFingerprint(base64Key: String): String = try {
+    val rawBytes = android.util.Base64.decode(base64Key.trim(), android.util.Base64.DEFAULT)
+    val digest = MessageDigest.getInstance("SHA-256").digest(rawBytes)
     val hex = digest.joinToString("") { "%02X".format(it) }
-    return hex.chunked(4).take(4).joinToString("-")
-}
+    hex.chunked(4).take(8).joinToString("-")
+} catch (_: Exception) { "UNVERIFIED" }
 
-/** Compute a SHA-256 fingerprint from a base64 public key */
-private fun computeFingerprint(base64PublicKey: String): String = try {
-    whisperFingerprint(base64PublicKey)
-} catch (_: Exception) {
-    "UNVERIFIED"
-}
+/** Compute a SHA-256 fingerprint from a base64 public key — P1-17 delegates to single source. */
+private fun computeFingerprint(base64PublicKey: String): String = whisperFingerprint(base64PublicKey)

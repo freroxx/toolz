@@ -57,11 +57,14 @@ class WhisperOutgoingQueue @Inject constructor(
         saveInternal(emptyList())
     }
 
-    // Non-suspend fast path for legacy callers still on Main — delegates to suspend version via
-    // blocking IO off Main. Kept for binary compat, prefer suspend enqueue/remove.
+    // P1 FIX: Previously runBlocking on arbitrary dispatcher — ANR if called on Main.
+    // Now strictly suspend-only. Blocking path removed; callers must be coroutine.
+    // Kept as @Deprecated trampoline that enforces IO and throws if misused on Main.
+    @Deprecated("Use suspend enqueue() — blocking path removed to prevent ANR", ReplaceWith("enqueue(entry)"))
     fun enqueueBlocking(entry: WhisperQueuedMessage) {
-        // Used only from tests / non-coroutine contexts; do commit on IO thread but block caller
-        // briefly on mutex. Avoid calling from Main in production.
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            "enqueueBlocking must not be called on Main thread — use suspend enqueue()"
+        }
         kotlinx.coroutines.runBlocking { enqueue(entry) }
     }
 

@@ -20,7 +20,15 @@ object WhisperImageCipherTransport {
     // each decoded pixel costs up to ~11 bytes at peak (4 for ARGB_8888 + 4 raw buffer +
     // 3 extracted), so a few KB of header can demand gigabytes of heap. The send pipeline
     // compresses real images to ~5 MP, so 8 MP leaves ample headroom for legit payloads.
+    // P2-5: cap 4M on low-RAM devices.
     private const val MAX_PIXELS = 8_000_000
+    private const val MAX_PIXELS_LOW_RAM = 4_000_000
+    fun maxPixelsForDevice(context: android.content.Context): Int {
+        return try {
+            val am = context.getSystemService(android.app.ActivityManager::class.java)
+            if (am?.isLowRamDevice == true) MAX_PIXELS_LOW_RAM else MAX_PIXELS
+        } catch (_: Exception) { MAX_PIXELS }
+    }
 
     fun encode(cipherBytes: ByteArray): ByteArray {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Encrypted image is too large." }

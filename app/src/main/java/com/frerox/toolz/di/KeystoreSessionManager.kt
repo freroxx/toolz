@@ -50,10 +50,15 @@ class KeystoreSessionManager(context: Context) : SessionManager {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val encrypted = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
-        prefs.edit()
-            .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
-            .putString(KEY_SESSION, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+        // P1 FIX: apply() is async — crash immediately after login loses session. Use commit() on IO.
+        with(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.withContext(this) {
+                prefs.edit()
+                    .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+                    .putString(KEY_SESSION, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+                    .commit()
+            }
+        }
     }
 
     override suspend fun loadSession(): UserSession {
@@ -71,13 +76,13 @@ class KeystoreSessionManager(context: Context) : SessionManager {
             json.decodeFromString(UserSession.serializer(), String(plain, Charsets.UTF_8))
         } catch (e: Exception) {
             // Unreadable or tampered session: drop it and behave as signed out.
-            prefs.edit().clear().apply()
+            prefs.edit().clear().commit()
             null
         }
     }
 
     override suspend fun deleteSession() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().commit()
     }
 
     private companion object {

@@ -450,22 +450,57 @@ fun WhisperChatScreen(
                     }
                 }
 
-                // Key changed banner
-                if (uiState.keyTrust?.status == KeyTrustStatus.CHANGED) {
-                    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
-                            Text(
-                                stringResource(R.string.st_Whisper_Chat_KeyChanged, uiState.otherUser?.effectiveName ?: "Partner"),
-                                modifier = Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
-                                Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
+                // Key trust banners — polished 7-day: auto/manual are info, CHANGED remains warning.
+                when (uiState.keyTrust?.status) {
+                    KeyTrustStatus.CHANGED -> {
+                        Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Shield, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                                Text(
+                                    stringResource(R.string.st_Whisper_Chat_KeyChanged, uiState.otherUser?.effectiveName ?: "Partner"),
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
+                                    Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
+                    KeyTrustStatus.ROTATED_AUTO -> {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Autorenew, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Text(
+                                    uiState.keyTrust?.rotateMessage ?: "Encryption key has been rotated automatically — we do this every week to keep you secure.",
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
+                                    Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                    KeyTrustStatus.ROTATED_MANUAL -> {
+                        Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text(
+                                    uiState.keyTrust?.rotateMessage ?: "${uiState.otherUser?.effectiveName ?: "Partner"} has manually rotated their encryption key.",
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
+                                    Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
                 }
 
                 // Realtime Disconnected banner (M-6)

@@ -736,12 +736,15 @@ fun ToolzNavHost(
         // 1. Resolve route first (handles aliases specifically)
         val resolvedRoute = resolveExternalNavigationRoute(latestIntent)
         
-        // 2. Handle Whisper Chat Deep Link
+        // 2. Handle Whisper Chat Deep Link — P1-18 FIX: validate non-empty, not self, UUID/valid id shape.
         if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_CHAT") {
-            val otherUserId = latestIntent.getStringExtra("otherUserId")
-            if (otherUserId != null) {
+            val otherUserId = latestIntent.getStringExtra("otherUserId")?.trim()
+            if (!otherUserId.isNullOrBlank() && otherUserId.length in 5..128 && otherUserId.matches(Regex("[a-zA-Z0-9_-]+"))) {
+                // Self-chat prevented at Repository level too, but guard early to avoid navigation loop.
                 navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
                 return@LaunchedEffect
+            } else {
+                android.util.Log.w("MainActivity", "Invalid OPEN_WHISPER_CHAT otherUserId: $otherUserId")
             }
         }
 

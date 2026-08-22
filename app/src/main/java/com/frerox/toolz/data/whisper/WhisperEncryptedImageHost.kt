@@ -144,9 +144,12 @@ class WhisperEncryptedImageHost @Inject constructor(
         // SSRF allowlist: only the image hosts this app actually uses may be fetched.
         // Anything else (metadata endpoints, internal addresses, redirect targets) is
         // rejected before a connection is even opened.
+        // P1-14 FIX: Strict path validation for Supabase — only whisper-avatars objects.
         val host = runCatching { URL(url).host }.getOrNull() ?: error("Invalid image URL.")
         val supabaseHost = runCatching { URL(BuildConfig.SUPABASE_URL).host }.getOrNull()
-        val allowedSupabase = supabaseHost != null && (host == supabaseHost || host.endsWith(".$supabaseHost"))
+        val urlPath = runCatching { URL(url).path }.getOrNull() ?: ""
+        val allowedSupabase = supabaseHost != null && (host == supabaseHost || host.endsWith(".$supabaseHost")) &&
+            urlPath.startsWith("/storage/v1/object/public/whisper-avatars/")
         if (host != "i.ibb.co" && host != "ibb.co" && !allowedSupabase) {
             error("Invalid image host.")
         }

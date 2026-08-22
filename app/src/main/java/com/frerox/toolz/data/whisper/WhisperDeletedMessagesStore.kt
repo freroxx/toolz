@@ -26,7 +26,10 @@ class WhisperDeletedMessagesStore @Inject constructor(
 ) {
     private val prefs: SharedPreferences = context.getSharedPreferences("whisper_deleted_msgs", Context.MODE_PRIVATE)
     private val mutex = Mutex()
-    private val ioScope = CoroutineScope(Dispatchers.IO)
+    // P2: Previously uncancelled CoroutineScope(Dispatchers.IO) looked like a leak.
+    // For @Singleton the scope lifetime == app lifetime, so not a true leak. Mark with
+    // SupervisorJob for structured error handling and explicit app-scope.
+    private val ioScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val _deletedIds = MutableStateFlow<Set<String>>(loadDeletedIds())
     val deletedIds: StateFlow<Set<String>> = _deletedIds.asStateFlow()
 

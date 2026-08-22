@@ -14,7 +14,9 @@ import androidx.room.Index
     indices = [
         Index(value = ["senderId"]),
         Index(value = ["receiverId"]),
-        Index(value = ["createdAt"])
+        Index(value = ["createdAt"]),
+        // P1 FIX: Hot query is (senderId,receiverId,createdAt) — composite covers it.
+        Index(value = ["senderId", "receiverId", "createdAt"])
     ]
 )
 data class WhisperMessageEntity(

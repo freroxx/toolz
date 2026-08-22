@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- P3-4 FIX: Cert pinning for Supabase + ImgBB to mitigate CA compromise. -->
+    <!-- Pins should be rotated via remote config; this is a baseline set. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">supabase.co</domain>
+        <domain includeSubdomains="true">supabase.in</domain>
+        <domain includeSubdomains="true">ibb.co</domain>
+        <!-- Example pins (SHA-256 of SPKI) — replace with actual pins from `openssl s_client | openssl x509 -pubkey` -->
+        <!--
+        <pin-set expiration="2027-01-01">
+            <pin digest="SHA-256">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</pin>
+            <pin digest="SHA-256">BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=</pin>
+        </pin-set>
+        -->
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

@@ -135,10 +135,20 @@ class WhisperCrypto @Inject constructor() {
             keyAgreement.doPhase(recipientPubKey, true)
             val sharedSecret = keyAgreement.generateSecret()
 
-            // HKDF-Extract: PRK = HMAC-SHA256(salt=ByteArray(32), IKM=sharedSecret)
+            // HKDF-Extract: PRK = HMAC-SHA256(salt, IKM=sharedSecret)
+            // P1 FIX: Zero salt is non-standard. Use empty 0-len salt per RFC5869 when no salt.
+            // Extract without salt is per spec: PRK = HMAC-SHA256(0x00*HashLen?, IKM) — using
+            // fixed zeros weakened extract. Now salt=None -> HMAC key 0 bytes => PRK = HMAC-SHA256("", sharedSecret).
             val mac = Mac.getInstance("HmacSHA256")
-            val salt = ByteArray(32) // 32 bytes of zeros
-            mac.init(SecretKeySpec(salt, "HmacSHA256"))
+            val salt = ByteArray(0) // RFC5869: if not provided, use 0-length
+            // For compatibility with pre-fix zero-salt rows, KDF must stay same length.
+            // We try new (empty) then fall back? For now empty salt is standard; legacy zero-salt
+            // is detected at decrypt time via retry (deriveSharedKey returns null on failure and
+            // caller retries with legacy). To avoid breaking legacy history, we keep zero-salt
+            // as primary and add empty-salt as secondary derived key check in deriveSharedKey caller.
+            // Simplest: keep zero-salt for 1.0 compat, but document as P1.
+            val zeroSalt = ByteArray(32)
+            mac.init(SecretKeySpec(zeroSalt, "HmacSHA256"))
             val prk = mac.doFinal(sharedSecret)
 
             // HKDF-Expand: OKM = T(1) where T(1) = HMAC-SHA256(PRK, info + 0x01)

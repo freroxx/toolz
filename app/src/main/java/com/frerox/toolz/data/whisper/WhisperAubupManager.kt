@@ -61,9 +61,12 @@ class WhisperAubupManager @Inject constructor(
             val cleanUser = username.trim().lowercase()
             val cleanCred = credential.trim()
             val all = passwordDao.getAllPasswordsSync()
+            // P1 FIX (reviewwhisper.md): Matching on password==cleanCred collided across
+            // users (any vault entry with same password would be overwritten). Match only
+            // on url + username (canonical key), consistent with createAccessFileForUser.
             val existing = all.find { entity ->
                 entity.url == "whisper.toolz.app" &&
-                    (entity.username.equals(cleanUser, ignoreCase = true) || entity.password == cleanCred)
+                    entity.username.equals(cleanUser, ignoreCase = true)
             }
 
             if (existing != null) {
@@ -90,6 +93,32 @@ class WhisperAubupManager @Inject constructor(
         }
     }
 
+    // P0-3 FIX: Deprecated getExternalStoragePublicDirectory fails on Android Q+ scoped storage.
+    // Provide modern resolver: Q+ uses MediaStore/Downloads via app-specific fallback + legacy dir for reading.
+    private fun resolveToolzDir(): File {
+        return try {
+            // On Q+ the public Downloads/Toolz is restricted; prefer app's external files dir
+            // plus also keep legacy for reading old files. Writes go to scoped location that
+            // does not require STORAGE permission.
+            val scoped = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
+            // Also ensure legacy dir exists for backward-compat scanning (best-effort)
+            val legacy = File(
+                @Suppress("DEPRECATION") Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "Toolz"
+            )
+            // Prefer scoped if we are on Q+, otherwise legacy still works for write.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                if (!scoped.exists()) scoped.mkdirs()
+                scoped
+            } else {
+                if (!legacy.exists()) legacy.mkdirs()
+                if (legacy.exists() && legacy.canWrite()) legacy else scoped.apply { if (!exists()) mkdirs() }
+            }
+        } catch (_: Exception) {
+            File(context.filesDir, "Toolz_access").apply { if (!exists()) mkdirs() }
+        }
+    }
+
     suspend fun createAccessFile(
         username: String,
         authType: String,
@@ -107,6 +136,11 @@ class WhisperAubupManager @Inject constructor(
             )
             val jsonString = json.encodeToString(payload)
 
+            // P0-2 NOTE: 6-digit code = 1M entropy. CryptoManager uses PBKDF2 65536 + random 16-byte salt.
+            // Offline brute-force remains trivial if .enc is exfiltrated; mitigation is user
+            // choosing long random password OR future 8+ alphanum requirement. For 1.0 we
+            // keep 6-digit for compat but document KDF params and add rate-limit on decrypt
+            // (decryptAccessFile is throttled at UI 300ms + caller delay).
             val (encryptedText, success) = CryptoManager.encryptAes(
                 plaintext = jsonString,
                 password = whisperCode.toCharArray(),
@@ -115,11 +149,11 @@ class WhisperAubupManager @Inject constructor(
                 error("Encryption failed with the provided Whisper Code.")
             }
 
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val toolzDir = resolveToolzDir()
+            // P1 privacy: filename no longer leaks hash of raw username; use only sanitized 8-char prefix.
             val rawUser = username.trim().lowercase()
-            val cleanUser = rawUser.replace(Regex("[^a-z0-9_]"), "_")
-            val userSuffix = if (cleanUser != rawUser) "_${rawUser.hashCode().toUInt().toString(16)}" else ""
-            val targetFile = File(toolzDir, "whisper_access_${cleanUser}${userSuffix}.enc")
+            val cleanUser = rawUser.replace(Regex("[^a-z0-9_]"), "_").take(16)
+            val targetFile = File(toolzDir, "whisper_access_${cleanUser}.enc")
 
             FileOutputStream(targetFile).use { output ->
                 output.write(encryptedText.toByteArray(Charsets.UTF_8))
@@ -146,7 +180,8 @@ class WhisperAubupManager @Inject constructor(
             return@withContext Result.failure(IllegalStateException("No credentials found for @$cleanUser in Password Vault. Please re-enter credentials."))
         }
 
-        val isToken = matched?.name?.contains("Anon", ignoreCase = true) == true || (credential.length == 64 && credential.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' })
+        // P2-14 FIX: Don't misclassify hex passwords as tokens. Only trust vault name "Anon".
+        val isToken = matched?.name?.contains("Anon", ignoreCase = true) == true
         val authType = if (isToken) "TOKEN" else "PASSWORD"
 
         createAccessFile(
@@ -170,15 +205,27 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun scanToolzFolderForAccessFiles(): List<File> = withContext(Dispatchers.IO) {
         runCatching {
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val toolzDir = File(downloadsDir, "Toolz")
-            if (!toolzDir.exists() || !toolzDir.isDirectory) return@runCatching emptyList()
-
-            val files = toolzDir.listFiles() ?: return@runCatching emptyList()
-            files.filter { file ->
-                file.isFile && file.name.lowercase().endsWith(".enc") &&
-                (file.name.lowercase().contains("whisper") || file.name.lowercase().startsWith("whisper_access"))
-            }.sortedByDescending { it.lastModified() }
+            // Scan both scoped (Q+ writes) and legacy public dir for backward compat.
+            val scopedDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
+            @Suppress("DEPRECATION")
+            val legacyDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz")
+            val files = mutableListOf<File>()
+            for (dir in listOf(scopedDir, legacyDir)) {
+                if (!dir.exists() || !dir.isDirectory) continue
+                val listed = dir.listFiles() ?: continue
+                files += listed.filter { file ->
+                    file.isFile && file.name.lowercase().endsWith(".enc") &&
+                    (file.name.lowercase().contains("whisper") || file.name.lowercase().startsWith("whisper_access"))
+                }
+            }
+            // Also scan app-internal fallback (used if external unavailable)
+            val internalDir = File(context.filesDir, "Toolz_access")
+            if (internalDir.exists() && internalDir.isDirectory) {
+                internalDir.listFiles()?.let { listed ->
+                    files += listed.filter { it.isFile && it.name.lowercase().endsWith(".enc") }
+                }
+            }
+            files.sortedByDescending { it.lastModified() }
         }.getOrDefault(emptyList())
     }
 

@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperAuthState
 import com.frerox.toolz.data.whisper.asString
@@ -115,28 +116,39 @@ fun WhisperAuthScreen(
         )
     }
 
-    LaunchedEffect(authState) {
-        if (authState is WhisperAuthState.Authenticated) onAuthenticated()
-    }
-
-    LaunchedEffect(authState) {
-        (authState as? WhisperAuthState.Error)?.let { err ->
-            haptic.error()
-            toastState.show(err.message.asString(context), WhisperToastType.ERROR)
-            viewModel.clearError()
-        }
-    }
-
-    LaunchedEffect(authState) {
-        (authState as? WhisperAuthState.Notice)?.let { notice ->
-            toastState.show(notice.message.asString(context), WhisperToastType.SUCCESS)
-            viewModel.dismissNotice()
-        }
-    }
-
     val aubupState by viewModel.aubupState.collectAsStateWithLifecycle()
     var showAubupRecoverySheet by remember { mutableStateOf(false) }
     var restoredCredentials by remember { mutableStateOf<AubupRecoveryState.Restored?>(null) }
+
+    // BUGFIX (P0-RestorePopup #37): The "Account restored successfully" dialog was
+    // flashing for ~1 frame and disappearing. Root cause: restore paths set
+    // _authState=Authenticated AND _aubupState=Restored in the ViewModel. The old
+    // LaunchedEffect(authState) navigated away immediately (popUpTo WhisperAuth),
+    // unmounting this screen before the aubupState Restored could promote to
+    // restoredCredentials and render WhisperCredentialRevealedDialog.
+    // Fix: gate navigation on the restore state. When aubupState is Restored (or a
+    // pending restoredCredentials exists) we suppress onAuthenticated() and let the
+    // dialog drive navigation onDismiss. Also consolidate the three authState effects
+    // into one to avoid stale closures.
+    LaunchedEffect(authState, aubupState, restoredCredentials) {
+        // If a restore just happened, don't auto-navigate — the credential dialog must be acknowledged.
+        if (authState is WhisperAuthState.Authenticated && aubupState is AubupRecoveryState.Restored) return@LaunchedEffect
+        if (authState is WhisperAuthState.Authenticated && restoredCredentials != null) return@LaunchedEffect
+
+        when (val s = authState) {
+            is WhisperAuthState.Authenticated -> onAuthenticated()
+            is WhisperAuthState.Error -> {
+                haptic.error()
+                toastState.show(s.message.asString(context), WhisperToastType.ERROR)
+                viewModel.clearError()
+            }
+            is WhisperAuthState.Notice -> {
+                toastState.show(s.message.asString(context), WhisperToastType.SUCCESS)
+                viewModel.dismissNotice()
+            }
+            else -> {}
+        }
+    }
 
     val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -152,6 +164,7 @@ fun WhisperAuthScreen(
     LaunchedEffect(aubupState) {
         when (val s = aubupState) {
             is AubupRecoveryState.Restored -> {
+                // Persist for dialog even if sheet closes; suppress automatic navigation
                 restoredCredentials = s
                 showAubupRecoverySheet = false
             }

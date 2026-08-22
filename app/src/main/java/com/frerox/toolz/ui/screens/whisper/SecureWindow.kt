@@ -13,7 +13,12 @@ private fun Context.findActivity(): Activity? = generateSequence(this) { (it as?
 /** Sets FLAG_SECURE on the hosting window so sensitive content never appears in
  *  screenshots, screen recordings, or the recents preview. FLAG_SECURE applies while
  *  this composable is on screen and is cleared on leave, so non-Whisper screens are
- *  never affected by it. */
+ *  never affected by it.
+ *  P1-18 FIX: Reference-counted — multiple SecureWindow hosts no longer clear the
+ *  flag while another still needs it. */
+private var secureWindowRefCount = 0
+private val secureWindowLock = Any()
+
 @Composable
 fun SecureWindow(bypassEnabled: Boolean = false) {
     val view = LocalView.current
@@ -21,15 +26,24 @@ fun SecureWindow(bypassEnabled: Boolean = false) {
         DisposableEffect(bypassEnabled) {
             val window = view.context.findActivity()?.window
                 ?: return@DisposableEffect onDispose {}
-            
-            if (!bypassEnabled) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+
+            val needsSecure = !bypassEnabled
+            if (needsSecure) {
+                synchronized(secureWindowLock) {
+                    if (secureWindowRefCount == 0) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    secureWindowRefCount++
+                }
             } else {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
             }
-            
+
             onDispose {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                if (needsSecure) {
+                    synchronized(secureWindowLock) {
+                        secureWindowRefCount = (secureWindowRefCount - 1).coerceAtLeast(0)
+                        if (secureWindowRefCount == 0) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
             }
         }
     }

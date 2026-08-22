@@ -57,11 +57,17 @@ object WhisperErrorMapper {
             msg.contains("23505", ignoreCase = true)
     }
 
-    /** True when retrying cannot help: the request is rejected outright or the input is invalid. */
-    fun isPermanentError(throwable: Throwable): Boolean =
-        throwable is IllegalArgumentException || throwable is IllegalStateException ||
-            (throwable is RestException && throwable.statusCode in 400..404) ||
-            (throwable is RestException && throwable.statusCode == 410)
+    /** True when retrying cannot help: the request is rejected outright or the input is invalid. P2 FIX: 400-499 except 408/429 are permanent. */
+    fun isPermanentError(throwable: Throwable): Boolean {
+        if (throwable is IllegalArgumentException || throwable is IllegalStateException) return true
+        if (throwable is RestException) {
+            val code = throwable.statusCode
+            // 408 timeout and 429 rate-limit are retryable; everything else 4xx permanent.
+            if (code == 408 || code == 429) return false
+            if (code in 400..499) return true
+        }
+        return false
+    }
 
     /**
      * Maps a [Throwable] to a short, user-friendly [UiText].

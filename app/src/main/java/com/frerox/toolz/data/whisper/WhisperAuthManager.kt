@@ -77,6 +77,8 @@ class WhisperAuthManager @Inject constructor(
 
         // Ask the edge function (service role, JWT-verified) to permanently delete the
         // GoTrue user. The caller wipes local data after this returns.
+        // P0-4 FIX: Also send X-Whisper-Password so the edge function can independently
+        // verify re-auth. A stolen JWT alone can no longer delete the account.
         val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before deleting your account.")
         withContext(Dispatchers.IO) {
             val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-delete-account").openConnection() as HttpURLConnection)
@@ -84,12 +86,16 @@ class WhisperAuthManager @Inject constructor(
                 connection.requestMethod = "POST"
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 30_000
-                // Bodyless POST: the edge function only checks the method and the
-                // Authorization header, so no request body is written or streamed.
                 connection.doOutput = false
                 connection.setRequestProperty("Authorization", "Bearer $token")
                 connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
                 connection.setRequestProperty("Content-Type", "application/json")
+                // P0-4: forward password confirmation for server-side verification (omitted for anon token users)
+                if (!isTokenUser && !password.isNullOrBlank()) {
+                    connection.setRequestProperty("X-Whisper-Password", password)
+                }
+                // Also include a fresh confirmation nonce (timestamp) to prevent replay beyond 5 min
+                connection.setRequestProperty("X-Whisper-Confirm-Ts", System.currentTimeMillis().toString())
                 if (connection.responseCode !in 200..299) {
                     val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                     error(errorBody.take(200).ifBlank { "HTTP ${connection.responseCode}" })
@@ -203,13 +209,15 @@ class WhisperAuthManager @Inject constructor(
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         val token = bytes.toHexString()
-        return WhisperAnonToken(token = token, virtualEmail = sha256(token).take(32) + "@whisper.toolz.app")
+        // P1-15 FIX: Use full 64-char SHA256 hex (256-bit) for new accounts; 32 was 128-bit truncation.
+        // Login retains fallback to 32 for pre-fix accounts.
+        return WhisperAnonToken(token = token, virtualEmail = sha256(token) + "@whisper.toolz.app")
     }
 
     suspend fun registerWithToken(anonToken: WhisperAnonToken, username: String, displayName: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(anonToken.token)
         require(isValidToken(cleanToken)) { "Token must be a valid 64-character hex string." }
-        val virtualEmail = sha256(cleanToken).take(32) + "@whisper.toolz.app"
+        val virtualEmail = sha256(cleanToken) + "@whisper.toolz.app"
         val virtualPassword = sha256("pwd_" + cleanToken)
         val cleanUsername = username.trim().lowercase()
         val cleanDisplayName = displayName.trim()
@@ -233,7 +241,8 @@ class WhisperAuthManager @Inject constructor(
     suspend fun loginWithToken(rawToken: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
-        val virtualEmail = sha256(cleanToken).take(32) + "@whisper.toolz.app"
+        // P1-15: Try full 64 first, fall back to legacy 32 truncated for accounts created before fix.
+        val virtualEmails = listOf(sha256(cleanToken) + "@whisper.toolz.app", sha256(cleanToken).take(32) + "@whisper.toolz.app").distinct()
 
         val candidatePasswords = listOf(
             sha256("pwd_" + cleanToken),
@@ -244,23 +253,25 @@ class WhisperAuthManager @Inject constructor(
         )
 
         var lastException: Throwable? = null
-        for (candidatePwd in candidatePasswords) {
-            val attempt = runCatching {
-                supabase.auth.signInWith(Email) {
-                    this.email = virtualEmail
-                    this.password = candidatePwd
+        outer@ for (virtualEmail in virtualEmails) {
+            for (candidatePwd in candidatePasswords) {
+                val attempt = runCatching {
+                    supabase.auth.signInWith(Email) {
+                        this.email = virtualEmail
+                        this.password = candidatePwd
+                    }
                 }
-            }
-            if (attempt.isSuccess) {
-                return@runCatching
-            } else {
-                val ex = attempt.exceptionOrNull()
-                lastException = ex
-                if (ex != null && !isInvalidCredentials(ex)) {
-                    throw ex
+                if (attempt.isSuccess) {
+                    return@runCatching
+                } else {
+                    val ex = attempt.exceptionOrNull()
+                    lastException = ex
+                    if (ex != null && !isInvalidCredentials(ex)) {
+                        throw ex
+                    }
+                    // Slow down brute-force attempts over the derivation candidates.
+                    delay(TOKEN_ATTEMPT_DELAY_MS)
                 }
-                // Slow down brute-force attempts over the derivation candidates.
-                delay(TOKEN_ATTEMPT_DELAY_MS)
             }
         }
         throw lastException ?: Exception("Invalid login credentials")

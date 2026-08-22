@@ -773,9 +773,12 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    /** Chronological order (ISO timestamps sort lexicographically), pending pinned last. */
+    /** P2-7 FIX: Chronological order via Instant parse (ISO lex is reliable but fractional seconds variance), pending pinned last. */
     private fun sortedMessages(messages: List<WhisperMessage>): List<WhisperMessage> =
-        messages.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
+        messages.sortedWith(compareBy(
+            { runCatching { java.time.Instant.parse(it.createdAt) }.getOrNull() ?: java.time.Instant.MIN },
+            { if (it.isPending) 1 else 0 }
+        ))
 
     private fun sendPresenceSignal(isOnline: Boolean) {
         viewModelScope.launch {
@@ -1056,8 +1059,26 @@ private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int)
 private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
     withContext(Dispatchers.Default) {
         runCatching {
-            // Sample-decode huge sources first so the pipeline never allocates a full-size bitmap.
-            val bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
+            // P1-10 FIX: Handle EXIF rotation so portrait photos don't upload sideways.
+            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
+            // Apply EXIF orientation before scaling — use original bytes' EXIF (JPEG).
+            try {
+                val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
+                val orientation = exif.getAttributeInt(androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION, androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                val matrix = android.graphics.Matrix()
+                when (orientation) {
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                    else -> {}
+                }
+                if (!matrix.isIdentity) {
+                    val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                    if (rotated != bitmap) { bitmap.recycle(); bitmap = rotated }
+                }
+            } catch (_: Exception) {}
             val maxDimension = 1920
             val width = bitmap.width
             val height = bitmap.height

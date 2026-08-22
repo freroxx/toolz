@@ -1170,6 +1170,12 @@ class WhisperRepository @Inject constructor(
 
     suspend fun restoreMessages(messages: List<WhisperMessage>): Result<Unit> = runCatching {
         if (messages.isEmpty()) return@runCatching
+        // P2 FIX: Ensure caller passes ciphertext (undo path does). Plaintext must never resurrect.
+        messages.forEach { msg ->
+            require(msg.contentIv != null || WhisperTombstone.isTombstone(msg.content) || msg.content == WhisperTombstone.LEGACY_ENCRYPTED) {
+                "restoreMessages requires ciphertext: id=${msg.id} has plain content without IV/tombstone"
+            }
+        }
         deletedStore.unmarkMessagesDeleted(messages.map { it.id })
         removeRemoteTombstones(messages.map { it.id })
         val inserts = messages.map { msg ->
@@ -1268,9 +1274,10 @@ class WhisperRepository @Inject constructor(
         } else {
             // Fallback when RPC is unavailable: paginate instead of truncating at 200, otherwise
             // users with >200 messages silently lose conversations.
+            // P1-13 FIX: Cap raised from 2000 to 10000 (20 pages) to cover power users.
             val allMessages = mutableListOf<WhisperMessage>()
             var fbPage = 0
-            while (allMessages.size < 2000) {
+            while (allMessages.size < 10000) {
                 val batch = db.from("messages")
                     .select {
                         filter {
@@ -1287,7 +1294,7 @@ class WhisperRepository @Inject constructor(
                 allMessages.addAll(batch)
                 if (batch.size < 500) break
                 fbPage++
-                if (fbPage > 3) break // cap 2000, enough to rebuild convos
+                if (fbPage > 19) break // cap 10000, enough to rebuild convos for hoarders
             }
 
             val grouped = allMessages.groupBy { msg ->
@@ -1811,19 +1818,42 @@ class WhisperRepository @Inject constructor(
         if (currentKey.isNullOrBlank()) return KeyTrustInfo(myFingerprint = myFingerprint)
 
         val known = keyTrustStore.knownKey(otherUserId)
-        val status = when {
-            known == null -> {
-                keyTrustStore.rememberKey(otherUserId, currentKey)
-                KeyTrustStatus.MATCH
-            }
-            known == currentKey -> KeyTrustStatus.MATCH
+        if (known == null) {
+            keyTrustStore.rememberKey(otherUserId, currentKey)
+            return KeyTrustInfo(status = KeyTrustStatus.MATCH, partnerFingerprint = crypto.fingerprint(currentKey), myFingerprint = myFingerprint, isVerified = false)
+        }
+        if (known == currentKey) {
+            return KeyTrustInfo(status = KeyTrustStatus.MATCH, partnerFingerprint = crypto.fingerprint(currentKey), myFingerprint = myFingerprint, isVerified = keyTrustStore.verifiedKey(otherUserId) == currentKey)
+        }
+        // Changed key — polished 7-day logic: don't scare friends every week.
+        // Expected auto-rotate if old key age >= 6 days (within 7d+jitter), else warning.
+        // Also treat very fresh server key (updated <10m ago) as manual rotate → info, not warning.
+        val knownTs = keyTrustStore.knownKeyTimestamp(otherUserId)
+        val ageMs = if (knownTs == 0L) Long.MAX_VALUE else System.currentTimeMillis() - knownTs
+        val weekMs = 7L * 24 * 60 * 60 * 1000
+        val serverUpdatedAgeMs = runCatching {
+            java.time.OffsetDateTime.parse(profile.updatedAt).toInstant().toEpochMilli().let { System.currentTimeMillis() - it }
+        }.getOrNull() ?: Long.MAX_VALUE
+        val isFreshManual = serverUpdatedAgeMs in 0..(10 * 60 * 1000) // <10m → likely just rotated (manual or auto)
+        val isExpected = ageMs >= (weekMs - 24 * 60 * 60 * 1000) // >=6 days → expected weekly
+        val isManualFresh = isFreshManual && ageMs < (weekMs - 24 * 60 * 60 * 1000) // manual within week
+        val polishedStatus = when {
+            isExpected -> KeyTrustStatus.ROTATED_AUTO
+            isManualFresh -> KeyTrustStatus.ROTATED_MANUAL
             else -> KeyTrustStatus.CHANGED
         }
+        val rotateMsg = when (polishedStatus) {
+            KeyTrustStatus.ROTATED_AUTO -> "Encryption key has been rotated automatically — we do this every week to keep you secure."
+            KeyTrustStatus.ROTATED_MANUAL -> "${profile.effectiveName} has manually rotated their encryption key — tap to verify the new safety number if you want."
+            else -> null
+        }
         return KeyTrustInfo(
-            status = status,
+            status = polishedStatus,
             partnerFingerprint = crypto.fingerprint(currentKey),
             myFingerprint = myFingerprint,
-            isVerified = keyTrustStore.verifiedKey(otherUserId) == currentKey,
+            isVerified = false,
+            rotateMessage = rotateMsg,
+            isExpectedRotation = isExpected,
         )
     }
 

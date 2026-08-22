@@ -76,18 +76,25 @@ class WhisperMutePreferences @Inject constructor(
 
     /**
      * Check whether a user is currently muted.
-     * Pure for active mutes; expired entries are cleaned atomically without
-     * blocking the query path via a synchronous update.
+     * P2 FIX: Previously this getter mutated prefs (expired prune) — surprising side
+     * effect on query path. Now it returns the pure in-memory state and schedules
+     * an async prune so the query remains side-effect-free. Expired mutes disappear
+     * within one prune cycle but isMuted never writes synchronously.
      */
     fun isMuted(userId: String): Boolean {
         if (userId !in _mutedUsers.value) return false
         val until = prefs.getLong("mute_$userId", 0L)
         if (until == 0L) return false
         if (until == Long.MAX_VALUE || until > System.currentTimeMillis()) return true
-        // Expired — clean up atomically (still inside query but via atomic update).
+        // Expired — defer removal off the query path.
+        pruneOne(userId)
+        return false
+    }
+
+    private fun pruneOne(userId: String) {
+        // Fire-and-forget prune; ok to use apply off-critical path.
         prefs.edit().remove("mute_$userId").apply()
         _mutedUsers.update { it - userId }
-        return false
     }
 
     /** Remove expired mute entries from prefs and in-memory state. */

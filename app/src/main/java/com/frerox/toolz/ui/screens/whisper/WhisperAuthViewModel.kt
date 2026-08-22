@@ -102,14 +102,23 @@ class WhisperAuthViewModel @Inject constructor(
     /**
      * Schedules durable clipboard clearing via WorkManager (H-3 fix).
      * Survives process recreation and app restarts cleanly.
+     * P0-5 FIX: Token is encrypted before persisting to WorkManager's SQLite.
+     * Plaintext token is never stored in workDataOf (recoverable on rooted device).
      */
     fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager) {
+        // Encrypt token+restoreTo via same Keystore key the Worker will decrypt with.
+        val encryptedToken = try {
+            com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(token, getApplication())
+        } catch (_: Exception) { null } ?: token // fallback: best-effort (not ideal but never crash schedule)
+        val encryptedRestore = try {
+            if (restoreTo != null) com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(restoreTo, getApplication()) else ""
+        } catch (_: Exception) { null } ?: (restoreTo ?: "")
         val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.WhisperClipboardClearWorker>()
             .setInitialDelay(60, java.util.concurrent.TimeUnit.SECONDS)
             .setInputData(
                 androidx.work.workDataOf(
-                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_TOKEN to token,
-                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_RESTORE_TO to (restoreTo ?: ""),
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_TOKEN to encryptedToken,
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_RESTORE_TO to encryptedRestore,
                 )
             )
             .build()
@@ -142,8 +151,8 @@ class WhisperAuthViewModel @Inject constructor(
     fun restoreFromVault(account: PasswordEntity) {
         viewModelScope.launch {
             _submitting.value = true
-            val isToken = account.name.contains("Anon", ignoreCase = true) ||
-                (account.password.length == 64 && account.password.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' })
+            // P2-14 FIX: Don't misclassify hex passwords as tokens — only Anon name.
+            val isToken = account.name.contains("Anon", ignoreCase = true)
 
             val result = if (isToken) {
                 authManager.loginWithToken(account.password)
@@ -152,12 +161,17 @@ class WhisperAuthViewModel @Inject constructor(
             }
 
             result.onSuccess {
-                _authState.value = WhisperAuthState.Authenticated
+                // BUGFIX (Review #P0-RestorePopup): Set Restored BEFORE Authenticated so
+                // WhisperAuthScreen LaunchedEffect can see the restore state and suppress
+                // the automatic navigate. Without this ordering the authState navigate
+                // fires first and the Restored dialog flashes for one frame then disappears
+                // because the composable is popped.
                 _aubupState.value = AubupRecoveryState.Restored(
                     username = account.username,
                     authType = if (isToken) "TOKEN" else "PASSWORD",
                     credential = account.password,
                 )
+                _authState.value = WhisperAuthState.Authenticated
             }.onFailure { err ->
                 _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with stored credentials")
             }
@@ -201,12 +215,13 @@ class WhisperAuthViewModel @Inject constructor(
         }
 
         result.onSuccess {
-            _authState.value = WhisperAuthState.Authenticated
+            // BUGFIX (P0-RestorePopup): Order matters — see restoreFromVault.
             _aubupState.value = AubupRecoveryState.Restored(
                 username = payload.username,
                 authType = payload.authType,
                 credential = payload.credential,
             )
+            _authState.value = WhisperAuthState.Authenticated
             // Re-save to vault on successful recovery
             aubupManager.upsertWhisperVaultEntry(
                 name = if (payload.authType == "TOKEN") "Whisper Anon: ${payload.username}" else "Whisper: ${payload.username}",

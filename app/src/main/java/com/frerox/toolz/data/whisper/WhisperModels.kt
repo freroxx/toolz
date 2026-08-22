@@ -398,11 +398,13 @@ data class WhisperUiState(
 // Key Trust & Verification
 // ─────────────────────────────────────────────────────────────
 
-enum class KeyTrustStatus { NO_KEY, MATCH, CHANGED }
+enum class KeyTrustStatus { NO_KEY, MATCH, CHANGED, ROTATED_AUTO, ROTATED_MANUAL }
 
 /**
  * Snapshot of how much we trust the current encryption key of a conversation
  * partner, together with the fingerprints needed to verify it in person.
+ * 7-day polished: ROTATED_AUTO (weekly, not scary), ROTATED_MANUAL (user tapped rotate),
+ * CHANGED remains warning for truly unexpected/malicious.
  */
 data class KeyTrustInfo(
     val status: KeyTrustStatus = KeyTrustStatus.NO_KEY,
@@ -412,6 +414,10 @@ data class KeyTrustInfo(
     val myFingerprint: String? = null,
     /** True only if this exact key was verified by the user (compared in person). */
     val isVerified: Boolean = false,
+    /** Human-readable rotate reason for polished banner. */
+    val rotateMessage: String? = null,
+    /** True if this change looks like expected weekly rotation (not MITM). */
+    val isExpectedRotation: Boolean = false,
 )
 
 data class WhisperChatUiState(

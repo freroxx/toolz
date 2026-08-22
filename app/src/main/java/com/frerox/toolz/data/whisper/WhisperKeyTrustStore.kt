@@ -40,23 +40,41 @@ class WhisperKeyTrustStore @Inject constructor(
     /** The public key the user explicitly verified for a user (base64), or null. */
     fun verifiedKey(userId: String): String? = prefs.getString("verified_$userId", null)
 
-    /** Accept a key as "known" without marking it verified. */
+    /** Timestamp of when known key was last stored — for 7-day polished rotation. */
+    fun knownKeyTimestamp(userId: String): Long = prefs.getLong("known_ts_$userId", 0L)
+
+    /** Accept a key as "known" without marking it verified. P1 FIX: commit() for durability. */
     fun rememberKey(userId: String, publicKey: String) {
-        prefs.edit().putString("known_$userId", publicKey).apply()
+        val now = System.currentTimeMillis()
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                prefs.edit().putString("known_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+            }
+        } else {
+            prefs.edit().putString("known_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+        }
     }
 
-    /** Accept a key as known AND verified (fingerprint compared in person). */
+    /** Accept a key as known AND verified (fingerprint compared in person). P1 FIX. */
     fun markVerified(userId: String, publicKey: String) {
-        prefs.edit().putString("known_$userId", publicKey).putString("verified_$userId", publicKey).apply()
+        val now = System.currentTimeMillis()
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                prefs.edit().putString("known_$userId", publicKey).putString("verified_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+            }
+        } else {
+            prefs.edit().putString("known_$userId", publicKey).putString("verified_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+        }
     }
 
     /** Drop all trust records for a user (e.g. when blocking or unfriending). */
     fun forgetUser(userId: String) {
-        prefs.edit().remove("known_$userId").remove("verified_$userId").apply()
+        // Non-critical, but keep commit for consistency.
+        prefs.edit().remove("known_$userId").remove("verified_$userId").commit()
     }
 
     /** Wipe every trust record on this device (account deletion). */
     fun clearAll() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().commit()
     }
 }
