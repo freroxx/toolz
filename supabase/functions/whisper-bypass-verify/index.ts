@@ -16,6 +16,18 @@ import {
   timingSafeEqual,
 } from "https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts";
 import {
+
+// Lazily-built JWKS verifier: building at module-eval time would throw on a cold
+// start if SUPABASE_URL were ever absent, turning EVERY request into a 500.
+let _remoteJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+function jwks() {
+  if (_remoteJWKS === null) {
+    _remoteJWKS = createRemoteJWKSet(
+      new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
+    );
+  }
+  return _remoteJWKS;
+}
   createRemoteJWKSet,
   jwtVerify,
 } from "https://esm.sh/jose@5.9.6";
@@ -46,9 +58,6 @@ async function passwordsMatch(candidate: string, expectedSecret: string): Promis
 }
 
 // Key-type-agnostic (see whisper-image-upload): HS256 secret, then project JWKS.
-const remoteJWKS = createRemoteJWKSet(
-  new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
-);
 
 async function extractVerifiedSub(jwt: string): Promise<string | null> {
   const secret = Deno.env.get("SUPABASE_JWT_SECRET");
@@ -59,7 +68,7 @@ async function extractVerifiedSub(jwt: string): Promise<string | null> {
     } catch { /* fall through to asymmetric */ }
   }
   try {
-    const { payload } = await jwtVerify(jwt, remoteJWKS, { algorithms: ["ES256", "RS256", "EdDSA"] });
+    const { payload } = await jwtVerify(jwt, jwks(), { algorithms: ["ES256", "RS256", "EdDSA"] });
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;

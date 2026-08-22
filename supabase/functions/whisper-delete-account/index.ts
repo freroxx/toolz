@@ -1,5 +1,17 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import {
+
+// Lazily-built JWKS verifier: building at module-eval time would throw on a cold
+// start if SUPABASE_URL were ever absent, turning EVERY request into a 500.
+let _remoteJWKS: ReturnType<typeof createRemoteJWKSet> | null = null;
+function jwks() {
+  if (_remoteJWKS === null) {
+    _remoteJWKS = createRemoteJWKSet(
+      new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
+    );
+  }
+  return _remoteJWKS;
+}
   createRemoteJWKSet,
   jwtVerify,
 } from "https://esm.sh/jose@5.9.6";
@@ -138,9 +150,6 @@ serve(async (request) => {
 
 // Key-type-agnostic verification (same fix as whisper-image-upload): legacy HS256
 // secret first, then asymmetric signing keys via the project JWKS.
-const remoteJWKS = createRemoteJWKSet(
-  new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
-);
 
 async function verifyProjectJwt(jwt: string): Promise<{ sub?: string; iat?: number } | null> {
   const secret = Deno.env.get("SUPABASE_JWT_SECRET");
@@ -151,7 +160,7 @@ async function verifyProjectJwt(jwt: string): Promise<{ sub?: string; iat?: numb
     } catch { /* fall through to asymmetric */ }
   }
   try {
-    const { payload } = await jwtVerify(jwt, remoteJWKS, { algorithms: ["ES256", "RS256", "EdDSA"] });
+    const { payload } = await jwtVerify(jwt, jwks(), { algorithms: ["ES256", "RS256", "EdDSA"] });
     return payload as { sub?: string; iat?: number };
   } catch {
     return null;

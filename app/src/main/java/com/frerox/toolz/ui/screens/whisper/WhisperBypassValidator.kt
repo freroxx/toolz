@@ -75,6 +75,14 @@ private fun verifyBypassRemotely(password: String): WhisperBypassVerdict? {
         val responseText = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
             ?.bufferedReader()?.use { it.readText() }.orEmpty()
 
+        if (connection.responseCode !in 200..299) {
+            // Field-diagnosis aid: name the exact status/body behind a non-verdict.
+            android.util.Log.w(
+                "WhisperBypass",
+                "bypass-verify HTTP ${connection.responseCode}: ${responseText.take(200)}",
+            )
+        }
+
         return when {
             connection.responseCode in 200..299 ->
                 if (runCatching { JSONObject(responseText).optBoolean("ok", false) }.getOrDefault(false)) {
