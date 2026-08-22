@@ -56,7 +56,10 @@ fun NetworkConsoleView(
     val filteredLogs = remember(logs, selectedCategory) {
         logs.filter { if (selectedCategory == "ALL") true else it.tag.contains(selectedCategory, ignoreCase = true) }
     }
-    LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.animateScrollToItem(0) }
+    // Fix crash: animateScroll can throw if list not laid out; use scrollToItem + filtered size
+    LaunchedEffect(filteredLogs.size) {
+        if (filteredLogs.isNotEmpty()) runCatching { listState.scrollToItem(0) }
+    }
 
     var pendingDestructive by remember { mutableStateOf<String?>(null) }
     val destructiveKeywords = remember { setOf("rm ", "pm clear", "pm uninstall", "svc data disable", "svc wifi disable", "reboot", "mkfs", "dd ", ">:") }
@@ -132,7 +135,7 @@ fun NetworkConsoleView(
                     }
                 } else {
                     LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(filteredLogs, key = { it.timestamp to it.tag }) { log -> ConsoleLogItem(log = log) }
+                        items(filteredLogs) { log -> ConsoleLogItem(log = log) }
                     }
                 }
             }

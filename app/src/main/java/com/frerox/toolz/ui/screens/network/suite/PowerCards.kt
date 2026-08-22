@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CellTower
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Hub
@@ -29,9 +30,13 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Timeline
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,32 +75,47 @@ internal fun PublicIpCard(
     state: NetworkPowerUiState,
     onRefresh: () -> Unit
 ) {
+    val isLoading = state.isRefreshingPublicIp
+    val info = state.publicIpInfo
+    val isError = info.ip == "Unavailable" || info.ip == "Check Internet" || info.isp.contains("retry", ignoreCase = true)
     NetCard(
         title = "Public IP",
-        subtitle = "What the internet sees",
+        subtitle = when {
+            isLoading -> "Fetching…"
+            isError -> "Tap refresh to retry"
+            else -> "What the internet sees"
+        },
         icon = Icons.Rounded.Public,
         trailing = {
-            IconButton(onClick = onRefresh, enabled = !state.isRefreshingPublicIp) {
-                if (state.isRefreshingPublicIp) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Rounded.CloudSync, contentDescription = "Refresh")
-                }
+            FilledTonalIconButton(onClick = onRefresh, enabled = !isLoading, shape = RoundedCornerShape(50)) {
+                if (isLoading) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.CloudSync, contentDescription = "Refresh")
             }
         }
     ) {
-        if (state.publicIpInfo.ip == "Unknown" || state.isRefreshingPublicIp) {
-            Text("Tap refresh to fetch your public address", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (isLoading) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                repeat(3) { Box(modifier = Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) }
+            }
+        } else if (isError || info.ip == "Unknown") {
+            Surface(shape = NetTokens.InnerShape, color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Rounded.CloudOff, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(20.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Public IP unavailable", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(info.isp.ifBlank { "Check Internet and tap refresh" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                    Button(onClick = onRefresh, shape = RoundedCornerShape(50)) { Text("Retry") }
+                }
+            }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailRowSimple("Address", state.publicIpInfo.ip)
-                DetailRowSimple("Provider", state.publicIpInfo.isp)
-                if (state.publicIpInfo.city != "Unknown" || state.publicIpInfo.country != "Unknown") {
-                    DetailRowSimple("Location", "${state.publicIpInfo.city}, ${state.publicIpInfo.country}".trim().removePrefix(", "))
+                DetailRowSimple("Address", info.ip)
+                DetailRowSimple("Provider", info.isp)
+                if (info.city != "Unknown" || info.country != "Unknown") {
+                    DetailRowSimple("Location", "${info.city}, ${info.country}".trim().removePrefix(", "))
                 }
-                if (state.publicIpInfo.asn != "Unknown") {
-                    DetailRowSimple("ASN", state.publicIpInfo.asn)
-                }
+                if (info.asn != "Unknown") DetailRowSimple("ASN", info.asn)
             }
         }
     }

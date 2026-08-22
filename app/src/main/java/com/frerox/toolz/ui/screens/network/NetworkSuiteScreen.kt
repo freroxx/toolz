@@ -170,6 +170,24 @@ fun NetworkSuiteScreen(
         launch { tweaksVm.events.collect { snackbarHostState.showSnackbar(it) } }
         launch { powerVm.events.collect { snackbarHostState.showSnackbar(it) } }
     }
+    // Auto-enable Shizuku if permission already granted — no tap needed
+    LaunchedEffect(power.privilegedState.isAuthorized, power.privilegedState.isServiceReady) {
+        if (power.privilegedState.isAuthorized && !power.privilegedState.isServiceReady) {
+            powerVm.verifyPrivilegedAccess()
+        }
+    }
+    // M3 Expressive gate — show on entry if Shizuku is required and not ready (once per composition)
+    var hasShownShizukuGate by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(700)
+        if (!hasShownShizukuGate && (!power.privilegedState.isAuthorized || !power.privilegedState.isServiceReady)) {
+            hasShownShizukuGate = true
+            shizukuPrompt = ShizukuPrompt(
+                "Shizuku required",
+                "System tweaks, Private DNS presets, and traceroute need Shizuku. Diagnostics work without it — but for full power, enable Shizuku."
+            )
+        }
+    }
 
     val permissions = remember {
         buildList {
@@ -320,9 +338,8 @@ fun NetworkSuiteScreen(
                                 onToggleAudio = tweaksVm::setAudioFeedback,
                                 onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
                                 extraCards = {
-                                    Spacer(Modifier.height(NetTokens.SpacingL))
+                                    // Perfectly organized — no double spacers, single SpacingM rhythm via parent LazyColumn + Column
                                     PublicIpCard(state = power, onRefresh = { powerVm.fetchPublicIp() })
-                                    Spacer(Modifier.height(NetTokens.SpacingL))
                                     val hostPorts by powerVm.hostPortResults.collectAsStateWithLifecycle()
                                     val hostScanning by powerVm.hostPortScanning.collectAsStateWithLifecycle()
                                     DeviceMeshCard(
@@ -333,7 +350,6 @@ fun NetworkSuiteScreen(
                                         hostPortResults = hostPorts,
                                         hostPortScanning = hostScanning
                                     )
-                                    Spacer(Modifier.height(NetTokens.SpacingL))
                                     MobileDataCard(
                                         state = power,
                                         privilegedReady = privilegedReady,
@@ -342,7 +358,6 @@ fun NetworkSuiteScreen(
                                             else requestShizukuAccess("Mobile data toggle", "System radio controls are protected. Connect Shizuku to unlock one-tap mobile data toggles.")
                                         }
                                     )
-                                    Spacer(Modifier.height(NetTokens.SpacingXL))
                                 }
                             )
 

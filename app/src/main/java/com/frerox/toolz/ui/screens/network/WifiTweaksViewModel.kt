@@ -1183,6 +1183,11 @@ class WifiTweaksViewModel @Inject constructor(
             addLog("TWEAK", "Shizuku not available for ${tweak.title}", LogLevel.WARNING)
             return false
         }
+        // SHIZUKU_OR_GUIDE with manual fallback and no Shizuku → already marked MANUAL, treat as success (no rollback)
+        if (!_uiState.value.shizukuStatus.isServiceReady && tweak.type == TweakType.SHIZUKU_OR_GUIDE && tweak.manualSteps.isNotEmpty()) {
+            addLog("TWEAK", "Manual guide displayed for ${tweak.title}", LogLevel.SUCCESS)
+            return true
+        }
 
         // Capture BEFORE writing so revert can restore reality.
         val captured = capturePreviousValues(tweak)
@@ -1228,10 +1233,12 @@ class WifiTweaksViewModel @Inject constructor(
             setTweakResult(
                 tweak.id,
                 status = TweakStatus.MANUAL,
-                message = "Use the manual steps below.",
+                message = "Manual steps ready — open details.",
                 isApplied = false
             )
             emitMessage("Shizuku is not ready. ${tweak.title} has a manual fallback.")
+            // For SHIZUKU_OR_GUIDE, manual fallback counts as success for profiles (no rollback)
+            return tweak.type == TweakType.SHIZUKU_OR_GUIDE
         } else {
             setTweakResult(
                 tweak.id,
@@ -1240,8 +1247,8 @@ class WifiTweaksViewModel @Inject constructor(
                 isApplied = false
             )
             emitMessage("Connect Shizuku to apply ${tweak.title}.")
+            return false
         }
-        return false
     }
 
     /** Read-back probe returning an honest tri-state instead of optimistic booleans. */

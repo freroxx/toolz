@@ -232,20 +232,36 @@ class NetworkViewModel @Inject constructor(
     fun fetchPublicIp() {
         viewModelScope.launch {
             updateState { copy(isRefreshingPublicIp = true) }
-            val apis = listOf("https://api.ipify.org?format=json", "https://ipapi.co/json/")
+            // P4 fix: public IP was “not working” — now 4 fallbacks, text fallback, timeout 5s, robust parsing
+            val apis = listOf(
+                "https://api.ipify.org?format=json",
+                "https://ipapi.co/json/",
+                "https://ipinfo.io/json",
+                "https://ifconfig.me/ip" // text fallback
+            )
             var resolved: PublicIpInfo? = null
             for (apiUrl in apis) {
                 resolved = runCatching {
                     withContext(Dispatchers.IO) {
                         val conn = (URL(apiUrl).openConnection() as java.net.HttpURLConnection).apply {
-                            connectTimeout = 3500; readTimeout = 3500; setRequestProperty("User-Agent","Toolz/2.0")
+                            connectTimeout = 5000; readTimeout = 5000; setRequestProperty("User-Agent","Toolz/2.0"); setRequestProperty("Accept","application/json, text/plain")
                         }
-                        if (conn.responseCode in 200..299) parsePublicIp(conn.inputStream.bufferedReader().readText()) else null
+                        if (conn.responseCode !in 200..299) return@withContext null
+                        val text = conn.inputStream.bufferedReader().readText().trim()
+                        if (text.startsWith("{")) parsePublicIp(text)
+                        else if (text.matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+.*"))) PublicIpInfo(ip = text.lineSequence().first().trim(), isp = "via ifconfig.me")
+                        else null
                     }
                 }.getOrNull()
-                if (resolved != null) break
+                if (resolved != null && resolved.ip != "Unknown" && resolved.ip != "Check Internet") break
             }
-            updateState { copy(publicIpInfo = resolved ?: PublicIpInfo(ip = "Check Internet", isp = "Unavailable"), isRefreshingPublicIp = false) }
+            if (resolved == null) {
+                appendLog("PUBLIC_IP: All IP APIs failed — check Internet")
+                emitEvent("Public IP unavailable — check Internet and retry")
+            } else {
+                appendLog("PUBLIC_IP: Resolved ${resolved.ip} via ${resolved.isp}")
+            }
+            updateState { copy(publicIpInfo = resolved ?: PublicIpInfo(ip = "Unavailable", isp = "Tap refresh to retry"), isRefreshingPublicIp = false) }
         }
     }
 

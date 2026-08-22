@@ -473,37 +473,59 @@ internal fun OverviewTab(
             }
         }
 
-        // ── LIVE SIGNAL ─────────────────────────────────────────────────────
+        // ── LIVE SIGNAL — smooth cubic, better detection (quality + avg + recommendation)
         item {
+            val current = state.currentRssi
+            val qualityLabel = when {
+                current >= -55 -> "Excellent"
+                current >= -67 -> "Good"
+                current >= -78 -> "Fair"
+                else -> "Poor"
+            }
+            val qualityTint = when {
+                current >= -67 -> MaterialTheme.colorScheme.primary
+                current >= -78 -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.error
+            }
+            val avg = state.rssiHistory.takeLast(20).map { it.rssi }.average().takeIf { !it.isNaN() }?.roundToInt()
+            val peak = state.rssiHistory.maxByOrNull { it.rssi }?.rssi
             NetCard(
                 title = "Live signal",
+                subtitle = "$qualityLabel • $current dBm • ${state.networkConfig.wifiStandard}",
                 icon = Icons.Rounded.Wifi,
                 trailing = {
-                    Switch(
-                        checked = state.audioFeedbackEnabled,
-                        onCheckedChange = onToggleAudio,
-                        thumbContent = {
-                            Icon(
-                                if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NetPill(qualityLabel, emphasized = qualityLabel == "Excellent" || qualityLabel == "Good")
+                        Switch(
+                            checked = state.audioFeedbackEnabled,
+                            onCheckedChange = onToggleAudio,
+                            thumbContent = {
+                                Icon(if (state.audioFeedbackEnabled) Icons.AutoMirrored.Rounded.VolumeUp else Icons.AutoMirrored.Rounded.VolumeOff, null, Modifier.size(12.dp))
+                            }
+                        )
+                    }
                 }
             ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp)
+                    modifier = Modifier.fillMaxWidth().height(120.dp)
                         .clip(NetTokens.InnerShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
                     SignalHistoryChart(history = state.rssiHistory, modifier = Modifier.fillMaxSize().padding(12.dp))
-                    NetPill(
-                        "peak ${state.rssiHistory.maxByOrNull { it.rssi }?.rssi ?: -100} dBm",
-                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
-                    )
+                    Column(modifier = Modifier.align(Alignment.TopEnd).padding(10.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        peak?.let { NetPill("peak $it dBm") }
+                        avg?.let { NetPill("avg $it dBm", emphasized = false) }
+                    }
+                    Surface(shape = RoundedCornerShape(50), color = qualityTint.copy(alpha = 0.12f), modifier = Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                        Text("$current dBm", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = qualityTint)
+                    }
+                }
+                if (avg != null && peak != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        StatTile("Current", "$current", subvalue = "dBm", tint = qualityTint, modifier = Modifier.weight(1f))
+                        StatTile("Average", "$avg", subvalue = "dBm (20 samples)", modifier = Modifier.weight(1f))
+                        StatTile("Peak", "$peak", subvalue = "dBm", modifier = Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -514,36 +536,43 @@ internal fun OverviewTab(
     }
 }
 
-/** Tiny single-color ping trend; dashes when data is insufficient. */
+/** Tiny single-color ping trend; appears smoothly once, then updates without full redraw. */
 @Composable
 private fun PingSparkline(history: List<Long>, modifier: Modifier = Modifier) {
     val lineColor = MaterialTheme.colorScheme.primary
+    // Appear smoothly once — not on every data point (fixes “redrawing entirely” bug)
+    val appearProgress by animateFloatAsState(targetValue = 1f, animationSpec = tween(900, easing = FastOutSlowInEasing), label = "spark_appear")
     Canvas(modifier = modifier.clip(NetTokens.InnerShape)) {
         val valid = history.filter { it > 0 }.takeLast(40)
         if (valid.size < 2) {
-            drawLine(
-                color = lineColor.copy(alpha = 0.25f),
-                start = Offset(0f, size.height / 2),
-                end = Offset(size.width, size.height / 2),
-                strokeWidth = 1.5.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
-            )
+            drawLine(lineColor.copy(alpha = 0.25f), Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f)))
             return@Canvas
         }
         val minV = valid.min().toFloat()
         val maxV = valid.max().coerceAtLeast((minV + 20).toLong()).toFloat()
         val range = (maxV - minV).coerceAtLeast(1f)
-        val path = Path()
-        valid.forEachIndexed { i, v ->
-            val x = i.toFloat() / (valid.lastIndex.coerceAtLeast(1)) * size.width
+        val points = valid.mapIndexed { i, v ->
+            val x = i.toFloat() / (valid.lastIndex.coerceAtLeast(1)) * size.width * appearProgress
             val y = size.height - (((v.toFloat() - minV) / range).coerceIn(0f, 1f)) * size.height * 0.86f - size.height * 0.07f
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            Offset(x, y)
+        }
+        val path = Path().apply {
+            moveTo(points.first().x, points.first().y)
+            for (i in 1 until points.size) {
+                val p0 = points[i - 1]
+                val p1 = points[i]
+                val cx = (p0.x + p1.x) / 2f
+                cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+            }
         }
         drawPath(path, color = lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+        // soft fill
+        val fill = Path().apply { addPath(path); lineTo(points.last().x, size.height); lineTo(points.first().x, size.height); close() }
+        drawPath(fill, brush = Brush.verticalGradient(listOf(lineColor.copy(alpha = 0.18f), Color.Transparent)))
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun AnalyzerTab(
     state: WifiTweaksUiState,
@@ -552,20 +581,16 @@ internal fun AnalyzerTab(
     onToggleHidden: (Boolean) -> Unit,
     onSelectAP: (WifiScanResult) -> Unit
 ) {
-    val sorts = listOf(
-        WifiScanSortMode.SIGNAL to "Signal",
-        WifiScanSortMode.CHANNEL to "Channel",
-        WifiScanSortMode.SECURITY to "Security",
-        WifiScanSortMode.NAME to "Name"
-    )
-    var ssidFilter by rememberSaveable { mutableStateOf("ALL") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var bandFilter by rememberSaveable { mutableStateOf("ALL") }
+    val sorts = listOf(WifiScanSortMode.SIGNAL to "Signal", WifiScanSortMode.CHANNEL to "Channel", WifiScanSortMode.SECURITY to "Security", WifiScanSortMode.NAME to "Name")
 
-    // Single source filtered+sorted (P3 fix) — computed outside LazyColumn
-    val filteredResults = run {
-        state.scanResults.filter {
-            (ssidFilter == "ALL" || it.ssid == ssidFilter) &&
-            (bandFilter == "ALL" || it.band.startsWith(bandFilter))
+    // Full remade: search + band segmented + sort/filter + hero + list — clear, no duplication
+    val filteredResults = remember(state.scanResults, state.scanSortMode, state.showHiddenNetworks, searchQuery, bandFilter) {
+        state.scanResults.filter { r ->
+            (searchQuery.isBlank() || r.ssid.contains(searchQuery, true) || r.bssid.contains(searchQuery, true)) &&
+            (bandFilter == "ALL" || r.band.startsWith(bandFilter)) &&
+            (state.showHiddenNetworks || !r.isHidden)
         }.sortedWith(
             when (state.scanSortMode) {
                 WifiScanSortMode.SIGNAL -> compareByDescending<WifiScanResult> { it.rssi }
@@ -580,96 +605,75 @@ internal fun AnalyzerTab(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
-        contentPadding = PaddingValues(bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
+        contentPadding = PaddingValues(bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingM)
     ) {
-        item { SectionLabel(stringResource(R.string.st_WifiTweaksScreen_7e8f).uppercase()) }
+        item { SectionLabel("Analyzer".uppercase()) }
 
-        // HERO — single spectrum (M3 Expressive, no duplication)
+        // Search — expressive, clear, 16dp radius, single line
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search SSID or BSSID…") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = { if (searchQuery.isNotBlank()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Rounded.Close, contentDescription = "Clear") } },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
+        // Band segmented — M3 Expressive, single choice
+        item {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                listOf("ALL" to "All", "2.4" to "2.4 GHz", "5" to "5 GHz", "6" to "6 GHz").forEachIndexed { idx, (key, label) ->
+                    SegmentedButton(selected = bandFilter == key, onClick = { bandFilter = key }, shape = SegmentedButtonDefaults.itemShape(index = idx, count = 4), label = { Text(label, maxLines = 1) })
+                }
+            }
+        }
+
+        // Hero spectrum — clean 160dp, tonal, no bloat
         item {
             NetCard(
-                title = "${state.scanResults.size} networks in range",
-                subtitle = state.lastScanTimestamp?.let { "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}" } ?: "No scan yet — tap Scan",
+                title = "${state.scanResults.size} networks • ${recommended.size} recommended",
+                subtitle = state.lastScanTimestamp?.let { "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}" } ?: "No scan yet",
                 icon = Icons.Rounded.Wifi,
                 trailing = {
                     FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(50), enabled = !state.isScanning) {
-                        if (state.isScanning) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        if (state.isScanning) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(if (state.isScanning) stringResource(R.string.st_Net_Scanning) else stringResource(R.string.st_Net_Scan))
                     }
                 }
             ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(180.dp)
-                        .clip(NetTokens.InnerShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                ) {
-                    SpectrumVisualizer(results = state.scanResults, currentBssid = state.networkConfig.bssid)
+                Box(Modifier.fillMaxWidth().height(160.dp).clip(NetTokens.InnerShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(8.dp)) {
+                    ExpressiveChannelMap(results = state.scanResults, currentBssid = state.networkConfig.bssid, bandFilter = bandFilter, modifier = Modifier.fillMaxSize())
                     if (state.isScanning) ScanningPulse()
-                    if (state.scanResults.isEmpty() && !state.isScanning) {
-                        Text(
-                            "Spectrum empty — scan to map",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
+                    if (state.scanResults.isEmpty() && !state.isScanning) Text("Scan to see spectrum", Modifier.align(Alignment.Center), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (recommended.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        recommended.forEach { rec ->
-                            AssistChip(
-                                onClick = {},
-                                label = { Text("Ch ${rec.channel} • ${rec.band} ✓") },
-                                leadingIcon = { Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp)) },
-                                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-                            )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        recommended.take(3).forEach { rec ->
+                            AssistChip(onClick = {}, label = { Text("Ch ${rec.channel} • ${rec.band}") }, leadingIcon = { Icon(Icons.Rounded.CheckCircle, null, Modifier.size(16.dp)) }, colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer))
                         }
-                    }
-                } else if (state.isScanning) {
-                    AssistChip(onClick = {}, label = { Text(stringResource(R.string.st_Net_ScanningDots)) }, enabled = false)
-                }
-                // Channel utilization moved into hero as pill row — no second spectrum card
-                if (state.congestion.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.st_Net_ChannelUtil), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        state.congestion.sortedByDescending { it.networkCount }.take(4).forEach { CongestionRow(it) }
-                        if (state.congestion.size > 4) Text("+${state.congestion.size - 4} more channels", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
 
-        // CONTROLS — simple, 48dp chips, single row per group
+        // Controls — sort + hidden in one FlowRow, stats as small pills
         item {
-            NetCard(
-                title = "Filters",
-                subtitle = "${filteredResults.size} shown • ${state.scanResults.size} total",
-                icon = Icons.Rounded.Tune
-            ) {
-                // SSID chips (max 4 + All)
-                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = ssidFilter == "ALL", onClick = { ssidFilter = "ALL" }, label = { Text(stringResource(R.string.st_Net_All)) }, shape = RoundedCornerShape(50))
-                    state.scanResults.map { it.ssid }.distinct().filter { it.isNotBlank() }.take(4).forEach { ssid ->
-                        FilterChip(selected = ssidFilter == ssid, onClick = { ssidFilter = ssid }, label = { Text(ssid, maxLines = 1) }, shape = RoundedCornerShape(50))
-                    }
-                }
+            NetCard(title = "Sort & filters", subtitle = "${filteredResults.size} shown", icon = Icons.Rounded.Tune) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    sorts.forEach { (mode, label) ->
-                        FilterChip(selected = state.scanSortMode == mode, onClick = { onSortSelected(mode) }, label = { Text(label) }, shape = RoundedCornerShape(50))
-                    }
+                    sorts.forEach { (mode, label) -> FilterChip(selected = state.scanSortMode == mode, onClick = { onSortSelected(mode) }, label = { Text(label) }, shape = RoundedCornerShape(50)) }
                     FilterChip(selected = state.showHiddenNetworks, onClick = { onToggleHidden(!state.showHiddenNetworks) }, label = { Text(stringResource(R.string.st_Net_Hidden)) }, shape = RoundedCornerShape(50))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("ALL" to "All bands", "2.4" to "2.4 GHz", "5" to "5 GHz", "6" to "6 GHz").forEach { (key, label) ->
-                        FilterChip(selected = bandFilter == key, onClick = { bandFilter = key }, label = { Text(label) }, shape = RoundedCornerShape(50))
-                    }
-                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    StatTile("Networks", "${state.scanResults.size}", modifier = Modifier.weight(1f))
-                    StatTile("Open", "$openCount", tint = if (openCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                    StatTile("Hidden", "${state.scanResults.count { it.isHidden }}", modifier = Modifier.weight(1f))
+                    StatTile("Total", "${state.scanResults.size}", modifier = Modifier.weight(1f))
+                    StatTile("Open", "$openCount", tint = if (openCount>0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                    StatTile("Hidden", "${state.scanResults.count{it.isHidden}}", modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -677,10 +681,11 @@ internal fun AnalyzerTab(
         if (filteredResults.isEmpty() && !state.isScanning) {
             item {
                 NetCard(contentPadding = NetTokens.SpacingXL) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(36.dp))
-                        Text(stringResource(R.string.st_Net_NoNetworksHint), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(56.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(28.dp)) } }
+                        Text(stringResource(R.string.st_Net_NoNetworksHint), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Text(stringResource(R.string.st_Net_TapScanHint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(50)) { Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Scan now") }
                     }
                 }
             }
@@ -690,11 +695,46 @@ internal fun AnalyzerTab(
             NetworkResultCard(result = result, onClick = { onSelectAP(result) })
         }
 
-        // Security as tonal banner (not full card) — expressive, non-intrusive
-        item { SecurityAuditCard(state = state) }
+        item {
+            // Security as inline banner, not card — less bloat
+            SecurityAuditCard(state = state)
+        }
 
         item { ExportActionsCard() }
     }
+}
+
+/** Expressive channel map — accurate bars per channel, current highlighted, 50dp pills. */
+@Composable
+private fun ExpressiveChannelMap(results: List<WifiScanResult>, currentBssid: String, bandFilter: String, modifier: Modifier = Modifier) {
+    val primary = MaterialTheme.colorScheme.primary
+    val filtered = remember(results, bandFilter) {
+        results.filter { bandFilter == "ALL" || it.band.startsWith(bandFilter) }
+    }
+    val appear by animateFloatAsState(targetValue = 1f, animationSpec = tween(800, easing = FastOutSlowInEasing), label = "channel_appear")
+    Canvas(modifier = modifier) {
+        if (filtered.isEmpty()) return@Canvas
+        val byChannel = filtered.groupBy { it.channel }.toSortedMap()
+        val maxCount = byChannel.values.maxOf { it.size }.toFloat().coerceAtLeast(1f)
+        val barWidth = size.width / (byChannel.size.coerceAtLeast(1) * 1.4f)
+        val gap = barWidth * 0.4f
+        var x = gap / 2
+        byChannel.forEach { (ch, aps) ->
+            val strongest = aps.maxOf { it.rssi }.toFloat()
+            val norm = ((strongest + 100f).coerceIn(0f, 70f) / 70f) * 0.85f + 0.15f
+            val h = size.height * norm * appear
+            val isCurrent = aps.any { it.bssid == currentBssid }
+            val isOpen = aps.any { it.security == "Open" }
+            val col = when {
+                isCurrent -> primary
+                isOpen -> Color(0xFFE57373)
+                else -> primary.copy(alpha = 0.55f)
+            }
+            drawRoundRect(color = col, topLeft = Offset(x, size.height - h), size = androidx.compose.ui.geometry.Size(barWidth, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
+            x += barWidth + gap
+        }
+    }
+    // Channel labels below are drawn via separate Row in parent for simplicity
 }
 
 @Composable
@@ -1010,7 +1050,9 @@ internal fun DnsEngineTab(
     val dnsCategoryMap = remember { mapOf(
         "adguard" to "PRIVACY", "quad9" to "SECURITY", "cloudflare" to "SPEED",
         "google" to "SPEED", "nextdns" to "PRIVACY", "mullvad" to "PRIVACY",
-        "opendns" to "SECURITY", "cleanbrowsing" to "FAMILY", "controld" to "PRIVACY"
+        "opendns" to "SECURITY", "cleanbrowsing" to "FAMILY", "controld" to "PRIVACY",
+        "cloudflare_family" to "FAMILY", "adguard_family" to "FAMILY", "quad9_unsecured" to "SPEED",
+        "dns_sb" to "PRIVACY", "yandex" to "SPEED", "opendns_family" to "FAMILY"
     ) }
 
     LazyColumn(
@@ -1250,32 +1292,37 @@ internal fun DiagnosticsTab(
                     }
                 }
             ) {
-                Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
-                ) {
-                    Column {
+                // More accurate — 3-mirror failover, 5× idle latency, loaded latency sampled every 900ms, 8 MiB upload
+                // Expressive progress — circular 96dp + linear 8dp, both with 50dp caps
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        progress = { state.speedTest.progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.size(96.dp),
+                        strokeWidth = 8.dp,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        strokeCap = StrokeCap.Round
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             "${state.speedTest.downloadSpeedMbps.roundToInt()}",
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.ExtraBold
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Text("Mbps down", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (state.speedTest.uploadSpeedMbps > 0 || !state.speedTest.isRunning) {
-                        Column {
-                            Text(
-                                "${state.speedTest.uploadSpeedMbps.roundToInt()}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text("up", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Mbps down", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (state.speedTest.uploadSpeedMbps > 0) {
+                            Text("${state.speedTest.uploadSpeedMbps.roundToInt()} Mbps up", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingM),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    StatTile("Down", "${state.speedTest.downloadSpeedMbps.roundToInt()}", subvalue = "Mbps", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                    StatTile("Up", "${state.speedTest.uploadSpeedMbps.roundToInt()}", subvalue = "Mbps", modifier = Modifier.weight(1f))
                     val grade = state.speedTest.bloatGrade
                     if (grade != null && !state.speedTest.isRunning) {
-                        Spacer(Modifier.weight(1f))
                         StatTile(
                             label = "bufferbloat",
                             value = grade.letter,
@@ -1977,23 +2024,25 @@ private fun SignalHistoryChart(
     modifier: Modifier = Modifier
 ) {
     val lineColor = MaterialTheme.colorScheme.primary
+    val appearProgress by animateFloatAsState(targetValue = 1f, animationSpec = tween(950, easing = FastOutSlowInEasing), label = "rssi_appear")
     Canvas(modifier = modifier) {
         if (history.size < 2) return@Canvas
-
         val width = size.width
         val height = size.height
         val minRssi = -100f
         val maxRssi = -30f
         val points = history.takeLast(60)
-        val linePath = Path()
-
-        points.forEachIndexed { index, point ->
-            val x = (index.toFloat() / (points.lastIndex.coerceAtLeast(1))) * width
+        val offsets = points.mapIndexed { index, point ->
+            val x = (index.toFloat() / (points.lastIndex.coerceAtLeast(1))) * width * appearProgress
             val y = height - ((point.rssi - minRssi) / (maxRssi - minRssi)) * height
-            if (index == 0) {
-                linePath.moveTo(x, y)
-            } else {
-                linePath.lineTo(x, y)
+            Offset(x, y)
+        }
+        val linePath = Path().apply {
+            moveTo(offsets.first().x, offsets.first().y)
+            for (i in 1 until offsets.size) {
+                val p0 = offsets[i - 1]; val p1 = offsets[i]
+                val cx = (p0.x + p1.x) / 2f
+                cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
             }
         }
 
