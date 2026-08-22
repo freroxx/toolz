@@ -39,6 +39,7 @@ enum class BackupCategory(val displayName: String) {
     PRODUCTIVITY("Productivity"),
     SECURITY("Security & Privacy"),
     PERSONAL("Personal Data"),
+    WHISPER("Whisper Messenger"),
     SYSTEM("System & Settings")
 }
 
@@ -54,6 +55,9 @@ enum class BackupItem(val displayName: String, val category: BackupCategory) {
     SEARCH_HISTORY("Search & Bookmarks", BackupCategory.PERSONAL),
     NOTIFICATIONS("Notification Vault", BackupCategory.PERSONAL),
     CLIPBOARD("Clipboard History", BackupCategory.PERSONAL),
+    
+    WHISPER_ACCESS("Whisper Access Files", BackupCategory.WHISPER),
+    WHISPER_STATE("Whisper Local State", BackupCategory.WHISPER),
     
     SETTINGS("App Preferences", BackupCategory.SYSTEM),
     STEPS("Step Counter Data", BackupCategory.SYSTEM),

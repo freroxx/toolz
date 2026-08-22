@@ -22,7 +22,7 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     private val deletedMessagesStore: WhisperDeletedMessagesStore,
 ) : CoroutineWorker(context, workerParams) {
     override suspend fun doWork(): ListenableWorker.Result = try {
-        deletedMessagesStore.purgeExpired()
+        deletedMessagesStore.evictOldest()
         ListenableWorker.Result.success()
     } catch (e: kotlinx.coroutines.CancellationException) {
         // WorkManager cancels this coroutine on stop; rethrow so cancellation is honored.

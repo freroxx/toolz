@@ -91,6 +91,7 @@ fun WhisperAuthScreen(
     val context = LocalContext.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
+    val scope = rememberCoroutineScope()
 
     var showBypassDialog by remember { mutableStateOf(false) }
 
@@ -101,11 +102,13 @@ fun WhisperAuthScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (isWhisperBypassPassword(password)) {
-                    viewModel.setScreenshotBypass(true)
-                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
-                } else {
-                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                scope.launch {
+                    if (isWhisperBypassPassword(password)) {
+                        viewModel.setScreenshotBypass(true)
+                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    } else {
+                        toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                    }
                 }
                 showBypassDialog = false
             }
@@ -1124,7 +1127,7 @@ fun WhisperAubupRecoveryModalSheet(
                             OutlinedTextField(
                                 value = whisperCodeInput,
                                 onValueChange = {
-                                    if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                                    if (it.length <= 6 && it.all { c -> c.isDigit() }) {
                                         whisperCodeInput = it
                                         codeError = null
                                     }
@@ -1162,7 +1165,7 @@ fun WhisperAubupRecoveryModalSheet(
 
                                 ToolzExpressiveButton(
                                     onClick = {
-                                        if (whisperCodeInput.length != 4) {
+                                        if (whisperCodeInput.length != 6) {
                                             codeError = context.getString(R.string.st_Whisper_Aubup_CodeLengthError)
                                             return@ToolzExpressiveButton
                                         }
@@ -1173,7 +1176,7 @@ fun WhisperAubupRecoveryModalSheet(
                                             onRestoreBytes(uploadedBytesForCode!!, whisperCodeInput)
                                         }
                                     },
-                                    enabled = whisperCodeInput.length == 4,
+                                    enabled = whisperCodeInput.length == 6,
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(stringResource(R.string.st_Whisper_Aubup_DecryptAndLogin), fontWeight = FontWeight.Bold)

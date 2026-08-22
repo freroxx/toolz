@@ -94,7 +94,8 @@ class WhisperDeletedMessagesStore @Inject constructor(
 
     fun isMessageDeleted(messageId: String): Boolean = _deletedIds.value.contains(messageId)
 
-    suspend fun purgeExpired(): Int = mutex.withLock {
+    /** Evicts the oldest tombstone IDs when store exceeds MAX_TOMBSTONES. */
+    suspend fun evictOldest(): Int = mutex.withLock {
         val raw = loadAll()
         val capped = capById(raw)
         val removed = raw.size - capped.size
@@ -106,6 +107,9 @@ class WhisperDeletedMessagesStore @Inject constructor(
         }
         removed
     }
+
+    @Deprecated("Renamed to evictOldest to clarify size-based capping", ReplaceWith("evictOldest()"))
+    suspend fun purgeExpired(): Int = evictOldest()
 
     suspend fun clearAll() = mutex.withLock {
         withContext(Dispatchers.IO) { prefs.edit().remove("deleted_message_ids").commit() }

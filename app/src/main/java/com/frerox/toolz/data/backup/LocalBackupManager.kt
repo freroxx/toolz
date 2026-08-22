@@ -124,7 +124,36 @@ class LocalBackupManager @Inject constructor(
             // 3. Database Items (Selective)
             exportDatabaseItems(zip, items, entryHashes)
 
-            // 4. Files & Settings (Selective)
+            // 4. Whisper Data (Selective)
+            if (items.contains(BackupItem.WHISPER_ACCESS)) {
+                _progress.value = "Whisper Access Files"
+                val toolzDownloads = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz")
+                if (toolzDownloads.exists() && toolzDownloads.isDirectory) {
+                    toolzDownloads.listFiles { file -> file.isFile && file.name.endsWith(".enc") }?.forEach { encFile ->
+                        addFileEntry(zip, encFile, "whisper/access_files/${encFile.name}", entryHashes)
+                    }
+                }
+            }
+
+            if (items.contains(BackupItem.WHISPER_STATE)) {
+                _progress.value = "Whisper Local State"
+                val prefsDir = File(context.dataDir, "shared_prefs")
+                val whisperPrefs = listOf(
+                    "whisper_deleted_msgs.xml",
+                    "whisper_key_trust.xml",
+                    "whisper_mute_prefs.xml",
+                    "whisper_hidden_chats.xml",
+                    "whisper_outbox.xml"
+                )
+                whisperPrefs.forEach { prefName ->
+                    val file = File(prefsDir, prefName)
+                    if (file.exists()) {
+                        addFileEntry(zip, file, "whisper/prefs/$prefName", entryHashes)
+                    }
+                }
+            }
+
+            // 5. Files & Settings (Selective)
             if (items.contains(BackupItem.SETTINGS)) {
                 addDirectory(
                     zip = zip,
@@ -306,6 +335,15 @@ class LocalBackupManager @Inject constructor(
                     }
                     entry.name.startsWith("shared_prefs/") && itemsToRestore.contains(BackupItem.SETTINGS) -> {
                         restoreEntry(zipFile, entry.name, File(context.dataDir, "shared_prefs"), "shared_prefs")
+                        restoredEntries++
+                    }
+                    entry.name.startsWith("whisper/access_files/") && itemsToRestore.contains(BackupItem.WHISPER_ACCESS) -> {
+                        val toolzDownloads = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz").apply { mkdirs() }
+                        restoreEntry(zipFile, entry.name, toolzDownloads, "whisper/access_files")
+                        restoredEntries++
+                    }
+                    entry.name.startsWith("whisper/prefs/") && itemsToRestore.contains(BackupItem.WHISPER_STATE) -> {
+                        restoreEntry(zipFile, entry.name, File(context.dataDir, "shared_prefs"), "whisper/prefs")
                         restoredEntries++
                     }
                     entry.name.startsWith("files/") && itemsToRestore.contains(BackupItem.OTHERS) -> {
@@ -578,7 +616,12 @@ class LocalBackupManager @Inject constructor(
 
         private val ENCRYPTED_PREF_FILES = setOf(
             "toolz_vault_prefs.xml",
-            "ai_settings.xml"
+            "ai_settings.xml",
+            "whisper_deleted_msgs.xml",
+            "whisper_key_trust.xml",
+            "whisper_mute_prefs.xml",
+            "whisper_hidden_chats.xml",
+            "whisper_outbox.xml"
         )
     }
 }

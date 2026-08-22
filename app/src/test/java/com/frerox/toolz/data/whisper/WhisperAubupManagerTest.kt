@@ -11,17 +11,18 @@ class WhisperAubupManagerTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun testIsValidWhisperCode_validatesFourDigitsOnly() {
-        assertTrue(WhisperAubupManager.isValidWhisperCode("0000"))
-        assertTrue(WhisperAubupManager.isValidWhisperCode("1234"))
-        assertTrue(WhisperAubupManager.isValidWhisperCode("9999"))
+    fun testIsValidWhisperCode_validatesSixDigitsOnly() {
+        assertTrue(WhisperAubupManager.isValidWhisperCode("000000"))
+        assertTrue(WhisperAubupManager.isValidWhisperCode("123456"))
+        assertTrue(WhisperAubupManager.isValidWhisperCode("999999"))
 
         assertFalse(WhisperAubupManager.isValidWhisperCode(""))
-        assertFalse(WhisperAubupManager.isValidWhisperCode("123"))
+        assertFalse(WhisperAubupManager.isValidWhisperCode("1234"))
         assertFalse(WhisperAubupManager.isValidWhisperCode("12345"))
-        assertFalse(WhisperAubupManager.isValidWhisperCode("12a4"))
-        assertFalse(WhisperAubupManager.isValidWhisperCode("abcd"))
-        assertFalse(WhisperAubupManager.isValidWhisperCode(" 1234 "))
+        assertFalse(WhisperAubupManager.isValidWhisperCode("1234567"))
+        assertFalse(WhisperAubupManager.isValidWhisperCode("12a456"))
+        assertFalse(WhisperAubupManager.isValidWhisperCode("abcdef"))
+        assertFalse(WhisperAubupManager.isValidWhisperCode(" 123456 "))
     }
 
     @Test

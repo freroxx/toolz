@@ -551,8 +551,8 @@ class WhisperChatViewModel @Inject constructor(
             repository.downloadEncryptedImage(attachment, key)
                 .onSuccess { bytes ->
                     _uiState.update { state ->
-                        // Bound the in-memory image cache so long chats can't exhaust memory.
-                        val cache = state.decryptedImageBytes.toMutableMap()
+                        // Bound the in-memory image cache with strict FIFO/LRU order so long chats can't exhaust memory.
+                        val cache = LinkedHashMap<String, ByteArray>(state.decryptedImageBytes)
                         while (cache.size >= MAX_DECRYPTED_IMAGES) {
                             val oldest = cache.keys.firstOrNull() ?: break
                             cache.remove(oldest)

@@ -10,6 +10,7 @@ import android.os.Environment
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.util.CryptoManager
+import com.frerox.toolz.util.password.PasswordGenerator
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -41,10 +42,53 @@ class WhisperAubupManager @Inject constructor(
 ) {
     companion object {
         fun isValidWhisperCode(code: String): Boolean =
-            code.length == 4 && code.all { it in '0'..'9' }
+            code.length == 6 && code.all { it in '0'..'9' }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Intelligently saves or updates Whisper credentials in the Toolz Password Vault.
+     * Prevents duplicate entries on repeated logins.
+     */
+    suspend fun upsertWhisperVaultEntry(
+        name: String,
+        username: String,
+        credential: String,
+        isToken: Boolean = false,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cleanUser = username.trim().lowercase()
+            val cleanCred = credential.trim()
+            val all = passwordDao.getAllPasswordsSync()
+            val existing = all.find { entity ->
+                entity.url == "whisper.toolz.app" &&
+                    (entity.username.equals(cleanUser, ignoreCase = true) || entity.password == cleanCred)
+            }
+
+            if (existing != null) {
+                val updated = existing.copy(
+                    name = name,
+                    username = cleanUser,
+                    password = cleanCred,
+                    strength = PasswordGenerator.calculateStrength(cleanCred),
+                    lastUsedAt = System.currentTimeMillis()
+                )
+                passwordDao.updatePassword(updated)
+            } else {
+                val newEntity = PasswordEntity(
+                    name = name,
+                    url = "whisper.toolz.app",
+                    username = cleanUser,
+                    password = cleanCred,
+                    strength = PasswordGenerator.calculateStrength(cleanCred),
+                    createdAt = System.currentTimeMillis(),
+                    lastUsedAt = System.currentTimeMillis()
+                )
+                passwordDao.insertPassword(newEntity)
+            }
+        }
+    }
 
     suspend fun createAccessFile(
         username: String,
@@ -54,7 +98,7 @@ class WhisperAubupManager @Inject constructor(
         whisperCode: String,
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 4 digits." }
+            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
             val payload = WhisperAccessPayload(
                 username = username.trim().lowercase(),
                 authType = authType,
@@ -72,9 +116,10 @@ class WhisperAubupManager @Inject constructor(
             }
 
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val toolzDir = File(downloadsDir, "Toolz").apply { if (!exists()) mkdirs() }
-            val cleanUser = username.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_")
-            val targetFile = File(toolzDir, "whisper_access_${cleanUser}.enc")
+            val rawUser = username.trim().lowercase()
+            val cleanUser = rawUser.replace(Regex("[^a-z0-9_]"), "_")
+            val userSuffix = if (cleanUser != rawUser) "_${rawUser.hashCode().toUInt().toString(16)}" else ""
+            val targetFile = File(toolzDir, "whisper_access_${cleanUser}${userSuffix}.enc")
 
             FileOutputStream(targetFile).use { output ->
                 output.write(encryptedText.toByteArray(Charsets.UTF_8))
@@ -139,7 +184,7 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun decryptAccessFile(file: File, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 4 digits." }
+            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
             val cipherText = FileInputStream(file).use { it.bufferedReader().readText() }
             decryptCiphertext(cipherText, whisperCode)
         }
@@ -147,7 +192,7 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun decryptAccessBytes(bytes: ByteArray, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
-            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 4 digits." }
+            require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
             val cipherText = String(bytes, Charsets.UTF_8)
             decryptCiphertext(cipherText, whisperCode)
         }

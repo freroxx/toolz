@@ -145,11 +145,13 @@ fun WhisperChatScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (isWhisperBypassPassword(password)) {
-                    viewModel.setScreenshotBypass(true)
-                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
-                } else {
-                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                scope.launch {
+                    if (isWhisperBypassPassword(password)) {
+                        viewModel.setScreenshotBypass(true)
+                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    } else {
+                        toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                    }
                 }
                 showBypassDialog = false
             }
@@ -189,7 +191,7 @@ fun WhisperChatScreen(
     LaunchedEffect(newestMessageId) {
         if (newestMessageId == null || uiState.isSearchActive) return@LaunchedEffect
         
-        val lastMsg = messages.last()
+        val lastMsg = messages.lastOrNull() ?: return@LaunchedEffect
         val isMine = lastMsg.senderId == viewModel.myUserId
         
         // In reverse layout, item 0 is the newest (bottom).

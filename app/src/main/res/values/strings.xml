@@ -125,11 +125,11 @@
     <string name="st_Whisper_Aubup_VaultFound">Account found in Password Vault</string>
     <string name="st_Whisper_Aubup_VaultDesc">We found your credentials saved in your local Toolz Password Vault.</string>
     <string name="st_Whisper_Aubup_FileFound">Encrypted Access File found</string>
-    <string name="st_Whisper_Aubup_EnterWhisperCode">Enter your 4-digit Whisper Code to decrypt this access file.</string>
-    <string name="st_Whisper_Aubup_WhisperCodeLabel">4-Digit Whisper Code</string>
-    <string name="st_Whisper_Aubup_ConfirmCodeLabel">Confirm 4-Digit Whisper Code</string>
+    <string name="st_Whisper_Aubup_EnterWhisperCode">Enter your 6-digit Whisper Code to decrypt this access file.</string>
+    <string name="st_Whisper_Aubup_WhisperCodeLabel">6-Digit Whisper Code</string>
+    <string name="st_Whisper_Aubup_ConfirmCodeLabel">Confirm 6-Digit Whisper Code</string>
     <string name="st_Whisper_Aubup_CodeMismatch">Whisper Codes do not match</string>
-    <string name="st_Whisper_Aubup_CodeLengthError">Whisper Code must be exactly 4 digits</string>
+    <string name="st_Whisper_Aubup_CodeLengthError">Whisper Code must be exactly 6 digits</string>
     <string name="st_Whisper_Aubup_RestoreAndLogin">Restore &amp; Sign In</string>
     <string name="st_Whisper_Aubup_DecryptAndLogin">Decrypt &amp; Sign In</string>
     <string name="st_Whisper_Aubup_ManualUpload">Upload Access File (.enc)</string>
@@ -138,9 +138,9 @@
     <string name="st_Whisper_Aubup_CredentialRevealedTitle">Account Restored Successfully</string>
     <string name="st_Whisper_Aubup_CredentialWarning">Save these credentials safely! You will need them if you lose access again or reset your device.</string>
     <string name="st_Whisper_Aubup_SaveAccessFile">Save Access File</string>
-    <string name="st_Whisper_Aubup_SaveAccessFileDesc">Export an encrypted .enc backup file with a 4-digit Whisper Code</string>
+    <string name="st_Whisper_Aubup_SaveAccessFileDesc">Export an encrypted .enc backup file with a 6-digit Whisper Code</string>
     <string name="st_Whisper_Aubup_InfoTitle">What is an Access File?</string>
-    <string name="st_Whisper_Aubup_InfoDesc">An Access File is an offline encrypted backup of your Whisper account credentials. It is encrypted using AES-256 with a 4-digit numeric Whisper Code of your choice and saved into your Downloads/Toolz folder. If you ever switch devices or lose access, you can recover your account instantly by providing this file and your 4-digit code.</string>
+    <string name="st_Whisper_Aubup_InfoDesc">An Access File is an offline encrypted backup of your Whisper account credentials. It is encrypted using AES-256 with a 6-digit numeric Whisper Code of your choice and saved into your Downloads/Toolz folder. If you ever switch devices or lose access, you can recover your account instantly by providing this file and your 6-digit code.</string>
     <string name="st_Whisper_Aubup_FileCreatedSuccess">Access File saved to Downloads/Toolz/whisper_access_%s.enc</string>
     <string name="st_Whisper_Aubup_CustomDesignBadge">Whisper E2EE</string>
     <string name="st_Whisper_Aubup_TokenAccount">Anonymous Token</string>
@@ -321,7 +321,7 @@
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Could not decrypt this message.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
-    <string name="st_Whisper_Beta_Warning_Desc">Whisper is an experimental encrypted tool. You are participating in an early access program and may encounter bugs or performance issues. Please share your feedback to help us improve!</string>
+    <string name="st_Whisper_Beta_Warning_Desc">Whisper is an experimental encrypted tool using static ECDH key agreement. If your device private key is ever compromised, past messages could be decrypted. Rotate your encryption key periodically in Profile settings. Please share your feedback to help us improve!</string>
     <string name="st_Whisper_Beta_Warning_Confirm">I Understand</string>
     <!-- Whisper: Onboarding -->
     <string name="st_Whisper_Onboarding_Title1">Chat Without Limits</string>
@@ -1673,6 +1673,7 @@
     <string name="st_Backup_Cat_Productivity">Productivity</string>
     <string name="st_Backup_Cat_Security">Security &amp; Privacy</string>
     <string name="st_Backup_Cat_Personal">Personal Data</string>
+    <string name="st_Backup_Cat_Whisper">Whisper Private Messenger</string>
     <string name="st_Backup_Cat_System">System &amp; Settings</string>
 
     <string name="st_Backup_Item_Notes">Notes &amp; Attachments</string>
@@ -1684,6 +1685,8 @@
     <string name="st_Backup_Item_SearchHistory">Search &amp; Bookmarks</string>
     <string name="st_Backup_Item_Notifications">Notification Vault</string>
     <string name="st_Backup_Item_Clipboard">Clipboard History</string>
+    <string name="st_Backup_Item_WhisperAccess">Whisper Access Files (.enc)</string>
+    <string name="st_Backup_Item_WhisperState">Whisper Local State (mutes, trust, history)</string>
     <string name="st_Backup_Item_Settings">App Preferences</string>
     <string name="st_Backup_Item_Steps">Step Counter Data</string>
     <string name="st_Backup_Item_MathHistory">Math &amp; Calculations</string>

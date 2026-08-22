@@ -208,7 +208,12 @@ class WhisperAuthViewModel @Inject constructor(
                 credential = payload.credential,
             )
             // Re-save to vault on successful recovery
-            saveToVault("Whisper: ${payload.username}", payload.username, payload.credential)
+            aubupManager.upsertWhisperVaultEntry(
+                name = if (payload.authType == "TOKEN") "Whisper Anon: ${payload.username}" else "Whisper: ${payload.username}",
+                username = payload.username,
+                credential = payload.credential,
+                isToken = payload.authType == "TOKEN"
+            )
         }.onFailure { err ->
             _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with restored credentials")
         }
@@ -245,8 +250,12 @@ class WhisperAuthViewModel @Inject constructor(
             // Double-submit guard: only one sign-in may be in flight at a time.
             if (_submitting.value) return@launch
             _submitting.value = true
-            authManager.loginWithUsername(username, password)
-                .onSuccess { _authState.value = WhisperAuthState.Authenticated }
+            val cleanUser = username.trim().lowercase()
+            authManager.loginWithUsername(cleanUser, password)
+                .onSuccess {
+                    _authState.value = WhisperAuthState.Authenticated
+                    aubupManager.upsertWhisperVaultEntry("Whisper: $cleanUser", cleanUser, password, isToken = false)
+                }
                 .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
             _submitting.value = false
         }
@@ -285,23 +294,9 @@ class WhisperAuthViewModel @Inject constructor(
         authManager.registerWithUsername(cleanUser, password, displayName)
             .onSuccess {
                 _authState.value = WhisperAuthState.Authenticated
-                saveToVault("Whisper: $cleanUser", cleanUser, password)
+                aubupManager.upsertWhisperVaultEntry("Whisper: $cleanUser", cleanUser, password, isToken = false)
             }
             .onFailure { _authState.value = WhisperAuthState.Error(formatError(it)) }
-    }
-
-    private fun saveToVault(name: String, user: String, pass: String) {
-        viewModelScope.launch {
-            passwordDao.insertPassword(
-                PasswordEntity(
-                    name = name,
-                    url = "whisper.toolz.app",
-                    username = user,
-                    password = pass,
-                    strength = PasswordGenerator.calculateStrength(pass)
-                )
-            )
-        }
     }
 
     fun generateToken() {
@@ -335,7 +330,7 @@ class WhisperAuthViewModel @Inject constructor(
             authManager.registerWithToken(token, username = cleanUsername, displayName = cleanName)
                 .onSuccess {
                     _authState.value = WhisperAuthState.Authenticated
-                    saveToVault("Whisper Anon: $cleanUsername", cleanUsername, token.token)
+                    aubupManager.upsertWhisperVaultEntry("Whisper Anon: $cleanUsername", cleanUsername, token.token, isToken = true)
                 }
                 .onFailure {
                     _authState.value = WhisperAuthState.Error(formatError(it))
@@ -358,7 +353,12 @@ class WhisperAuthViewModel @Inject constructor(
             if (_submitting.value) return@launch
             _submitting.value = true
             authManager.loginWithToken(cleanToken)
-                .onSuccess { _authState.value = WhisperAuthState.Authenticated }
+                .onSuccess {
+                    _authState.value = WhisperAuthState.Authenticated
+                    val myProfile = repository.getMyProfile(forceRefresh = true).getOrNull()
+                    val userHandle = myProfile?.effectiveUsername ?: "anon_${cleanToken.take(6)}"
+                    aubupManager.upsertWhisperVaultEntry("Whisper Anon: $userHandle", userHandle, cleanToken, isToken = true)
+                }
                 .onFailure {
                     val message = if (authManager.isInvalidCredentials(it)) {
                         UiText.StringResource(R.string.st_Whisper_Error_TokenNotRecognized)

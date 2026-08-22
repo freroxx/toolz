@@ -90,8 +90,8 @@ class WhisperCrypto @Inject constructor() {
     fun fingerprint(base64PublicKey: String?): String? {
         if (base64PublicKey.isNullOrBlank()) return null
         return try {
-            val digest = MessageDigest.getInstance("SHA-256")
-                .digest(base64PublicKey.trim().toByteArray(Charsets.UTF_8))
+            val rawBytes = Base64.decode(base64PublicKey.trim(), Base64.DEFAULT)
+            val digest = MessageDigest.getInstance("SHA-256").digest(rawBytes)
             val hex = digest.joinToString("") { "%02X".format(it) }
             hex.chunked(4).take(8).joinToString("-")
         } catch (_: Exception) { null }

@@ -67,6 +67,7 @@ fun WhisperUserProfileScreen(
     val haptic = rememberToolzHapticFeedback()
     val toastState = rememberWhisperToastState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var showBypassDialog by remember { mutableStateOf(false) }
 
@@ -77,11 +78,13 @@ fun WhisperUserProfileScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (isWhisperBypassPassword(password)) {
-                    viewModel.setScreenshotBypass(true)
-                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
-                } else {
-                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                scope.launch {
+                    if (isWhisperBypassPassword(password)) {
+                        viewModel.setScreenshotBypass(true)
+                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    } else {
+                        toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                    }
                 }
                 showBypassDialog = false
             }

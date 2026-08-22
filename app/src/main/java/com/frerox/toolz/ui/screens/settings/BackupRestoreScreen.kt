@@ -253,6 +253,7 @@ private fun CategorySelectionCard(
                     BackupCategory.PRODUCTIVITY -> Icons.Rounded.RocketLaunch
                     BackupCategory.SECURITY -> Icons.Rounded.VerifiedUser
                     BackupCategory.PERSONAL -> Icons.Rounded.Person
+                    BackupCategory.WHISPER -> Icons.Rounded.Shield
                     BackupCategory.SYSTEM -> Icons.Rounded.SettingsSuggest
                 }
                 Surface(
@@ -275,6 +276,7 @@ private fun CategorySelectionCard(
                             BackupCategory.PRODUCTIVITY -> R.string.st_Backup_Cat_Productivity
                             BackupCategory.SECURITY -> R.string.st_Backup_Cat_Security
                             BackupCategory.PERSONAL -> R.string.st_Backup_Cat_Personal
+                            BackupCategory.WHISPER -> R.string.st_Backup_Cat_Whisper
                             BackupCategory.SYSTEM -> R.string.st_Backup_Cat_System
                         }),
                         style = MaterialTheme.typography.titleMedium,
@@ -319,6 +321,8 @@ private fun CategorySelectionCard(
                         BackupItem.SEARCH_HISTORY -> R.string.st_Backup_Item_SearchHistory
                         BackupItem.NOTIFICATIONS -> R.string.st_Backup_Item_Notifications
                         BackupItem.CLIPBOARD -> R.string.st_Backup_Item_Clipboard
+                        BackupItem.WHISPER_ACCESS -> R.string.st_Backup_Item_WhisperAccess
+                        BackupItem.WHISPER_STATE -> R.string.st_Backup_Item_WhisperState
                         BackupItem.SETTINGS -> R.string.st_Backup_Item_Settings
                         BackupItem.STEPS -> R.string.st_Backup_Item_Steps
                         BackupItem.MATH_HISTORY -> R.string.st_Backup_Item_MathHistory

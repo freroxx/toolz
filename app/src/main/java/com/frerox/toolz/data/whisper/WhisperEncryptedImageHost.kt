@@ -23,68 +23,73 @@ import javax.inject.Singleton
 class WhisperEncryptedImageHost @Inject constructor(
     private val supabase: SupabaseClient,
 ) {
+    private suspend fun getValidAccessToken(forceRefresh: Boolean = false): String {
+        if (forceRefresh) {
+            runCatching { supabase.auth.refreshCurrentSession() }
+        }
+        return supabase.auth.currentSessionOrNull()?.accessToken
+            ?: error("Sign in before uploading an image.")
+    }
+
     /** Returns Pair(url, attachmentId) */
     suspend fun upload(cipherBytes: ByteArray, name: String, expirationSeconds: Long?): Result<Pair<String, String?>> = runCatching {
         require(cipherBytes.isNotEmpty() && cipherBytes.size <= MAX_CIPHER_BYTES) { "Image is too large to send securely." }
-        val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before uploading an image.")
         
-        // 1. Try uploading to Edge Function (ImgBB) first
-        val edgeFunctionResult = runCatching {
-            // Peak allocation: encode() holds width*height*4 raw + PNG bytes, then Base64 adds ~4/3 expansion.
-            // At MAX_CIPHER_BYTES this can transiently peak at >10 MB; callers must enforce size caps before this point.
-            val pngBytes = WhisperImageCipherTransport.encode(cipherBytes)
-            val body = buildJsonObject {
-                put("image", Base64.encodeToString(pngBytes, Base64.NO_WRAP))
-                put("name", name.take(80))
-                expirationSeconds?.let { put("expiration", it) }
-            }.toString()
+        val pngBytes = WhisperImageCipherTransport.encode(cipherBytes)
+        val body = buildJsonObject {
+            put("image", Base64.encodeToString(pngBytes, Base64.NO_WRAP))
+            put("name", name.take(80))
+            expirationSeconds?.let { put("expiration", it) }
+        }.toString()
+        val bodyBytes = body.toByteArray(Charsets.UTF_8)
 
-            withContext(Dispatchers.IO) {
-                val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
-                try {
-                    val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                    connection.requestMethod = "POST"
-                    connection.connectTimeout = CONNECT_TIMEOUT_MS
-                    connection.readTimeout = READ_TIMEOUT_MS
-                    connection.doOutput = true
-                    connection.setFixedLengthStreamingMode(bodyBytes.size)
-                    
-                    connection.setRequestProperty("Authorization", "Bearer $token")
-                    connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                    connection.setRequestProperty("Content-Type", "application/json")
-                    
-                    connection.outputStream.use { it.write(bodyBytes) }
-                    
-                    val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
-                    val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                    
-                    if (connection.responseCode !in 200..299) {
-                        val errorMsg = runCatching {
-                            Json.parseToJsonElement(response).jsonObject["error"]?.jsonPrimitive?.content
-                        }.getOrNull() ?: response.take(200).ifBlank { "HTTP ${connection.responseCode}" }
-                        error(errorMsg)
-                    }
-                    
-                    val json = Json.parseToJsonElement(response).jsonObject
-                    val url = json["url"]?.jsonPrimitive?.content ?: error("Image host returned an invalid response.")
-                    val id = json["id"]?.jsonPrimitive?.content
-                    url to id
-                } finally {
-                    connection.disconnect()
-                }
+        // Helper to execute edge function call
+        suspend fun executeUpload(token: String): Pair<Int, String> = withContext(Dispatchers.IO) {
+            val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = CONNECT_TIMEOUT_MS
+                connection.readTimeout = READ_TIMEOUT_MS
+                connection.doOutput = true
+                connection.setFixedLengthStreamingMode(bodyBytes.size)
+                
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                connection.setRequestProperty("Content-Type", "application/json")
+                
+                connection.outputStream.use { it.write(bodyBytes) }
+                
+                val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+                val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                connection.responseCode to response
+            } finally {
+                connection.disconnect()
             }
         }
 
-        if (edgeFunctionResult.isFailure) {
-            val edgeError = edgeFunctionResult.exceptionOrNull()?.message.orEmpty()
-            android.util.Log.w("WhisperEncryptedImageHost", "Edge function upload failed: $edgeError")
-        }
+        // Try with current token, if 401 refresh token and retry once
+        var token = getValidAccessToken(forceRefresh = false)
+        var (code, response) = executeUpload(token)
         
-        if (edgeFunctionResult.isSuccess) {
-            return@runCatching edgeFunctionResult.getOrThrow()
+        if (code == 401) {
+            android.util.Log.w("WhisperEncryptedImageHost", "Edge upload returned 401 Unauthorized, refreshing session and retrying...")
+            token = getValidAccessToken(forceRefresh = true)
+            val retryResult = executeUpload(token)
+            code = retryResult.first
+            response = retryResult.second
         }
 
-        error("Encrypted image upload failed: ${edgeFunctionResult.exceptionOrNull()?.message.orEmpty().ifBlank { "unknown error" }}")
+        if (code !in 200..299) {
+            val errorMsg = runCatching {
+                Json.parseToJsonElement(response).jsonObject["error"]?.jsonPrimitive?.content
+            }.getOrNull() ?: response.take(200).ifBlank { "HTTP $code" }
+            error("Encrypted image upload failed: $errorMsg")
+        }
+
+        val json = Json.parseToJsonElement(response).jsonObject
+        val url = json["url"]?.jsonPrimitive?.content ?: error("Image host returned an invalid response.")
+        val id = json["id"]?.jsonPrimitive?.content
+        url to id
     }
 
     suspend fun delete(url: String, attachmentId: String?): Result<Unit> = runCatching {

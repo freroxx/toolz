@@ -117,11 +117,13 @@ fun WhisperMainScreen(
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
-                if (isWhisperBypassPassword(password)) {
-                    viewModel.setScreenshotBypass(true)
-                    toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
-                } else {
-                    toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                scope.launch {
+                    if (isWhisperBypassPassword(password)) {
+                        viewModel.setScreenshotBypass(true)
+                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                    } else {
+                        toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                    }
                 }
                 showBypassDialog = false
             }
@@ -1947,7 +1949,7 @@ private fun ProfileTab(
                     OutlinedTextField(
                         value = whisperCode,
                         onValueChange = {
-                            if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                            if (it.length <= 6 && it.all { c -> c.isDigit() }) {
                                 whisperCode = it
                                 codeError = null
                             }
@@ -1963,7 +1965,7 @@ private fun ProfileTab(
                     OutlinedTextField(
                         value = confirmWhisperCode,
                         onValueChange = {
-                            if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                            if (it.length <= 6 && it.all { c -> c.isDigit() }) {
                                 confirmWhisperCode = it
                                 codeError = null
                             }
@@ -1989,7 +1991,7 @@ private fun ProfileTab(
             confirmButton = {
                 ToolzExpressiveButton(
                     onClick = {
-                        if (whisperCode.length != 4) {
+                        if (whisperCode.length != 6) {
                             codeError = codeLengthMsg
                             return@ToolzExpressiveButton
                         }
@@ -2016,7 +2018,7 @@ private fun ProfileTab(
                             }
                         )
                     },
-                    enabled = whisperCode.length == 4 && confirmWhisperCode.length == 4 && !isCreating
+                    enabled = whisperCode.length == 6 && confirmWhisperCode.length == 6 && !isCreating
                 ) {
                     if (isCreating) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)

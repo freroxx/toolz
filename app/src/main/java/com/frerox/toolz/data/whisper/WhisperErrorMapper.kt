@@ -39,7 +39,8 @@ object WhisperErrorMapper {
         return msg.contains("JWT expired", ignoreCase = true) ||
             msg.contains("invalid claim", ignoreCase = true) ||
             msg.contains("session expired", ignoreCase = true) ||
-            msg.contains("user_not_found", ignoreCase = true)
+            msg.contains("user_not_found", ignoreCase = true) ||
+            msg.contains("Unauthorized", ignoreCase = true)
     }
 
     /** True when the resource genuinely does not exist (as opposed to a network failure). */

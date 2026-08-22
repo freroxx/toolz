@@ -355,7 +355,7 @@ class WhisperRepository @Inject constructor(
             // Empty strings must reach the server to clear a field; null means "don't touch".
             if (update.displayName != null) put("display_name", update.displayName)
             if (update.bio != null) put("bio", update.bio)
-            update.avatarUrl?.let { put("avatar_url", it) }
+            if (update.avatarUrl != null) put("avatar_url", update.avatarUrl)
             update.isPrivate?.let { put("is_private", it) }
             update.isHiddenFromDiscover?.let { put("hide_from_discover", it) }
             update.lastSeenAt?.let { put("last_seen_at", it) }
@@ -843,7 +843,7 @@ class WhisperRepository @Inject constructor(
         
         // 2. Update database with tombstone, selecting back the rows it affected so a
         // mismatch (0 rows) is surfaced instead of silently "succeeding".
-        val tombstone = "This message has been deleted"
+        val tombstone = WhisperTombstone.DISPLAY_TEXT
         val updated = db.from("messages").update(
             buildJsonObject {
                 put("content", tombstone)
@@ -985,7 +985,7 @@ class WhisperRepository @Inject constructor(
                         if (msg.isDeletedForEveryone || shouldEmitMessage(msg.id)) trySend(WhisperChatEvent.MessageEvent(finalMsg))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Postgres message realtime error: ${e.message}")
+                    android.util.Log.e("WhisperRepo", "Postgres message realtime error: ${e.message}", e)
                 }
             }
         }
@@ -1007,7 +1007,7 @@ class WhisperRepository @Inject constructor(
                         trySend(WhisperChatEvent.ReactionEvent(row.messageId, row.userId, row.emoji))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Postgres reaction realtime error: ${e.message}")
+                    android.util.Log.e("WhisperRepo", "Postgres reaction realtime error: ${e.message}", e)
                 }
             }
         }
@@ -1068,7 +1068,7 @@ class WhisperRepository @Inject constructor(
                         if (shouldEmitMessage(msg.id)) trySend(msg.copy(content = decrypted))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Realtime collect error: ${e.message}")
+                    android.util.Log.e("WhisperRepo", "Realtime collect error: ${e.message}", e)
                 }
             }
         }
@@ -1531,7 +1531,7 @@ class WhisperRepository @Inject constructor(
                         trySend(WhisperFriendship(id = id, userA = uA, userB = uB, status = status))
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("WhisperRepo", "Friend broadcast parse error: ${e.message}")
+                    android.util.Log.e("WhisperRepo", "Friend broadcast parse error: ${e.message}", e)
                 }
             }
         }
