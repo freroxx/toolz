@@ -112,7 +112,6 @@
     <string name="st_Whisper_Auth_SaveTokenWarning">¡Guarda este token! No se puede recuperar.</string>
     <string name="st_Whisper_Auth_CopyToContinue">Copia el token para continuar</string>
     <string name="st_Whisper_Auth_ChooseDisplayName">Elige un nombre visible</string>
-    <string name="st_Whisper_Auth_Phase2Note">Cifrado de extremo a extremo próximamente en la Fase 2. Tus mensajes están protegidos por RLS de Supabase.</string>
     <string name="st_Whisper_Vault_SecuredTitle">Protegido en la Bóveda</string>
     <string name="st_Whisper_Vault_SecuredDesc">Tus credenciales se guardarán automáticamente en tu Bóveda de Toolz para mayor seguridad.</string>
     <string name="st_Whisper_Vault_Name">Whisper: %s</string>
@@ -2850,4 +2849,37 @@
     <string name="st_Whisper_ProfileSetPublic">Perfil configurado como Público</string>
     <string name="st_Whisper_HiddenFromDiscover">Oculto de Descubrir</string>
     <string name="st_Whisper_VisibleInDiscover">Visible en Descubrir</string>
+
+    <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
+    <string name="st_Whisper_KeyRotate_AutoMonthly">La clave de cifrado se renovó automáticamente — esto ocurre cada %1$d días para tu seguridad.</string>
+    <string name="st_Whisper_KeyRotate_Manual">%1$s renovó manualmente su clave de cifrado — verifica el nuevo número de seguridad si quieres.</string>
+    <string name="st_Whisper_Fingerprint_RotateButton">Renovar clave de cifrado</string>
+    <string name="st_Whisper_RotateKey_Title">Renovar clave de cifrado</string>
+    <string name="st_Whisper_RotateKey_Desc">Renovar tu clave P-256 genera un nuevo par de claves. Tus amigos podrán verificar de nuevo tu nueva huella. El historial de mensajes en este dispositivo se conserva y todos los mensajes futuros usarán la nueva clave.</string>
+    <string name="st_Whisper_RotateKey_Action">Renovar clave</string>
+    <string name="st_Whisper_RotateKey_Success">Clave de cifrado renovada con éxito</string>
+    <string name="st_Whisper_RotateKey_Failed">No se pudo renovar la clave de cifrado</string>
+    <string name="st_Whisper_Bypass_ProtectionOff">Protección de capturas de pantalla desactivada</string>
+    <string name="st_Whisper_Bypass_ProtectionOn">Protección de capturas de pantalla activada</string>
+    <string name="st_Whisper_ChatOptions_Title">Opciones del chat</string>
+    <string name="st_Whisper_MuteNotifications">Silenciar notificaciones</string>
+    <string name="st_Whisper_UnmuteNotifications">Activar notificaciones</string>
+    <string name="st_Whisper_BlockUser">Bloquear usuario</string>
+    <string name="st_Whisper_UnblockUser">Desbloquear usuario</string>
+    <string name="st_Whisper_SuggestedForYou">Sugerido para ti</string>
+    <string name="st_Whisper_WhisperSomeone">Susurra a alguien</string>
+    <string name="st_Whisper_HideDiscoverWarning_Body">Al activarlo, nadie podrá encontrarte en Whisper a menos que tú contactes primero. Se te eliminará de todos los resultados de búsqueda y recomendaciones.</string>
+    <string name="st_Whisper_DeleteAccount_Title">Eliminar cuenta</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Token">Esto eliminará permanentemente tu cuenta y todos tus mensajes. No se puede deshacer.</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Password">Esto eliminará permanentemente tu cuenta y todos tus mensajes. Introduce tu contraseña para confirmar.</string>
+    <string name="st_Whisper_ConnectionLost">Conexión en directo perdida</string>
+    <string name="st_Whisper_Reconnect">Reconectar</string>
+    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Clave renovada automáticamente según lo programado — verificar es opcional.</string>
+    <string name="st_Whisper_Profile_KeyRotatedManualFallback">%1$s renovó su clave manualmente — verifica el nuevo número de seguridad.</string>
+    <string name="st_Whisper_VerifyOptional">Verificar (opcional)</string>
+    <string name="st_Whisper_AcceptShort">Aceptar</string>
+    <string name="st_Whisper_Aubup_Continue">Continuar a Whisper</string>
+    <string name="st_Whisper_Aubup_AccountLabel">Cuenta:</string>
+    <string name="st_Whisper_CredentialCopied">Credencial copiada</string>
+    <string name="cd_Whisper_CopyCredential">Copiar credencial</string>
 </resources>

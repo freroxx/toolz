@@ -11,7 +11,6 @@ import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.exceptions.RestException
-import io.github.jan.supabase.postgrest.postgrest
 import com.frerox.toolz.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -105,39 +104,14 @@ class WhisperAuthManager @Inject constructor(
             }
         }
 
-        // Delete user's profile and friends entries
-        try {
-            supabase.postgrest.from("profiles").delete { filter { eq("id", user.id) } }
-        } catch (_: Exception) {}
-
-        try {
-            supabase.postgrest.from("friends").delete {
-                filter { eq("user_a", user.id) }
-            }
-        } catch (_: Exception) {}
-
-        try {
-            supabase.postgrest.from("friends").delete {
-                filter { eq("user_b", user.id) }
-            }
-        } catch (_: Exception) {}
-
-        // Delete all messages the user sent, plus their reactions and blocks
-        try {
-            supabase.postgrest.from("messages").delete { filter { eq("sender_id", user.id) } }
-        } catch (_: Exception) {}
-
-        try {
-            supabase.postgrest.from("message_reactions").delete { filter { eq("user_id", user.id) } }
-        } catch (_: Exception) {}
-
-        try {
-            supabase.postgrest.from("whisper_blocks").delete { filter { eq("blocker_id", user.id) } }
-        } catch (_: Exception) {}
-
-        try {
-            supabase.postgrest.from("whisper_blocks").delete { filter { eq("blocked_id", user.id) } }
-        } catch (_: Exception) {}
+        // M-5 FIX (reviewwhisper.md): ALL server-side data cleanup now happens INSIDE
+        // whisper-delete-account BEFORE the GoTrue user is deleted. The old client-side
+        // postgrest deletes ran AFTER user deletion, relying on RLS matching a JWT sub
+        // that no longer corresponds to a live user — fragile against session revocation
+        // tightening, and it silently no-op'd if Supabase changed that behavior.
+        //
+        // FK-cascaded tables (whisper_upload_quota, whisper_deleted_tombstones,
+        // whisper_discover_quota) clean themselves automatically.
 
         // Sign out
         supabase.auth.signOut()
@@ -241,37 +215,39 @@ class WhisperAuthManager @Inject constructor(
     suspend fun loginWithToken(rawToken: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
-        // P1-15: Try full 64 first, fall back to legacy 32 truncated for accounts created before fix.
-        val virtualEmails = listOf(sha256(cleanToken) + "@whisper.toolz.app", sha256(cleanToken).take(32) + "@whisper.toolz.app").distinct()
-
-        val candidatePasswords = listOf(
-            sha256("pwd_" + cleanToken),
-            sha512(cleanToken).take(72),
-            sha256(cleanToken),
-            sha512(cleanToken),
-            sha256(cleanToken).take(32) // Fallback for shortened hash if used as pwd before
-        )
+        // P0-NOTE FIX (reviewwhisper.md): the old 2-emails × 5-passwords nested loop
+        // could fire up to TEN sequential GoTrue password grants per login, tripping
+        // Supabase's per-identity rate limits and locking legacy users out for an hour.
+        // Replaced with the four (email, password) combinations that actually existed
+        // historically, most-likely-first, with a hard cap of 4 network attempts.
+        val fullHash = sha256(cleanToken)
+        val candidates: List<Pair<String, String>> = listOf(
+            // Current scheme (P1-15, 2026+): full 256-bit hash email.
+            fullHash + "@whisper.toolz.app" to sha256("pwd_" + cleanToken),
+            // Earliest era: truncated 128-bit email + SHA-512-truncated password.
+            fullHash.take(32) + "@whisper.toolz.app" to sha512(cleanToken).take(72),
+            fullHash.take(32) + "@whisper.toolz.app" to sha512(cleanToken),
+            fullHash.take(32) + "@whisper.toolz.app" to sha256(cleanToken).take(32),
+        ).distinctBy { it.first + it.second }
 
         var lastException: Throwable? = null
-        outer@ for (virtualEmail in virtualEmails) {
-            for (candidatePwd in candidatePasswords) {
-                val attempt = runCatching {
-                    supabase.auth.signInWith(Email) {
-                        this.email = virtualEmail
-                        this.password = candidatePwd
-                    }
+        for ((virtualEmail, virtualPassword) in candidates) {
+            val attempt = runCatching {
+                supabase.auth.signInWith(Email) {
+                    this.email = virtualEmail
+                    this.password = virtualPassword
                 }
-                if (attempt.isSuccess) {
-                    return@runCatching
-                } else {
-                    val ex = attempt.exceptionOrNull()
-                    lastException = ex
-                    if (ex != null && !isInvalidCredentials(ex)) {
-                        throw ex
-                    }
-                    // Slow down brute-force attempts over the derivation candidates.
-                    delay(TOKEN_ATTEMPT_DELAY_MS)
+            }
+            if (attempt.isSuccess) {
+                return@runCatching
+            } else {
+                val ex = attempt.exceptionOrNull()
+                lastException = ex
+                if (ex != null && !isInvalidCredentials(ex)) {
+                    throw ex
                 }
+                // Slow down brute-force attempts over the derivation candidates.
+                delay(TOKEN_ATTEMPT_DELAY_MS)
             }
         }
         throw lastException ?: Exception("Invalid login credentials")
@@ -294,8 +270,7 @@ class WhisperAuthManager @Inject constructor(
 
     private companion object {
         const val MIN_PASSWORD_LENGTH = 10
-        const val TOKEN_ATTEMPT_DELAY_MS = 700L
-        val EMAIL_PATTERN = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+        const val TOKEN_ATTEMPT_DELAY_MS = 500L
         val USERNAME_PATTERN = Regex("^[a-z0-9](?:[a-z0-9_]{1,18}[a-z0-9])?$")
     }
 }

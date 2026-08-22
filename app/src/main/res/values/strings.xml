@@ -113,7 +113,6 @@
     <string name="st_Whisper_Auth_SaveTokenWarning">Save this token! It cannot be recovered.</string>
     <string name="st_Whisper_Auth_CopyToContinue">Copy token to continue</string>
     <string name="st_Whisper_Auth_ChooseDisplayName">Choose a display name</string>
-    <string name="st_Whisper_Auth_Phase2Note">End-to-end encryption coming in Phase 2. Your messages are protected by Supabase Row Level Security.</string>
     <string name="st_Whisper_Vault_SecuredTitle">Secured in Vault</string>
     <string name="st_Whisper_Vault_SecuredDesc">Your credentials will be automatically saved to your Toolz Vault for safe keeping.</string>
     <string name="st_Whisper_Vault_Name">Whisper: %s</string>
@@ -3034,4 +3033,37 @@
     <string name="st_Whisper_ProfileSetPublic">Profile set to Public</string>
     <string name="st_Whisper_HiddenFromDiscover">Hidden from Discover</string>
     <string name="st_Whisper_VisibleInDiscover">Visible in Discover</string>
+
+    <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
+    <string name="st_Whisper_KeyRotate_AutoMonthly">Encryption key was rotated automatically — this happens every %1$d days to keep you safe.</string>
+    <string name="st_Whisper_KeyRotate_Manual">%1$s manually rotated their encryption key — verify the new safety number if you want.</string>
+    <string name="st_Whisper_Fingerprint_RotateButton">Rotate Encryption Key</string>
+    <string name="st_Whisper_RotateKey_Title">Rotate Encryption Key</string>
+    <string name="st_Whisper_RotateKey_Desc">Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.</string>
+    <string name="st_Whisper_RotateKey_Action">Rotate Key</string>
+    <string name="st_Whisper_RotateKey_Success">Encryption key rotated successfully</string>
+    <string name="st_Whisper_RotateKey_Failed">Failed to rotate encryption key</string>
+    <string name="st_Whisper_Bypass_ProtectionOff">Screenshot protection disabled</string>
+    <string name="st_Whisper_Bypass_ProtectionOn">Screenshot protection enabled</string>
+    <string name="st_Whisper_ChatOptions_Title">Chat Options</string>
+    <string name="st_Whisper_MuteNotifications">Mute notifications</string>
+    <string name="st_Whisper_UnmuteNotifications">Unmute notifications</string>
+    <string name="st_Whisper_BlockUser">Block user</string>
+    <string name="st_Whisper_UnblockUser">Unblock user</string>
+    <string name="st_Whisper_SuggestedForYou">Suggested For You</string>
+    <string name="st_Whisper_WhisperSomeone">Whisper Someone</string>
+    <string name="st_Whisper_HideDiscoverWarning_Body">Activating this means no one will ever find you on Whisper unless you reach out first. You will be removed from all search results and recommendations.</string>
+    <string name="st_Whisper_DeleteAccount_Title">Delete Account</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Token">This will permanently delete your account and all your messages. This cannot be undone.</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Password">This will permanently delete your account and all your messages. Enter your password to confirm.</string>
+    <string name="st_Whisper_ConnectionLost">Live connection lost</string>
+    <string name="st_Whisper_Reconnect">Reconnect</string>
+    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Key rotated automatically on schedule — verifying is optional.</string>
+    <string name="st_Whisper_Profile_KeyRotatedManualFallback">%1$s rotated their key manually — verify the new safety number.</string>
+    <string name="st_Whisper_VerifyOptional">Verify (optional)</string>
+    <string name="st_Whisper_AcceptShort">Accept</string>
+    <string name="st_Whisper_Aubup_Continue">Continue to Whisper</string>
+    <string name="st_Whisper_Aubup_AccountLabel">Account:</string>
+    <string name="st_Whisper_CredentialCopied">Credential copied</string>
+    <string name="cd_Whisper_CopyCredential">Copy credential</string>
 </resources>

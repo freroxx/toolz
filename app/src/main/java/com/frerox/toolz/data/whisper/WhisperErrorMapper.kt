@@ -83,8 +83,11 @@ object WhisperErrorMapper {
 
         val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)
 
+        // L-5 FIX (reviewwhisper.md): STRUCTURED checks (status codes, error codes) now run
+        // BEFORE broad substring matching — the old order misrouted any server message
+        // merely containing "blocked"/"connect"/"network" into unrelated buckets.
         return when {
-            // Auth errors
+            // Auth errors (specific phrases + error codes first)
             isInvalidCredentials(throwable) ->
                 UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
             msg.contains("User already registered", ignoreCase = true) ->
@@ -105,27 +108,7 @@ object WhisperErrorMapper {
             msg.contains("doesn't look right", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_InvalidToken)
 
-            // Network & offline errors
-            msg.contains("offline", ignoreCase = true) ||
-            msg.contains("Unable to resolve host", ignoreCase = true) ||
-            msg.contains("ConnectException", ignoreCase = true) ||
-            msg.contains("SocketTimeoutException", ignoreCase = true) ||
-            msg.contains("NoRouteToHostException", ignoreCase = true) ||
-            msg.contains("SSLHandshakeException", ignoreCase = true) ||
-            msg.contains("HttpTimeout", ignoreCase = true) ||
-            msg.contains("network", ignoreCase = true) ||
-            msg.contains("connect", ignoreCase = true) ||
-            msg.contains("timeout", ignoreCase = true) ||
-            msg.contains("unreachable", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_Offline)
-
-            // Permission / database errors
-            msg.contains("blocked", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_Blocked)
-            msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true) || msg.contains("23505") ->
-                UiText.StringResource(R.string.st_Whisper_Error_AlreadyConnected)
-            msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
-                UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
+            // Structured HTTP status codes (RestException) before any keyword heuristics
             throwable is RestException && throwable.statusCode == 404 ->
                 UiText.StringResource(R.string.st_Whisper_Error_NotFound)
             throwable is RestException && throwable.statusCode == 409 ->
@@ -134,6 +117,30 @@ object WhisperErrorMapper {
                 UiText.StringResource(R.string.st_Whisper_Error_RequestFailed)
             throwable is RestException && throwable.statusCode in 500..599 ->
                 UiText.StringResource(R.string.st_Whisper_Error_ServerBusy)
+
+            // Network & offline errors (keyword-based; non-RestException transports)
+            msg.contains("offline", ignoreCase = true) ||
+            msg.contains("Unable to resolve host", ignoreCase = true) ||
+            msg.contains("ConnectException", ignoreCase = true) ||
+            msg.contains("SocketTimeoutException", ignoreCase = true) ||
+            msg.contains("NoRouteToHostException", ignoreCase = true) ||
+            msg.contains("SSLHandshakeException", ignoreCase = true) ||
+            msg.contains("HttpTimeout", ignoreCase = true) ||
+            msg.contains("unreachable", ignoreCase = true) ||
+            msg.contains("timeout", ignoreCase = true) ||
+            msg.contains("Failed to connect", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_Offline)
+
+            // Permission / database errors — tightened phrases to avoid false positives
+            // (L-5: a bare "blocked" substring used to swallow unrelated errors).
+            msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
+                UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
+            msg.contains("You have blocked this user", ignoreCase = true) ||
+                msg.contains("You have been blocked by this user", ignoreCase = true) ||
+                msg.contains("blocked by this user", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_Blocked)
+            msg.contains("duplicate key", ignoreCase = true) || msg.contains("23505") ->
+                UiText.StringResource(R.string.st_Whisper_Error_AlreadyConnected)
 
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->

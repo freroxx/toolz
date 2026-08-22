@@ -20,6 +20,8 @@ package com.frerox.toolz.data.whisper
 import android.content.Context
 import android.content.SharedPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,6 +29,10 @@ import javax.inject.Singleton
  * Remembers which public key each conversation partner last used, plus which
  * keys the user has explicitly verified in person. Lets Whisper detect a
  * changed key (possible MITM) and surface it without blocking messaging.
+ *
+ * All writes are suspend + fsync'd commit on IO: key-trust data is security-
+ * critical, so it must be durable before the caller proceeds — but it must
+ * never block the main thread (the old runBlocking-on-Main workaround caused jank).
  */
 @Singleton
 class WhisperKeyTrustStore @Inject constructor(
@@ -43,38 +49,44 @@ class WhisperKeyTrustStore @Inject constructor(
     /** Timestamp of when known key was last stored — for 7-day polished rotation. */
     fun knownKeyTimestamp(userId: String): Long = prefs.getLong("known_ts_$userId", 0L)
 
-    /** Accept a key as "known" without marking it verified. P1 FIX: commit() for durability. */
-    fun rememberKey(userId: String, publicKey: String) {
+    /** Accept a key as "known" without marking it verified. Durable, off-main. */
+    suspend fun rememberKey(userId: String, publicKey: String) {
         val now = System.currentTimeMillis()
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                prefs.edit().putString("known_$userId", publicKey).putLong("known_ts_$userId", now).commit()
-            }
-        } else {
-            prefs.edit().putString("known_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+        withContext(Dispatchers.IO) {
+            prefs.edit()
+                .putString("known_$userId", publicKey)
+                .putLong("known_ts_$userId", now)
+                .commit()
         }
     }
 
-    /** Accept a key as known AND verified (fingerprint compared in person). P1 FIX. */
-    fun markVerified(userId: String, publicKey: String) {
+    /** Accept a key as known AND verified (fingerprint compared in person). Durable, off-main. */
+    suspend fun markVerified(userId: String, publicKey: String) {
         val now = System.currentTimeMillis()
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                prefs.edit().putString("known_$userId", publicKey).putString("verified_$userId", publicKey).putLong("known_ts_$userId", now).commit()
-            }
-        } else {
-            prefs.edit().putString("known_$userId", publicKey).putString("verified_$userId", publicKey).putLong("known_ts_$userId", now).commit()
+        withContext(Dispatchers.IO) {
+            prefs.edit()
+                .putString("known_$userId", publicKey)
+                .putString("verified_$userId", publicKey)
+                .putLong("known_ts_$userId", now)
+                .commit()
         }
     }
 
     /** Drop all trust records for a user (e.g. when blocking or unfriending). */
-    fun forgetUser(userId: String) {
-        // Non-critical, but keep commit for consistency.
-        prefs.edit().remove("known_$userId").remove("verified_$userId").commit()
+    suspend fun forgetUser(userId: String) {
+        // known_ts_ is removed too — a stale timestamp could otherwise skew the
+        // expected-rotation heuristic if the user is re-added later.
+        // M-7 FIX (reviewwhisper.md): commit() is fsync'd — must never run on Main.
+        withContext(Dispatchers.IO) {
+            prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").commit()
+        }
     }
 
     /** Wipe every trust record on this device (account deletion). */
-    fun clearAll() {
-        prefs.edit().clear().commit()
+    suspend fun clearAll() {
+        // M-7 FIX: same as forgetUser — durable write off the calling thread.
+        withContext(Dispatchers.IO) {
+            prefs.edit().clear().commit()
+        }
     }
 }

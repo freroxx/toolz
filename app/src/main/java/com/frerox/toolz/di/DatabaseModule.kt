@@ -72,8 +72,9 @@ object DatabaseModule {
         )
         .openHelperFactory(factory)
         .fallbackToDestructiveMigrationOnDowngrade()
-        // NOTE: Add explicit Migration(46,47) objects here when schema changes.
-        // Do NOT re-introduce fallbackToDestructiveMigration().
+        // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
+        // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
+        // fallbackToDestructiveMigration().
 
         val db = builder.build()
 

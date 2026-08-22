@@ -52,15 +52,43 @@ class WhisperNotificationManager @Inject constructor(
         private const val GROUP_KEY = "com.frerox.toolz.WHISPER_MESSAGES"
         private const val REQUEST_CODE_BASE = 9000
         private const val SUMMARY_NOTIF_ID = 8999
+        private const val FIRST_MESSAGE_NOTIF_ID = 1000
+        // Keep this band well below the friend-request range (2_100_000_000+) and small
+        // enough that REQUEST_CODE_BASE + id never approaches Int.MAX_VALUE.
+        private const val LAST_MESSAGE_NOTIF_ID = 1_000_000
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
+    // Stable per-sender notification IDs: hashCode() collisions silently overwrote one
+    // conversation's notification with another's. Allocation is persisted so IDs survive
+    // process death and remain unique until the (practically unreachable) band exhausts.
+    private val idPrefs = context.getSharedPreferences("whisper_notif_ids", Context.MODE_PRIVATE)
+    private val senderNotifIds = HashMap<String, Int>()
+    private var nextMessageId = FIRST_MESSAGE_NOTIF_ID
     @Volatile private var isInForeground = false
     @Volatile var currentChatId: String? = null
 
     init {
         createChannel()
         observeAppLifecycle()
+        synchronized(senderNotifIds) {
+            for ((key, value) in idPrefs.all) {
+                if (key.startsWith("id_") && value is Int) senderNotifIds[key.removePrefix("id_")] = value
+            }
+            nextMessageId = idPrefs.getInt("next", FIRST_MESSAGE_NOTIF_ID)
+            if (nextMessageId >= LAST_MESSAGE_NOTIF_ID) {
+                // Band exhausted after ~1M senders — recycle cleanly.
+                // M-9 FIX (reviewwhisper.md): dismiss OUR active notifications first so
+                // stale IDs can never be cancelled/mismatched after the reset.
+                runCatching {
+                    notifManager.activeNotifications
+                        .filter { it.notification.group == GROUP_KEY || it.id == SUMMARY_NOTIF_ID }
+                        .forEach { notifManager.cancel(it.id) }
+                }
+                senderNotifIds.clear()
+                nextMessageId = FIRST_MESSAGE_NOTIF_ID
+            }
+        }
     }
 
     private fun createChannel() {
@@ -188,20 +216,23 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
-    /** Legacy overload — delegates to id-based API using display name as fallback id. */
-    fun showFriendRequestNotification(fromName: String) {
-        showFriendRequestNotification(fromName, fromName)
-    }
-
     /** Dismiss notification when user opens chat */
     fun cancelMessageNotification(senderId: String) {
         notifManager.cancel(senderNotifId(senderId))
     }
 
-    private fun senderNotifId(senderId: String): Int =
-        // (hashCode() and 0x7FFFFFFF) + 1000 can overflow past Int.MAX_VALUE for the
-        // largest hash codes and wrap to a negative notification id (which crashes
-        // notify()). Modulo 2_000_000_000 keeps the base small enough that the +1000
-        // offset stays within Int.MAX_VALUE (max 2,000,000,999).
-        ((senderId.hashCode() and 0x7FFFFFFF) % 2_000_000_000) + 1000
+    private fun senderNotifId(senderId: String): Int = synchronized(senderNotifIds) {
+        senderNotifIds[senderId]?.let { return it }
+        val id = nextMessageId++
+        if (nextMessageId >= LAST_MESSAGE_NOTIF_ID) {
+            // Practically unreachable; recycle the band rather than overflow into
+            // the friend-request range or negative IDs (which crash notify()).
+            idPrefs.edit().clear().apply()
+            senderNotifIds.clear()
+            nextMessageId = FIRST_MESSAGE_NOTIF_ID
+        }
+        idPrefs.edit().putInt("id_$senderId", id).putInt("next", nextMessageId).apply()
+        senderNotifIds[senderId] = id
+        id
+    }
 }

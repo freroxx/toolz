@@ -51,22 +51,22 @@ data class WhisperProfile(
     /** Display name with username fallback */
     val effectiveName: String get() = displayName?.takeIf { it.isNotBlank() } ?: effectiveUsername
 
+    // M-14 FIX (reviewwhisper.md): parse once per instance — onlineStatus is read on
+    // every recomposition of every list row; the old getter re-parsed the timestamp each time.
+    private val parsedLastSeen: java.time.OffsetDateTime? by lazy {
+        lastSeenAt?.let { runCatching { java.time.OffsetDateTime.parse(it) }.getOrNull() }
+    }
+
     /** Formatted online status / last seen */
     val onlineStatus: String get() {
-        val lastSeen = lastSeenAt ?: return "Offline"
-        return try {
-            val dt = java.time.OffsetDateTime.parse(lastSeen)
-            val now = java.time.OffsetDateTime.now()
-            val diffMinutes = java.time.Duration.between(dt, now).toMinutes()
-            
-            when {
-                diffMinutes < 2 -> "Online"
-                diffMinutes < 60 -> "Online ${diffMinutes}m ago"
-                diffMinutes < 120 -> "Online 1h ago"
-                else -> "Offline"
-            }
-        } catch (_: Exception) {
-            "Offline"
+        val dt = parsedLastSeen ?: return "Offline"
+        val diffMinutes = java.time.Duration.between(dt, java.time.OffsetDateTime.now()).toMinutes()
+
+        return when {
+            diffMinutes < 2 -> "Online"
+            diffMinutes < 60 -> "Online ${diffMinutes}m ago"
+            diffMinutes < 120 -> "Online 1h ago"
+            else -> "Offline"
         }
     }
 
@@ -246,9 +246,14 @@ data class WhisperImageAttachment(
 
     companion object {
         const val MESSAGE_PREFIX = "whisper:image:"
+
+        // Tolerant parser: a partner on a newer app version may attach extra envelope
+        // fields — unknown keys must be skipped, never fail the whole message (H-11).
+        private val envelopeJson = Json { ignoreUnknownKeys = true }
+
         fun fromMessageContent(content: String): WhisperImageAttachment? = runCatching {
             if (!content.startsWith(MESSAGE_PREFIX)) return null
-            Json.decodeFromString(serializer(), content.removePrefix(MESSAGE_PREFIX))
+            envelopeJson.decodeFromString(serializer(), content.removePrefix(MESSAGE_PREFIX))
         }.getOrNull()
     }
 }
@@ -379,7 +384,8 @@ data class WhisperUiState(
     val currentProfile: WhisperProfile? = null,
     val conversations: List<WhisperConversation> = emptyList(),
     val friends: List<WhisperProfile> = emptyList(),
-    val pendingIncoming: List<WhisperFriendship> = emptyList(),
+    // L-2 FIX (reviewwhisper.md): the duplicate `pendingIncoming` list was removed —
+    // pendingIncomingRequests is the single source of truth (nav badges derive from it).
     val pendingIncomingRequests: List<WhisperFriendRequestItem> = emptyList(),
     val pendingOutgoing: List<WhisperFriendship> = emptyList(),
     val searchResults: List<WhisperProfile> = emptyList(),
@@ -414,9 +420,9 @@ data class KeyTrustInfo(
     val myFingerprint: String? = null,
     /** True only if this exact key was verified by the user (compared in person). */
     val isVerified: Boolean = false,
-    /** Human-readable rotate reason for polished banner. */
-    val rotateMessage: String? = null,
-    /** True if this change looks like expected weekly rotation (not MITM). */
+    /** Human-readable rotate reason for polished banner (P0-1: resource-backed, localizable). */
+    val rotateMessage: UiText? = null,
+    /** True if this change looks like expected scheduled rotation (not MITM). */
     val isExpectedRotation: Boolean = false,
 )
 

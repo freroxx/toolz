@@ -2,9 +2,11 @@ package com.frerox.toolz.ui.screens.whisper
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -12,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +31,44 @@ import com.frerox.toolz.ui.components.bouncyClick
  * These helpers were all private in MainScreen and are now shared to reduce god-file size.
  * Next PR moves DiscoverTab/ProfileTab bodies here.
  */
+
+/** L-15 FIX (reviewwhisper.md): single online-indicator color instead of three literals. */
+internal val WhisperOnlineGreen = Color(0xFF4CAF50)
+
+/**
+ * L-16 FIX (reviewwhisper.md): cache-buster derived from the profile's server-side
+ * updatedAt — avatars are persisted WITHOUT a ?t= buster anymore (a persisted buster
+ * defeats every other viewer's cache). Pass bust=true only where staleness matters
+ * right after an edit (own hero avatar / own full-screen view).
+ */
+internal fun whisperAvatarModel(profile: WhisperProfile, bust: Boolean = false): String? {
+    val url = profile.avatarUrl ?: return null
+    if (!bust || profile.updatedAt.isBlank()) return url
+    return "$url?t=${profile.updatedAt.hashCode()}"
+}
+
+/**
+ * M-16 FIX (reviewwhisper.md): shared row composable for ALL Whisper option sheets.
+ * MainScreen's ChatOptionsSheet and ChatScreen's ConversationOptionsSheet had drifted
+ * apart (divergent labels/tints); both now render through this single component.
+ */
+@Composable
+fun WhisperOptionsListItem(
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    labelColor: Color = MaterialTheme.colorScheme.onSurface,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
+) {
+    ListItem(
+        leadingContent = { Icon(leadingIcon, null, tint = iconTint) },
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Text(label, fontWeight = FontWeight.Medium, color = labelColor)
+    }
+}
 @Composable
 fun WhisperAvatar(
     profile: WhisperProfile,
@@ -35,8 +76,10 @@ fun WhisperAvatar(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
+    bustCache: Boolean = false,
 ) {
-    var isImageError by remember(profile.avatarUrl) { mutableStateOf(false) }
+    val resolvedUrl = whisperAvatarModel(profile, bust = bustCache)
+    var isImageError by remember(resolvedUrl) { mutableStateOf(false) }
     val baseModifier = modifier
         .size(size)
         .clip(CircleShape)
@@ -48,8 +91,8 @@ fun WhisperAvatar(
                 else -> Modifier
             }
         )
-    if (!profile.avatarUrl.isNullOrBlank() && !isImageError) {
-        AsyncImage(model = profile.avatarUrl, contentDescription = profile.effectiveName, contentScale = ContentScale.Crop, onError = { isImageError = true }, modifier = baseModifier)
+    if (!resolvedUrl.isNullOrBlank() && !isImageError) {
+        AsyncImage(model = resolvedUrl, contentDescription = profile.effectiveName, contentScale = ContentScale.Crop, onError = { isImageError = true }, modifier = baseModifier)
     } else {
         Box(modifier = baseModifier.background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.secondaryContainer))), contentAlignment = Alignment.Center) {
             Text(profile.avatarInitial, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Black, fontSize = (size.value * 0.42f).sp)
@@ -155,3 +198,18 @@ internal fun java.io.InputStream.readBounded(maxBytes: Int): ByteArray {
 }
 
 internal const val MAX_AVATAR_READ_BYTES = 10 * 1024 * 1024
+
+/** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
+internal fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): android.graphics.Bitmap? {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= maxWidth || bounds.outHeight / (sample * 2) >= maxHeight) {
+        sample *= 2
+    }
+    return android.graphics.BitmapFactory.decodeByteArray(
+        bytes, 0, bytes.size,
+        android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    )
+}

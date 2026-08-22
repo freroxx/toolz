@@ -20,7 +20,6 @@ import android.content.ContentValues
 import android.content.Context
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -142,13 +141,21 @@ fun WhisperChatScreen(
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
     if (showBypassDialog) {
+        // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
                 scope.launch {
                     if (isWhisperBypassPassword(password)) {
-                        viewModel.setScreenshotBypass(true)
-                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                        val enabling = !screenshotBypassEnabled
+                        viewModel.setScreenshotBypass(enabling)
+                        toastState.show(
+                            context.getString(
+                                if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                else R.string.st_Whisper_Bypass_ProtectionOn
+                            ),
+                            WhisperToastType.SUCCESS
+                        )
                     } else {
                         toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                     }
@@ -242,12 +249,8 @@ fun WhisperChatScreen(
             topBar = {
                 ExpressiveTopAppBar(
                     modifier = Modifier.screenshotBypassGesture {
-                        if (screenshotBypassEnabled) {
-                            viewModel.setScreenshotBypass(false)
-                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
-                        } else {
-                            showBypassDialog = true
-                        }
+                        // M-17: verification happens inside the dialog for both directions.
+                        showBypassDialog = true
                     },
                     title = {
                         if (uiState.isSearchActive) {
@@ -301,7 +304,7 @@ fun WhisperChatScreen(
                                                     .size(11.dp)
                                                     .align(Alignment.BottomEnd)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFF4CAF50))
+                                                    .background(WhisperOnlineGreen)
                                                     .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                                             )
                                         }
@@ -473,7 +476,10 @@ fun WhisperChatScreen(
                             Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Autorenew, null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
                                 Text(
-                                    uiState.keyTrust?.rotateMessage ?: "Encryption key has been rotated automatically — we do this every week to keep you secure.",
+                                    // P0-1 FIX: rotateMessage is now a localized UiText aligned
+                                    // with the real 30-day interval ("every week" is gone).
+                                    uiState.keyTrust?.rotateMessage?.asString(context)
+                                        ?: stringResource(R.string.st_Whisper_KeyRotate_AutoMonthly, 30),
                                     modifier = Modifier.weight(1f),
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     style = MaterialTheme.typography.bodySmall
@@ -489,7 +495,8 @@ fun WhisperChatScreen(
                             Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
                                 Text(
-                                    uiState.keyTrust?.rotateMessage ?: "${uiState.otherUser?.effectiveName ?: "Partner"} has manually rotated their encryption key.",
+                                    uiState.keyTrust?.rotateMessage?.asString(context)
+                                        ?: stringResource(R.string.st_Whisper_KeyRotate_Manual, uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault)),
                                     modifier = Modifier.weight(1f),
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     style = MaterialTheme.typography.bodySmall
@@ -513,13 +520,13 @@ fun WhisperChatScreen(
                         ) {
                             Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
                             Text(
-                                "Live connection lost",
+                                stringResource(R.string.st_Whisper_ConnectionLost),
                                 modifier = Modifier.weight(1f),
                                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 style = MaterialTheme.typography.bodySmall
                             )
                             ToolzTonalExpressiveButton(onClick = { haptic.click(); viewModel.reconnectRealtime() }) {
-                                Text("Reconnect", fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.st_Whisper_Reconnect), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -955,63 +962,46 @@ private fun ConversationOptionsSheet(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            ListItem(
-                leadingContent = { Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSearch() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_SearchLabel), fontWeight = FontWeight.Medium)
-            }
-            ListItem(
-                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium)
-            }
-            ListItem(
-                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium)
-            }
+            // M-16 FIX: shared rows — identical behavior/labels to the hub screen's sheet.
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.Search,
+                label = stringResource(R.string.st_Whisper_SearchLabel),
+                onClick = onSearch,
+            )
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.Person,
+                label = stringResource(R.string.st_Whisper_ViewProfile),
+                onClick = onViewProfile,
+            )
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.CleaningServices,
+                label = stringResource(R.string.st_Whisper_ClearHistory),
+                onClick = onClearChat,
+            )
             if (hasClearedUndo) {
-                ListItem(
-                    leadingContent = { Icon(Icons.AutoMirrored.Rounded.Undo, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onUndoClear() }
-                ) {
-                    Text(stringResource(R.string.st_Whisper_UndoClearCount, clearedCount), fontWeight = FontWeight.Medium)
-                }
+                WhisperOptionsListItem(
+                    leadingIcon = Icons.AutoMirrored.Rounded.Undo,
+                    label = stringResource(R.string.st_Whisper_UndoClearCount, clearedCount),
+                    onClick = onUndoClear,
+                )
             }
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                        null,
-                        tint = if (isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
-            ) {
-                Text(if (isMuted) stringResource(R.string.st_Whisper_Unmute) else stringResource(R.string.st_Whisper_Mute), fontWeight = FontWeight.Medium)
-            }
+            WhisperOptionsListItem(
+                leadingIcon = if (isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                iconTint = if (isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                label = if (isMuted) stringResource(R.string.st_Whisper_UnmuteNotifications)
+                else stringResource(R.string.st_Whisper_MuteNotifications),
+                onClick = onToggleMute,
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
-                        null,
-                        tint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
-                },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
-            ) {
-                Text(
-                    if (isBlocked) stringResource(R.string.st_Whisper_Unblock) else stringResource(R.string.st_Whisper_Block),
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                )
-            }
+            WhisperOptionsListItem(
+                leadingIcon = if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
+                iconTint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                label = if (isBlocked) stringResource(R.string.st_Whisper_UnblockUser) else stringResource(R.string.st_Whisper_BlockUser),
+                labelColor = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                onClick = onToggleBlock,
+            )
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1399,7 +1389,11 @@ private fun MessageBubble(
     val performanceMode = LocalPerformanceMode.current
     // Gesture hints for accessibility (resolved once; the semantics block isn't composable).
     val messageSemanticsCd = stringResource(R.string.st_Whisper_MessageSemantics)
-    
+
+    // L-7 FIX (reviewwhisper.md): the swipe accumulated only positive drag deltas, so in
+    // RTL locales the gesture was effectively dead. The delta is now mirrored for RTL.
+    val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+
     // ── SLIDE TO REPLY STATE ──
     var offsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(
@@ -1450,11 +1444,14 @@ private fun MessageBubble(
                     )
                     // Surface the swipe/double-tap gestures to screen readers.
                     .semantics { contentDescription = messageSemanticsCd }
-                    .pointerInput(Unit) {
+                    .pointerInput(layoutDirection) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { _, dragAmount ->
-                                if (dragAmount > 0) {
-                                    offsetX = (offsetX + dragAmount).coerceIn(0f, 80f)
+                                // L-7: mirror the delta under RTL so the swipe always runs
+                                // toward the reply affordance side.
+                                val effective = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) -dragAmount else dragAmount
+                                if (effective > 0) {
+                                    offsetX = (offsetX + effective).coerceIn(0f, 80f)
                                 }
                             },
                             onDragEnd = {
@@ -1784,12 +1781,20 @@ fun String.formatWhisperTime(): String {
         val dateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault())
         dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
     } catch (e: Exception) {
-        ""
+        // L-10 FIX (reviewwhisper.md): show a raw fallback instead of a blank cell when
+        // parsing fails (e.g. legacy rows with non-ISO timestamps).
+        if (length >= 16) take(16).replace('T', ' ') else this
     }
 }
 
 /**
  * Basic Markdown parser for Bold (**text**) and Italic (*text*).
+ *
+ * L-8 (documented limitations): intentionally minimal for a chat bubble —
+ * no links/underscores/code spans/escapes, and `***bold italic***` closes at
+ * the NEAREST terminator rather than balancing across paragraphs. Content is
+ * E2EE plaintext authored by a human peer, so under-parsing is safe (it can
+ * only render literal asterisks), never inject markup.
  */
 private fun String.parseMarkdown(): AnnotatedString {
     val builder = AnnotatedString.Builder()
@@ -1850,17 +1855,7 @@ private fun String.parseMarkdown(): AnnotatedString {
     return builder.toAnnotatedString()
 }
 
-/** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
-private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    var sample = 1
-    while (bounds.outWidth / (sample * 2) >= maxWidth || bounds.outHeight / (sample * 2) >= maxHeight) {
-        sample *= 2
-    }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-}
+// decodeBoundedBitmap now lives in WhisperMainScreenComponents.kt (single shared copy).
 
 @Composable
 private fun WhisperFullScreenImageViewer(
@@ -1917,10 +1912,18 @@ private fun WhisperFullScreenImageViewer(
                     contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
+                        .pointerInput(bmp) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 scale = (scale * zoom).coerceIn(1f, 5f)
-                                offset += pan
+                                // L-9 FIX (reviewwhisper.md): clamp pan so the image can no
+                                // longer be dragged entirely off-screen. translation is
+                                // center-origin, so max |offset| is (scale-1)*dimension/2.
+                                val maxX = (scale - 1f) * size.width / 2f
+                                val maxY = (scale - 1f) * size.height / 2f
+                                offset = Offset(
+                                    (offset.x + pan.x).coerceIn(-maxX, maxX),
+                                    (offset.y + pan.y).coerceIn(-maxY, maxY),
+                                )
                             }
                         }
                         .graphicsLayer(

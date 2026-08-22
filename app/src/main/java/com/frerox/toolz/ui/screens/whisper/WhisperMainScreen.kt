@@ -114,13 +114,23 @@ fun WhisperMainScreen(
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
     if (showBypassDialog) {
+        // M-17 FIX (reviewwhisper.md): the password is now required BOTH to enable and to
+        // disable the bypass (previously disabling needed no verification at all), and
+        // the toast wording is unified + localized.
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
                 scope.launch {
                     if (isWhisperBypassPassword(password)) {
-                        viewModel.setScreenshotBypass(true)
-                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                        val enabling = !screenshotBypassEnabled
+                        viewModel.setScreenshotBypass(enabling)
+                        toastState.show(
+                            context.getString(
+                                if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                else R.string.st_Whisper_Bypass_ProtectionOn
+                            ),
+                            WhisperToastType.SUCCESS
+                        )
                     } else {
                         toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                     }
@@ -182,12 +192,9 @@ fun WhisperMainScreen(
             topBar = {
                 ExpressiveTopAppBar(
                     modifier = Modifier.screenshotBypassGesture {
-                        if (screenshotBypassEnabled) {
-                            viewModel.setScreenshotBypass(false)
-                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
-                        } else {
-                            showBypassDialog = true
-                        }
+                        // M-17: toggling in EITHER direction requires the server-verified
+                        // password; the dialog applies the toggle on success.
+                        showBypassDialog = true
                     },
                     title = {
                         Row(
@@ -225,7 +232,7 @@ fun WhisperMainScreen(
                     tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
                         val totalUnread = uiState.conversations.sumOf { it.unreadCount }
                         val unread = if (index == 0) totalUnread else 0
-                        val pendingCount = if (index == 0) uiState.pendingIncoming.size else 0
+                        val pendingCount = if (index == 0) uiState.pendingIncomingRequests.size else 0
                         ExpressiveNavigationBarItem(
                             selected = pagerState.currentPage == index,
                             onClick = {
@@ -560,8 +567,11 @@ fun WhisperMainScreen(
             onToggleMute = {
                 val uId = convo.otherUser.id
                 selectedConvoForOptions = null
-                viewModel.toggleMuteUser(uId)
-                toastState.show(if (convo.isMuted) unmutedMsg else mutedMsg, WhisperToastType.INFO)
+                // Toast from the toggle RESULT, not the possibly-stale conversation
+                // snapshot — the snapshot may not match the persisted mute state.
+                viewModel.toggleMuteUser(uId) { nowMuted ->
+                    toastState.show(if (nowMuted) mutedMsg else unmutedMsg, WhisperToastType.INFO)
+                }
             },
             onToggleBlock = {
                 val uId = convo.otherUser.id
@@ -749,7 +759,7 @@ private fun MergedChatsAndFriendsTab(
         return
     }
 
-    if (uiState.conversations.isEmpty() && uiState.friends.isEmpty() && uiState.pendingIncoming.isEmpty()) {
+    if (uiState.conversations.isEmpty() && uiState.friends.isEmpty() && uiState.pendingIncomingRequests.isEmpty()) {
         WhisperEmptyState(
             icon = Icons.AutoMirrored.Rounded.Chat,
             title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
@@ -765,8 +775,8 @@ private fun MergedChatsAndFriendsTab(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Incoming Friend Requests Banner. pendingIncomingRequests is the single source
-        // of truth (it mirrors pendingIncoming, which is kept for the nav badge only).
+        // Incoming Friend Requests Banner — pendingIncomingRequests is the single source
+        // of truth (L-2: duplicate mirror list removed).
         if (uiState.pendingIncomingRequests.isNotEmpty()) {
             item {
                 SectionHeader(stringResource(R.string.st_Whisper_FriendRequestsCount, uiState.pendingIncomingRequests.size))
@@ -813,7 +823,7 @@ private fun MergedChatsAndFriendsTab(
                                             .size(12.dp)
                                             .align(Alignment.BottomEnd)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF4CAF50))
+                                            .background(WhisperOnlineGreen)
                                             .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                                     )
                                 }
@@ -908,7 +918,7 @@ private fun ConversationCard(
                                 scaleY = onlineDotScale
                             }
                             .clip(CircleShape)
-                            .background(Color(0xFF4CAF50))
+                            .background(WhisperOnlineGreen)
                             .border(2.dp, MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
                     )
                 }
@@ -966,7 +976,7 @@ private fun ConversationCard(
                         // Online status as small colored label
                         if (isOnline) {
                             Text(
-                                "Online",
+                                stringResource(R.string.st_Whisper_Online),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold,
@@ -1080,10 +1090,9 @@ private fun DiscoverTab(
     val haptic = rememberToolzHapticFeedback()
     val discoverLoadFailed by viewModel.discoverLoadFailed.collectAsStateWithLifecycle()
 
-    // Debounced search: a network call per keystroke is wasteful, so wait 400ms of
-    // stillness before asking the VM (the VM also cancels the previous in-flight job).
+    // M-15 FIX (reviewwhisper.md): the UI-side 400ms debounce on top of the VM's own
+    // 300ms debounce added ~700ms perceived lag; the VM-side debounce alone governs.
     LaunchedEffect(searchQuery) {
-        delay(400)
         viewModel.searchProfiles(searchQuery)
     }
 
@@ -1140,22 +1149,27 @@ private fun DiscoverTab(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    item { SectionHeader("Suggested For You") }
+                    item { SectionHeader(stringResource(R.string.st_Whisper_SuggestedForYou)) }
                     items(3) { DiscoverSkeleton() }
                 }
             } else {
-                // Infinite scroll trigger
-                val shouldLoadMore = remember(uiState.hasReachedEndOfDiscover, uiState.isDiscoverLoadingNext) {
+                // Infinite scroll trigger.
+                // L-14 FIX (reviewwhisper.md): the old `remember(flags){derivedStateOf{...}}`
+                // captured the flags at remember-time and only re-created when they flipped;
+                // pagination state read through rememberUpdatedState stays live instead.
+                val reachedEndState by rememberUpdatedState(uiState.hasReachedEndOfDiscover)
+                val loadingNextState by rememberUpdatedState(uiState.isDiscoverLoadingNext)
+                val shouldLoadMore by remember {
                     derivedStateOf {
                         val layoutInfo = lazyListState.layoutInfo
                         val totalItems = layoutInfo.totalItemsCount
                         val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                        totalItems > 0 && lastVisibleItem >= totalItems - 5 && !uiState.hasReachedEndOfDiscover && !uiState.isDiscoverLoadingNext
+                        totalItems > 0 && lastVisibleItem >= totalItems - 5 && !reachedEndState && !loadingNextState
                     }
                 }
-                
-                LaunchedEffect(shouldLoadMore.value) {
-                    if (shouldLoadMore.value) {
+
+                LaunchedEffect(shouldLoadMore) {
+                    if (shouldLoadMore) {
                         viewModel.loadNextDiscoverPage()
                     }
                 }
@@ -1175,7 +1189,7 @@ private fun DiscoverTab(
                                 modifier = Modifier.padding(vertical = 4.dp)
                             ) {
                                 Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                SectionHeader("Suggested For You")
+                                SectionHeader(stringResource(R.string.st_Whisper_SuggestedForYou))
                             }
                         }
 
@@ -1203,7 +1217,7 @@ private fun DiscoverTab(
                             modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
                         ) {
                             Icon(Icons.Rounded.Explore, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
-                            SectionHeader("Whisper Someone")
+                            SectionHeader(stringResource(R.string.st_Whisper_WhisperSomeone))
                         }
                     }
 
@@ -1510,6 +1524,7 @@ private fun ProfileTab(
                 size = 104.dp,
                 onClick = onShowAvatarOptions,
                 onLongClick = { onViewAvatarFull(profile) },
+                bustCache = true, // L-16: bust right after a self-upload/edit
             )
             Surface(
                 shape = CircleShape,
@@ -1681,7 +1696,7 @@ private fun ProfileTab(
                     ) {
                         Icon(Icons.Rounded.SyncLock, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Rotate Encryption Key", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.st_Whisper_Fingerprint_RotateButton), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -2046,7 +2061,7 @@ private fun ProfileTab(
             icon = {
                 Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
             },
-            title = { Text("Rotate Encryption Key", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.st_Whisper_RotateKey_Title), fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     "Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.",
@@ -2063,9 +2078,9 @@ private fun ProfileTab(
                             showRotateKeyDialog = false
                             if (success) {
                                 haptic.success()
-                                toastState.show("Encryption key rotated successfully", WhisperToastType.SUCCESS)
+                                toastState.show(context.getString(R.string.st_Whisper_RotateKey_Success), WhisperToastType.SUCCESS)
                             } else {
-                                toastState.show("Failed to rotate encryption key", WhisperToastType.ERROR)
+                                toastState.show(context.getString(R.string.st_Whisper_RotateKey_Failed), WhisperToastType.ERROR)
                             }
                         }
                     },
@@ -2074,7 +2089,7 @@ private fun ProfileTab(
                     if (isRotatingKey) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                     } else {
-                        Text("Rotate Key", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.st_Whisper_RotateKey_Action), fontWeight = FontWeight.Bold)
                     }
                 }
             },
@@ -2152,7 +2167,7 @@ private fun ProfileTab(
             },
             title = {
                 Text(
-                    "Delete Account",
+                    stringResource(R.string.st_Whisper_DeleteAccount_Title),
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.error
@@ -2161,10 +2176,8 @@ private fun ProfileTab(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        if (isTokenUser)
-                            "This will permanently delete your account and all your messages. This cannot be undone."
-                        else
-                            "This will permanently delete your account and all your messages. Enter your password to confirm.",
+                        if (isTokenUser) stringResource(R.string.st_Whisper_DeleteAccount_Desc_Token)
+                        else stringResource(R.string.st_Whisper_DeleteAccount_Desc_Password),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2241,7 +2254,7 @@ private fun ProfileTab(
             },
             text = {
                 Text(
-                    "Activating this means no one will ever find you on Whisper unless you reach out first. You will be removed from all search results and recommendations.",
+                    stringResource(R.string.st_Whisper_HideDiscoverWarning_Body),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2432,71 +2445,52 @@ private fun ChatOptionsSheet(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                "Chat Options",
+                stringResource(R.string.st_Whisper_ChatOptions_Title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
 
-            // View Profile
-            ListItem(
-                leadingContent = { Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onViewProfile() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_ViewProfile), fontWeight = FontWeight.Medium)
-            }
+            // M-16 FIX (reviewwhisper.md): all rows render through the shared
+            // WhisperOptionsListItem so this sheet and ChatScreen's sheet can never drift.
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.Person,
+                label = stringResource(R.string.st_Whisper_ViewProfile),
+                onClick = onViewProfile,
+            )
 
-            // Clear Chat
-            ListItem(
-                leadingContent = { Icon(Icons.Rounded.CleaningServices, null, tint = MaterialTheme.colorScheme.primary) },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onClearChat() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_ClearHistory), fontWeight = FontWeight.Medium)
-            }
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.CleaningServices,
+                label = stringResource(R.string.st_Whisper_ClearHistory),
+                onClick = onClearChat,
+            )
 
-            // Mute / Unmute
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
-                        null,
-                        tint = if (convo.isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleMute() }
-            ) {
-                Text(if (convo.isMuted) "Unmute notifications" else "Mute notifications", fontWeight = FontWeight.Medium)
-            }
+            WhisperOptionsListItem(
+                leadingIcon = if (convo.isMuted) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsOff,
+                iconTint = if (convo.isMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                label = if (convo.isMuted) stringResource(R.string.st_Whisper_UnmuteNotifications)
+                else stringResource(R.string.st_Whisper_MuteNotifications),
+                onClick = onToggleMute,
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-            // Block / Unblock
-            ListItem(
-                leadingContent = {
-                    Icon(
-                        if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
-                        null,
-                        tint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
-                },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onToggleBlock() }
-            ) {
-                Text(
-                    if (isBlocked) "Unblock user" else "Block user",
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                )
-            }
+            WhisperOptionsListItem(
+                leadingIcon = if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
+                iconTint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                label = if (isBlocked) stringResource(R.string.st_Whisper_UnblockUser) else stringResource(R.string.st_Whisper_BlockUser),
+                labelColor = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                onClick = onToggleBlock,
+            )
 
             // Hide chat (hides from the chats tab, non-destructive)
-            ListItem(
-                leadingContent = {
-                    Icon(Icons.Rounded.VisibilityOff, null, tint = MaterialTheme.colorScheme.error)
-                },
-                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onDeleteChat() }
-            ) {
-                Text(stringResource(R.string.st_Whisper_HideChat), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
-            }
+            WhisperOptionsListItem(
+                leadingIcon = Icons.Rounded.VisibilityOff,
+                iconTint = MaterialTheme.colorScheme.error,
+                label = stringResource(R.string.st_Whisper_HideChat),
+                labelColor = MaterialTheme.colorScheme.error,
+                onClick = onDeleteChat,
+            )
 
             Spacer(Modifier.height(24.dp))
         }

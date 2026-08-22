@@ -10,10 +10,15 @@ import javax.inject.Singleton
  * Cheap FS auto-rotate — stores last rotation timestamp.
  * v3: 90 days → v4: 30 days + jitter, new-login guard, retry-safe.
  * No users yet, so no migration needed. First run seeds now().
- * Used by WhisperViewModel heartbeat to call crypto.rotateKeyPair().
+ * Used by WhisperViewModel heartbeat to drive crypto.stageNewKeyPair()/commit.
  * Complexity tax ~0 vs full Double Ratchet (1 value vs 500).
  * Better: 30 days means at most 30 days of history exposed if Keystore leaks,
  * vs 90 before. Still cheap (1 server write per month).
+ *
+ * P0-1 FIX (reviewwhisper.md): [ROTATE_INTERVAL_MS] is now the SINGLE source of
+ * truth. WhisperRepository.getKeyTrustInfo / sendMessage and every UI string are
+ * aligned to it — the old code rotated every 30 days while the key-trust
+ * heuristic assumed weekly rotations and the copy literally said "every week".
  */
 @Singleton
 class WhisperKeyRotationStore @Inject constructor(
@@ -40,12 +45,6 @@ class WhisperKeyRotationStore @Inject constructor(
         return (now - last) >= (ROTATE_INTERVAL_MS + jitter)
     }
 
-    /** Force rotate check on new login: if server key older than interval, rotate now. */
-    fun shouldRotateOnLogin(serverPublicKeyAgeMs: Long): Boolean {
-        // If we have no local record but server suggests old key, rotate.
-        return serverPublicKeyAgeMs >= ROTATE_INTERVAL_MS
-    }
-
     fun clear() {
         prefs.edit().clear().commit()
     }
@@ -53,8 +52,15 @@ class WhisperKeyRotationStore @Inject constructor(
     // Exposed for ViewModel logging
     fun intervalDays(): Int = (ROTATE_INTERVAL_MS / (24 * 60 * 60 * 1000)).toInt()
 
-    private companion object {
+    companion object {
         const val KEY_LAST_ROTATE = "last_rotate_ms"
-        const val ROTATE_INTERVAL_MS = 30L * 24 * 60 * 60 * 1000 // 30 days — better than 90, still cheap (was 90)
+        /** 30 days — referenced by WhisperRepository key-change classification (P0-1). */
+        const val ROTATE_INTERVAL_MS = 30L * 24 * 60 * 60 * 1000
+
+        /**
+         * A server-side profile `updated_at` fresher than this is treated as "the key
+         * was JUST rotated" (auto or manual) rather than a suspicious stale change.
+         */
+        const val FRESH_ROTATION_WINDOW_MS = 30L * 60 * 1000
     }
 }

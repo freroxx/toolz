@@ -36,8 +36,13 @@ class WhisperClipboardClearWorker @AssistedInject constructor(
         private const val GCM_TAG_BITS = 128
         private const val IV_SIZE = 12
 
-        /** Encrypt for WorkManager storage (VM side). Mirrors decrypt below. P0-5 FIX. */
-        fun encryptForStorage(plain: String, ctx: Context): String {
+        /**
+         * Encrypt for WorkManager storage (VM side). Mirrors decrypt below. P0-5 FIX.
+         * Returns null when Keystore is unavailable — callers must NOT schedule the
+         * worker in that case (the old base64 fallback persisted a reversible
+         * credential in WorkManager's SQLite, defeating the point of encrypting).
+         */
+        fun encryptForStorage(plain: String, ctx: Context): String? {
             try {
                 if (plain.isEmpty()) return ""
                 val key = getOrCreateKey(ctx)
@@ -48,8 +53,7 @@ class WhisperClipboardClearWorker @AssistedInject constructor(
                 val combined = cipher.iv + encrypted
                 return android.util.Base64.encodeToString(combined, android.util.Base64.NO_WRAP)
             } catch (_: Exception) {
-                // If Keystore fails, fall back to base64 (still not plaintext in logs)
-                return android.util.Base64.encodeToString(plain.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+                return null
             }
         }
 

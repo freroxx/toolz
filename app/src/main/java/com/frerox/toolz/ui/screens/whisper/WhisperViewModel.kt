@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.retry
@@ -41,6 +42,7 @@ class WhisperViewModel @Inject constructor(
     private val outgoingQueue: WhisperOutgoingQueue,
     private val aubupManager: WhisperAubupManager,
     private val keyRotationStore: WhisperKeyRotationStore,
+    private val offlineManager: com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
@@ -151,6 +153,18 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
+    // M-11 FIX (reviewwhisper.md): realtime message events used to trigger a
+    // conversations RPC per event. A trailing 1.5s debounce collapses bursts into a
+    // single refresh while keeping the list feeling live.
+    private var convoRefreshJob: Job? = null
+    private fun scheduleConversationRefresh(forceRefresh: Boolean) {
+        convoRefreshJob?.cancel()
+        convoRefreshJob = viewModelScope.launch {
+            delay(1_500)
+            loadConversationsInternal(forceRefresh = forceRefresh)
+        }
+    }
+
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch {
@@ -168,7 +182,7 @@ class WhisperViewModel @Inject constructor(
                     }
                     android.util.Log.w("WhisperVM", "heartbeat failed: ${e.message}")
                 }
-                delay(60_000)
+                delay(300_000) // L-17 FIX: 5-min cadence (was 60s) — last_seen churn x fleet matters
             }
         }
     }
@@ -176,32 +190,30 @@ class WhisperViewModel @Inject constructor(
     private suspend fun maybeAutoRotateKey() {
         // Better cheap FS: 30 days + jitter, retry-safe (only mark on success), no-op if offline.
         if (!keyRotationStore.shouldRotate()) return
-        // Don't rotate if offline — would generate key but fail to publish, stranding it.
+        // Don't rotate if offline — would stage a key but fail to publish it.
         if (!isOnline()) return
-        val newPub = crypto.rotateKeyPair() ?: return
-        // Publish — only markRotated on success so failure retries next heartbeat (60s), not 30 days.
-        repository.updateProfile(WhisperProfileUpdate(publicKey = newPub))
+        // STAGED rotation: the old key stays active until the server confirms the new
+        // public key. A failed publish rolls back cleanly instead of destroying history.
+        val staged = crypto.stageNewKeyPair() ?: return
+        repository.updateProfile(WhisperProfileUpdate(publicKey = staged.publicKeyBase64))
             .onSuccess {
+                crypto.commitStagedKeyPair(staged)
                 keyRotationStore.markRotated()
                 android.util.Log.i("WhisperVM", "Auto-rotated Whisper key (${keyRotationStore.intervalDays()}d FS)")
-                // Notify UI: optional toast so user knows safety number changed (non-blocking).
                 _uiState.update { it.copy(error = UiText.DynamicString("Security key refreshed (${keyRotationStore.intervalDays()}d rotation)")) }
             }
             .onFailure {
-                // Roll back local key — we keep old key on server, so revert Keystore to old to avoid desync.
+                // Publish failed: delete the staged pair; the old key remains active so
+                // incoming messages encrypted to the server's current key stay readable.
+                crypto.abortStagedKeyPair(staged)
                 android.util.Log.w("WhisperVM", "Auto-rotate failed (will retry): ${it.message}")
-                // Don't markRotated — will retry next heartbeat.
             }
     }
 
-    private fun isOnline(): Boolean {
-        return try {
-            val cm = (repository as? Any)?.let {
-                // Cheap check via repository's offlineManager if available; fallback to true to not block.
-                true
-            } ?: true
-            cm
-        } catch (_: Exception) { true }
+    private suspend fun isOnline(): Boolean = try {
+        offlineManager.offlineState.first() == com.frerox.toolz.util.OfflineState.ONLINE
+    } catch (_: Exception) {
+        true // If the connectivity signal itself fails, don't block rotation.
     }
 
     private fun stopHeartbeat() {
@@ -389,10 +401,7 @@ class WhisperViewModel @Inject constructor(
         repository.getPendingIncomingWithProfiles()
             .onSuccess { pendingRequests ->
                 _uiState.update {
-                    it.copy(
-                        pendingIncomingRequests = pendingRequests,
-                        pendingIncoming = pendingRequests.map { r -> r.friendship }
-                    )
+                    it.copy(pendingIncomingRequests = pendingRequests)
                 }
             }
         repository.getPendingOutgoing()
@@ -503,12 +512,20 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    fun toggleMuteUser(userId: String) {
-        if (mutePrefs.isMuted(userId)) {
+    /**
+     * Toggles mute for [userId]. [onResult] is invoked with the NEW state
+     * (true = now muted) so callers toast accurately instead of guessing from a
+     * possibly-stale conversation snapshot.
+     */
+    fun toggleMuteUser(userId: String, onResult: (Boolean) -> Unit = {}) {
+        val nowMuted = if (mutePrefs.isMuted(userId)) {
             mutePrefs.unmuteUser(userId)
+            false
         } else {
             mutePrefs.muteUser(userId)
+            true
         }
+        onResult(nowMuted)
     }
 
     fun updateProfile(
@@ -594,14 +611,16 @@ class WhisperViewModel @Inject constructor(
 
     fun rotateEncryptionKey(onComplete: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val newPublicKey = crypto.rotateKeyPair()
-            if (newPublicKey == null) {
+            // Staged rotation: publish first, switch active key only on success.
+            val staged = crypto.stageNewKeyPair()
+            if (staged == null) {
                 onComplete(false)
                 return@launch
             }
-            val update = WhisperProfileUpdate(publicKey = newPublicKey)
+            val update = WhisperProfileUpdate(publicKey = staged.publicKeyBase64)
             repository.updateProfile(update)
                 .onSuccess {
+                    crypto.commitStagedKeyPair(staged)
                     repository.getMyProfile(forceRefresh = true).onSuccess { p ->
                         _uiState.update { it.copy(currentProfile = p) }
                     }
@@ -609,6 +628,7 @@ class WhisperViewModel @Inject constructor(
                     onComplete(true)
                 }
                 .onFailure {
+                    crypto.abortStagedKeyPair(staged)
                     onComplete(false)
                 }
         }
@@ -673,8 +693,16 @@ class WhisperViewModel @Inject constructor(
                     }
                 }
                 .collect { msg ->
-                    // Force refresh conversations from server on new incoming message
-                    loadConversationsInternal(forceRefresh = true)
+                    // Refresh the chats list for INCOMING messages only. Own outgoing sends
+                    // already invalidate the conversations cache in the repository, and
+                    // refreshing on every echo turned each sent message into a network storm.
+                    // M-11: debounced — see scheduleConversationRefresh.
+                    if (msg.senderId != myId) {
+                        scheduleConversationRefresh(forceRefresh = true)
+                    } else {
+                        repository.invalidateConversationsCache()
+                        scheduleConversationRefresh(forceRefresh = false)
+                    }
                     if (msg.senderId != myId && !msg.isDeletedForEveryone) {
                         // Hidden and muted chats never notify.
                         if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
@@ -730,5 +758,6 @@ class WhisperViewModel @Inject constructor(
         heartbeatJob?.cancel()
         profileSearchJob?.cancel()
         droppedCollectorJob?.cancel()
+        convoRefreshJob?.cancel()
     }
 }

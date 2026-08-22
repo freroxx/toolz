@@ -15,7 +15,12 @@ private fun Context.findActivity(): Activity? = generateSequence(this) { (it as?
  *  this composable is on screen and is cleared on leave, so non-Whisper screens are
  *  never affected by it.
  *  P1-18 FIX: Reference-counted — multiple SecureWindow hosts no longer clear the
- *  flag while another still needs it. */
+ *  flag while another still needs it.
+ *
+ *  NOTE: `bypassEnabled` reflects a single app-wide settings flag — when enabled it
+ *  disables FLAG_SECURE for EVERY Whisper screen, not just the one showing the toggle.
+ *  Intentional (a per-screen bypass would still expose the recents preview), but it is
+ *  global rather than per-screen. */
 private var secureWindowRefCount = 0
 private val secureWindowLock = Any()
 

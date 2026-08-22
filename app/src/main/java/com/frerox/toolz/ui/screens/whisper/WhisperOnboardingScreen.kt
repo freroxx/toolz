@@ -290,16 +290,24 @@ private fun OnboardingPage(
 
     // Gentle continuous bob so the hero shape never sits perfectly still,
     // even when the pager is idle.
-    val infiniteTransition = rememberInfiniteTransition(label = "iconBob")
-    val bob by infiniteTransition.animateFloat(
-        initialValue = -6f,
-        targetValue = 6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2600, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "bobOffset",
-    )
+    // L-18 FIX (reviewwhisper.md): performance mode renders a static hero — every other
+    // Whisper screen already gates its animations behind LocalPerformanceMode.
+    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+    val bob = if (performanceMode) {
+        remember { 0f }
+    } else {
+        val infiniteTransition = rememberInfiniteTransition(label = "iconBob")
+        val animated by infiniteTransition.animateFloat(
+            initialValue = -6f,
+            targetValue = 6f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2600, easing = EaseInOutSine),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "bobOffset",
+        )
+        animated
+    }
 
     Column(
         modifier = Modifier
@@ -518,6 +526,23 @@ private fun BoxScope.FloatingMorphShape(
     steps: List<OnboardingStep>,
     currentPage: Int,
 ) {
+    // L-18 FIX: performance mode renders one static shape per spec — no infinite
+    // transitions, no morph allocation.
+    val performanceMode = com.frerox.toolz.ui.theme.LocalPerformanceMode.current
+    if (performanceMode) {
+        val staticStep = steps[spec.baseShapeIndex % steps.size]
+        Box(
+            modifier = Modifier
+                .align(spec.anchor)
+                .offset(x = spec.offsetX, y = spec.offsetY)
+                .size(spec.size)
+                .graphicsLayer { alpha = spec.alpha }
+                .clip(MorphPolygonShape(Morph(staticStep.shape, staticStep.shape), progress = { 0f }))
+                .background(staticStep.color)
+        )
+        return
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "floatingShape")
 
     val drift by infiniteTransition.animateFloat(

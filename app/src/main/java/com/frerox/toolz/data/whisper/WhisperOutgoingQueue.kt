@@ -28,23 +28,28 @@ class WhisperOutgoingQueue @Inject constructor(
     private val _droppedClientIds = MutableStateFlow<Set<String>>(emptySet())
     val droppedClientIds: StateFlow<Set<String>> = _droppedClientIds.asStateFlow()
 
-    fun entries(): List<WhisperQueuedMessage> =
+    /**
+     * M-8 FIX (reviewwhisper.md): reads now go through the same mutex as writes.
+     * Previously `entries()` read the raw pref snapshot outside the lock, which only
+     * worked by accident of SharedPreferences snapshot semantics.
+     */
+    suspend fun entries(): List<WhisperQueuedMessage> = mutex.withLock { entriesInternal() }
+
+    /** Caller MUST hold [mutex]. */
+    private fun entriesInternal(): List<WhisperQueuedMessage> =
         runCatching { json.decodeFromString<List<WhisperQueuedMessage>>(prefs.getString(KEY, "[]") ?: "[]") }
             .getOrDefault(emptyList())
 
     suspend fun enqueue(entry: WhisperQueuedMessage) = mutex.withLock {
-        val current = entries()
+        val current = entriesInternal()
         saveInternal(current.filterNot { it.clientId == entry.clientId } + entry)
     }
 
     suspend fun replace(entry: WhisperQueuedMessage) = enqueue(entry)
 
     suspend fun remove(clientId: String) = mutex.withLock {
-        saveInternal(entries().filterNot { it.clientId == clientId })
+        saveInternal(entriesInternal().filterNot { it.clientId == clientId })
     }
-
-    /** Entry reached the server; drop it from the outbox. */
-    suspend fun markDelivered(clientId: String) = remove(clientId)
 
     /** Records that a message was permanently dropped so the UI can surface the loss. */
     fun noteDropped(clientId: String) {
@@ -57,17 +62,6 @@ class WhisperOutgoingQueue @Inject constructor(
         saveInternal(emptyList())
     }
 
-    // P1 FIX: Previously runBlocking on arbitrary dispatcher — ANR if called on Main.
-    // Now strictly suspend-only. Blocking path removed; callers must be coroutine.
-    // Kept as @Deprecated trampoline that enforces IO and throws if misused on Main.
-    @Deprecated("Use suspend enqueue() — blocking path removed to prevent ANR", ReplaceWith("enqueue(entry)"))
-    fun enqueueBlocking(entry: WhisperQueuedMessage) {
-        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            "enqueueBlocking must not be called on Main thread — use suspend enqueue()"
-        }
-        kotlinx.coroutines.runBlocking { enqueue(entry) }
-    }
-
     private suspend fun saveInternal(entries: List<WhisperQueuedMessage>) {
         val toPersist = if (entries.size > MAX_ENTRIES) {
             val overflow = entries.dropLast(MAX_ENTRIES)
@@ -76,6 +70,7 @@ class WhisperOutgoingQueue @Inject constructor(
         } else {
             entries
         }
+        // M-8: serialize under the caller's lock; decode uses the same Json config.
         val encoded = json.encodeToString(toPersist)
         // commit() must survive process death, but never on Main — withContext(IO) keeps ANR-free
         // while still synchronous (commit returns only after fsync).

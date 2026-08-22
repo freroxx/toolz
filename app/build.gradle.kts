@@ -33,6 +33,14 @@ plugins {
     alias(libs.plugins.hilt.android)
 }
 
+// H-10 FIX (reviewwhisper.md): export Room schemas so every future version bump ships
+// with a reviewable schema diff and an explicit Migration. fallbackToDestructiveMigration
+// was already removed (it wiped E2EE history on drift); without exported schemas the next
+// bump would crash every installed client with "migration not found".
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "com.frerox.toolz"
     compileSdk = 37

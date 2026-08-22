@@ -102,7 +102,10 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
         ScanSnapshotEntity::class
     ],
     version = 47,
-    exportSchema = false
+    // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
+    // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
+    // the DatabaseModule comment documents this contract too.
+    exportSchema = true
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
 abstract class AppDatabase : RoomDatabase() {

@@ -44,10 +44,4 @@ class WhisperCryptoRoundTripTest {
         assertEquals("cipherBase64", cipher.toEntity().content)
         assertEquals("ivBase64", cipher.toEntity().contentIv)
     }
-
-    @Test fun rotationStore30DayBetter() {
-        // Document contract: cheap FS now 30 days, not 90, jitter <6h.
-        // Real store intervalDays() is 30 — verified via code read (WhisperKeyRotationStore.kt:44).
-        assertEquals(30, 30) // placeholder — intervalDays() is 30 in source
-    }
 }

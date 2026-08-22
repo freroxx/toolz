@@ -47,10 +47,10 @@ import kotlinx.coroutines.launch
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
 import com.frerox.toolz.data.whisper.KeyTrustStatus
+import com.frerox.toolz.data.whisper.WhisperCrypto
 import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
-import java.security.MessageDigest
 
 /**
  * User Profile Viewer Screen — displays another user's profile card, privacy status,
@@ -76,13 +76,21 @@ fun WhisperUserProfileScreen(
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
     if (showBypassDialog) {
+        // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
                 scope.launch {
                     if (isWhisperBypassPassword(password)) {
-                        viewModel.setScreenshotBypass(true)
-                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                        val enabling = !screenshotBypassEnabled
+                        viewModel.setScreenshotBypass(enabling)
+                        toastState.show(
+                            context.getString(
+                                if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                else R.string.st_Whisper_Bypass_ProtectionOn
+                            ),
+                            WhisperToastType.SUCCESS
+                        )
                     } else {
                         toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                     }
@@ -104,12 +112,8 @@ fun WhisperUserProfileScreen(
             topBar = {
                 ExpressiveTopAppBar(
                     modifier = Modifier.screenshotBypassGesture {
-                        if (screenshotBypassEnabled) {
-                            viewModel.setScreenshotBypass(false)
-                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
-                        } else {
-                            showBypassDialog = true
-                        }
+                        // M-17: verification happens inside the dialog for both directions.
+                        showBypassDialog = true
                     },
                     title = { Text(uiState.profile?.effectiveName ?: "", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
@@ -299,9 +303,11 @@ fun WhisperUserProfileScreen(
                                             keyTrust?.status == KeyTrustStatus.CHANGED ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyChangedDesc)
                                             keyTrust?.status == KeyTrustStatus.ROTATED_AUTO ->
-                                                keyTrust.rotateMessage ?: "Key rotated automatically weekly — verify if you want, not required."
+                                                keyTrust.rotateMessage?.asString(context)
+                                                    ?: stringResource(R.string.st_Whisper_Profile_KeyRotatedAutoFallback)
                                             keyTrust?.status == KeyTrustStatus.ROTATED_MANUAL ->
-                                                keyTrust.rotateMessage ?: "${profile.effectiveName} rotated manually — verify new safety number."
+                                                keyTrust.rotateMessage?.asString(context)
+                                                    ?: stringResource(R.string.st_Whisper_Profile_KeyRotatedManualFallback, profile.effectiveName)
                                             else ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyFingerprintDesc, profile.effectiveName)
                                         },
@@ -336,13 +342,13 @@ fun WhisperUserProfileScreen(
                                                     onClick = { haptic.success(); viewModel.verifyKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Verify) else "Verify (optional)", fontWeight = FontWeight.Bold)
+                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Verify) else stringResource(R.string.st_Whisper_VerifyOptional), fontWeight = FontWeight.Bold)
                                                 }
                                                 ToolzOutlinedExpressiveButton(
                                                     onClick = { haptic.click(); viewModel.acceptNewKey() },
                                                     modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Profile_AcceptNewKey) else "Accept", fontWeight = FontWeight.Bold)
+                                                    Text(if (isWarning) stringResource(R.string.st_Whisper_Profile_AcceptNewKey) else stringResource(R.string.st_Whisper_AcceptShort), fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -376,7 +382,8 @@ fun WhisperUserProfileScreen(
                             // Relationship Action Button
                             val status = uiState.friendshipStatus
                             val record = uiState.friendshipRecord
-                            val iSentRequest = record?.userA == viewModel.targetUserId
+                            // userA is always the requester: if the TARGET sent it, I can accept.
+                            val partnerSentRequest = record?.userA == viewModel.targetUserId
 
                             when (status) {
                                 FriendStatus.NONE -> {
@@ -390,7 +397,7 @@ fun WhisperUserProfileScreen(
                                     }
                                 }
                                 FriendStatus.PENDING -> {
-                                    if (iSentRequest) {
+                                    if (partnerSentRequest) {
                                         ToolzTonalExpressiveButton(
                                             onClick = { haptic.click(); viewModel.acceptFriendRequest() },
                                             modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -441,20 +448,12 @@ fun WhisperUserProfileScreen(
 }
 
 /**
- * SHA-256 fingerprint of a base64 public key, rendered as 4 groups of 4 uppercase
- * hex chars — byte-for-byte the same algorithm as WhisperCrypto.fingerprint. Kept
- * as a file-level function because this screen has no crypto instance; WhisperCrypto
- * should eventually delegate to this single implementation.
- * P1-17 FIX: Previously hashed the base64 STRING bytes (trimmed UTF-8), not the
- * DER bytes. Now correctly decodes base64 then hashes, matching WhisperCrypto.fingerprint
- * (8 groups of 4). Fallback to 4 groups kept only for legacy imports.
+ * Fingerprint of a base64 public key — delegates to WhisperCrypto.computeFingerprint,
+ * the single source of truth (this file previously carried a duplicated hash
+ * implementation that could silently drift from the crypto module's algorithm).
  */
-internal fun whisperFingerprint(base64Key: String): String = try {
-    val rawBytes = android.util.Base64.decode(base64Key.trim(), android.util.Base64.DEFAULT)
-    val digest = MessageDigest.getInstance("SHA-256").digest(rawBytes)
-    val hex = digest.joinToString("") { "%02X".format(it) }
-    hex.chunked(4).take(8).joinToString("-")
-} catch (_: Exception) { "UNVERIFIED" }
+internal fun whisperFingerprint(base64Key: String): String =
+    WhisperCrypto.computeFingerprint(base64Key) ?: "UNVERIFIED"
 
 /** Compute a SHA-256 fingerprint from a base64 public key — P1-17 delegates to single source. */
 private fun computeFingerprint(base64PublicKey: String): String = whisperFingerprint(base64PublicKey)

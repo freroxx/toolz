@@ -103,22 +103,29 @@ class WhisperAuthViewModel @Inject constructor(
      * Schedules durable clipboard clearing via WorkManager (H-3 fix).
      * Survives process recreation and app restarts cleanly.
      * P0-5 FIX: Token is encrypted before persisting to WorkManager's SQLite.
-     * Plaintext token is never stored in workDataOf (recoverable on rooted device).
+     * If Keystore encryption fails, scheduling is SKIPPED — a reversible copy of
+     * the token must never land in WorkData.
      */
     fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager) {
-        // Encrypt token+restoreTo via same Keystore key the Worker will decrypt with.
         val encryptedToken = try {
             com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(token, getApplication())
-        } catch (_: Exception) { null } ?: token // fallback: best-effort (not ideal but never crash schedule)
-        val encryptedRestore = try {
-            if (restoreTo != null) com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(restoreTo, getApplication()) else ""
-        } catch (_: Exception) { null } ?: (restoreTo ?: "")
+        } catch (_: Exception) { null }
+        // Encryption unavailable (or empty): skip the durable clear rather than store
+        // anything reversible. The 60 s clipboard exposure still applies, but no secret
+        // is persisted.
+        if (encryptedToken.isNullOrEmpty()) return
+        val encryptedRestore = if (restoreTo != null) {
+            try {
+                com.frerox.toolz.worker.WhisperClipboardClearWorker.encryptForStorage(restoreTo, getApplication())
+            } catch (_: Exception) { null }
+        } else ""
+        if (restoreTo != null && encryptedRestore.isNullOrEmpty()) return
         val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.WhisperClipboardClearWorker>()
             .setInitialDelay(60, java.util.concurrent.TimeUnit.SECONDS)
             .setInputData(
                 androidx.work.workDataOf(
                     com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_TOKEN to encryptedToken,
-                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_RESTORE_TO to encryptedRestore,
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_RESTORE_TO to (encryptedRestore ?: ""),
                 )
             )
             .build()
@@ -406,12 +413,5 @@ class WhisperAuthViewModel @Inject constructor(
                 UiText.StringResource(R.string.st_Whisper_Error_Network)
             else -> UiText.DynamicString(msg)
         }
-    }
-
-    private companion object {
-        const val TOKEN_CLIPBOARD_TTL_MS = 60_000L
-        const val KEY_TOKEN = "token"
-        const val KEY_RESTORE_TO = "restoreTo"
-        const val KEY_DEADLINE = "deadlineEpochMs"
     }
 }

@@ -100,13 +100,21 @@ fun WhisperAuthScreen(
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
     if (showBypassDialog) {
+        // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
                 scope.launch {
                     if (isWhisperBypassPassword(password)) {
-                        viewModel.setScreenshotBypass(true)
-                        toastState.show("Successfully bypassed screenshot block", WhisperToastType.SUCCESS)
+                        val enabling = !screenshotBypassEnabled
+                        viewModel.setScreenshotBypass(enabling)
+                        toastState.show(
+                            context.getString(
+                                if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                else R.string.st_Whisper_Bypass_ProtectionOn
+                            ),
+                            WhisperToastType.SUCCESS
+                        )
                     } else {
                         toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
                     }
@@ -150,17 +158,6 @@ fun WhisperAuthScreen(
         }
     }
 
-    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
-            if (bytes != null) {
-                // Stored in temporary state to prompt for whisper code
-            }
-        }
-    }
-
     LaunchedEffect(aubupState) {
         when (val s = aubupState) {
             is AubupRecoveryState.Restored -> {
@@ -180,12 +177,8 @@ fun WhisperAuthScreen(
             topBar = {
                 ExpressiveTopAppBar(
                     modifier = Modifier.screenshotBypassGesture {
-                        if (screenshotBypassEnabled) {
-                            viewModel.setScreenshotBypass(false)
-                            toastState.show("Successfully enabled screenshot block", WhisperToastType.SUCCESS)
-                        } else {
-                            showBypassDialog = true
-                        }
+                        // M-17: verification happens inside the dialog for both directions.
+                        showBypassDialog = true
                     },
                     title = {
                         Row(
@@ -1004,10 +997,12 @@ private fun TokenRegisterForm(
 }
 
 private fun calculatePasswordScore(pwd: String): Int {
+    // L-11 FIX (reviewwhisper.md): reward long passphrases and symbols, not just digits+caps.
     if (pwd.length < 6) return 1
     var score = 1
     if (pwd.length >= 10) score++
     if (pwd.any { it.isDigit() } && pwd.any { it.isUpperCase() }) score++
+    if (pwd.length >= 16 || pwd.any { !it.isLetterOrDigit() }) score++
     return score.coerceAtMost(3)
 }
 
@@ -1412,7 +1407,8 @@ fun WhisperCredentialRevealedDialog(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            "Account: @${restored.username}",
+                            // L-6 FIX: localized (was hardcoded English).
+                            stringResource(R.string.st_Whisper_Aubup_AccountLabel) + " @${restored.username}",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -1427,9 +1423,9 @@ fun WhisperCredentialRevealedDialog(
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()
                                 clipboardManager.setText(AnnotatedString(restored.credential))
-                                android.widget.Toast.makeText(context, "Credential copied", android.widget.Toast.LENGTH_SHORT).show()
+                                android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_CredentialCopied), android.widget.Toast.LENGTH_SHORT).show()
                             }) {
-                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy credential", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.cd_Whisper_CopyCredential), modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -1438,7 +1434,7 @@ fun WhisperCredentialRevealedDialog(
         },
         confirmButton = {
             ToolzExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("Continue to Whisper", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.st_Whisper_Aubup_Continue), fontWeight = FontWeight.Bold)
             }
         }
     )

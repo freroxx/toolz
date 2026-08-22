@@ -50,7 +50,8 @@ class WhisperDeletedMessagesStore @Inject constructor(
     }
 
     private suspend fun persist(ids: Set<String>) {
-        val existing = loadAll()
+        // M-18 FIX (reviewwhisper.md): the merge-read now runs off-main like the write.
+        val existing = withContext(Dispatchers.IO) { loadAll() }
         val now = System.currentTimeMillis()
         val merged = capById(existing + ids.associateWith { now })
         withContext(Dispatchers.IO) {
@@ -87,7 +88,8 @@ class WhisperDeletedMessagesStore @Inject constructor(
     suspend fun unmarkMessagesDeleted(messageIds: Collection<String>) {
         if (messageIds.isEmpty()) return
         mutex.withLock {
-            val existing = loadAll() - messageIds.toSet()
+            // M-18 FIX: read off-main (see persist).
+            val existing = withContext(Dispatchers.IO) { loadAll() } - messageIds.toSet()
             withContext(Dispatchers.IO) {
                 prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
             }
@@ -99,7 +101,8 @@ class WhisperDeletedMessagesStore @Inject constructor(
 
     /** Evicts the oldest tombstone IDs when store exceeds MAX_TOMBSTONES. */
     suspend fun evictOldest(): Int = mutex.withLock {
-        val raw = loadAll()
+        // M-18 FIX: read off-main (see persist).
+        val raw = withContext(Dispatchers.IO) { loadAll() }
         val capped = capById(raw)
         val removed = raw.size - capped.size
         if (removed > 0) {
@@ -111,15 +114,10 @@ class WhisperDeletedMessagesStore @Inject constructor(
         removed
     }
 
-    @Deprecated("Renamed to evictOldest to clarify size-based capping", ReplaceWith("evictOldest()"))
-    suspend fun purgeExpired(): Int = evictOldest()
-
     suspend fun clearAll() = mutex.withLock {
         withContext(Dispatchers.IO) { prefs.edit().remove("deleted_message_ids").commit() }
         _deletedIds.value = emptySet()
     }
-
-    fun clearAllBlocking() = kotlinx.coroutines.runBlocking { clearAll() }
 
     private companion object {
         const val MAX_TOMBSTONES = 5_000

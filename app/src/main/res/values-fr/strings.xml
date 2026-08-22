@@ -112,7 +112,6 @@
     <string name="st_Whisper_Auth_SaveTokenWarning">Enregistrez ce jeton ! Il ne peut pas être récupéré.</string>
     <string name="st_Whisper_Auth_CopyToContinue">Copier le jeton pour continuer</string>
     <string name="st_Whisper_Auth_ChooseDisplayName">Choisissez un nom d\'affichage</string>
-    <string name="st_Whisper_Auth_Phase2Note">Chiffrement de bout en bout prévu pour la Phase 2. Vos messages sont protégés par la sécurité RLS de Supabase.</string>
     <string name="st_Whisper_Vault_SecuredTitle">Sécurisé dans le coffre-fort</string>
     <string name="st_Whisper_Vault_SecuredDesc">Vos identifiants seront automatiquement sauvegardés dans votre coffre-fort Toolz pour plus de sécurité.</string>
     <string name="st_Whisper_Vault_Name">Whisper : %s</string>
@@ -2893,4 +2892,37 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_ProfileSetPublic">Profil défini sur Public</string>
     <string name="st_Whisper_HiddenFromDiscover">Masqué de Découvrir</string>
     <string name="st_Whisper_VisibleInDiscover">Visible dans Découvrir</string>
+
+    <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
+    <string name="st_Whisper_KeyRotate_AutoMonthly">La clé de chiffrement a été renouvelée automatiquement — cela arrive tous les %1$d jours pour votre sécurité.</string>
+    <string name="st_Whisper_KeyRotate_Manual">%1$s a manuellement renouvelé sa clé de chiffrement — vérifiez le nouveau numéro de sécurité si vous le souhaitez.</string>
+    <string name="st_Whisper_Fingerprint_RotateButton">Renouveler la clé de chiffrement</string>
+    <string name="st_Whisper_RotateKey_Title">Renouveler la clé de chiffrement</string>
+    <string name="st_Whisper_RotateKey_Desc">Le renouvellement de votre clé P-256 génère une nouvelle paire de clés. Vos amis seront invités à revérifier votre nouvelle empreinte. L\'historique des messages sur cet appareil est conservé et tous les futurs messages utiliseront la nouvelle clé.</string>
+    <string name="st_Whisper_RotateKey_Action">Renouveler la clé</string>
+    <string name="st_Whisper_RotateKey_Success">Clé de chiffrement renouvelée avec succès</string>
+    <string name="st_Whisper_RotateKey_Failed">Échec du renouvellement de la clé</string>
+    <string name="st_Whisper_Bypass_ProtectionOff">Protection contre les captures d\'écran désactivée</string>
+    <string name="st_Whisper_Bypass_ProtectionOn">Protection contre les captures d\'écran activée</string>
+    <string name="st_Whisper_ChatOptions_Title">Options de conversation</string>
+    <string name="st_Whisper_MuteNotifications">Couper les notifications</string>
+    <string name="st_Whisper_UnmuteNotifications">Réactiver les notifications</string>
+    <string name="st_Whisper_BlockUser">Bloquer l\'utilisateur</string>
+    <string name="st_Whisper_UnblockUser">Débloquer l\'utilisateur</string>
+    <string name="st_Whisper_SuggestedForYou">Suggéré pour vous</string>
+    <string name="st_Whisper_WhisperSomeone">Chuchoter à quelqu\'un</string>
+    <string name="st_Whisper_HideDiscoverWarning_Body">En activant cette option, personne ne pourra vous trouver sur Whisper tant que vous ne prenez pas contact en premier. Vous serez retiré de tous les résultats de recherche et recommandations.</string>
+    <string name="st_Whisper_DeleteAccount_Title">Supprimer le compte</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Token">Votre compte et tous vos messages seront définitivement supprimés. Cette action est irréversible.</string>
+    <string name="st_Whisper_DeleteAccount_Desc_Password">Votre compte et tous vos messages seront définitivement supprimés. Saisissez votre mot de passe pour confirmer.</string>
+    <string name="st_Whisper_ConnectionLost">Connexion en direct perdue</string>
+    <string name="st_Whisper_Reconnect">Reconnecter</string>
+    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Clé renouvelée automatiquement selon le calendrier — la vérification est facultative.</string>
+    <string name="st_Whisper_Profile_KeyRotatedManualFallback">%1$s a renouvelé sa clé manuellement — vérifiez le nouveau numéro de sécurité.</string>
+    <string name="st_Whisper_VerifyOptional">Vérifier (facultatif)</string>
+    <string name="st_Whisper_AcceptShort">Accepter</string>
+    <string name="st_Whisper_Aubup_Continue">Continuer vers Whisper</string>
+    <string name="st_Whisper_Aubup_AccountLabel">Compte :</string>
+    <string name="st_Whisper_CredentialCopied">Identifiant copié</string>
+    <string name="cd_Whisper_CopyCredential">Copier l\'identifiant</string>
 </resources>

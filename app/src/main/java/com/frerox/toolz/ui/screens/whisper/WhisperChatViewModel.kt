@@ -54,6 +54,10 @@ class WhisperChatViewModel @Inject constructor(
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
     private val settingsRepository: SettingsRepository,
+    // M-10 FIX (reviewwhisper.md): injected app scope replaces the ad-hoc
+    // `CoroutineScope(NonCancellable + Dispatchers.IO)` in onCleared().
+    @com.frerox.toolz.di.ApplicationScope private val appScope: CoroutineScope,
+    private val undoBufferStore: com.frerox.toolz.data.whisper.WhisperUndoBufferStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -92,6 +96,9 @@ class WhisperChatViewModel @Inject constructor(
     private var searchDebounceJob: Job? = null
     private var isCurrentlyTyping = false
 
+    // H-4 FIX (reviewwhisper.md): the undo buffer is now WRITE-THROUGH persisted via
+    // WhisperUndoBufferStore — a process death inside the 30-second window no longer
+    // silently destroys the restore data while partner rows are tombstoned remotely.
     private val deletedMessagesUndoBuffer = mutableListOf<WhisperMessage>()
     private var pendingIdCounter = 0L
     // Per-message in-flight reactions prevent double-tap races against the server.
@@ -99,6 +106,23 @@ class WhisperChatViewModel @Inject constructor(
 
     companion object {
         private const val MAX_DECRYPTED_IMAGES = 20
+
+        /** H-4: persisted buffers older than 2× the undo window are dropped on resume. */
+        const val UNDO_RESUME_WINDOW_MS = 60_000L
+    }
+
+    // H-9 FIX (reviewwhisper.md): read receipts are COALESCED. Every incoming message /
+    // read-flip event used to fire markMessagesAsRead immediately; bursts produced one
+    // REST write per event. A trailing 250 ms debounce collapses them into one write.
+    private var markReadJob: Job? = null
+    private fun requestMarkPartnerRead() {
+        markReadJob?.cancel()
+        markReadJob = viewModelScope.launch {
+            delay(250)
+            runCatching { repository.markMessagesAsRead(otherUserId) }
+                .onFailure { WhisperErrorMapper.log(it, "markMessagesAsRead") }
+            notificationManager.cancelMessageNotification(otherUserId)
+        }
     }
 
     init {
@@ -112,11 +136,31 @@ class WhisperChatViewModel @Inject constructor(
                 _uiState.update { it.copy(isMuted = otherUserId in muted) }
             }
         }
+        restorePersistedUndoBuffer()
         loadInitialData()
         subscribeToChat()
         subscribeToTyping()
         subscribeToPresence()
         sendPresenceSignal(true)
+    }
+
+    /**
+     * H-4: if the process died during an undo window, resume it — the persisted buffer
+     * is adopted into memory and a fresh countdown starts. Stale buffers (older than
+     * 2× the window) are dropped: the user has moved on and the data would be a surprise.
+     */
+    private fun restorePersistedUndoBuffer() {
+        viewModelScope.launch {
+            val savedAt = undoBufferStore.savedAtMs()
+            val persisted = undoBufferStore.load()
+            if (persisted.isEmpty()) return@launch
+            if (savedAt == 0L || System.currentTimeMillis() - savedAt > UNDO_RESUME_WINDOW_MS) {
+                undoBufferStore.clear()
+                return@launch
+            }
+            deletedMessagesUndoBuffer.addAll(persisted)
+            startUndoCountdown()
+        }
     }
 
     private fun handleError(err: Throwable, context: String) {
@@ -241,7 +285,7 @@ class WhisperChatViewModel @Inject constructor(
                         )
                     }
                     if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {
-                        repository.markMessagesAsRead(otherUserId)
+                        requestMarkPartnerRead()
                     }
                 }
             }
@@ -547,8 +591,8 @@ class WhisperChatViewModel @Inject constructor(
             if (key != null && peerId == otherUserId) {
                 partnerPublicKey = key
             }
-            
-            repository.downloadEncryptedImage(attachment, key)
+
+            repository.downloadEncryptedImage(attachment, peerId, key)
                 .onSuccess { bytes ->
                     _uiState.update { state ->
                         // Bound the in-memory image cache with strict FIFO/LRU order so long chats can't exhaust memory.
@@ -571,7 +615,9 @@ class WhisperChatViewModel @Inject constructor(
         // Optimistic local update. WhisperMessage.isDeletedForEveryone is a computed getter
         // derived from content, so mirroring the server's exact tombstone text both marks the
         // message deleted and keeps local and remote state identical until the next reload.
-        val tombstone = "This message has been deleted"
+        // H-5 FIX (reviewwhisper.md): use the SINGLE shared constant — the old hardcoded
+        // literal could drift from WhisperTombstone.DISPLAY_TEXT silently.
+        val tombstone = WhisperTombstone.DISPLAY_TEXT
         _uiState.update { state ->
             val updated = state.messages.map {
                 if (it.id == message.id) it.copy(content = tombstone, contentIv = null) else it
@@ -580,9 +626,7 @@ class WhisperChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            // senderDisplayName is unused by the server write; pass "" rather than a dead
-            // "You" constant so the tombstone stays server-authoritative.
-            repository.deleteMessageForEveryone(message.id, otherUserId, "")
+            repository.deleteMessageForEveryone(message.id, otherUserId)
                 .onFailure { err ->
                     handleError(err, "deleteMessage")
                     loadMessages()
@@ -654,25 +698,32 @@ class WhisperChatViewModel @Inject constructor(
                     // Accumulate: a second clear while the first undo window is open must
                     // not destroy the earlier batch — undo restores everything together.
                     deletedMessagesUndoBuffer.addAll(deletedList)
+                    // H-4: durable write-through so process death cannot eat the buffer.
+                    viewModelScope.launch { undoBufferStore.save(deletedMessagesUndoBuffer.toList()) }
                     _uiState.update { state ->
                         val deletedIds = deletedList.map { it.id }.toSet()
                         state.copy(messages = state.messages.filter { it.id !in deletedIds })
                     }
-                    _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
-
-                    undoTimerJob?.cancel()
-                    undoTimerJob = viewModelScope.launch {
-                        for (sec in 30 downTo 1) {
-                            _undoState.update { it.copy(secondsRemaining = sec) }
-                            delay(1_000)
-                        }
-                        deletedMessagesUndoBuffer.clear()
-                        _undoState.value = WhisperUndoUiState()
-                    }
+                    startUndoCountdown()
                 }
                 .onFailure { err ->
                     handleError(err, "clearChat")
                 }
+        }
+    }
+
+    /** Shared 30s countdown; expires by discarding the persisted + in-memory buffers. */
+    private fun startUndoCountdown() {
+        _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
+        undoTimerJob?.cancel()
+        undoTimerJob = viewModelScope.launch {
+            for (sec in 30 downTo 1) {
+                _undoState.update { it.copy(secondsRemaining = sec) }
+                delay(1_000)
+            }
+            deletedMessagesUndoBuffer.clear()
+            undoBufferStore.save(emptyList())
+            _undoState.value = WhisperUndoUiState()
         }
     }
 
@@ -686,20 +737,14 @@ class WhisperChatViewModel @Inject constructor(
             repository.restoreMessages(toRestore)
                 .onSuccess {
                     deletedMessagesUndoBuffer.clear()
+                    undoBufferStore.clear()
                     loadMessages()
                 }
                 .onFailure { err ->
                     handleError(err, "restoreMessages")
-                    // Keep the undo bar alive so the user can retry within the window.
-                    _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
-                    undoTimerJob = viewModelScope.launch {
-                        for (sec in 30 downTo 1) {
-                            _undoState.update { it.copy(secondsRemaining = sec) }
-                            delay(1_000)
-                        }
-                        deletedMessagesUndoBuffer.clear()
-                        _undoState.value = WhisperUndoUiState()
-                    }
+                    // Keep the undo bar alive so the user can retry within the window;
+                    // H-4: re-persist the (unchanged) buffer for the restarted countdown.
+                    startUndoCountdown()
                 }
         }
     }
@@ -899,8 +944,7 @@ class WhisperChatViewModel @Inject constructor(
                                 }
                             }
                             if (newMsg.senderId == otherUserId) {
-                                repository.markMessagesAsRead(otherUserId)
-                                notificationManager.cancelMessageNotification(otherUserId)
+                                requestMarkPartnerRead()
                             }
                         }
                         is WhisperChatEvent.ReactionEvent -> {
@@ -1009,10 +1053,11 @@ class WhisperChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         notificationManager.currentChatId = null
-        // viewModelScope is cancelled the moment onCleared starts, so a scope-launched
-        // presence-off would never leave. Fire it in a top-level scope that ignores
-        // cancellation so partners reliably see us go offline.
-        CoroutineScope(NonCancellable + Dispatchers.IO).launch {
+        // M-10 FIX (reviewwhisper.md): viewModelScope is cancelled the moment onCleared()
+        // starts, so presence-off fires on the injected application scope instead of the
+        // old ad-hoc CoroutineScope(NonCancellable) anti-pattern (uncancellable,
+        // unsupervised, uninjectable in tests).
+        appScope.launch {
             runCatching { repository.sendPresence(otherUserId, false) }
                 .onFailure { android.util.Log.w("WhisperChatVM", "presence-off signal failed", it) }
         }
@@ -1042,18 +1087,6 @@ private fun readBoundedImageBytes(input: java.io.InputStream, context: Context):
         output.write(buffer, 0, read)
     }
     return output.toByteArray()
-}
-
-/** Decodes a bitmap downsampled so its pixel count stays within [maxWidth]x[maxHeight]. */
-private fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    var sample = 1
-    while (bounds.outWidth / (sample * 2) >= maxWidth || bounds.outHeight / (sample * 2) >= maxHeight) {
-        sample *= 2
-    }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
 }
 
 private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =

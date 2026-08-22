@@ -17,9 +17,11 @@
 
 package com.frerox.toolz.data.whisper
 
+import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -38,11 +40,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class WhisperCrypto @Inject constructor() {
+class WhisperCrypto @Inject constructor(
+    @ApplicationContext private val context: Context,
+) {
 
     companion object {
-        private const val KEY_ALIAS = "whisper_e2ee_ec_key"
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+        /** Alias used by builds before staged rotation existed — adopted as active on first run. */
+        private const val LEGACY_KEY_ALIAS = "whisper_e2ee_ec_key"
+        private const val STAGED_ALIAS_PREFIX = "whisper_e2ee_ec_key_staged_"
+        private const val STATE_PREFS = "whisper_crypto_state"
+        private const val PREF_ACTIVE_ALIAS = "active_alias"
         private const val AES_GCM_TAG_LEN = 128
         private const val IV_LEN = 12
         private const val MAX_MESSAGE_CHARS = 8_192
@@ -51,23 +59,88 @@ class WhisperCrypto @Inject constructor() {
         private const val MAX_ATTACHMENT_BYTES = WhisperImageCipherTransport.MAX_CIPHER_BYTES - (AES_GCM_TAG_LEN / 8)
         private val ATTACHMENT_AAD = "whisper-attachment-v1".toByteArray(Charsets.UTF_8)
         private val MESSAGE_AAD = "whisper-message-v1".toByteArray(Charsets.UTF_8)
+
+        /**
+         * H-3 FIX (reviewwhisper.md): single switch controlling the pre-AAD decryption
+         * fallbacks. Legacy rows created before direction-bound AAD existed can only be
+         * decrypted without AAD (messages) or with constant-only AAD (attachments) — both
+         * fallbacks weaken replay protection, so they are gated here.
+         *
+         * Keep this TRUE only until every device has had a full migration window
+         * (cached ciphertext is re-fetched/decrypted once into the Room cache), then flip
+         * to FALSE in a dedicated release so cross-chat replay protection has no silent
+         * escape hatch anymore. New ciphertext is ALWAYS written with bound AAD.
+         */
+        internal var LEGACY_AAD_FALLBACK_ENABLED: Boolean = true
+
+        /**
+         * SHA-256 fingerprint of a base64 public key, rendered as 8 groups of 4
+         * uppercase hex chars ("AAAA-BBBB-…"). Single source of truth shared by
+         * [fingerprint] and the profile screen so the two can never drift.
+         *
+         * Uses java.util.Base64 (minSdk 31) instead of android.util.Base64 so this
+         * security-critical contract is testable in plain JVM unit tests (H-11).
+         */
+        fun computeFingerprint(base64PublicKey: String?): String? {
+            if (base64PublicKey.isNullOrBlank()) return null
+            return try {
+                // Strict RFC 4648 decoder — malformed keys must yield null (never a
+                // fingerprint of silently-stripped garbage), matching the previous
+                // android.util.Base64.DEFAULT rejection semantics.
+                val rawBytes = java.util.Base64.getDecoder().decode(base64PublicKey.trim())
+                val digest = MessageDigest.getInstance("SHA-256").digest(rawBytes)
+                digest.joinToString("") { "%02X".format(it) }.chunked(4).take(8).joinToString("-")
+            } catch (_: Exception) { null }
+        }
     }
+
+    /** A newly generated key pair waiting for the server publish to confirm it. */
+    data class StagedKeyPair(val alias: String, val publicKeyBase64: String)
+
+    private val rotationLock = Any()
 
     init {
         ensureKeyPairExists()
     }
 
+    /**
+     * Resolves (creating or adopting if needed) the ACTIVE key alias.
+     * Rotation switches this pointer only AFTER the new public key is published,
+     * so a failed publish can be rolled back by deleting the staged alias — the
+     * old private key is never destroyed before the server acknowledges its replacement.
+     */
+    private fun activeAlias(): String {
+        synchronized(rotationLock) {
+            val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            prefs.getString(PREF_ACTIVE_ALIAS, null)?.let { return it }
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            val alias = if (keyStore.containsAlias(LEGACY_KEY_ALIAS)) {
+                LEGACY_KEY_ALIAS
+            } else {
+                val created = genStagedAlias()
+                createKeyPairUnder(created)
+                created
+            }
+            prefs.edit().putString(PREF_ACTIVE_ALIAS, alias).apply()
+            return alias
+        }
+    }
+
+    private fun genStagedAlias(): String =
+        STAGED_ALIAS_PREFIX + System.currentTimeMillis()
+
+    private fun createKeyPairUnder(alias: String) {
+        val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEYSTORE_PROVIDER)
+        val parameterSpec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_AGREE_KEY)
+            .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+            .build()
+        kpg.initialize(parameterSpec)
+        kpg.generateKeyPair()
+    }
+
     private fun ensureKeyPairExists() {
         try {
-            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            if (!keyStore.containsAlias(KEY_ALIAS)) {
-                val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEYSTORE_PROVIDER)
-                val parameterSpec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_AGREE_KEY)
-                    .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                    .build()
-                kpg.initialize(parameterSpec)
-                kpg.generateKeyPair()
-            }
+            activeAlias()
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Key pair generation failed", e)
         }
@@ -76,31 +149,19 @@ class WhisperCrypto @Inject constructor() {
     fun getPublicKeyBase64(): String? {
         return try {
             val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+            val entry = keyStore.getEntry(activeAlias(), null) as? KeyStore.PrivateKeyEntry
             val publicKey = entry?.certificate?.publicKey ?: return null
             Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
         } catch (_: Exception) { null }
     }
 
-    /**
-     * SHA-256 fingerprint of a base64 public key, rendered as 8 groups of 4
-     * uppercase hex chars ("AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH").
-     * 8 groups × 16 bits = 128-bit security for manual out-of-band verification.
-     */
-    fun fingerprint(base64PublicKey: String?): String? {
-        if (base64PublicKey.isNullOrBlank()) return null
-        return try {
-            val rawBytes = Base64.decode(base64PublicKey.trim(), Base64.DEFAULT)
-            val digest = MessageDigest.getInstance("SHA-256").digest(rawBytes)
-            val hex = digest.joinToString("") { "%02X".format(it) }
-            hex.chunked(4).take(8).joinToString("-")
-        } catch (_: Exception) { null }
-    }
+    /** SHA-256 fingerprint of a base64 public key, rendered as 8 groups of 4 uppercase hex chars ("AAAA-BBBB-…"). */
+    fun fingerprint(base64PublicKey: String?): String? = computeFingerprint(base64PublicKey)
 
     private fun getPrivateKey(): PrivateKey? {
         return try {
             val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+            val entry = keyStore.getEntry(activeAlias(), null) as? KeyStore.PrivateKeyEntry
             entry?.privateKey
         } catch (_: Exception) { null }
     }
@@ -135,18 +196,12 @@ class WhisperCrypto @Inject constructor() {
             keyAgreement.doPhase(recipientPubKey, true)
             val sharedSecret = keyAgreement.generateSecret()
 
-            // HKDF-Extract: PRK = HMAC-SHA256(salt, IKM=sharedSecret)
-            // P1 FIX: Zero salt is non-standard. Use empty 0-len salt per RFC5869 when no salt.
-            // Extract without salt is per spec: PRK = HMAC-SHA256(0x00*HashLen?, IKM) — using
-            // fixed zeros weakened extract. Now salt=None -> HMAC key 0 bytes => PRK = HMAC-SHA256("", sharedSecret).
+            // HKDF-Extract: PRK = HMAC-SHA256(salt, IKM=sharedSecret).
+            // DEVIATION (documented, stable): we use a zero-filled 32-byte salt rather than
+            // RFC 5869's empty salt. Both are deterministic; the IKM here is a uniformly
+            // random ECDH secret, so extract quality is unaffected. This must NOT change
+            // without a dual-derive migration — every stored message was derived with it.
             val mac = Mac.getInstance("HmacSHA256")
-            val salt = ByteArray(0) // RFC5869: if not provided, use 0-length
-            // For compatibility with pre-fix zero-salt rows, KDF must stay same length.
-            // We try new (empty) then fall back? For now empty salt is standard; legacy zero-salt
-            // is detected at decrypt time via retry (deriveSharedKey returns null on failure and
-            // caller retries with legacy). To avoid breaking legacy history, we keep zero-salt
-            // as primary and add empty-salt as secondary derived key check in deriveSharedKey caller.
-            // Simplest: keep zero-salt for 1.0 compat, but document as P1.
             val zeroSalt = ByteArray(32)
             mac.init(SecretKeySpec(zeroSalt, "HmacSHA256"))
             val prk = mac.doFinal(sharedSecret)
@@ -234,12 +289,15 @@ class WhisperCrypto @Inject constructor() {
             val aadPlainBytes = runCatching { aadCipher.doFinal(cipherBytes) }.getOrNull()
             if (aadPlainBytes != null) {
                 String(aadPlainBytes, Charsets.UTF_8)
-            } else {
-                // Legacy rows predating AAD binding: decrypt without it.
+            } else if (LEGACY_AAD_FALLBACK_ENABLED) {
+                // Legacy rows predating AAD binding: decrypt without it. Gated by
+                // LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion.
                 val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding")
                 legacyCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
                 val legacyPlainBytes = legacyCipher.doFinal(cipherBytes)
                 String(legacyPlainBytes, Charsets.UTF_8)
+            } else {
+                null
             }
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Decryption failed: ${e.message}")
@@ -271,7 +329,8 @@ class WhisperCrypto @Inject constructor() {
             if (iv.size != IV_LEN) return null
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
-            // Try bound AAD first; fall back to legacy constant-only AAD for pre-fix rows.
+            // Try bound AAD first; fall back to legacy constant-only AAD for pre-fix rows
+            // (gated by LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion).
             val boundAad = aadFor(senderId, receiverId) + ATTACHMENT_AAD
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             val bound = runCatching {
@@ -279,41 +338,105 @@ class WhisperCrypto @Inject constructor() {
                 cipher.updateAAD(boundAad)
                 cipher.doFinal(cipherBytes)
             }.getOrNull()
-            bound ?: run {
-                val legacy = Cipher.getInstance("AES/GCM/NoPadding")
-                legacy.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
-                legacy.updateAAD(ATTACHMENT_AAD)
-                legacy.doFinal(cipherBytes)
-            }
+            if (bound != null) return bound
+            if (!LEGACY_AAD_FALLBACK_ENABLED) return null
+            val legacy = Cipher.getInstance("AES/GCM/NoPadding")
+            legacy.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
+            legacy.updateAAD(ATTACHMENT_AAD)
+            legacy.doFinal(cipherBytes)
         } catch (e: Exception) {
             android.util.Log.w("WhisperCrypto", "Attachment decryption failed: ${e.message}")
             null
         }
     }
 
-    // Legacy overloads for callers that haven't migrated yet — delegate to constant AAD so old rows stay decryptable.
-    fun encryptAttachment(bytes: ByteArray, recipientPublicKeyBase64: String): Pair<ByteArray, String>? =
-        encryptAttachment(bytes, recipientPublicKeyBase64, "", "")
-    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?): ByteArray? =
-        decryptAttachment(cipherBytes, ivBase64, senderPublicKeyBase64, "", "")
+    // H-3 FIX (reviewwhisper.md): the old convenience overloads
+    //   encryptAttachment(bytes, recipientKey) / decryptAttachment(cipher, iv, senderKey)
+    // silently bound AAD to senderId="" receiverId="", producing replayable ciphertext.
+    // They had no remaining callers and have been deleted — every caller must pass the
+    // real (senderId, receiverId) pair.
 
     fun isCurrentPublicKey(publicKeyBase64: String?): Boolean =
         !publicKeyBase64.isNullOrBlank() && publicKeyBase64 == getPublicKeyBase64()
 
-    /** Destroys the local key pair and generates a fresh one (account deletion). */
+    /**
+     * Destroys the local key pair and generates a fresh one (account deletion).
+     * Removes the active pair, any staged-but-uncommitted pair, and the pointer.
+     */
     fun resetKeyPair() {
         try {
-            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
+            synchronized(rotationLock) {
+                val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                val active = prefs.getString(PREF_ACTIVE_ALIAS, null) ?: LEGACY_KEY_ALIAS
+                for (alias in listOf(active, LEGACY_KEY_ALIAS)) {
+                    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+                }
+                // Best-effort: remove any orphaned staged aliases from interrupted rotations.
+                for (entry in keyStore.aliases().toList()) {
+                    if (entry.startsWith(STAGED_ALIAS_PREFIX)) keyStore.deleteEntry(entry)
+                }
+                prefs.edit().remove(PREF_ACTIVE_ALIAS).apply()
+            }
+            ensureKeyPairExists()
         } catch (e: Exception) {
             android.util.Log.w("WhisperCrypto", "Key pair deletion failed", e)
         }
-        ensureKeyPairExists()
     }
 
-    /** Rotates the local P-256 EC key pair and returns the new base64 public key. */
-    fun rotateKeyPair(): String? {
-        resetKeyPair()
-        return getPublicKeyBase64()
+    // ── Crash-safe rotation (publish-before-switch, rollback on failure) ──
+
+    /**
+     * Generates a fresh key pair under a STAGED alias without touching the active one.
+     * Returns the staged alias + its public key, or null on failure. The caller must
+     * publish [StagedKeyPair.publicKeyBase64] and then call either
+     * [commitStagedKeyPair] (server confirmed) or [abortStagedKeyPair] (publish failed).
+     */
+    fun stageNewKeyPair(): StagedKeyPair? {
+        return try {
+            synchronized(rotationLock) {
+                val alias = genStagedAlias()
+                createKeyPairUnder(alias)
+                val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                val entry = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
+                    ?: return@synchronized null
+                StagedKeyPair(alias, Base64.encodeToString(entry.certificate.publicKey.encoded, Base64.NO_WRAP))
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("WhisperCrypto", "Key staging failed", e)
+            null
+        }
+    }
+
+    /** Promotes a staged pair to active and destroys the previous key. Call only after the server accepted the new public key. */
+    fun commitStagedKeyPair(staged: StagedKeyPair): Boolean {
+        return try {
+            synchronized(rotationLock) {
+                val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                if (!keyStore.containsAlias(staged.alias)) return false
+                val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                val previous = prefs.getString(PREF_ACTIVE_ALIAS, null)
+                prefs.edit().putString(PREF_ACTIVE_ALIAS, staged.alias).apply()
+                if (previous != null && previous != staged.alias && keyStore.containsAlias(previous)) {
+                    keyStore.deleteEntry(previous)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("WhisperCrypto", "Key commit failed", e)
+            false
+        }
+    }
+
+    /** Rolls an unpublished staged pair back — the old key remains active and intact. */
+    fun abortStagedKeyPair(staged: StagedKeyPair) {
+        try {
+            synchronized(rotationLock) {
+                val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                if (keyStore.containsAlias(staged.alias)) keyStore.deleteEntry(staged.alias)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("WhisperCrypto", "Key abort failed", e)
+        }
     }
 }

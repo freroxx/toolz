@@ -72,6 +72,7 @@ class WhisperToastState {
         } else {
             // Cap queue at 5 to avoid spam.
             if (queue.size < 5) queue.addLast(data)
+            else android.util.Log.w("WhisperToast", "Toast queue full (cap 5) — dropped message: ${data.message.take(80)}")
         }
     }
 
