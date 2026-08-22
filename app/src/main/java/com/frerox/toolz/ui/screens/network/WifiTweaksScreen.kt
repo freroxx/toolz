@@ -78,6 +78,7 @@ import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
 import com.frerox.toolz.ui.screens.network.suite.MiniMetric
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
@@ -323,7 +324,7 @@ internal fun OverviewTab(
     extraCards: (@Composable () -> Unit)? = null
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
     ) {
@@ -648,8 +649,14 @@ internal fun AnalyzerTab(
                     }
                 }
             ) {
-                Box(Modifier.fillMaxWidth().height(160.dp).clip(NetTokens.InnerShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(8.dp)) {
-                    ExpressiveChannelMap(results = state.scanResults, currentBssid = state.networkConfig.bssid, bandFilter = bandFilter, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxWidth().height(180.dp).clip(NetTokens.InnerShape).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(8.dp)) {
+                    InformativeSpectrumMap(
+                        congestion = state.congestion,
+                        currentChannel = state.networkConfig.channel,
+                        results = state.scanResults,
+                        bandFilter = bandFilter,
+                        modifier = Modifier.fillMaxSize()
+                    )
                     if (state.isScanning) ScanningPulse()
                     if (state.scanResults.isEmpty() && !state.isScanning) Text("Scan to see spectrum", Modifier.align(Alignment.Center), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -704,37 +711,62 @@ internal fun AnalyzerTab(
     }
 }
 
-/** Expressive channel map — accurate bars per channel, current highlighted, 50dp pills. */
+/** Informative spectrum — per-channel bars with count, avg signal, utilization, current & recommended highlighted, band-aware. */
 @Composable
-private fun ExpressiveChannelMap(results: List<WifiScanResult>, currentBssid: String, bandFilter: String, modifier: Modifier = Modifier) {
+private fun InformativeSpectrumMap(
+    congestion: List<ChannelCongestion>,
+    currentChannel: Int,
+    results: List<WifiScanResult>,
+    bandFilter: String,
+    modifier: Modifier = Modifier
+) {
     val primary = MaterialTheme.colorScheme.primary
-    val filtered = remember(results, bandFilter) {
-        results.filter { bandFilter == "ALL" || it.band.startsWith(bandFilter) }
-    }
-    val appear by animateFloatAsState(targetValue = 1f, animationSpec = tween(800, easing = FastOutSlowInEasing), label = "channel_appear")
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val error = MaterialTheme.colorScheme.error
+    val appear by animateFloatAsState(targetValue = 1f, animationSpec = tween(900, easing = FastOutSlowInEasing), label = "channel_appear")
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
     Canvas(modifier = modifier) {
+        // Filter congestion by band
+        val filtered = congestion.filter { bandFilter == "ALL" || it.band.startsWith(bandFilter) }.sortedBy { it.channel }
         if (filtered.isEmpty()) return@Canvas
-        val byChannel = filtered.groupBy { it.channel }.toSortedMap()
-        val maxCount = byChannel.values.maxOf { it.size }.toFloat().coerceAtLeast(1f)
-        val barWidth = size.width / (byChannel.size.coerceAtLeast(1) * 1.4f)
-        val gap = barWidth * 0.4f
-        var x = gap / 2
-        byChannel.forEach { (ch, aps) ->
-            val strongest = aps.maxOf { it.rssi }.toFloat()
-            val norm = ((strongest + 100f).coerceIn(0f, 70f) / 70f) * 0.85f + 0.15f
-            val h = size.height * norm * appear
-            val isCurrent = aps.any { it.bssid == currentBssid }
-            val isOpen = aps.any { it.security == "Open" }
+        val barWidth = size.width / (filtered.size.coerceAtLeast(1) * 1.5f)
+        val gap = barWidth * 0.5f
+        var x = gap
+        filtered.forEach { ch ->
+            val utilNorm = (ch.utilizationScore.coerceIn(0, 100) / 100f) * 0.75f + 0.15f
+            val countNorm = (ch.networkCount / 8f).coerceIn(0f, 1f) * 0.25f
+            val h = size.height * (utilNorm + countNorm).coerceIn(0.12f, 0.92f) * appear * 0.85f
+            val isCurrent = ch.channel == currentChannel && currentChannel != 0
+            val isRec = ch.isRecommended
+            val isCongested = ch.networkCount >= 4 || ch.utilizationScore >= 70
             val col = when {
                 isCurrent -> primary
-                isOpen -> Color(0xFFE57373)
-                else -> primary.copy(alpha = 0.55f)
+                isRec -> tertiary
+                isCongested -> error.copy(alpha = 0.75f)
+                else -> primary.copy(alpha = 0.45f)
             }
-            drawRoundRect(color = col, topLeft = Offset(x, size.height - h), size = androidx.compose.ui.geometry.Size(barWidth, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
+            // bar
+            drawRoundRect(color = col, topLeft = Offset(x, size.height - h - 14.dp.toPx()), size = androidx.compose.ui.geometry.Size(barWidth, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
+            // count badge on top
+            if (ch.networkCount > 0) {
+                val txt = "${ch.networkCount}"
+                val layout = textMeasurer.measure(txt, labelStyle.copy(color = col))
+                drawText(layout, color = col, topLeft = Offset(x + barWidth/2 - layout.size.width/2, size.height - h - 14.dp.toPx() - 14.dp.toPx()))
+            }
+            // channel label bottom
+            val chTxt = "${ch.channel}"
+            val chLayout = textMeasurer.measure(chTxt, labelStyle.copy(fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal))
+            drawText(chLayout, color = if (isCurrent) primary else Color.Gray.copy(alpha = 0.7f), topLeft = Offset(x + barWidth/2 - chLayout.size.width/2, size.height - 12.dp.toPx()))
             x += barWidth + gap
         }
     }
-    // Channel labels below are drawn via separate Row in parent for simplicity
+}
+/** Keep old name as alias for ChannelSpectrumCard (not used in hero) */
+@Composable
+private fun ExpressiveChannelMap(results: List<WifiScanResult>, currentBssid: String, bandFilter: String, modifier: Modifier = Modifier) {
+    // Delegates to informative map for backward compat
+    InformativeSpectrumMap(congestion = emptyList(), currentChannel = 0, results = results, bandFilter = bandFilter, modifier = modifier)
 }
 
 @Composable
@@ -1148,8 +1180,8 @@ internal fun DnsEngineTab(
                     "Fast" to listOf("private_dns_cloudflare", "private_dns_google"),
                     "Family" to emptyList<String>()
                 )
-                // P4 DNS category chips (filter presets)
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // P4 DNS category chips (filter presets) — with horizontal fading edges
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).horizontalFadingEdges(left = 16.dp, right = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("ALL", "SPEED", "PRIVACY", "SECURITY", "FAMILY").forEach { cat ->
                         FilterChip(
                             selected = dnsFilter == cat,
@@ -1260,7 +1292,7 @@ internal fun DiagnosticsTab(
     var traceTarget by remember(state.lastTraceTarget) { mutableStateOf(state.lastTraceTarget) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {

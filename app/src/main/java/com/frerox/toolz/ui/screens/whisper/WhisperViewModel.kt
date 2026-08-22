@@ -39,6 +39,7 @@ class WhisperViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val crypto: WhisperCrypto,
     private val outgoingQueue: WhisperOutgoingQueue,
+    private val aubupManager: WhisperAubupManager,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
@@ -535,6 +536,49 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
+    fun createAccessFile(
+        whisperCode: String,
+        onSuccess: (java.io.File) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val current = _uiState.value.currentProfile ?: run {
+            onError("Profile not loaded")
+            return
+        }
+        viewModelScope.launch {
+            aubupManager.createAccessFileForUser(
+                username = current.username,
+                displayName = current.displayName,
+                whisperCode = whisperCode,
+            ).onSuccess { file ->
+                onSuccess(file)
+            }.onFailure { err ->
+                onError(err.message ?: "Failed to create Access File")
+            }
+        }
+    }
+
+    fun rotateEncryptionKey(onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val newPublicKey = crypto.rotateKeyPair()
+            if (newPublicKey == null) {
+                onComplete(false)
+                return@launch
+            }
+            val update = WhisperProfileUpdate(publicKey = newPublicKey)
+            repository.updateProfile(update)
+                .onSuccess {
+                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                        _uiState.update { it.copy(currentProfile = p) }
+                    }
+                    onComplete(true)
+                }
+                .onFailure {
+                    onComplete(false)
+                }
+        }
+    }
+
     fun deleteAvatar() {
         viewModelScope.launch {
             repository.deleteAvatar()
@@ -634,7 +678,7 @@ class WhisperViewModel @Inject constructor(
                         if (mutePrefs.isMuted(friendship.userA)) return@collect
                         val senderProfile = repository.getProfile(friendship.userA).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
-                        notificationManager.showFriendRequestNotification(senderName)
+                        notificationManager.showFriendRequestNotification(friendship.userA, senderName)
                     }
                 }
         }

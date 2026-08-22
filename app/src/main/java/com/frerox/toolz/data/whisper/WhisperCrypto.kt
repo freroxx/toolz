@@ -83,10 +83,9 @@ class WhisperCrypto @Inject constructor() {
     }
 
     /**
-     * SHA-256 fingerprint of a base64 public key, rendered as 4 groups of 4
-     * uppercase hex chars ("A1B2-C3D4-E5F6-7890"). Hashes the trimmed base64
-     * string to stay byte-for-byte consistent with the fingerprint shown in
-     * the user profile screen.
+     * SHA-256 fingerprint of a base64 public key, rendered as 8 groups of 4
+     * uppercase hex chars ("AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH").
+     * 8 groups × 16 bits = 128-bit security for manual out-of-band verification.
      */
     fun fingerprint(base64PublicKey: String?): String? {
         if (base64PublicKey.isNullOrBlank()) return null
@@ -94,7 +93,7 @@ class WhisperCrypto @Inject constructor() {
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(base64PublicKey.trim().toByteArray(Charsets.UTF_8))
             val hex = digest.joinToString("") { "%02X".format(it) }
-            hex.chunked(4).take(4).joinToString("-")
+            hex.chunked(4).take(8).joinToString("-")
         } catch (_: Exception) { null }
     }
 
@@ -119,6 +118,14 @@ class WhisperCrypto @Inject constructor() {
         }
     }
 
+    /**
+     * Derives a symmetric AES-GCM session key using static ECDH (secp256r1) + HKDF-Extract/Expand.
+     *
+     * SECURITY NOTE (No Forward Secrecy):
+     * Whisper v1.x uses long-term ECDH key agreement without an ephemeral Double Ratchet.
+     * A compromise of the local Keystore private key allows decrypting past messages.
+     * To limit exposure, users can rotate their key pair via [rotateKeyPair].
+     */
     private fun deriveSharedKey(recipientPublicKeyBase64: String): SecretKeySpec? {
         val privateKey = getPrivateKey() ?: return null
         val recipientPubKey = parsePublicKey(recipientPublicKeyBase64) ?: return null
@@ -292,5 +299,11 @@ class WhisperCrypto @Inject constructor() {
             android.util.Log.w("WhisperCrypto", "Key pair deletion failed", e)
         }
         ensureKeyPairExists()
+    }
+
+    /** Rotates the local P-256 EC key pair and returns the new base64 public key. */
+    fun rotateKeyPair(): String? {
+        resetKeyPair()
+        return getPublicKeyBase64()
     }
 }

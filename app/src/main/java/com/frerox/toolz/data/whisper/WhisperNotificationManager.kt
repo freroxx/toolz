@@ -51,6 +51,7 @@ class WhisperNotificationManager @Inject constructor(
         private const val TAG = "WhisperNotifMgr"
         private const val GROUP_KEY = "com.frerox.toolz.WHISPER_MESSAGES"
         private const val REQUEST_CODE_BASE = 9000
+        private const val SUMMARY_NOTIF_ID = 8999
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
@@ -127,8 +128,20 @@ class WhisperNotificationManager @Inject constructor(
             .setContentIntent(pendingIntent)
             .build()
 
+        val summaryNotification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_whisper_notif)
+            .setContentTitle("Whisper")
+            .setContentText("New encrypted messages")
+            .setGroup(GROUP_KEY)
+            .setGroupSummary(true)
+            .setAutoCancel(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
         try {
             notifManager.notify(notifId, notification)
+            notifManager.notify(SUMMARY_NOTIF_ID, summaryNotification)
         } catch (e: SecurityException) {
             Log.e(TAG, "Notification permission not granted: ${e.message}")
         } catch (e: Exception) {

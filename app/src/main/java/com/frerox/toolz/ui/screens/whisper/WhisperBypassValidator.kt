@@ -11,7 +11,12 @@ fun isWhisperBypassPassword(input: String): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         val hashBytes = digest.digest(trimmed.toByteArray(Charsets.UTF_8))
         val expected = BYPASS_HASH.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        MessageDigest.isEqual(hashBytes, expected)
+        val match = MessageDigest.isEqual(hashBytes, expected)
+        if (!match) {
+            // Artificial delay to mitigate rapid automated brute-force attempts
+            Thread.sleep(300)
+        }
+        match
     } catch (_: Exception) {
         false
     }

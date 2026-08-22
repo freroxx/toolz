@@ -133,6 +133,10 @@ android {
         noCompress += "tflite"
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileSdkMinor = 1
 }
 

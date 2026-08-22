@@ -1397,6 +1397,10 @@ private fun ProfileTab(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var showDiscoveryWarningDialog by remember { mutableStateOf(false) }
+    var showAubupInfoDialog by remember { mutableStateOf(false) }
+    var showCreateAccessFileDialog by remember { mutableStateOf(false) }
+    var showRotateKeyDialog by remember { mutableStateOf(false) }
+    var isRotatingKey by remember { mutableStateOf(false) }
 
     // Resolved in composition scope: stringResource is composable-only and cannot be
     // called from the non-composable doSave() callback.
@@ -1666,6 +1670,73 @@ private fun ProfileTab(
                             }
                         }
                     }
+                    ToolzOutlinedExpressiveButton(
+                        onClick = {
+                            haptic.click()
+                            showRotateKeyDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.SyncLock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Rotate Encryption Key", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        // AUBUP: Auth User Backup Program Card
+        ExpressiveCard(
+            onClick = { showCreateAccessFileDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.EnhancedEncryption,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Aubup_SaveAccessFile),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ToolzExpressiveIconButton(onClick = {
+                        haptic.click()
+                        showAubupInfoDialog = true
+                    }) {
+                        Icon(
+                            Icons.Rounded.Info,
+                            contentDescription = "Access File Info",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.st_Whisper_Aubup_SaveAccessFileDesc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ToolzOutlinedExpressiveButton(
+                    onClick = {
+                        haptic.click()
+                        showCreateAccessFileDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.st_Whisper_Aubup_CreateBackup), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -1800,6 +1871,220 @@ private fun ProfileTab(
         }
 
         Spacer(Modifier.height(20.dp))
+    }
+
+    // AUBUP Info Dialog
+    if (showAubupInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showAubupInfoDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            icon = {
+                Icon(
+                    Icons.Rounded.EnhancedEncryption,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    stringResource(R.string.st_Whisper_Aubup_InfoTitle),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Text(
+                    stringResource(R.string.st_Whisper_Aubup_InfoDesc),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(onClick = { showAubupInfoDialog = false }) {
+                    Text(stringResource(R.string.st_Whisper_Aubup_GotIt), fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // AUBUP Create Access File Dialog
+    if (showCreateAccessFileDialog) {
+        var whisperCode by remember { mutableStateOf("") }
+        var confirmWhisperCode by remember { mutableStateOf("") }
+        var codeError by remember { mutableStateOf<String?>(null) }
+        var isCreating by remember { mutableStateOf(false) }
+
+        val codeMismatchMsg = stringResource(R.string.st_Whisper_Aubup_CodeMismatch)
+        val codeLengthMsg = stringResource(R.string.st_Whisper_Aubup_CodeLengthError)
+
+        AlertDialog(
+            onDismissRequest = { if (!isCreating) showCreateAccessFileDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            icon = {
+                Icon(
+                    Icons.Rounded.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    stringResource(R.string.st_Whisper_Aubup_SaveAccessFile),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Aubup_EnterWhisperCode),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedTextField(
+                        value = whisperCode,
+                        onValueChange = {
+                            if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                                whisperCode = it
+                                codeError = null
+                            }
+                        },
+                        label = { Text(stringResource(R.string.st_Whisper_Aubup_WhisperCodeLabel)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        shape = MediumExpressiveShape,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = confirmWhisperCode,
+                        onValueChange = {
+                            if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                                confirmWhisperCode = it
+                                codeError = null
+                            }
+                        },
+                        label = { Text(stringResource(R.string.st_Whisper_Aubup_ConfirmCodeLabel)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        shape = MediumExpressiveShape,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (codeError != null) {
+                        Text(
+                            text = codeError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        if (whisperCode.length != 4) {
+                            codeError = codeLengthMsg
+                            return@ToolzExpressiveButton
+                        }
+                        if (whisperCode != confirmWhisperCode) {
+                            codeError = codeMismatchMsg
+                            return@ToolzExpressiveButton
+                        }
+                        isCreating = true
+                        viewModel.createAccessFile(
+                            whisperCode = whisperCode,
+                            onSuccess = { file ->
+                                isCreating = false
+                                showCreateAccessFileDialog = false
+                                haptic.success()
+                                toastState.show(
+                                    context.getString(R.string.st_Whisper_Aubup_FileCreatedSuccess, profile.effectiveUsername),
+                                    WhisperToastType.SUCCESS
+                                )
+                            },
+                            onError = { err ->
+                                isCreating = false
+                                codeError = err
+                                toastState.show(err, WhisperToastType.ERROR)
+                            }
+                        )
+                    },
+                    enabled = whisperCode.length == 4 && confirmWhisperCode.length == 4 && !isCreating
+                ) {
+                    if (isCreating) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    } else {
+                        Text(stringResource(R.string.st_Whisper_Aubup_CreateBackup), fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(
+                    onClick = { showCreateAccessFileDialog = false },
+                    enabled = !isCreating
+                ) {
+                    Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    // Rotate Key Dialog
+    if (showRotateKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isRotatingKey) showRotateKeyDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            icon = {
+                Icon(Icons.Rounded.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+            },
+            title = { Text("Rotate Encryption Key", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                ToolzExpressiveButton(
+                    onClick = {
+                        isRotatingKey = true
+                        viewModel.rotateEncryptionKey { success ->
+                            isRotatingKey = false
+                            showRotateKeyDialog = false
+                            if (success) {
+                                haptic.success()
+                                toastState.show("Encryption key rotated successfully", WhisperToastType.SUCCESS)
+                            } else {
+                                toastState.show("Failed to rotate encryption key", WhisperToastType.ERROR)
+                            }
+                        }
+                    },
+                    enabled = !isRotatingKey
+                ) {
+                    if (isRotatingKey) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    } else {
+                        Text("Rotate Key", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                ToolzOutlinedExpressiveButton(
+                    onClick = { showRotateKeyDialog = false },
+                    enabled = !isRotatingKey
+                ) {
+                    Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
     }
 
     // Material 3 Expressive Logout Confirmation Dialog

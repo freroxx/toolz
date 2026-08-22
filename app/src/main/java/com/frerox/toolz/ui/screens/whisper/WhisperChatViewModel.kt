@@ -825,6 +825,7 @@ class WhisperChatViewModel @Inject constructor(
                         false
                     } else if (consecutiveFailures >= 10) {
                         android.util.Log.w("WhisperChatVM", "Realtime subscription gave up after 10 consecutive failures: ${cause.message}")
+                        _uiState.update { it.copy(isRealtimeDisconnected = true) }
                         false
                     } else {
                         consecutiveFailures++
@@ -835,6 +836,9 @@ class WhisperChatViewModel @Inject constructor(
                 }
                 .collect { event ->
                     consecutiveFailures = 0
+                    if (_uiState.value.isRealtimeDisconnected) {
+                        _uiState.update { it.copy(isRealtimeDisconnected = false) }
+                    }
                     when (event) {
                         is WhisperChatEvent.MessageEvent -> {
                             val newMsg = event.message
@@ -956,6 +960,14 @@ class WhisperChatViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    /** Reconnects all realtime listeners after a network failure or retry cap. */
+    fun reconnectRealtime() {
+        _uiState.update { it.copy(isRealtimeDisconnected = false) }
+        subscribeToChat()
+        subscribeToTyping()
+        subscribeToPresence()
     }
 
     private fun subscribeToTyping() {

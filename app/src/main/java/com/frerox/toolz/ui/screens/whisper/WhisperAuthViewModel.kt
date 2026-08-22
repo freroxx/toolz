@@ -32,6 +32,21 @@ sealed class UsernameAvailability {
     data class Invalid(val reason: UiText) : UsernameAvailability()
 }
 
+sealed class AubupRecoveryState {
+    object Idle : AubupRecoveryState()
+    object Scanning : AubupRecoveryState()
+    data class ScanResult(
+        val vaultAccounts: List<PasswordEntity>,
+        val accessFiles: List<java.io.File>,
+    ) : AubupRecoveryState()
+    data class Restored(
+        val username: String,
+        val authType: String,
+        val credential: String,
+    ) : AubupRecoveryState()
+    data class Error(val message: String) : AubupRecoveryState()
+}
+
 @HiltViewModel
 class WhisperAuthViewModel @Inject constructor(
     application: Application,
@@ -39,6 +54,7 @@ class WhisperAuthViewModel @Inject constructor(
     private val repository: WhisperRepository,
     private val passwordDao: PasswordDao,
     private val settingsRepository: SettingsRepository,
+    private val aubupManager: WhisperAubupManager,
 ) : AndroidViewModel(application) {
 
     val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
@@ -60,14 +76,10 @@ class WhisperAuthViewModel @Inject constructor(
     private val _usernameAvailability = MutableStateFlow<UsernameAvailability>(UsernameAvailability.Idle)
     val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
 
-    // Clipboard expiry is owned here (viewModelScope survives rotation and navigation,
-    // unlike a rememberCoroutineScope), with a SharedPreferences fallback so a killed
-    // process can still clean up the clipboard the next time this screen opens.
-    private val clipboardRestorePrefs =
-        application.getSharedPreferences("whisper_clipboard_restore", android.content.Context.MODE_PRIVATE)
+    private val _aubupState = MutableStateFlow<AubupRecoveryState>(AubupRecoveryState.Idle)
+    val aubupState: StateFlow<AubupRecoveryState> = _aubupState.asStateFlow()
 
     init {
-        restorePendingClipboardExpiry()
         // The session check must never leave the user stuck on the splash: after a hard
         // cap, fall back to the auth form even if Supabase never resolved the session.
         viewModelScope.launch {
@@ -88,53 +100,119 @@ class WhisperAuthViewModel @Inject constructor(
     }
 
     /**
-     * Copies a token to the clipboard for [TOKEN_CLIPBOARD_TTL_MS], then swaps it back
-     * to [restoreTo]. The timer runs on the ViewModel, so it survives screen navigation
-     * and rotation; the persisted entry covers process death.
-     * NOTE: VM-scoped expiry is best-effort and dies if VM is cleared/navigation away;
-     * a full fix requires WorkManager to guarantee expiry across process death.
+     * Schedules durable clipboard clearing via WorkManager (H-3 fix).
+     * Survives process recreation and app restarts cleanly.
      */
     fun scheduleTokenClipboardExpiry(token: String, restoreTo: String?, clipboard: ClipboardManager) {
-        val deadline = SystemClock.elapsedRealtime() + TOKEN_CLIPBOARD_TTL_MS
-        clipboardRestorePrefs.edit()
-            .putString(KEY_TOKEN, token)
-            .putString(KEY_RESTORE_TO, restoreTo)
-            .putLong(KEY_DEADLINE, deadline)
-            .apply()
-        armClipboardExpiry(token, restoreTo, deadline, clipboard)
+        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.WhisperClipboardClearWorker>()
+            .setInitialDelay(60, java.util.concurrent.TimeUnit.SECONDS)
+            .setInputData(
+                androidx.work.workDataOf(
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_TOKEN to token,
+                    com.frerox.toolz.worker.WhisperClipboardClearWorker.KEY_RESTORE_TO to (restoreTo ?: ""),
+                )
+            )
+            .build()
+
+        androidx.work.WorkManager.getInstance(getApplication())
+            .enqueueUniqueWork(
+                com.frerox.toolz.worker.WhisperClipboardClearWorker.UNIQUE_WORK_NAME,
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
     }
 
-    private fun restorePendingClipboardExpiry() {
-        val token = clipboardRestorePrefs.getString(KEY_TOKEN, null) ?: return
-        val restoreTo = clipboardRestorePrefs.getString(KEY_RESTORE_TO, null)
-        val deadline = clipboardRestorePrefs.getLong(KEY_DEADLINE, 0L)
-        val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java) ?: return
-        val remaining = deadline - SystemClock.elapsedRealtime()
-        if (remaining <= 0) {
-            // The deadline passed while the app was gone: swap the clipboard back now if
-            // our token is still the top entry.
-            if (clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication<Application>())?.toString() == token) {
-                clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo ?: ""))
-            }
-            clipboardRestorePrefs.edit().clear().apply()
-        } else {
-            // Still inside the window: re-arm the timer with the remaining time.
-            armClipboardExpiry(token, restoreTo, deadline, clipboard)
-        }
-    }
-
-    private fun armClipboardExpiry(token: String, restoreTo: String?, deadline: Long, clipboard: ClipboardManager) {
-        val remaining = (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+    fun startAubupScan() {
         viewModelScope.launch {
-            delay(remaining)
-            // Only touch the clipboard if our token is still the top entry.
-            // Uses coerceToText for AnnotatedString compatibility and elapsedRealtime for monotonic deadline.
-            // NOTE: Best-effort VM-scoped; full fix requires WorkManager to survive VM recreation.
-            if (clipboard.primaryClip?.getItemAt(0)?.coerceToText(getApplication<Application>())?.toString() == token) {
-                clipboard.setPrimaryClip(ClipData.newPlainText(null, restoreTo ?: ""))
-            }
-            clipboardRestorePrefs.edit().clear().apply()
+            _aubupState.value = AubupRecoveryState.Scanning
+            delay(400) // Visual feedback for smooth scanning transition
+            val vaultAccounts = aubupManager.scanVaultForWhisperAccounts()
+            val accessFiles = aubupManager.scanToolzFolderForAccessFiles()
+            _aubupState.value = AubupRecoveryState.ScanResult(
+                vaultAccounts = vaultAccounts,
+                accessFiles = accessFiles,
+            )
         }
+    }
+
+    fun resetAubupState() {
+        _aubupState.value = AubupRecoveryState.Idle
+    }
+
+    fun restoreFromVault(account: PasswordEntity) {
+        viewModelScope.launch {
+            _submitting.value = true
+            val isToken = account.name.contains("Anon", ignoreCase = true) ||
+                (account.password.length == 64 && account.password.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' })
+
+            val result = if (isToken) {
+                authManager.loginWithToken(account.password)
+            } else {
+                authManager.loginWithUsername(account.username, account.password)
+            }
+
+            result.onSuccess {
+                _authState.value = WhisperAuthState.Authenticated
+                _aubupState.value = AubupRecoveryState.Restored(
+                    username = account.username,
+                    authType = if (isToken) "TOKEN" else "PASSWORD",
+                    credential = account.password,
+                )
+            }.onFailure { err ->
+                _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with stored credentials")
+            }
+            _submitting.value = false
+        }
+    }
+
+    fun restoreFromAccessFile(file: java.io.File, whisperCode: String) {
+        viewModelScope.launch {
+            _submitting.value = true
+            aubupManager.decryptAccessFile(file, whisperCode)
+                .onSuccess { payload ->
+                    loginWithPayload(payload)
+                }
+                .onFailure { err ->
+                    _aubupState.value = AubupRecoveryState.Error(err.message ?: "Failed to decrypt Access File")
+                    _submitting.value = false
+                }
+        }
+    }
+
+    fun restoreFromAccessBytes(bytes: ByteArray, whisperCode: String) {
+        viewModelScope.launch {
+            _submitting.value = true
+            aubupManager.decryptAccessBytes(bytes, whisperCode)
+                .onSuccess { payload ->
+                    loginWithPayload(payload)
+                }
+                .onFailure { err ->
+                    _aubupState.value = AubupRecoveryState.Error(err.message ?: "Failed to decrypt Access File")
+                    _submitting.value = false
+                }
+        }
+    }
+
+    private suspend fun loginWithPayload(payload: WhisperAccessPayload) {
+        val result = if (payload.authType == "TOKEN") {
+            authManager.loginWithToken(payload.credential)
+        } else {
+            authManager.loginWithUsername(payload.username, payload.credential)
+        }
+
+        result.onSuccess {
+            _authState.value = WhisperAuthState.Authenticated
+            _aubupState.value = AubupRecoveryState.Restored(
+                username = payload.username,
+                authType = payload.authType,
+                credential = payload.credential,
+            )
+            // Re-save to vault on successful recovery
+            saveToVault("Whisper: ${payload.username}", payload.username, payload.credential)
+        }.onFailure { err ->
+            _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with restored credentials")
+        }
+        _submitting.value = false
     }
 
     private var usernameCheckJob: Job? = null

@@ -793,6 +793,13 @@ fun CredentialCard(
     val isIncomplete = password.password.isEmpty()
     val pawnedCount = password.pwnedCount ?: 0
     val isBreached = pawnedCount > 0
+    val isWhisper = remember(password.name, password.url) {
+        password.url?.contains("whisper.toolz.app", ignoreCase = true) == true ||
+        password.name.startsWith("Whisper", ignoreCase = true)
+    }
+    val isTokenAccount = remember(password.name, password.password) {
+        password.name.contains("Anon", ignoreCase = true) || (password.password.length == 64 && password.password.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' })
+    }
 
     // Swipe-to-dismiss: left = edit, right = delete
     val dismissState = rememberSwipeToDismissBoxState(
@@ -867,6 +874,7 @@ fun CredentialCard(
         val cardBg by animateColorAsState(
             targetValue = when {
                 isBreached  -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.18f)
+                isWhisper   -> if (expanded) Color(0xFF6750A4).copy(alpha = 0.18f) else Color(0xFF6750A4).copy(alpha = 0.08f)
                 expanded    -> MaterialTheme.colorScheme.surfaceContainerHighest
                 else        -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
@@ -876,6 +884,7 @@ fun CredentialCard(
         val cardBorder by animateColorAsState(
             targetValue = when {
                 isBreached -> MaterialTheme.colorScheme.error.copy(alpha = 0.28f)
+                isWhisper  -> if (expanded) Color(0xFF8E24AA).copy(alpha = 0.55f) else Color(0xFF8E24AA).copy(alpha = 0.30f)
                 expanded   -> MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                 else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.14f)
             },
@@ -892,7 +901,7 @@ fun CredentialCard(
             modifier = Modifier.fillMaxWidth(),
             shape = SquircleShape,
             color = cardBg,
-            border = BorderStroke(1.dp, cardBorder),
+            border = BorderStroke(if (isWhisper) 1.5.dp else 1.dp, cardBorder),
             tonalElevation = if (expanded) 2.dp else 0.dp,
             shadowElevation = if (expanded) 3.dp else 0.dp,
         ) {
@@ -910,14 +919,44 @@ fun CredentialCard(
                     Spacer(Modifier.width(14.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            smartName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                smartName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (isWhisper) {
+                                Spacer(Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF8E24AA).copy(alpha = 0.18f),
+                                    border = BorderStroke(1.dp, Color(0xFF8E24AA).copy(alpha = 0.35f)),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Lock,
+                                            contentDescription = null,
+                                            tint = Color(0xFFAB47BC),
+                                            modifier = Modifier.size(10.dp),
+                                        )
+                                        Spacer(Modifier.width(3.dp))
+                                        Text(
+                                            if (isTokenAccount) "Whisper Token" else "Whisper E2EE",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFAB47BC),
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Text(
                             text = password.username.ifBlank { "No username set" },
                             style = MaterialTheme.typography.bodySmall,
@@ -1121,13 +1160,18 @@ private fun AppIconAvatar(
     context: android.content.Context,
 ) {
     var loadFailed by remember { mutableStateOf(false) }
+    val isWhisper = remember(password.name, password.url) {
+        password.url?.contains("whisper.toolz.app", ignoreCase = true) == true ||
+        password.name.startsWith("Whisper", ignoreCase = true)
+    }
     val isApp = password.url?.startsWith("android://") == true
     val packageName = if (isApp) password.url?.removePrefix("android://") else null
 
-    val bgColor = if (isIncomplete)
-        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
-    else
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+    val bgColor = when {
+        isWhisper -> Color(0xFF8E24AA)
+        isIncomplete -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
+        else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+    }
 
     val fallbackTextColor = if (isIncomplete)
         MaterialTheme.colorScheme.onTertiaryContainer
@@ -1140,7 +1184,25 @@ private fun AppIconAvatar(
         modifier = Modifier.size(52.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            if (isApp && packageName != null) {
+            if (isWhisper) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF8E24AA), Color(0xFF6750A4))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Shield,
+                        contentDescription = "Whisper E2EE Account",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            } else if (isApp && packageName != null) {
                 val appIcon = remember(packageName) { PasswordUtils.getAppIcon(context, packageName) }
                 if (appIcon != null) {
                     AsyncImage(

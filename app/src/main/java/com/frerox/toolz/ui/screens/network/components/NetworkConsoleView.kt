@@ -23,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import com.frerox.toolz.ui.components.fadingEdges
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -115,8 +117,8 @@ fun NetworkConsoleView(
                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(if (isShizukuReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error))
                 Text(if (isShizukuReady) "Ready to execute" else "Enable Shizuku to run commands", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            // Filters — 50dp pill, single scroll row, expressive
-            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Filters — 50dp pill, single scroll row, expressive with horizontal fading edges
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).horizontalFadingEdges(left = 16.dp, right = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 categories.forEach { cat ->
                     FilterChip(selected = selectedCategory == cat, onClick = { vibrationManager?.vibrateClick(); selectedCategory = cat }, label = { Text(cat) }, shape = RoundedCornerShape(50))
                 }
@@ -134,7 +136,11 @@ fun NetworkConsoleView(
                         }
                     }
                 } else {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().padding(12.dp).fadingEdges(top = 16.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         items(filteredLogs) { log -> ConsoleLogItem(log = log) }
                     }
                 }

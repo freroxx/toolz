@@ -24,6 +24,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -130,6 +131,34 @@ fun WhisperAuthScreen(
         }
     }
 
+    val aubupState by viewModel.aubupState.collectAsStateWithLifecycle()
+    var showAubupRecoverySheet by remember { mutableStateOf(false) }
+    var restoredCredentials by remember { mutableStateOf<AubupRecoveryState.Restored?>(null) }
+
+    val filePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
+            if (bytes != null) {
+                // Stored in temporary state to prompt for whisper code
+            }
+        }
+    }
+
+    LaunchedEffect(aubupState) {
+        when (val s = aubupState) {
+            is AubupRecoveryState.Restored -> {
+                restoredCredentials = s
+                showAubupRecoverySheet = false
+            }
+            is AubupRecoveryState.Error -> {
+                toastState.show(s.message, WhisperToastType.ERROR)
+            }
+            else -> {}
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
@@ -193,6 +222,10 @@ fun WhisperAuthScreen(
                     onRegisterToken = viewModel::registerWithGeneratedToken,
                     onLoginToken = viewModel::loginWithToken,
                     onNormalizeToken = viewModel::normalizeToken,
+                    onLostAccountClick = {
+                        showAubupRecoverySheet = true
+                        viewModel.startAubupScan()
+                    },
                     onCopyToken = { token, restoreTo ->
                         val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
                         viewModel.scheduleTokenClipboardExpiry(token, restoreTo, systemClipboard)
@@ -200,6 +233,30 @@ fun WhisperAuthScreen(
                     modifier = Modifier.padding(paddingValues),
                 )
             }
+        }
+
+        if (showAubupRecoverySheet) {
+            WhisperAubupRecoveryModalSheet(
+                aubupState = aubupState,
+                onDismiss = {
+                    showAubupRecoverySheet = false
+                    viewModel.resetAubupState()
+                },
+                onRestoreVault = viewModel::restoreFromVault,
+                onRestoreFile = viewModel::restoreFromAccessFile,
+                onRestoreBytes = viewModel::restoreFromAccessBytes,
+                onRescan = viewModel::startAubupScan,
+            )
+        }
+
+        if (restoredCredentials != null) {
+            WhisperCredentialRevealedDialog(
+                restored = restoredCredentials!!,
+                onDismiss = {
+                    restoredCredentials = null
+                    onAuthenticated()
+                }
+            )
         }
 
         WhisperToastHost(
@@ -227,6 +284,7 @@ private fun WhisperAuthContent(
     onRegisterToken: (displayName: String) -> Unit,
     onLoginToken: (String) -> Unit,
     onNormalizeToken: (String) -> String,
+    onLostAccountClick: () -> Unit,
     onCopyToken: (token: String, restoreTo: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -240,7 +298,7 @@ private fun WhisperAuthContent(
             .verticalScroll(rememberScrollState())
             .fadingEdges(top = 16.dp, bottom = 24.dp)
             .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         WhisperAuthHeader()
 
@@ -287,6 +345,21 @@ private fun WhisperAuthContent(
         }
         
         VaultAssuranceCard()
+
+        // AUBUP: I lost my account recovery entrypoint
+        ToolzOutlinedExpressiveButton(
+            onClick = onLostAccountClick,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = MediumExpressiveShape,
+        ) {
+            Icon(Icons.Rounded.LockReset, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(R.string.st_Whisper_Aubup_LostAccount),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
     }
@@ -926,4 +999,431 @@ private fun calculatePasswordScore(pwd: String): Int {
 private fun String.maskedHex(): String {
     if (length <= 12) return "•".repeat(length)
     return take(6) + "•".repeat(length - 10) + takeLast(4)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUBUP RECOVERY COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun WhisperAubupRecoveryModalSheet(
+    aubupState: AubupRecoveryState,
+    onDismiss: () -> Unit,
+    onRestoreVault: (com.frerox.toolz.data.password.PasswordEntity) -> Unit,
+    onRestoreFile: (java.io.File, String) -> Unit,
+    onRestoreBytes: (ByteArray, String) -> Unit,
+    onRescan: () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val context = LocalContext.current
+    var selectedFileForCode by remember { mutableStateOf<java.io.File?>(null) }
+    var uploadedBytesForCode by remember { mutableStateOf<ByteArray?>(null) }
+    var whisperCodeInput by remember { mutableStateOf("") }
+    var codeError by remember { mutableStateOf<String?>(null) }
+
+    val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let {
+            val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
+            if (bytes != null) {
+                uploadedBytesForCode = bytes
+                whisperCodeInput = ""
+                codeError = null
+            }
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.LockReset,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Aubup_Title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        stringResource(R.string.st_Whisper_Aubup_Subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ToolzExpressiveIconButton(onClick = { haptic.click(); onRescan() }) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Rescan", modifier = Modifier.size(20.dp))
+                }
+            }
+
+            HorizontalDivider()
+
+            when (aubupState) {
+                is AubupRecoveryState.Scanning -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            stringResource(R.string.st_Whisper_Aubup_Scanning),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                is AubupRecoveryState.ScanResult -> {
+                    val hasVault = aubupState.vaultAccounts.isNotEmpty()
+                    val hasFiles = aubupState.accessFiles.isNotEmpty()
+
+                    if (selectedFileForCode != null || uploadedBytesForCode != null) {
+                        // Whisper Code Prompt Subview
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_EnterWhisperCode),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+
+                            OutlinedTextField(
+                                value = whisperCodeInput,
+                                onValueChange = {
+                                    if (it.length <= 4 && it.all { c -> c.isDigit() }) {
+                                        whisperCodeInput = it
+                                        codeError = null
+                                    }
+                                },
+                                label = { Text(stringResource(R.string.st_Whisper_Aubup_WhisperCodeLabel)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                shape = MediumExpressiveShape,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            if (codeError != null) {
+                                Text(
+                                    text = codeError!!,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                ToolzOutlinedExpressiveButton(
+                                    onClick = {
+                                        selectedFileForCode = null
+                                        uploadedBytesForCode = null
+                                        whisperCodeInput = ""
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(stringResource(R.string.st_Whisper_Friends_Cancel))
+                                }
+
+                                ToolzExpressiveButton(
+                                    onClick = {
+                                        if (whisperCodeInput.length != 4) {
+                                            codeError = context.getString(R.string.st_Whisper_Aubup_CodeLengthError)
+                                            return@ToolzExpressiveButton
+                                        }
+                                        haptic.success()
+                                        if (selectedFileForCode != null) {
+                                            onRestoreFile(selectedFileForCode!!, whisperCodeInput)
+                                        } else if (uploadedBytesForCode != null) {
+                                            onRestoreBytes(uploadedBytesForCode!!, whisperCodeInput)
+                                        }
+                                    },
+                                    enabled = whisperCodeInput.length == 4,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(stringResource(R.string.st_Whisper_Aubup_DecryptAndLogin), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    } else if (!hasVault && !hasFiles) {
+                        // Empty State: Prompt Upload
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.SearchOff,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_NoBackupsFound),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_UploadDesc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            ToolzExpressiveButton(
+                                onClick = { filePicker.launch("application/octet-stream") },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Rounded.FileUpload, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.st_Whisper_Aubup_ManualUpload), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        // Tier 1: Vault Accounts
+                        if (hasVault) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_VaultFound),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            aubupState.vaultAccounts.forEach { account ->
+                                ExpressiveCard(
+                                    onClick = { onRestoreVault(account) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Shield,
+                                            contentDescription = null,
+                                            tint = Color(0xFF8E24AA),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                account.username,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                if (account.name.contains("Anon", ignoreCase = true)) stringResource(R.string.st_Whisper_Aubup_TokenAccount) else stringResource(R.string.st_Whisper_Aubup_PasswordAccount),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        ToolzExpressiveButton(
+                                            onClick = { onRestoreVault(account) },
+                                        ) {
+                                            Text(stringResource(R.string.st_Whisper_Aubup_RestoreAndLogin), fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tier 2: Access Files (.enc)
+                        if (hasFiles) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_FileFound),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            aubupState.accessFiles.forEach { file ->
+                                ExpressiveCard(
+                                    onClick = {
+                                        selectedFileForCode = file
+                                        whisperCodeInput = ""
+                                        codeError = null
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.EnhancedEncryption,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                file.name,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                "Downloads/Toolz",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        ToolzOutlinedExpressiveButton(
+                                            onClick = {
+                                                selectedFileForCode = file
+                                                whisperCodeInput = ""
+                                                codeError = null
+                                            }
+                                        ) {
+                                            Text(stringResource(R.string.st_Whisper_Aubup_DecryptAndLogin), fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Manual File Upload Button at bottom
+                        ToolzOutlinedExpressiveButton(
+                            onClick = { filePicker.launch("application/octet-stream") },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Rounded.FileUpload, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.st_Whisper_Aubup_ManualUpload), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                else -> {}
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun WhisperCredentialRevealedDialog(
+    restored: AubupRecoveryState.Restored,
+    onDismiss: () -> Unit,
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        icon = {
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(36.dp)
+            )
+        },
+        title = {
+            Text(
+                stringResource(R.string.st_Whisper_Aubup_CredentialRevealedTitle),
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Security Warning Box
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            stringResource(R.string.st_Whisper_Aubup_CredentialWarning),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+
+                // Credential Surface
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Account: @${restored.username}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${restored.authType}: ${restored.credential.take(16)}...",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f)
+                            )
+                            ToolzExpressiveIconButton(onClick = {
+                                haptic.click()
+                                clipboardManager.setText(AnnotatedString(restored.credential))
+                                android.widget.Toast.makeText(context, "Credential copied", android.widget.Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy credential", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            ToolzExpressiveButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text("Continue to Whisper", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }

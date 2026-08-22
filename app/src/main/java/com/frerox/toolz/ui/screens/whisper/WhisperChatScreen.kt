@@ -466,6 +466,28 @@ fun WhisperChatScreen(
                     }
                 }
 
+                // Realtime Disconnected banner (M-6)
+                if (uiState.isRealtimeDisconnected) {
+                    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(18.dp))
+                            Text(
+                                "Live connection lost",
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            ToolzTonalExpressiveButton(onClick = { haptic.click(); viewModel.reconnectRealtime() }) {
+                                Text("Reconnect", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 // Messages list
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (uiState.isLoading && messages.isEmpty()) {
@@ -1221,6 +1243,10 @@ private fun KeyVerifyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (partnerFingerprint != null) {
+                    val formattedPartner = partnerFingerprint.split("-").let { groups ->
+                        if (groups.size == 8) "${groups.take(4).joinToString("-")}\n${groups.drop(4).joinToString("-")}"
+                        else partnerFingerprint
+                    }
                     Text(
                         stringResource(R.string.st_Whisper_PartnerFingerprint, partnerName),
                         style = MaterialTheme.typography.labelSmall,
@@ -1233,7 +1259,7 @@ private fun KeyVerifyDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            partnerFingerprint,
+                            formattedPartner,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
@@ -1243,6 +1269,10 @@ private fun KeyVerifyDialog(
                     }
                 }
                 if (myFingerprint != null) {
+                    val formattedMine = myFingerprint.split("-").let { groups ->
+                        if (groups.size == 8) "${groups.take(4).joinToString("-")}\n${groups.drop(4).joinToString("-")}"
+                        else myFingerprint
+                    }
                     Text(
                         stringResource(R.string.st_Whisper_YourFingerprint),
                         style = MaterialTheme.typography.labelSmall,
@@ -1255,7 +1285,7 @@ private fun KeyVerifyDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            myFingerprint,
+                            formattedMine,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,

@@ -1239,8 +1239,8 @@ class WhisperRepository @Inject constructor(
             for (row in rows) {
                 if (row.partnerId in blockedPartnerIds) continue
                 val profile = profilesById[row.partnerId] ?: continue
-                val decryptedContent = if (row.lastContent.startsWith("[deleted_by_sender")) {
-                    "Message deleted"
+                val decryptedContent = if (WhisperTombstone.isTombstone(row.lastContent)) {
+                    WhisperTombstone.DISPLAY_TEXT
                 } else if (row.lastContentIv != null && profile.publicKey != null) {
                     // The RPC row does not expose a direction, so try both: AAD binds the
                     // exact (sender, receiver) of the original message row.
@@ -1249,7 +1249,7 @@ class WhisperRepository @Inject constructor(
                         ?: "🔒 Encrypted message"
                 } else if (row.lastContentIv != null) {
                     "🔒 Encrypted message"
-                } else row.lastContent
+                } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 val fakeMsg = WhisperMessage(
                     id = "",
@@ -1303,12 +1303,12 @@ class WhisperRepository @Inject constructor(
                 val profile = profilesById[partnerId] ?: continue
                 val lastMsg = visibleMsgs.first()
                 val decryptedContent = if (lastMsg.isDeletedForEveryone) {
-                    "Message deleted"
+                    WhisperTombstone.DISPLAY_TEXT
                 } else if (lastMsg.contentIv != null && profile.publicKey != null) {
                     crypto.decryptMessage(lastMsg.content, lastMsg.contentIv, profile.publicKey, lastMsg.senderId, lastMsg.receiverId) ?: "🔒 Encrypted message"
                 } else if (lastMsg.contentIv != null) {
                     "🔒 Encrypted message"
-                } else lastMsg.content
+                } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
                 conversations.add(WhisperConversation(profile, lastMsg.copy(content = decryptedContent), unread))
@@ -1674,22 +1674,29 @@ class WhisperRepository @Inject constructor(
         recommended
     }
 
+    /**
+     * Fetches paginated discoverable profiles via the [whisper_discover_profiles] RPC.
+     *
+     * The RPC enforces:
+     *   • 60 pages/hour per calling user (returns P0002 "rate_limited" on breach).
+     *   • Server-side filtering of private / hide_from_discover / own profile.
+     *   • Server-side exclusion of profiles that have blocked the caller.
+     *
+     * Friends are filtered out client-side to avoid a cross-join on the server.
+     */
     suspend fun getDiscoverProfiles(page: Int, pageSize: Int = 20): Result<List<WhisperProfile>> = runCatching {
         val myFriendIds = getFriendships().getOrThrow()
             .filter { it.status == "accepted" }
             .map { it.otherUserId(myId) }
             .toSet()
 
-        db.from("profiles")
-            .select {
-                filter {
-                    eq("is_private", false)
-                    eq("hide_from_discover", false)
-                    neq("id", myId)
-                }
-                order("last_seen_at", Order.DESCENDING)
-                range((page * pageSize).toLong(), ((page + 1) * pageSize - 1).toLong())
+        db.rpc(
+            "whisper_discover_profiles",
+            buildJsonObject {
+                put("p_page", page)
+                put("p_page_size", pageSize.coerceIn(1, 30))
             }
+        )
             .decodeList<WhisperProfile>()
             .filter { it.id !in myFriendIds }
     }

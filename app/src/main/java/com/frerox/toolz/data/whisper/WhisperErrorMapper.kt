@@ -88,6 +88,9 @@ object WhisperErrorMapper {
                 UiText.StringResource(R.string.st_Whisper_Error_SignupDisabled)
             msg.contains("over_email_send_rate_limit", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
+            // Discover rate-limit (whisper_discover_profiles RPC → P0002)
+            msg.contains("rate_limited", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
 
             // Token errors
             msg.contains("Token must be", ignoreCase = true) ->

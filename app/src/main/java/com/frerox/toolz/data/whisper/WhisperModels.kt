@@ -104,11 +104,44 @@ data class WhisperProfileInsert(
 // Messages & Reactions
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Delivery/read receipt status.
+ *
+ * NOTE: DELIVERED was removed (M-5). The backend has no `is_delivered` ACK column;
+ * message status is only PENDING (local optimistic), SENT (remote confirmed), or READ.
+ */
 enum class WhisperMessageStatus {
     PENDING,
     SENT,
-    DELIVERED,
     READ
+}
+
+/**
+ * Centralized tombstone constants (L-1).
+ * All checks on deleted/encrypted message content MUST use this object.
+ */
+object WhisperTombstone {
+    /** Written to `content` by delete-for-everyone. Legacy variant without sender name. */
+    const val CONTENT_LEGACY = "[deleted_by_sender]"
+
+    /** Human-readable display string shown instead of the deleted message. */
+    const val DISPLAY_TEXT = "This message has been deleted"
+
+    /** Prefix used when sender name is embedded: "[deleted_by_sender:<name>]". */
+    const val CONTENT_PREFIX = "[deleted_by_sender:"
+
+    /** Placeholder shown for rows with null content_iv (legacy/plaintext guard, M-3). */
+    const val LEGACY_ENCRYPTED = "[Legacy encrypted message]"
+
+    fun isTombstone(content: String): Boolean =
+        content == CONTENT_LEGACY ||
+        content == DISPLAY_TEXT ||
+        content.startsWith(CONTENT_PREFIX)
+
+    fun extractSenderName(content: String): String? =
+        if (content.startsWith(CONTENT_PREFIX) && content.endsWith("]"))
+            content.removePrefix(CONTENT_PREFIX).removeSuffix("]").trim()
+        else null
 }
 
 @Serializable
@@ -167,18 +200,10 @@ data class WhisperMessage(
     }
 
     /** Whether this message was deleted for everyone */
-    val isDeletedForEveryone: Boolean get() =
-        content == "[deleted_by_sender]" || content.startsWith("[deleted_by_sender:") || content == "This message has been deleted"
+    val isDeletedForEveryone: Boolean get() = WhisperTombstone.isTombstone(content)
 
     /** Extracted sender name attached to deletion tombstone */
-    val deletedSenderName: String? get() {
-        if (!isDeletedForEveryone) return null
-        return if (content.startsWith("[deleted_by_sender:") && content.endsWith("]")) {
-            content.removePrefix("[deleted_by_sender:").removeSuffix("]").trim()
-        } else {
-            null
-        }
-    }
+    val deletedSenderName: String? get() = WhisperTombstone.extractSenderName(content)
 }
 
 @Serializable
@@ -411,6 +436,7 @@ data class WhisperChatUiState(
     val keyTrust: KeyTrustInfo? = null,
     val isUploadingAttachment: Boolean = false,
     val decryptedImageBytes: Map<String, ByteArray> = emptyMap(),
+    val isRealtimeDisconnected: Boolean = false,
     val error: UiText? = null,
 )
 

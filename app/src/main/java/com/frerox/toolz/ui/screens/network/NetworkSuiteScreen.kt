@@ -93,6 +93,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
 import com.frerox.toolz.ui.screens.network.suite.CellularAuditCard
 import com.frerox.toolz.ui.screens.network.suite.NetTokens
@@ -543,7 +544,11 @@ private fun SuiteSectionIcon(section: SuiteSection) = when (section) {
 
 @Composable
 private fun TrafficColumn(power: com.frerox.toolz.data.network.NetworkPowerUiState) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL), contentPadding = PaddingValues(top = NetTokens.SpacingM, bottom = 96.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL),
+        contentPadding = PaddingValues(top = NetTokens.SpacingM, bottom = 96.dp)
+    ) {
         item { SocketsCard(power) }
         item { CellularAuditCard(power) }
         item { RoutesAuditCard(power) }

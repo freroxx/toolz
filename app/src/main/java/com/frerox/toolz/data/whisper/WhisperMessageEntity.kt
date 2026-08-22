@@ -52,12 +52,13 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     receiverId = receiverId,
     // Room is a ciphertext-only transport cache, never a plaintext message archive.
     // Encrypted payloads keep their ciphertext (decrypted at read time by the repository),
-    // pending/unsent messages store a neutral marker, and legacy unencrypted rows pass
-    // through untouched. Plaintext is never written to disk.
+    // pending/unsent messages store a neutral marker, and tombstones stay intact.
+    // Any legacy non-encrypted row is scrubbed to WhisperTombstone.LEGACY_ENCRYPTED.
     content = when {
         contentIv != null -> content
         isPending -> "[message pending sync]"
-        else -> content
+        WhisperTombstone.isTombstone(content) -> content
+        else -> WhisperTombstone.LEGACY_ENCRYPTED
     },
     contentIv = contentIv,
     replyToId = replyToId,
