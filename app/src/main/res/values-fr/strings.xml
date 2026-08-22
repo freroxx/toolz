@@ -2925,4 +2925,8 @@ La plupart des optimisations nécessitent Shizuku pour un accès shell privilég
     <string name="st_Whisper_Aubup_AccountLabel">Compte :</string>
     <string name="st_Whisper_CredentialCopied">Identifiant copié</string>
     <string name="cd_Whisper_CopyCredential">Copier l\'identifiant</string>
+
+    <!-- Bypass verification diagnostics -->
+    <string name="st_Whisper_Bypass_RateLimited">Trop de tentatives — réessayez dans ~15 minutes.</string>
+    <string name="st_Whisper_Bypass_Unavailable">Service de vérification indisponible — vérifiez la connexion ou la configuration du serveur.</string>
 </resources>

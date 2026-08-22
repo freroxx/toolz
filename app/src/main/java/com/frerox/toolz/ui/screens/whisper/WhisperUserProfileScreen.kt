@@ -81,18 +81,26 @@ fun WhisperUserProfileScreen(
             onDismiss = { showBypassDialog = false },
             onConfirm = { password ->
                 scope.launch {
-                    if (isWhisperBypassPassword(password)) {
-                        val enabling = !screenshotBypassEnabled
-                        viewModel.setScreenshotBypass(enabling)
-                        toastState.show(
-                            context.getString(
-                                if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
-                                else R.string.st_Whisper_Bypass_ProtectionOn
-                            ),
-                            WhisperToastType.SUCCESS
-                        )
-                    } else {
-                        toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                    // FIX: surface WHY verification failed instead of blaming the password
+                    // for lockouts/service errors.
+                    when (verifyWhisperBypass(password)) {
+                        WhisperBypassVerdict.Granted -> {
+                            val enabling = !screenshotBypassEnabled
+                            viewModel.setScreenshotBypass(enabling)
+                            toastState.show(
+                                context.getString(
+                                    if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                    else R.string.st_Whisper_Bypass_ProtectionOn
+                                ),
+                                WhisperToastType.SUCCESS
+                            )
+                        }
+                        WhisperBypassVerdict.Denied ->
+                            toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                        WhisperBypassVerdict.RateLimited ->
+                            toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
+                        WhisperBypassVerdict.Unavailable ->
+                            toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
                     }
                 }
                 showBypassDialog = false

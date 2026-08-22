@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { jwtVerify } from "https://esm.sh/jose@5.9.6";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+} from "https://esm.sh/jose@5.9.6";
 
 // Deletes the caller's GoTrue user account (and everything cascade-deleted from it).
 // The bearer token is genuinely verified in-function: signature and exp are checked
@@ -133,26 +136,38 @@ serve(async (request) => {
   return json({ success: true }, 200);
 });
 
-async function isJwtFresh(jwt: string, maxAgeMs: number): Promise<boolean> {
-  try {
-    const secret = new TextEncoder().encode(Deno.env.get("SUPABASE_JWT_SECRET") ?? "");
-    if (secret.length === 0) return false;
-    const { payload } = await jwtVerify(jwt, secret, { algorithms: ["HS256"] });
-    const iat = typeof payload.iat === "number" ? payload.iat * 1000 : 0;
-    if (!iat) return false;
-    return (Date.now() - iat) <= maxAgeMs;
-  } catch { return false; }
-}
+// Key-type-agnostic verification (same fix as whisper-image-upload): legacy HS256
+// secret first, then asymmetric signing keys via the project JWKS.
+const remoteJWKS = createRemoteJWKSet(
+  new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
+);
 
-async function extractVerifiedUserId(jwt: string): Promise<string | null> {
+async function verifyProjectJwt(jwt: string): Promise<{ sub?: string; iat?: number } | null> {
+  const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  if (secret) {
+    try {
+      const { payload } = await jwtVerify(jwt, new TextEncoder().encode(secret), { algorithms: ["HS256"] });
+      return payload as { sub?: string; iat?: number };
+    } catch { /* fall through to asymmetric */ }
+  }
   try {
-    const secret = new TextEncoder().encode(Deno.env.get("SUPABASE_JWT_SECRET") ?? "");
-    if (secret.length === 0) return null;
-    const { payload } = await jwtVerify(jwt, secret, { algorithms: ["HS256"] });
-    return typeof payload.sub === "string" ? payload.sub : null;
+    const { payload } = await jwtVerify(jwt, remoteJWKS, { algorithms: ["ES256", "RS256", "EdDSA"] });
+    return payload as { sub?: string; iat?: number };
   } catch {
     return null;
   }
+}
+
+async function isJwtFresh(jwt: string, maxAgeMs: number): Promise<boolean> {
+  const payload = await verifyProjectJwt(jwt);
+  const iat = typeof payload?.iat === "number" ? payload.iat * 1000 : 0;
+  if (!iat) return false;
+  return (Date.now() - iat) <= maxAgeMs;
+}
+
+async function extractVerifiedUserId(jwt: string): Promise<string | null> {
+  const payload = await verifyProjectJwt(jwt);
+  return typeof payload?.sub === "string" ? payload.sub : null;
 }
 
 function json(body: unknown, status: number) {

@@ -12,7 +12,13 @@
 //    can still use it while anonymous abuse stays bounded.
 //  • Fail closed on any internal error: no verdict means no bypass.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { jwtVerify } from "https://esm.sh/jose@5.9.6";
+import {
+  timingSafeEqual,
+} from "https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+} from "https://esm.sh/jose@5.9.6";
 
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_PASSWORD_LENGTH = 256;
@@ -34,14 +40,26 @@ async function sha256Hex(input: string): Promise<Uint8Array> {
 /** Digest-level compare: constant-time and length-normalized. */
 async function passwordsMatch(candidate: string, expectedSecret: string): Promise<boolean> {
   const [a, b] = await Promise.all([sha256Hex(candidate), sha256Hex(expectedSecret)]);
-  return crypto.subtle.timingSafeEqual(a, b);
+  // std's timingSafeEqual instead of the non-standard crypto.subtle.timingSafeEqual
+  // (which exists in newer Deno runtimes but is missing from Supabase's TS defs — TS2339).
+  return timingSafeEqual(a, b);
 }
 
+// Key-type-agnostic (see whisper-image-upload): HS256 secret, then project JWKS.
+const remoteJWKS = createRemoteJWKSet(
+  new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
+);
+
 async function extractVerifiedSub(jwt: string): Promise<string | null> {
+  const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  if (secret) {
+    try {
+      const { payload } = await jwtVerify(jwt, new TextEncoder().encode(secret), { algorithms: ["HS256"] });
+      if (typeof payload.sub === "string") return payload.sub;
+    } catch { /* fall through to asymmetric */ }
+  }
   try {
-    const secret = new TextEncoder().encode(Deno.env.get("SUPABASE_JWT_SECRET") ?? "");
-    if (secret.length === 0) return null;
-    const { payload } = await jwtVerify(jwt, secret, { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(jwt, remoteJWKS, { algorithms: ["ES256", "RS256", "EdDSA"] });
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;

@@ -2882,4 +2882,8 @@
     <string name="st_Whisper_Aubup_AccountLabel">Cuenta:</string>
     <string name="st_Whisper_CredentialCopied">Credencial copiada</string>
     <string name="cd_Whisper_CopyCredential">Copiar credencial</string>
+
+    <!-- Bypass verification diagnostics -->
+    <string name="st_Whisper_Bypass_RateLimited">Demasiados intentos — inténtalo de nuevo en ~15 minutos.</string>
+    <string name="st_Whisper_Bypass_Unavailable">Servicio de verificación no disponible — revisa la conexión o la configuración del servidor.</string>
 </resources>

@@ -3066,4 +3066,8 @@
     <string name="st_Whisper_Aubup_AccountLabel">Account:</string>
     <string name="st_Whisper_CredentialCopied">Credential copied</string>
     <string name="cd_Whisper_CopyCredential">Copy credential</string>
+
+    <!-- Bypass verification diagnostics -->
+    <string name="st_Whisper_Bypass_RateLimited">Too many attempts — try again in ~15 minutes.</string>
+    <string name="st_Whisper_Bypass_Unavailable">Verification service unavailable — check connection or server setup.</string>
 </resources>

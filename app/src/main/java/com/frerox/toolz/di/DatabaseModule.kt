@@ -85,7 +85,26 @@ object DatabaseModule {
         try {
             db.openHelper.writableDatabase
         } catch (e: Exception) {
-            if (e is SQLiteNotADatabaseException || (e.message?.contains("file is not a database") == true)) {
+            val isCorruptOrWrongKey = e is SQLiteNotADatabaseException ||
+                (e.message?.contains("file is not a database") == true)
+            // Legacy-hash recovery: a DB created by a build whose schema differed while
+            // the VERSION NUMBER stayed the same makes Room throw
+            // "Room cannot verify the data integrity" on every launch (fatal crash at
+            // first Hilt injection). Such a schema predates our exported history, so no
+            // honest Migration can be written from it — the only correct move is the
+            // same one used for corrupt/wrong-key files above: delete and rebuild.
+            // Going forward this cannot recur silently: schemas are exported
+            // (app/schemas) and every version bump MUST ship an explicit Migration.
+            val isLegacyHashMismatch = e is IllegalStateException &&
+                e.message?.contains("Room cannot verify the data integrity") == true
+
+            if (isCorruptOrWrongKey || isLegacyHashMismatch) {
+                android.util.Log.e(
+                    "DatabaseModule",
+                    "Unopenable database (${e.javaClass.simpleName}: ${e.message}). " +
+                        "Deleting '$dbName' and rebuilding from scratch.",
+                    e
+                )
                 context.deleteDatabase(dbName)
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)

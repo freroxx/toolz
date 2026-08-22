@@ -1,6 +1,9 @@
 // Supabase Edge Function: upload encrypted Whisper image bytes to ImgBB.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { jwtVerify } from "https://esm.sh/jose@5.9.6";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+} from "https://esm.sh/jose@5.9.6";
 
 // M-19 FIX (reviewwhisper.md): lowered from 32 MB to 12 MB. The real client pipeline
 // caps ciphertext at 5 MiB -> ~6.7 MiB PNG -> ~8.9 MiB base64, so 12 MB bounds abuse
@@ -150,11 +153,28 @@ serve(async (request) => {
   }, 200);
 });
 
+// Key-type-agnostic JWT verification (FIX for "Unauthorized" on projects using the
+// newer asymmetric JWT signing keys):
+//   1. Fast path — legacy symmetric HS256 via SUPABASE_JWT_SECRET.
+//   2. Fallback — asymmetric ES256/RS256/EdDSA tokens verified against the project's
+//      JWKS at /auth/v1/.well-known/jwks.json (createRemoteJWKSet fetches lazily and
+//      caches, so this costs one request per cold start).
+// The gateway's verify_jwt=true already rejected invalid tokens before us; this
+// in-function check stays as defense-in-depth but must not depend on key type.
+const remoteJWKS = createRemoteJWKSet(
+  new URL(`${Deno.env.get("SUPABASE_URL") ?? ""}/auth/v1/.well-known/jwks.json`),
+);
+
 async function extractVerifiedUserId(jwt: string): Promise<string | null> {
+  const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+  if (secret) {
+    try {
+      const { payload } = await jwtVerify(jwt, new TextEncoder().encode(secret), { algorithms: ["HS256"] });
+      if (typeof payload.sub === "string") return payload.sub;
+    } catch { /* not an HS256 token or secret mismatch — try asymmetric below */ }
+  }
   try {
-    const secret = new TextEncoder().encode(Deno.env.get("SUPABASE_JWT_SECRET") ?? "");
-    if (secret.length === 0) return null;
-    const { payload } = await jwtVerify(jwt, secret, { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(jwt, remoteJWKS, { algorithms: ["ES256", "RS256", "EdDSA"] });
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;
