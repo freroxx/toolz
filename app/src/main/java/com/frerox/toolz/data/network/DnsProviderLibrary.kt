@@ -193,4 +193,13 @@ object DnsProviderLibrary {
         providers.map { Triple(it.id, it.name, it.addresses.first()) }
 
     fun byId(id: String): DnsProvider? = providers.firstOrNull { it.id == id }
+
+    /** Single source for DNS weighted scoring — l*0.6 + j*0.25 + p*0.15 (used by DnsEngine + DnsRealBenchmark) */
+    fun weightedScore(latencyMs: Long?, jitterMs: Long?, packetLossPercent: Float): Int {
+        if (latencyMs == null) return 0
+        val latencyScore = (100 - ((latencyMs.coerceAtLeast(5L) - 10) * 0.9f)).coerceIn(0f, 100f)
+        val jitterScore = (100 - ((jitterMs ?: 0L) * 3f)).coerceIn(0f, 100f)
+        val packetScore = (100 - (packetLossPercent * 2f)).coerceIn(0f, 100f)
+        return (latencyScore * 0.60f + jitterScore * 0.25f + packetScore * 0.15f).toInt().coerceIn(0, 100)
+    }
 }

@@ -101,11 +101,6 @@ class DnsRealBenchmark @Inject constructor(
         } catch (_: Exception) { null }
     }
 
-    private fun score(latency: Long?, jitter: Long?, loss: Float): Int {
-        if (latency == null) return 0
-        val l = (100 - ((latency.coerceAtLeast(5L) - 10) * 0.9f)).coerceIn(0f, 100f)
-        val j = (100 - ((jitter ?: 0L) * 3f)).coerceIn(0f, 100f)
-        val p = (100 - loss * 2f).coerceIn(0f, 100f)
-        return (l * 0.6f + j * 0.25f + p * 0.15f).toInt().coerceIn(0, 100)
-    }
+    private fun score(latency: Long?, jitter: Long?, loss: Float): Int =
+        com.frerox.toolz.data.network.DnsProviderLibrary.weightedScore(latency, jitter, loss)
 }

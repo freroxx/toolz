@@ -36,10 +36,15 @@ class VpnHelper @Inject constructor(
         return VpnService.prepare(context)
     }
 
+    /** KILL LIST P0 — real VPN not shipped; behind flag vpn.experimental=false */
+    private val vpnEnabled = false
+
     /**
      * Placeholder for starting the VPN service with a configuration.
+     * Guarded behind vpnEnabled — currently disabled (fake TUN trust risk).
      */
     fun startVpn(ovpnConfig: String) {
+        if (!vpnEnabled) return
         val intent = Intent(context, com.frerox.toolz.service.ToolzVpnService::class.java).apply {
             putExtra("EXTRA_OVPN_CONFIG", ovpnConfig)
             action = "START_VPN"

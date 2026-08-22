@@ -45,6 +45,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -194,7 +196,18 @@ fun ScoreArc(score: Int, sizeDp: Int = 84, modifier: Modifier = Modifier) {
     val tint = healthTint(score)
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
     val stroke = 9.dp
-    Box(modifier = modifier.size(sizeDp.dp), contentAlignment = Alignment.Center) {
+    val label = when {
+        score >= 85 -> "Excellent"
+        score >= 70 -> "Good"
+        score >= 50 -> "Fair"
+        else -> "Poor"
+    }
+    Box(
+        modifier = modifier.size(sizeDp.dp).semantics(mergeDescendants = true) {
+            contentDescription = "Network health $score out of 100, $label"
+        },
+        contentAlignment = Alignment.Center
+    ) {
         Canvas(Modifier.fillMaxSize()) {
             val sweep = 280f
             val startAngle = 130f

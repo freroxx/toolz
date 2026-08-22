@@ -11,7 +11,9 @@
     <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
@@ -239,11 +241,14 @@
                 android:value="Media file conversion and processing" />
         </service>
 
+        <!-- P0 KILL LIST: Fake VPN disabled behind vpn.experimental=false — drains TUN to /dev/null, trust/legal risk -->
         <service
             android:name=".service.ToolzVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:exported="false">
-            <intent-filter>
+            android:enabled="false"
+            android:exported="false"
+            tools:node="merge">
+            <intent-filter tools:node="remove">
                 <action android:name="android.net.VpnService" />
             </intent-filter>
         </service>

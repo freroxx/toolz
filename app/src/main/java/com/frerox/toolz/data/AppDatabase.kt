@@ -65,15 +65,19 @@ import com.frerox.toolz.data.whisper.WhisperMessageDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
+import com.frerox.toolz.data.network.DeviceInventoryDao
+import com.frerox.toolz.data.network.DeviceInventoryEntity
+import com.frerox.toolz.data.network.ScanSnapshotDao
+import com.frerox.toolz.data.network.ScanSnapshotEntity
 import com.frerox.toolz.data.network.SpeedHistoryEntity
 import com.frerox.toolz.data.network.SpeedHistoryDao
 
 @Database(
     entities = [
-        Note::class, 
-        MusicTrack::class, 
-        Playlist::class, 
-        StepEntry::class, 
+        Note::class,
+        MusicTrack::class,
+        Playlist::class,
+        StepEntry::class,
         MathHistory::class,
         PdfAnnotation::class,
         PdfMetadata::class,
@@ -93,9 +97,11 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
         DeviceSpecCacheEntity::class,
         CatalogSearchEntry::class,
         WhisperMessageEntity::class,
-        SpeedHistoryEntity::class
+        SpeedHistoryEntity::class,
+        DeviceInventoryEntity::class,
+        ScanSnapshotEntity::class
     ],
-    version = 46,
+    version = 47,
     exportSchema = false
 )
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
@@ -120,4 +126,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun catalogSearchDao(): CatalogSearchDao
     abstract fun whisperMessageDao(): WhisperMessageDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
+    abstract fun deviceInventoryDao(): DeviceInventoryDao
+    abstract fun scanSnapshotDao(): ScanSnapshotDao
 }

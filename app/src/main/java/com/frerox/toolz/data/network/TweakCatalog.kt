@@ -79,13 +79,13 @@ object TweakCatalog {
             type = TweakType.SHIZUKU_ONLY,
             category = TweakCategory.PERFORMANCE,
             applyCommands = listOf(
-                "cmd wifi set-power-save-mode disabled",
-                "svc wifi set-power-save-mode disabled",
+                "cmd wifi set-power-save-mode disabled || true",
+                "svc wifi set-power-save-mode disabled || true",
                 "settings put global wifi_sleep_policy 2"
             ),
             revertCommands = listOf(
-                "cmd wifi set-power-save-mode enabled",
-                "svc wifi set-power-save-mode enabled",
+                "cmd wifi set-power-save-mode enabled || true",
+                "svc wifi set-power-save-mode enabled || true",
                 "settings delete global wifi_sleep_policy"
             ),
             verificationCommand =
@@ -138,9 +138,9 @@ object TweakCatalog {
             revertCommands = listOf("settings put global wifi_enable_aggressive_handover 0"),
             verificationCommand = "[ \"\$(settings get global wifi_enable_aggressive_handover)\" = \"1\" ]",
             manualSteps = listOf(
-                "Open Developer options.",
-                "Enable Wi-Fi verbose logging if your ROM exposes roaming details.",
-                "Test while walking between access points."
+                "Open Wi-Fi settings → Advanced or Roaming.",
+                "Enable aggressive roaming / fast transition if your ROM exposes it.",
+                "Test while walking between mesh nodes."
             ),
             riskNote = "Can cause extra roaming on noisy networks."
         ),

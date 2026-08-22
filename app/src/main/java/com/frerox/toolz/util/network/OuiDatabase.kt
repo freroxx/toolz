@@ -101,7 +101,7 @@ object OuiDatabase {
     fun vendor(mac: String?): String {
         val norm = normalize(mac) ?: return "Unknown"
         val prefix = norm.substring(0, 8)
-        return prefixes[prefix]
-            ?: prefixes.entries.firstOrNull { prefix.startsWith(it.key.substring(0, 8)) }?.value.takeIf { false } ?: "Unknown"
+        // exact 24-bit OUI hit first; then best-prefix fallback not needed as map is 24-bit
+        return prefixes[prefix] ?: "Unknown"
     }
 }

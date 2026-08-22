@@ -1,18 +1,5 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.ui.screens.network.components
@@ -45,14 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.data.network.DiagnosticLog
 import com.frerox.toolz.data.network.LogLevel
-import com.frerox.toolz.ui.components.ExpressiveFilterChip
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
+import com.frerox.toolz.ui.screens.network.suite.NetCard
+import com.frerox.toolz.ui.screens.network.suite.NetTokens
 import com.frerox.toolz.ui.theme.LocalVibrationManager
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
+/** Clear, simple M3 Expressive console — two cards: gate + terminal, 50dp chips, tonal input. */
 @Composable
 fun NetworkConsoleView(
     logs: List<DiagnosticLog>,
@@ -65,187 +49,120 @@ fun NetworkConsoleView(
 ) {
     val clipboard = LocalClipboardManager.current
     val vibrationManager = LocalVibrationManager.current
-
     var commandInput by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("ALL") }
     val listState = rememberLazyListState()
-
     val categories = listOf("ALL", "TWEAK", "COMMAND", "SYSTEM", "DIAG", "FIX")
-
     val filteredLogs = remember(logs, selectedCategory) {
-        logs.filter { log ->
-            if (selectedCategory == "ALL") true
-            else log.tag.equals(selectedCategory, ignoreCase = true) || log.tag.contains(selectedCategory, ignoreCase = true)
-        }
+        logs.filter { if (selectedCategory == "ALL") true else it.tag.contains(selectedCategory, ignoreCase = true) }
+    }
+    LaunchedEffect(logs.size) { if (logs.isNotEmpty()) listState.animateScrollToItem(0) }
+
+    var pendingDestructive by remember { mutableStateOf<String?>(null) }
+    val destructiveKeywords = remember { setOf("rm ", "pm clear", "pm uninstall", "svc data disable", "svc wifi disable", "reboot", "mkfs", "dd ", ">:") }
+    fun isDestructive(cmd: String): Boolean {
+        val lower = cmd.lowercase().trim()
+        return destructiveKeywords.any { lower.contains(it) } || lower.matches(Regex(".*\\b(rm\\s+-rf|mkfs|dd\\s+if=).*"))
+    }
+    pendingDestructive?.let { cmd ->
+        AlertDialog(
+            onDismissRequest = { pendingDestructive = null },
+            icon = { Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Confirm privileged command") },
+            text = { Text("This looks destructive:\n\n$cmd", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)) },
+            confirmButton = {
+                Button(onClick = { val c = pendingDestructive!!; pendingDestructive = null; vibrationManager?.vibrateClick(); onExecuteRawCommand(c) }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Run anyway") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDestructive = null }) { Text("Cancel") } },
+            shape = RoundedCornerShape(24.dp)
+        )
     }
 
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) {
-            listState.animateScrollToItem(0)
-        }
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)) {
         if (!consoleEnabled) {
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.secondary)
-                        Text("Raw shell is disabled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    }
-                    Text(
-                        "This console executes privileged commands as the shell user. It can change system behavior. Enable only if you know what you are doing.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Text("Developer mode", style = MaterialTheme.typography.labelLarge)
-                        Switch(checked = false, onCheckedChange = { onToggleConsole(true) })
-                    }
+            NetCard(title = "Developer console", subtitle = "Raw shell is disabled", icon = Icons.Rounded.Lock) {
+                Text("This console runs privileged shell commands via Shizuku. Enable only if you know what you are doing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Enable developer mode", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Switch(checked = false, onCheckedChange = { onToggleConsole(true) })
                 }
             }
             return@Column
         }
-        // Confirmation for destructive commands
-        // Header with status and actions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Diagnostic Console",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(if (isShizukuReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-                    )
-                    Text(
-                        text = if (isShizukuReady) "Privileged Shell Active" else "Shell Restricted",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+
+        // Status + actions — single NetCard header, tonal buttons, 50dp
+        NetCard(
+            title = "Diagnostic Console",
+            subtitle = if (isShizukuReady) "Privileged shell active" else "Shell restricted — Shizuku not bound",
+            icon = Icons.Rounded.Terminal,
+            trailing = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalIconButton(onClick = { vibrationManager?.vibrateClick(); clipboard.setText(AnnotatedString(logs.joinToString("\n") { "[${it.tag}] ${it.message}" })) }, shape = RoundedCornerShape(50)) {
+                        Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy logs", modifier = Modifier.size(18.dp))
+                    }
+                    FilledTonalIconButton(
+                        onClick = { vibrationManager?.vibrateClick(); onClearLogs() },
+                        shape = RoundedCornerShape(50),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                    ) { Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear", modifier = Modifier.size(18.dp)) }
                 }
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalIconButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        val text = logs.joinToString("\n") { "[${it.tag}] ${it.message}" }
-                        clipboard.setText(AnnotatedString(text))
-                    },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(20.dp))
-                }
-
-                FilledTonalIconButton(
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        onClearLogs()
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                ) {
-                    Icon(Icons.Rounded.DeleteSweep, contentDescription = "Clear", modifier = Modifier.size(20.dp))
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(if (isShizukuReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error))
+                Text(if (isShizukuReady) "Ready to execute" else "Enable Shizuku to run commands", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // Filters — 50dp pill, single scroll row, expressive
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                categories.forEach { cat ->
+                    FilterChip(selected = selectedCategory == cat, onClick = { vibrationManager?.vibrateClick(); selectedCategory = cat }, label = { Text(cat) }, shape = RoundedCornerShape(50))
                 }
             }
         }
 
-        // Filters
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            categories.forEach { category ->
-                FilterChip(
-                    selected = selectedCategory == category,
-                    onClick = {
-                        vibrationManager?.vibrateClick()
-                        selectedCategory = category
-                    },
-                    label = { Text(category) },
-                    shape = RoundedCornerShape(12.dp)
-                )
-            }
-        }
-
-        // Terminal
-        Surface(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            if (filteredLogs.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No logs recorded", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filteredLogs) { log ->
-                        ConsoleLogItem(log = log)
+        // Terminal — one card, surfaceContainerHigh, monospaced, empty state centered, 20dp radius
+        NetCard(title = "Logs", subtitle = "${filteredLogs.size} entries • ${logs.size} total", icon = Icons.Rounded.ReceiptLong) {
+            Surface(modifier = Modifier.fillMaxWidth().heightIn(min = 280.dp, max = 420.dp).weight(1f, fill = false), color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(20.dp)) {
+                if (filteredLogs.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.Terminal, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                            Text("No logs yet — run a scan or tweak", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(filteredLogs, key = { it.timestamp to it.tag }) { log -> ConsoleLogItem(log = log) }
                     }
                 }
             }
-        }
-
-        // Input
-        OutlinedTextField(
-            value = commandInput,
-            onValueChange = { commandInput = it },
-            placeholder = { Text("Enter shell command…", style = MaterialTheme.typography.bodyMedium) },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(50),
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-            ),
-            singleLine = true,
-            enabled = isShizukuReady,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            trailingIcon = {
-                IconButton(
-                    onClick = {
-                        if (commandInput.isNotBlank()) {
-                            vibrationManager?.vibrateClick()
-                            onExecuteRawCommand(commandInput.trim())
-                            commandInput = ""
-                        }
-                    },
-                    enabled = isShizukuReady && commandInput.isNotBlank()
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.Send, null)
+            // Input — tonal, 50dp, send as FilledIconButton, disabled when not Shizuku
+            OutlinedTextField(
+                value = commandInput,
+                onValueChange = { commandInput = it },
+                placeholder = { Text(if (isShizukuReady) "Enter shell command…" else "Shizuku required to type", style = MaterialTheme.typography.bodyMedium) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(50),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant),
+                singleLine = true,
+                enabled = isShizukuReady,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                trailingIcon = {
+                    FilledIconButton(
+                        onClick = {
+                            if (commandInput.isNotBlank()) {
+                                val trimmed = commandInput.trim().take(2048)
+                                commandInput = ""
+                                vibrationManager?.vibrateClick()
+                                if (isDestructive(trimmed)) pendingDestructive = trimmed else onExecuteRawCommand(trimmed)
+                            }
+                        },
+                        enabled = isShizukuReady && commandInput.isNotBlank(),
+                        modifier = Modifier.size(40.dp)
+                    ) { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send") }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -257,34 +174,10 @@ private fun ConsoleLogItem(log: DiagnosticLog) {
         LogLevel.SUCCESS -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         LogLevel.INFO -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f)
     }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = tagBg,
-            modifier = Modifier.width(60.dp)
-        ) {
-            Text(
-                text = log.tag,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                color = tagColor,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Surface(shape = RoundedCornerShape(8.dp), color = tagBg, modifier = Modifier.width(64.dp)) {
+            Text(text = log.tag, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = tagColor, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-
-        Text(
-            text = log.message,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 16.sp),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
+        Text(text = log.message, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, lineHeight = 16.sp), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
     }
 }

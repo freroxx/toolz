@@ -180,4 +180,14 @@ object DatabaseModule {
     fun provideSpeedHistoryDao(database: AppDatabase): com.frerox.toolz.data.network.SpeedHistoryDao {
         return database.speedHistoryDao()
     }
+
+    @Provides
+    fun provideDeviceInventoryDao(database: AppDatabase): com.frerox.toolz.data.network.DeviceInventoryDao {
+        return database.deviceInventoryDao()
+    }
+
+    @Provides
+    fun provideScanSnapshotDao(database: AppDatabase): com.frerox.toolz.data.network.ScanSnapshotDao {
+        return database.scanSnapshotDao()
+    }
 }

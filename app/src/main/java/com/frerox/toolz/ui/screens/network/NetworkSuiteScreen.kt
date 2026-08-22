@@ -252,7 +252,7 @@ fun NetworkSuiteScreen(
                                 vibrationManager?.vibrateTick()
                                 selectedSection = index
                             },
-                            icon = { Icon(SuiteSectionIcon(section), contentDescription = null) },
+                            icon = { Icon(SuiteSectionIcon(section), contentDescription = stringResource(section.labelRes)) },
                             label = { Text(stringResource(section.labelRes), maxLines = 1) }
                         )
                     }
@@ -271,7 +271,7 @@ fun NetworkSuiteScreen(
                                 vibrationManager?.vibrateTick()
                                 selectedSection = index
                             },
-                            icon = { Icon(SuiteSectionIcon(section), contentDescription = null) },
+                            icon = { Icon(SuiteSectionIcon(section), contentDescription = stringResource(section.labelRes)) },
                             label = { Text(stringResource(section.labelRes), maxLines = 1) }
                         )
                     }
@@ -279,6 +279,7 @@ fun NetworkSuiteScreen(
             }
 
             Box(modifier = Modifier.weight(1f)) {
+                // P3: keep nav visible but gate only scan/tweak actions; PermissionGate is banner not full-screen
                 AnimatedContent(
                     targetState = selectedSection,
                     transitionSpec = {
@@ -294,14 +295,20 @@ fun NetworkSuiteScreen(
                     modifier = Modifier.fillMaxSize()
                 ) { sectionOrdinal ->
                     val section = SuiteSection.entries[sectionOrdinal]
-                    if (!hasWifiPermission) {
-                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                    val needsGate = false // P0: keep gate inside OverviewTab only; suite stays navigable
+                    if (needsGate) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             PermissionGate(onGrant = {
                                 vibrationManager?.vibrateClick()
                                 permissionState.launchMultiplePermissionRequest()
                             })
+                            androidx.compose.material3.Text(
+                                "Diagnostics still work without Wi-Fi permission; scanning & tweaks need it.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
                         }
-                        return@AnimatedContent
                     }
                     Column(modifier = Modifier.fillMaxSize().padding(horizontal = NetTokens.SpacingL)) {
                         when (section) {
@@ -322,6 +329,7 @@ fun NetworkSuiteScreen(
                                         state = power,
                                         onScanDevices = { powerVm.scanSubnet() },
                                         onScanPortsForHost = { ip -> powerVm.scanPortsForHost(ip) },
+                                        onWakeHost = { mac, ip -> powerVm.wakeHost(mac, ip) },
                                         hostPortResults = hostPorts,
                                         hostPortScanning = hostScanning
                                     )
@@ -372,9 +380,17 @@ fun NetworkSuiteScreen(
                                 onOpenWifiSettings = { launchSettings(context, Settings.ACTION_WIFI_SETTINGS) },
                                 onOpenDevSettings = { launchSettings(context, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS) },
                                 onRunSpeedTest = { tweaksVm.runSpeedTest() },
+                                onCancelSpeedTest = { tweaksVm.cancelSpeedTest() },
                                 onRunTraceRoute = { target ->
-                                    if (privilegedReady) powerVm.runTraceRoute(target)
-                                    else requestShizukuAccess("Traceroute", "Traceroute runs through the privileged Shizuku shell.")
+                                    // P4 fix: traceroute now always gives UI feedback via tweaksVm (isTracing + traceHops + snackbar)
+                                    // PowerVm streaming kept as fallback for privileged path
+                                    if (target.isBlank()) {
+                                        scope.launch { snackbarHostState.showSnackbar("Enter a host to trace") }
+                                    } else {
+                                        tweaksVm.runTraceRoute(target)
+                                        if (privilegedReady) powerVm.runTraceRoute(target)
+                                        else requestShizukuAccess("Traceroute", "Traceroute runs through the privileged Shizuku shell.")
+                                    }
                                 },
                                 extraCards = {
                                     LatencyStreamCard(state = power)

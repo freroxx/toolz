@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CellTower
 import androidx.compose.material.icons.rounded.CloudSync
@@ -26,6 +27,8 @@ import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Router
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -112,6 +115,7 @@ internal fun DeviceMeshCard(
     state: NetworkPowerUiState,
     onScanDevices: () -> Unit,
     onScanPortsForHost: (String) -> Unit = {},
+    onWakeHost: (String, String) -> Unit = { _, _ -> },
     hostPortResults: Map<String, List<com.frerox.toolz.data.network.ScannedPort>> = emptyMap(),
     hostPortScanning: Set<String> = emptySet()
 ) {
@@ -153,6 +157,8 @@ internal fun DeviceMeshCard(
             }
         }
 
+        // Expressive mapping — label + improved canvas (clear hierarchy)
+        Text("Topology", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
         NetworkMap(state)
 
         if (devices.isEmpty()) {
@@ -262,6 +268,18 @@ internal fun DeviceMeshCard(
                         Spacer(Modifier.width(6.dp))
                         Text("Copy MAC")
                     }
+                }
+
+                // P9 WoL magic packet — no permission, huge utility win
+                OutlinedButton(
+                    onClick = { onWakeHost(dev.mac, dev.ip) },
+                    enabled = dev.mac != "Unknown",
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.st_Net_WakeOnLan))
                 }
 
                 HorizontalDivider()

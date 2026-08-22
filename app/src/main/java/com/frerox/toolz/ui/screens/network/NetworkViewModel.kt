@@ -31,6 +31,7 @@ import com.frerox.toolz.data.network.TopologyNode
 import com.frerox.toolz.data.network.NetworkTopology
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.util.network.DnsEngine
+import com.frerox.toolz.util.network.NetworkHealthEngine
 import com.frerox.toolz.util.network.NetworkMonitor
 import com.frerox.toolz.util.network.NetworkScanner
 import com.frerox.toolz.util.network.PrivilegedNetworkManager
@@ -69,7 +70,8 @@ class NetworkViewModel @Inject constructor(
     private val networkScanner: NetworkScanner,
     private val speedTestEngine: SpeedTestEngine,
     private val privilegedNetworkManager: PrivilegedNetworkManager,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val healthEngine: NetworkHealthEngine
 ) : ViewModel() {
 
     private val performanceMode = settingsRepository.performanceMode.stateIn(
@@ -346,6 +348,17 @@ class NetworkViewModel @Inject constructor(
         }
     }
 
+    /** P9 WoL — fire magic packet, surface result */
+    fun wakeHost(mac: String, ip: String) {
+        viewModelScope.launch {
+            if (mac == "Unknown") { emitEvent("No MAC — scan again to learn address."); return@launch }
+            appendLog("> WoL $mac → $ip:9")
+            val ok = networkScanner.wakeOnLan(mac, ip.substringBeforeLast(".") + ".255")
+                || networkScanner.wakeOnLan(mac)
+            emitEvent(if (ok) "Magic packet sent to $mac" else "WoL failed — check MAC")
+        }
+    }
+
     fun runSpeedTest() {
         viewModelScope.launch {
             updateState {
@@ -566,31 +579,37 @@ class NetworkViewModel @Inject constructor(
         )
     }
 
+    // P1 single source: delegate to HealthEngine (was duplicate formula)
     private fun calculateNetworkScore(
         latency: Long,
         jitter: Long,
         packetLoss: Float
     ): Int {
-        val latencyPenalty = (latency / 4).toInt().coerceIn(0, 35)
-        val jitterPenalty = (jitter * 2).toInt().coerceIn(0, 25)
-        val lossPenalty = (packetLoss * 0.5f).toInt().coerceIn(0, 40)
-        return (100 - latencyPenalty - jitterPenalty - lossPenalty).coerceIn(0, 100)
+        // HealthEngine is 0-100 weighted; map old gateway-centric latency+jitter+loss to HealthEngine via StabilityMetrics adaptation
+        val fakeStability = com.frerox.toolz.data.network.StabilityMetrics(
+            gatewayPingMs = latency,
+            jitterMs = jitter.toDouble(),
+            packetLossRate = packetLoss / 100.0,
+            history = emptyList()
+        )
+        // rssi not relevant for gateway-only score — use -55 as healthy baseline
+        return healthEngine.calculate(rssi = -55, stability = fakeStability).score
     }
 
     private fun updateHealthScore() {
         val wifi = uiState.value.wifiState
         val stability = uiState.value.stabilityInfo
-        val signalPenalty = when {
-            wifi.rssi >= -55 -> 0
-            wifi.rssi >= -62 -> 10
-            wifi.rssi >= -70 -> 20
-            else -> 35
-        }
-        val lossPenalty = (stability.packetLoss * 0.45f).toInt().coerceIn(0, 30)
-        val jitterPenalty = (stability.jitter / 3).toInt().coerceIn(0, 20)
-        updateState {
-            copy(networkHealthScore = (100 - signalPenalty - lossPenalty - jitterPenalty).coerceIn(0, 100))
-        }
+        // Map StabilityInfo → StabilityMetrics for single HealthEngine
+        val metrics = com.frerox.toolz.data.network.StabilityMetrics(
+            gatewayPingMs = stability.avgLatency.takeIf { it > 0 },
+            dnsPingMs = null,
+            publicPingMs = null,
+            jitterMs = stability.jitter.toDouble(),
+            packetLossRate = stability.packetLoss / 100.0,
+            history = emptyList()
+        )
+        val bd = healthEngine.calculate(rssi = wifi.rssi, stability = metrics)
+        updateState { copy(networkHealthScore = bd.score) }
     }
 
     private fun buildTopology(

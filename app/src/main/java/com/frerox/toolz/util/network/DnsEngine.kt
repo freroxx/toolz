@@ -173,17 +173,7 @@ fun providerLibrary(): List<DnsProvider> = providers.distinctBy { it.hostname ?:
         latencyMs: Long?,
         jitterMs: Long?,
         packetLossPercent: Float
-    ): Int {
-        if (latencyMs == null) return 0
-        val latencyScore = (100 - ((latencyMs.coerceAtLeast(5L) - 10) * 0.9f)).coerceIn(0f, 100f)
-        val jitterScore = (100 - ((jitterMs ?: 0L) * 3f)).coerceIn(0f, 100f)
-        val packetScore = (100 - (packetLossPercent * 2f)).coerceIn(0f, 100f)
-        return (
-            latencyScore * 0.60f +
-                jitterScore * 0.25f +
-                packetScore * 0.15f
-            ).toInt().coerceIn(0, 100)
-    }
+    ): Int = com.frerox.toolz.data.network.DnsProviderLibrary.weightedScore(latencyMs, jitterMs, packetLossPercent)
 
     private fun List<Long>.averageOrNull(): Double? {
         if (isEmpty()) return null

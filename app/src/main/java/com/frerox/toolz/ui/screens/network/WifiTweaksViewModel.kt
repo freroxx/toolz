@@ -256,7 +256,8 @@ class WifiTweaksViewModel @Inject constructor(
                                 privateDnsHost = dnsConfig.second
                             )
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        addLog("TELEMETRY", "Shizuku telemetry failed: ${e.message ?: e.javaClass.simpleName}", LogLevel.WARNING)
                     }
                 }
                 delay(10_000)
@@ -264,10 +265,16 @@ class WifiTweaksViewModel @Inject constructor(
         }
     }
 
+    private var speedTestJob: kotlinx.coroutines.Job? = null
+    fun cancelSpeedTest() {
+        speedTestJob?.cancel()
+        _uiState.update { it.copy(speedTest = it.speedTest.copy(isRunning = false, phaseLabel = "Cancelled")) }
+        addLog("SPEED", "Cancelled by user", LogLevel.WARNING)
+    }
     fun runSpeedTest() {
         if (uiState.value.speedTest.isRunning) return
 
-        viewModelScope.launch {
+        speedTestJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     speedTest = SpeedTestResult(isRunning = true, phaseLabel = "Starting…")
@@ -956,9 +963,8 @@ class WifiTweaksViewModel @Inject constructor(
                     isApplied = true, verified = true, lastUpdatedMs = System.currentTimeMillis()
                 )
                 VerifyState.APPLIED_UNVERIFIED -> previous.copy(
-                    status = if (previous.status == TweakStatus.MANUAL) TweakStatus.MANUAL else TweakStatus.IDLE,
-                    message = if (previous.status == TweakStatus.MANUAL) previous.message else "",
-                    isApplied = false, verified = null, lastUpdatedMs = System.currentTimeMillis()
+                    status = TweakStatus.SUCCESS, message = "Active · unverified",
+                    isApplied = true, verified = null, lastUpdatedMs = System.currentTimeMillis()
                 )
                 VerifyState.NOT_APPLIED -> previous.copy(
                     status = if (previous.status == TweakStatus.MANUAL) TweakStatus.MANUAL else TweakStatus.IDLE,

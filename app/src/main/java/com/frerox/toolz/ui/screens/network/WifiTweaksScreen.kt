@@ -226,7 +226,7 @@ internal fun PermissionGate(onGrant: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Android treats Wi-Fi scans as location-sensitive data. Grant access so the analyzer, channel advisor, and live diagnostics can work.",
+                text = "Android treats Wi-Fi scans as location-sensitive data. Grant access so the analyzer, channel advisor, and live diagnostics can work.\n\nToolz declares NEARBY_WIFI_DEVICES with neverForLocation — your location is never collected, only nearby SSIDs are read to map spectrum.",
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -395,10 +395,14 @@ internal fun OverviewTab(
             }
         }
 
-        // ── QUICK FIXES ─────────────────────────────────────────────────────
+        // ── QUICK FIXES (P0 diagnose-first) ─────────────────────────────────
         val hasAdvice = state.advice.recommendation.isNotBlank() &&
             !state.advice.recommendation.startsWith("Scan nearby")
-        if (hasAdvice || state.stability.packetLossRate > 0.05 || state.stability.jitterMs > 15.0) {
+        // Prefer diagnose-list over raw thresholds so card never shows without actionable fix
+        val diagnoseEmpty = state.networkConfig.isThrottlingEnabled.not() &&
+            !(state.currentRssi < -70 && state.currentRssi > -100) &&
+            !(state.privateDnsHost.isBlank() && state.privateDnsMode.equals("Automatic", true))
+        if (!diagnoseEmpty || hasAdvice || state.stability.packetLossRate > 0.05 || state.stability.jitterMs > 15.0) {
             item {
                 NetCard(
                     title = stringResource(R.string.st_WifiTweaksScreen_2b8a),
@@ -554,206 +558,142 @@ internal fun AnalyzerTab(
         WifiScanSortMode.SECURITY to "Security",
         WifiScanSortMode.NAME to "Name"
     )
-    
-    var ssidFilter by remember { mutableStateOf("ALL") }
-    var bandFilter by remember { mutableStateOf("ALL") }
+    var ssidFilter by rememberSaveable { mutableStateOf("ALL") }
+    var bandFilter by rememberSaveable { mutableStateOf("ALL") }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .fadingEdges(top = 16.dp, bottom = 40.dp),
-        contentPadding = PaddingValues(bottom = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            NetCard(
-                title = stringResource(R.string.st_WifiTweaksScreen_7e8f),
-                subtitle = "${state.scanResults.size} networks in range",
-                icon = Icons.Rounded.Wifi
-            ) {
-                Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
-                    SpectrumVisualizer(
-                        results = state.scanResults,
-                        currentBssid = state.networkConfig.bssid
-                    )
-                    if (state.isScanning) {
-                        ScanningPulse()
-                    }
-                }
-            }
-        }
-
-        item {
-            NetCard(
-                title = stringResource(R.string.st_WifiTweaksScreen_9f0a),
-                subtitle = state.lastScanTimestamp?.let { "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}" } ?: "No scan yet",
-                icon = Icons.Rounded.Radar,
-                trailing = {
-                    FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(50), enabled = !state.isScanning) {
-                        if (state.isScanning) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (state.isScanning) "Scanning" else "Scan")
-                    }
-                }
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(stringResource(R.string.st_WifiTweaksScreen_9f0a), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                            Text(
-                                text = state.lastScanTimestamp?.let {
-                                    "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}"
-                                } ?: "No scan yet",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(20.dp), enabled = !state.isScanning) {
-                            if (state.isScanning) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Rounded.Refresh, contentDescription = null)
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (state.isScanning) "Scanning" else "Scan")
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = ssidFilter == "ALL",
-                            onClick = { ssidFilter = "ALL" },
-                            label = { Text("All") },
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        state.scanResults.map { it.ssid }.distinct().filter { it.isNotBlank() }.take(8).forEach { ssid ->
-                            FilterChip(
-                                selected = ssidFilter == ssid,
-                                onClick = { ssidFilter = ssid },
-                                label = { Text(ssid) },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        sorts.forEach { (mode, label) ->
-                            FilterChip(
-                                selected = state.scanSortMode == mode,
-                                onClick = { onSortSelected(mode) },
-                                label = { Text(label) },
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                        }
-                        FilterChip(
-                            selected = state.showHiddenNetworks,
-                            onClick = { onToggleHidden(!state.showHiddenNetworks) },
-                            label = { Text("Hidden") },
-                            shape = RoundedCornerShape(50)
-                        )
-                    }
-
-                    // Band filter
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("ALL" to "All bands", "2.4" to "2.4 GHz", "5" to "5 GHz", "6" to "6 GHz").forEach { (key, label) ->
-                            FilterChip(
-                                selected = bandFilter == key,
-                                onClick = { bandFilter = key },
-                                label = { Text(label) },
-                                shape = RoundedCornerShape(50)
-                            )
-                        }
-                    }
-
-                    // Quick stats row
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        val openCount = state.scanResults.count { it.security == "Open" }
-                        StatTile("Networks", "${state.scanResults.size}", modifier = Modifier.weight(1f))
-                        StatTile("Open", "$openCount", tint = if (openCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                        StatTile("Hidden", "${state.scanResults.count { it.isHidden }}", modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-
-        val filteredResults = state.scanResults.filter {
+    // Single source filtered+sorted (P3 fix) — computed outside LazyColumn
+    val filteredResults = run {
+        state.scanResults.filter {
             (ssidFilter == "ALL" || it.ssid == ssidFilter) &&
             (bandFilter == "ALL" || it.band.startsWith(bandFilter))
+        }.sortedWith(
+            when (state.scanSortMode) {
+                WifiScanSortMode.SIGNAL -> compareByDescending<WifiScanResult> { it.rssi }
+                WifiScanSortMode.CHANNEL -> compareBy<WifiScanResult> { it.channel }.thenByDescending { it.rssi }
+                WifiScanSortMode.SECURITY -> compareBy<WifiScanResult> { it.security }.thenByDescending { it.rssi }
+                WifiScanSortMode.NAME -> compareBy<WifiScanResult> { it.ssid.lowercase() }
+            }
+        )
+    }
+    val openCount = state.scanResults.count { it.security == "Open" }
+    val recommended = state.congestion.filter { it.isRecommended }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
+        contentPadding = PaddingValues(bottom = 60.dp),
+        verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
+    ) {
+        item { SectionLabel(stringResource(R.string.st_WifiTweaksScreen_7e8f).uppercase()) }
+
+        // HERO — single spectrum (M3 Expressive, no duplication)
+        item {
+            NetCard(
+                title = "${state.scanResults.size} networks in range",
+                subtitle = state.lastScanTimestamp?.let { "Last scan ${DateFormat.getTimeInstance(DateFormat.SHORT).format(it)}" } ?: "No scan yet — tap Scan",
+                icon = Icons.Rounded.Wifi,
+                trailing = {
+                    FilledTonalButton(onClick = onScan, shape = RoundedCornerShape(50), enabled = !state.isScanning) {
+                        if (state.isScanning) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (state.isScanning) stringResource(R.string.st_Net_Scanning) else stringResource(R.string.st_Net_Scan))
+                    }
+                }
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(180.dp)
+                        .clip(NetTokens.InnerShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    SpectrumVisualizer(results = state.scanResults, currentBssid = state.networkConfig.bssid)
+                    if (state.isScanning) ScanningPulse()
+                    if (state.scanResults.isEmpty() && !state.isScanning) {
+                        Text(
+                            "Spectrum empty — scan to map",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                }
+                if (recommended.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        recommended.forEach { rec ->
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("Ch ${rec.channel} • ${rec.band} ✓") },
+                                leadingIcon = { Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(16.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                            )
+                        }
+                    }
+                } else if (state.isScanning) {
+                    AssistChip(onClick = {}, label = { Text(stringResource(R.string.st_Net_ScanningDots)) }, enabled = false)
+                }
+                // Channel utilization moved into hero as pill row — no second spectrum card
+                if (state.congestion.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.st_Net_ChannelUtil), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        state.congestion.sortedByDescending { it.networkCount }.take(4).forEach { CongestionRow(it) }
+                        if (state.congestion.size > 4) Text("+${state.congestion.size - 4} more channels", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // CONTROLS — simple, 48dp chips, single row per group
+        item {
+            NetCard(
+                title = "Filters",
+                subtitle = "${filteredResults.size} shown • ${state.scanResults.size} total",
+                icon = Icons.Rounded.Tune
+            ) {
+                // SSID chips (max 4 + All)
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = ssidFilter == "ALL", onClick = { ssidFilter = "ALL" }, label = { Text(stringResource(R.string.st_Net_All)) }, shape = RoundedCornerShape(50))
+                    state.scanResults.map { it.ssid }.distinct().filter { it.isNotBlank() }.take(4).forEach { ssid ->
+                        FilterChip(selected = ssidFilter == ssid, onClick = { ssidFilter = ssid }, label = { Text(ssid, maxLines = 1) }, shape = RoundedCornerShape(50))
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    sorts.forEach { (mode, label) ->
+                        FilterChip(selected = state.scanSortMode == mode, onClick = { onSortSelected(mode) }, label = { Text(label) }, shape = RoundedCornerShape(50))
+                    }
+                    FilterChip(selected = state.showHiddenNetworks, onClick = { onToggleHidden(!state.showHiddenNetworks) }, label = { Text(stringResource(R.string.st_Net_Hidden)) }, shape = RoundedCornerShape(50))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ALL" to "All bands", "2.4" to "2.4 GHz", "5" to "5 GHz", "6" to "6 GHz").forEach { (key, label) ->
+                        FilterChip(selected = bandFilter == key, onClick = { bandFilter = key }, label = { Text(label) }, shape = RoundedCornerShape(50))
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    StatTile("Networks", "${state.scanResults.size}", modifier = Modifier.weight(1f))
+                    StatTile("Open", "$openCount", tint = if (openCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                    StatTile("Hidden", "${state.scanResults.count { it.isHidden }}", modifier = Modifier.weight(1f))
+                }
+            }
         }
 
         if (filteredResults.isEmpty() && !state.isScanning) {
             item {
                 NetCard(contentPadding = NetTokens.SpacingXL) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Rounded.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(36.dp))
-                        Text("No networks found", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text("Tap Scan to discover nearby access points", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text(stringResource(R.string.st_Net_NoNetworksHint), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.st_Net_TapScanHint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                 }
             }
         }
 
         items(filteredResults, key = { it.bssid }) { result ->
-            NetworkResultCard(
-                result = result,
-                onClick = { onSelectAP(result) }
-            )
+            NetworkResultCard(result = result, onClick = { onSelectAP(result) })
         }
 
-        item {
-            ChannelSpectrumCard(state = state)
-        }
-        item {
-            SecurityAuditCard(state = state)
-        }
-        item {
-            ExportActionsCard()
-        }
-        item {
-            Card(
-                
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.BarChart, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        Text("Channel Utilization", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    }
-                    if (state.congestion.isEmpty()) {
-                        Text(
-                            "Scan nearby networks to see congestion by channel.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        state.congestion.sortedByDescending { it.networkCount }.forEach { item ->
-                            CongestionRow(item)
-                        }
-                    }
-                }
-            }
-        }
+        // Security as tonal banner (not full card) — expressive, non-intrusive
+        item { SecurityAuditCard(state = state) }
+
+        item { ExportActionsCard() }
     }
 }
 
@@ -767,7 +707,7 @@ private fun ChannelSpectrumCard(state: WifiTweaksUiState) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("Spectrum Map", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_Net_SpectrumMap), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     Text("${state.scanResults.size} networks • ${state.congestion.count { it.isRecommended }} recommended", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
@@ -801,14 +741,38 @@ private fun ExportActionsCard() {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val vm: WifiTweaksViewModel = hiltViewModel()
-    val state by vm.uiState.collectAsStateWithLifecycle()
     Card(shape = NetTokens.CardShape, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(vm.exportScanCsv())); android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
-                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy CSV")
+            OutlinedButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(vm.exportScanCsv()))
+                    android.widget.Toast.makeText(context, "CSV copied", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(50)
+            ) {
+                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.st_Net_CopyCsv))
             }
-            FilledTonalButton(onClick = { clipboard.setText(AnnotatedString(vm.exportDiagnosticJson())); android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(50)) {
-                Icon(Icons.Rounded.Share, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("Copy JSON")
+            FilledTonalButton(
+                onClick = {
+                    // P5 share intent + clipboard fallback
+                    val json = vm.exportDiagnosticJson()
+                    clipboard.setText(AnnotatedString(json))
+                    runCatching {
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(android.content.Intent.EXTRA_TEXT, json)
+                            putExtra(android.content.Intent.EXTRA_SUBJECT, "Toolz network diagnostic")
+                        }
+                        context.startActivity(android.content.Intent.createChooser(send, "Share diagnostic").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.onFailure {
+                        android.widget.Toast.makeText(context, "JSON copied", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(50)
+            ) {
+                Icon(Icons.Rounded.Share, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(stringResource(R.string.st_Net_ShareJson))
             }
         }
     }
@@ -835,7 +799,7 @@ private fun SecurityAuditCard(state: WifiTweaksUiState) {
                 Icon(if ((score ?:100) >=70) Icons.Rounded.VerifiedUser else Icons.Rounded.Warning, null, tint = if ((score ?:100) >=70) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text("Security Audit", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                Text(stringResource(R.string.st_Net_SecurityAudit), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                 Text(
                     when {
                         state.scanResults.isEmpty() -> "Scan to audit nearby networks."
@@ -1042,7 +1006,12 @@ internal fun DnsEngineTab(
 ) {
     val dnsTweaks = state.tweaks.filter { it.id.startsWith("private_dns_") }
     var customHost by remember { mutableStateOf("") }
-    var dnsFilter by remember { mutableStateOf("ALL") }
+    var dnsFilter by rememberSaveable { mutableStateOf("ALL") }
+    val dnsCategoryMap = remember { mapOf(
+        "adguard" to "PRIVACY", "quad9" to "SECURITY", "cloudflare" to "SPEED",
+        "google" to "SPEED", "nextdns" to "PRIVACY", "mullvad" to "PRIVACY",
+        "opendns" to "SECURITY", "cleanbrowsing" to "FAMILY", "controld" to "PRIVACY"
+    ) }
 
     LazyColumn(
         modifier = Modifier
@@ -1116,7 +1085,7 @@ internal fun DnsEngineTab(
         item {
             NetCard(
                 title = stringResource(R.string.st_WifiTweaksScreen_e1f2),
-                subtitle = "One tap to switch resolver",
+                subtitle = "Current: ${state.privateDnsMode} ${if (state.privateDnsHost.isNotBlank()) "• ${state.privateDnsHost}" else ""} — One tap to switch",
                 icon = Icons.Rounded.Public,
                 trailing = {
                     TextButton(
@@ -1137,9 +1106,25 @@ internal fun DnsEngineTab(
                     "Fast" to listOf("private_dns_cloudflare", "private_dns_google"),
                     "Family" to emptyList<String>()
                 )
+                // P4 DNS category chips (filter presets)
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ALL", "SPEED", "PRIVACY", "SECURITY", "FAMILY").forEach { cat ->
+                        FilterChip(
+                            selected = dnsFilter == cat,
+                            onClick = { dnsFilter = cat },
+                            label = { Text(cat) },
+                            shape = RoundedCornerShape(50)
+                        )
+                    }
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // All known presets, ordered: Secure → Fast → Family (extras fall into Fast)
-                    val ordered = dnsTweaks.sortedBy { tw ->
+                    val ordered = dnsTweaks.filter { tw ->
+                        if (dnsFilter == "ALL") true else {
+                            val key = tw.id.substringAfter("private_dns_")
+                            dnsCategoryMap[key] == dnsFilter || tw.id.contains(dnsFilter.lowercase())
+                        }
+                    }.sortedBy { tw ->
                         when {
                             tw.id.contains("quad9") || tw.id.contains("adguard") -> 0
                             tw.id.contains("cloudflare") || tw.id.contains("google") -> 1
@@ -1226,6 +1211,7 @@ internal fun DiagnosticsTab(
     onOpenWifiSettings: () -> Unit,
     onOpenDevSettings: () -> Unit,
     onRunSpeedTest: () -> Unit,
+    onCancelSpeedTest: () -> Unit = {},
     onRunTraceRoute: (String) -> Unit,
     extraCards: (@Composable () -> Unit)? = null
 ) {
@@ -1251,14 +1237,14 @@ internal fun DiagnosticsTab(
                 subtitle = if (state.speedTest.isRunning) state.speedTest.phaseLabel else "Full test · download, upload & bufferbloat",
                 icon = Icons.Rounded.Speed,
                 trailing = {
-                    Button(
-                        onClick = onRunSpeedTest,
-                        enabled = !state.speedTest.isRunning,
-                        shape = RoundedCornerShape(50)
-                    ) {
-                        if (state.speedTest.isRunning) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
+                    if (state.speedTest.isRunning) {
+                        OutlinedButton(onClick = onCancelSpeedTest, shape = RoundedCornerShape(50)) {
+                            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cancel")
+                        }
+                    } else {
+                        Button(onClick = onRunSpeedTest, shape = RoundedCornerShape(50)) {
                             Text(stringResource(R.string.st_WifiTweaksScreen_g7h8))
                         }
                     }
@@ -1325,12 +1311,19 @@ internal fun DiagnosticsTab(
         item {
             NetCard(
                 title = stringResource(R.string.st_WifiTweaksScreen_i9j0),
-                subtitle = if (state.isTracing) "Tracing…" else "Path to a target host",
+                subtitle = if (state.isTracing) "Tracing ${traceTarget} — ${state.traceHops.size} hops" else if (state.traceHops.isNotEmpty()) "${state.traceHops.size} hops • ${state.traceHops.lastOrNull()?.ip ?: ""}" else "Path to a target host",
                 icon = Icons.Rounded.Route,
                 trailing = {
-                    FilledTonalButton(onClick = { onRunTraceRoute(traceTarget) }, enabled = !state.isTracing, shape = RoundedCornerShape(50)) {
-                        if (state.isTracing) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text("Trace")
+                    if (state.isTracing) {
+                        FilledTonalButton(onClick = {}, enabled = false, shape = RoundedCornerShape(50)) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Tracing")
+                        }
+                    } else {
+                        FilledTonalButton(onClick = { onRunTraceRoute(traceTarget) }, shape = RoundedCornerShape(50)) {
+                            Text("Trace")
+                        }
                     }
                 }
             ) {
@@ -1339,19 +1332,39 @@ internal fun DiagnosticsTab(
                     onValueChange = { traceTarget = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.st_WifiTweaksScreen_k1l2)) },
+                    placeholder = { Text("1.1.1.1 or dns.google") },
                     singleLine = true,
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    trailingIcon = {
+                        if (traceTarget.isNotBlank()) IconButton(onClick = { traceTarget = "" }) { Icon(Icons.Rounded.Close, contentDescription = "Clear") }
+                    }
                 )
+                if (state.isTracing) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)), color = MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NetPill("Hop ${state.traceHops.size + 1} probing…", emphasized = true)
+                        Text("Streaming via ping-TTL (no binary needed)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (state.traceHops.isEmpty()) {
-                    Text("Run a trace to see each hop on the path.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (state.isTracing) {
+                        Text("Probing… first hop is your gateway, then upstream. This takes ~5–8s.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Surface(shape = NetTokens.InnerShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Icon(Icons.Rounded.Route, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                                Text("Run a trace to see each hop on the path. Requires Shizuku for raw TTL probes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         state.traceHops.forEach { hop ->
                             Surface(shape = NetTokens.InnerShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
                                 Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(28.dp)) {
+                                    Surface(shape = RoundedCornerShape(50), color = if (hop.latencyMs == null) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(28.dp)) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Text("${hop.hop}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            Text("${hop.hop}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (hop.latencyMs == null) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface)
                                         }
                                     }
                                     Spacer(Modifier.width(10.dp))
@@ -1359,6 +1372,8 @@ internal fun DiagnosticsTab(
                                         Text(hop.ip, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (hop.label.isNotBlank() && hop.label != "Hop ${hop.hop}") {
                                             Text(hop.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        } else {
+                                            Text(if (hop.latencyMs == null) "no reply" else hop.method, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                     Text(
@@ -1368,6 +1383,12 @@ internal fun DiagnosticsTab(
                                         color = if (hop.latencyMs == null) MaterialTheme.colorScheme.error else healthTint((90 - (hop.latencyMs ?: 200).coerceIn(0, 180) / 2).toInt())
                                     )
                                 }
+                            }
+                        }
+                        if (!state.isTracing && state.traceHops.isNotEmpty()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                NetPill("${state.traceHops.size} hops", emphasized = true)
+                                NetPill(state.traceHops.lastOrNull()?.let { if (it.ip == traceTarget) "Reached" else "Ended" } ?: "Done")
                             }
                         }
                     }
@@ -1630,7 +1651,7 @@ private fun TweakCard(
     onApply: () -> Unit,
     onUndo: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
 
     Card(
         
@@ -1654,40 +1675,48 @@ private fun TweakCard(
                 }
             }
 
+            // P3 fix: single source status pill — no duplicate Ready/Verified, correct tint (not red for unverified)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        statusLabel(result),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = when (result?.verified) {
-                            true -> MaterialTheme.colorScheme.primary
-                            null -> MaterialTheme.colorScheme.onSurfaceVariant
-                            false -> MaterialTheme.colorScheme.error
-                        }
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        NetPill(
-                            text = result?.message?.takeIf { it.isNotBlank() }
-                                ?: if (result?.isApplied == true) "Active" else "Ready",
-                            emphasized = result?.verified == true
-                        )
-                        if (result?.verified == false && result.isApplied) {
-                            NetPill("not verified")
-                        }
+                val isRunning = result?.status == TweakStatus.RUNNING
+                val isFailed = result?.status == TweakStatus.FAILED
+                val isApplied = result?.isApplied == true
+                val verified = result?.verified
+                val (pillText, pillEmphasized) = when {
+                    isRunning -> "Working…" to false
+                    isFailed -> (result?.message?.takeIf { it.isNotBlank() } ?: "Failed") to false
+                    isApplied && verified == true -> "Active · verified" to true
+                    isApplied && verified == null -> "Active · unverified" to false
+                    isApplied && verified == false -> "Not active" to false
+                    result?.status == TweakStatus.MANUAL -> "Manual" to false
+                    else -> "Ready" to false
+                }
+                val pillColor = when {
+                    isFailed -> MaterialTheme.colorScheme.error
+                    isApplied && verified == true -> MaterialTheme.colorScheme.primary
+                    isApplied && verified == null -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(shape = RoundedCornerShape(50), color = if (pillEmphasized) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest) {
+                        Text(pillText, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = if (pillEmphasized) MaterialTheme.colorScheme.onSecondaryContainer else pillColor)
+                    }
+                    if (!isRunning && !isFailed && result?.message?.isNotBlank() == true && pillText != result.message) {
+                        Text(result.message!!, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 if (tweak.riskNote != null) {
                     Text(
                         tweak.riskNote,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.End
+                        modifier = Modifier.weight(1f).padding(start = 12.dp),
+                        textAlign = TextAlign.End,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1760,7 +1789,8 @@ private fun PresetDnsRow(
     Surface(
         shape = NetTokens.InnerShape,
         color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onApply)
+        tonalElevation = if (active) 2.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onApply).let { m -> if (!enabled) m else m }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = NetTokens.SpacingM, vertical = NetTokens.SpacingM),
@@ -1861,7 +1891,7 @@ private fun NetworkResultCard(result: WifiScanResult, onClick: () -> Unit) {
 
 @Composable
 private fun CongestionRow(item: ChannelCongestion) {
-    val accent = if (item.isRecommended) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
+    val accent = if (item.isRecommended) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = accent.copy(alpha = if (item.isRecommended) 0.12f else 0.06f)
@@ -2274,15 +2304,15 @@ internal fun SpeedHistoryCard(
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("Speed history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Text("${history.size} runs · last 90 days", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_Net_SpeedHistory), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(R.string.st_Net_Runs90d, history.size), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = onClear, enabled = history.isNotEmpty()) {
                     Icon(Icons.Rounded.Delete, contentDescription = "Clear history")
                 }
             }
             if (history.size < 2) {
-                Text("Run a few speed tests to build a trend.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.st_Net_RunTrendHint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Sparkline(
                     values = history.reversed().map { it.downloadMbps },
@@ -2294,6 +2324,16 @@ internal fun SpeedHistoryCard(
                     MiniMetric("Average", "${history.map { it.downloadMbps }.average().roundToInt()}")
                     val grades = history.mapNotNull { it.bloatGrade }
                     if (grades.isNotEmpty()) MiniMetric("Bloat", grades.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: "-")
+                }
+                // P5 p50/p95 ISP latency (from loadedLatencyMs/idle fallback)
+                val latencies = history.mapNotNull { it.loadedLatencyMs ?: it.idleLatencyMs }.sorted()
+                if (latencies.isNotEmpty()) {
+                    fun pct(p: Double): Long = latencies[((latencies.size - 1).coerceAtLeast(0) * p).toInt()]
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        NetPill("p50 ${pct(0.5)}ms")
+                        NetPill("p95 ${pct(0.95)}ms")
+                        NetPill("${latencies.size} samples")
+                    }
                 }
             }
         }

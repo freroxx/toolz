@@ -1298,6 +1298,37 @@
     <string name="st_WifiTweaksScreen_select_benchmark">Select Benchmark Servers</string>
     <string name="st_WifiTweaksScreen_diag_summary_copied">Diagnostic summary copied.</string>
     <string name="st_WifiTweaksScreen_ping_result">Ping to %1$s: %2$s ms</string>
+    <string name="st_Net_WakeOnLan">Wake-on-LAN</string>
+    <string name="st_Net_NoNetworks">No networks found</string>
+    <string name="st_Net_TapScan">Tap Scan to discover nearby access points</string>
+    <string name="st_Net_Scan">Scan</string>
+    <string name="st_Net_Scanning">Scanning…</string>
+    <string name="st_Net_CopyCsv">Copy CSV</string>
+    <string name="st_Net_ShareJson">Share JSON</string>
+    <string name="st_Net_SpeedHistory">Speed history</string>
+    <string name="st_Net_Runs90d">%1$d runs · last 90 days</string>
+    <string name="st_Net_RunTrendHint">Run a few speed tests to build a trend.</string>
+    <string name="st_Net_ChannelUtil">Channel Utilization</string>
+    <string name="st_Net_SpectrumMap">Spectrum Map</string>
+    <string name="st_Net_SecurityAudit">Security Audit</string>
+    <string name="st_Net_NoNetworksHint">No networks found</string>
+    <string name="st_Net_TapScanHint">Tap Scan to discover nearby access points</string>
+    <string name="st_Net_Recommended">Recommended</string>
+    <string name="st_Net_ScanningDots">Scanning…</string>
+    <string name="st_Net_All">All</string>
+    <string name="st_Net_Hidden">Hidden</string>
+    <string name="st_Net_Devices">Devices</string>
+    <string name="st_Net_Gateway">Gateway</string>
+    <string name="st_Net_Named">Named</string>
+    <string name="st_Net_NewBadge">NEW</string>
+    <string name="st_Net_GwBadge">GW</string>
+    <string name="st_Net_CopyIp">Copy IP</string>
+    <string name="st_Net_CopyMac">Copy MAC</string>
+    <string name="st_Net_ScanPorts">Scan ports</string>
+    <string name="st_Net_ScanningPorts">Scanning ports…</string>
+    <string name="st_Net_NoOpenPorts">No common ports open</string>
+    <string name="st_Net_ScanGateway">Scan gateway ports</string>
+    <string name="st_Net_CollectingSamples">Collecting samples… keep this screen open</string>
 
 
 

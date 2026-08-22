@@ -1206,6 +1206,7 @@ fun ToolzNavHost(
         composable(Screen.Clipboard.route) {
             ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
         }
+        // P3 single entry: both legacy routes map to NetworkSuiteScreen (PowerSuite retired)
         composable(Screen.NetworkPowerSuite.route) {
             NetworkSuiteScreen(onBack = { navController.popBackStack() })
         }

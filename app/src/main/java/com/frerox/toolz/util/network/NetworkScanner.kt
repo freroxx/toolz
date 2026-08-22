@@ -128,9 +128,10 @@ class NetworkScanner @Inject constructor(
 
         val arpNow = arpTable()
 
+        val scanDispatcher = Dispatchers.IO.limitedParallelism(24)
         coroutineScope {
             val jobs = (1..254).map { hostIdx ->
-                async(Dispatchers.IO) {
+                async(scanDispatcher) {
                     if (!isActive) return@async
                     val host = "$subnet.$hostIdx"
                     probeDevice(host, gateway)?.let { trySend(it) }
@@ -214,6 +215,24 @@ class NetworkScanner @Inject constructor(
             }
         } catch (_: Exception) { null }
     }
+
+    /** P9 WoL: send magic packet to [mac] via UDP 9. Returns true if sent (not guaranteed delivery). */
+    suspend fun wakeOnLan(mac: String, broadcastIp: String = "255.255.255.255", port: Int = 9): Boolean =
+        withContext(Dispatchers.IO) {
+            val clean = mac.filter { it.isLetterOrDigit() }
+            if (clean.length != 12) return@withContext false
+            try {
+                val macBytes = clean.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val packet = ByteArray(6 + 16 * macBytes.size)
+                for (i in 0..5) packet[i] = 0xFF.toByte()
+                for (i in 0 until 16) System.arraycopy(macBytes, 0, packet, 6 + i * macBytes.size, macBytes.size)
+                java.net.DatagramSocket().use { s ->
+                    s.broadcast = true
+                    s.send(java.net.DatagramPacket(packet, packet.size, java.net.InetAddress.getByName(broadcastIp), port))
+                }
+                true
+            } catch (_: Exception) { false }
+        }
 
     private fun getServiceName(port: Int) = when (port) {
         22 -> "SSH"; 53 -> "DNS"; 80 -> "HTTP"; 123 -> "NTP"; 139 -> "NetBIOS"
