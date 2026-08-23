@@ -61,6 +61,38 @@ object DatabaseModule {
      * row by parsing its createdAt (Instant.parse, OffsetDateTime.parse fallback,
      * epoch 0 on failure) through a single prepared statement loop.
      */
+    // V3-FIX: 45->46 and 46->47 were shipped without migration objects (the old
+    // destructive-upgrade era). Devices still on DB 45 (last public release) crashed
+    // with "migration from 45 to 49 not found". Reconstructed purely from git
+    // history: each bump ONLY added new cache tables, so CREATE TABLE IF NOT EXISTS
+    // statements copied verbatim from the exported 49 schema are exact and safe —
+    // these are retention-purged caches, but recreating them non-destructively is
+    // free, so no user data is lost.
+    private val MIGRATION_45_46 = object : Migration(45, 46) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `network_speed_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`timestampMs` INTEGER NOT NULL, `downloadMbps` REAL NOT NULL, `uploadMbps` REAL NOT NULL, " +
+                    "`idleLatencyMs` INTEGER, `loadedLatencyMs` INTEGER, `bloatGrade` TEXT, `ssid` TEXT NOT NULL)"
+            )
+        }
+    }
+
+    private val MIGRATION_46_47 = object : Migration(46, 47) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `device_inventory` (`mac` TEXT NOT NULL, `ip` TEXT NOT NULL, " +
+                    "`hostname` TEXT NOT NULL, `vendor` TEXT NOT NULL, `typeLabel` TEXT NOT NULL, " +
+                    "`firstSeenMs` INTEGER NOT NULL, `lastSeenMs` INTEGER NOT NULL, `isGateway` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`mac`))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `scan_snapshots` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`timestampMs` INTEGER NOT NULL, `ssid` TEXT NOT NULL, `bssid` TEXT NOT NULL, `json` TEXT NOT NULL)"
+            )
+        }
+    }
+
     private val MIGRATION_47_48 = object : Migration(47, 48) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE whisper_messages ADD COLUMN sortEpoch INTEGER NOT NULL DEFAULT 0")
@@ -117,7 +149,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_47_48, MIGRATION_48_49)
+        .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -156,7 +188,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_47_48, MIGRATION_48_49)
+                    .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

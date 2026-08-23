@@ -177,9 +177,12 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // V3-FIX (reviewwhisper.md item 6): upload any FCM token parked before login.
-        lifecycleScope.launch { whisperPushTokenStore.retryPendingIfAny() }
         super.onCreate(savedInstanceState)
+        // V3-FIX (reviewwhisper.md item 6): upload any FCM token parked before login.
+        // MUST run AFTER super.onCreate() — Hilt performs field injection there, and
+        // lifecycleScope's Main.immediate dispatcher would otherwise execute this
+        // coroutine body inline before whisperPushTokenStore is assigned (crash).
+        lifecycleScope.launch { whisperPushTokenStore.retryPendingIfAny() }
         enableEdgeToEdge()
         window.setBackgroundDrawableResource(android.R.color.background_dark)
         Shizuku.addRequestPermissionResultListener(this)
