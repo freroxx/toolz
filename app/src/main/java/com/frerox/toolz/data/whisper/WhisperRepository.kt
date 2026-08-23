@@ -66,6 +66,9 @@ import java.util.concurrent.ConcurrentHashMap
 @Singleton
 class WhisperRepository @Inject constructor(
     private val supabase: SupabaseClient,
+    // V3-FIX (task F): app context lets the image decode path honor the device pixel
+    // budget (maxPixelsForDevice) — previously this class had no Context injection.
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val crypto: WhisperCrypto,
     private val encryptedImageHost: WhisperEncryptedImageHost,
     private val deletedStore: WhisperDeletedMessagesStore,
@@ -79,6 +82,9 @@ class WhisperRepository @Inject constructor(
     // ProducerScope is already cancelled when awaitClose fires — a plain `launch {}`
     // there never executes. This app-lifetime scope survives collection cancellation.
     @ApplicationScope private val appScope: kotlinx.coroutines.CoroutineScope,
+    // V3-FIX (task F): wired so clearAllLocalData also wipes the encrypted image disk
+    // cache — sign-out must not leave another account's cached images readable.
+    private val imageDiskCache: WhisperImageDiskCache,
 ) {
     private companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -161,7 +167,12 @@ class WhisperRepository @Inject constructor(
         // H-7 FIX (reviewwhisper.md): memoized — getMessagesFlow re-decrypts up to 500
         // cached rows on EVERY Room emission; each miss costs an ECDH+HKDF+GCM round
         // through AndroidKeyStore. The memo bounds that to one derive per unique row.
-        val decrypted = decryptMemoized(content, contentIv, key, senderId, receiverId)
+        // V3-FIX: createdAt is passed through so the legacy no-AAD fallback stays scoped
+        // to pre-cutoff rows only (undated rows parse to 0L = treated as legacy).
+        val decrypted = decryptMemoized(
+            content, contentIv, key, senderId, receiverId,
+            WhisperMessageEntity.parseSortEpoch(createdAt),
+        )
         return copy(content = decrypted ?: "[Encrypted message]")
     }
 
@@ -180,11 +191,14 @@ class WhisperRepository @Inject constructor(
         peerKey: String,
         senderId: String,
         receiverId: String,
+        messageCreatedAtEpochMs: Long,
     ): String? {
         if (ivBase64.isNullOrBlank()) return null
         val memoKey = "$senderId\u0000$receiverId\u0000$peerKey\u0000$ivBase64\u0000$rawCipher"
         synchronized(decryptMemo) { decryptMemo[memoKey]?.let { return it } }
-        val out = crypto.decryptMessage(rawCipher, ivBase64, peerKey, senderId, receiverId) ?: return null
+        // V3-FIX: forwards the row's creation time so crypto can scope its legacy fallback.
+        val out = crypto.decryptMessage(rawCipher, ivBase64, peerKey, senderId, receiverId, messageCreatedAtEpochMs)
+            ?: return null
         synchronized(decryptMemo) { decryptMemo[memoKey] = out }
         return out
     }
@@ -800,6 +814,10 @@ class WhisperRepository @Inject constructor(
         attachment: WhisperImageAttachment,
         peerId: String?,
         peerPublicKey: String?,
+        // V3-FIX (scoped legacy-AAD retirement): creation time of the message carrying
+        // this attachment; scopes crypto's constant-AAD legacy retry to pre-cutoff
+        // images only. Default = never-legacy for any caller that cannot date the row.
+        messageCreatedAtEpochMs: Long = Long.MAX_VALUE,
     ): Result<ByteArray> = runCatching {
         if (attachment.expiresAtEpochSeconds != null && java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds) {
             error("This disappearing image has expired.")
@@ -807,10 +825,13 @@ class WhisperRepository @Inject constructor(
         val rawBytes = encryptedImageHost.download(attachment.url).getOrThrow()
 
         // 1. Attempt to decode via lossless PNG transport (ImgBB host)
-        // V2-FIX M-M?: decode() accepts a maxPixels budget (maxPixelsForDevice) for low-RAM
-        // devices; this repository has no Context injection, so the safe default is kept
-        // (deferred: thread a Context/app-density provider through if ever needed).
-        val decodedPng = WhisperImageCipherTransport.decode(rawBytes)
+        // V3-FIX (task F): thread the device pixel budget through decode() — low-RAM
+        // devices now cap at 4 MP instead of the blanket 8 MP default. The default
+        // parameter on decode() is kept so unit tests without a Context still compile.
+        val decodedPng = WhisperImageCipherTransport.decode(
+            rawBytes,
+            WhisperImageCipherTransport.maxPixelsForDevice(appContext),
+        )
         val candidateCipher = decodedPng ?: rawBytes
 
         // 2. Decrypt bound to the original direction. The AAD binds (senderId, receiverId),
@@ -818,8 +839,9 @@ class WhisperRepository @Inject constructor(
         // sent it to the partner (me, peer). decryptAttachment also keeps an internal
         // constant-AAD fallback for legacy rows created before direction binding.
         val myIdNow = myId
+        // V3-FIX: forward the message timestamp so the fallback stays pre-cutoff-only.
         fun tryDecrypt(bytes: ByteArray, sender: String, receiver: String) =
-            crypto.decryptAttachment(bytes, attachment.iv, peerPublicKey, sender, receiver)
+            crypto.decryptAttachment(bytes, attachment.iv, peerPublicKey, sender, receiver, messageCreatedAtEpochMs)
 
         val boundPairs: List<Pair<String, String>> = when {
             peerId.isNullOrBlank() || peerId == myIdNow -> listOf("" to myIdNow, myIdNow to "")
@@ -1003,7 +1025,11 @@ class WhisperRepository @Inject constructor(
         // the accepted peer key before parsing the attachment envelope.
         fun attachmentOf(m: WhisperMessage): WhisperImageAttachment? {
             val raw = if (m.contentIv != null) {
-                crypto.decryptMessage(m.content, m.contentIv, peerKeyFor(otherUserId), m.senderId, m.receiverId) ?: m.content
+                // V3-FIX: pass the row's createdAt so the legacy fallback stays pre-cutoff-only.
+                crypto.decryptMessage(
+                    m.content, m.contentIv, peerKeyFor(otherUserId), m.senderId, m.receiverId,
+                    WhisperMessageEntity.parseSortEpoch(m.createdAt),
+                ) ?: m.content
             } else m.content
             return WhisperImageAttachment.fromMessageContent(raw)
         }
@@ -1084,13 +1110,15 @@ class WhisperRepository @Inject constructor(
     private suspend fun decryptRealtimeMessage(msg: WhisperMessage, peerId: String): String {
         if (msg.isDeletedForEveryone) return msg.content
         val contentIv = msg.contentIv ?: return msg.content
+        // V3-FIX: date the row once — scopes the legacy fallback to pre-cutoff messages.
+        val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(msg.createdAt)
         val trustedKey = peerKeyFor(peerId)
         trustedKey?.let { key ->
-            crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId)?.let { return it }
+            crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId, createdAtEpochMs)?.let { return it }
         }
         if (trustedKey == null) {
             getProfile(peerId).getOrNull()?.publicKey?.let { key ->
-                crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId)?.let { return it }
+                crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId, createdAtEpochMs)?.let { return it }
             }
         }
         return "[Encrypted message]"
@@ -1560,9 +1588,11 @@ class WhisperRepository @Inject constructor(
                     // preview; fall back to the fresh key only on true first contact.
                     // M-2 FIX: routed through the memoized decrypt — the double direction
                     // attempt used to cost two full ECDH derives per conversation row.
+                    // V3-FIX: lastCreatedAt scopes the legacy fallback to pre-cutoff rows.
                     val previewKey = peerKeyFor(row.partnerId) ?: profile.publicKey
-                    decryptMemoized(row.lastContent, row.lastContentIv, previewKey, row.partnerId, myId)
-                        ?: decryptMemoized(row.lastContent, row.lastContentIv, previewKey, myId, row.partnerId)
+                    val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(row.lastCreatedAt)
+                    decryptMemoized(row.lastContent, row.lastContentIv, previewKey, row.partnerId, myId, createdAtEpochMs)
+                        ?: decryptMemoized(row.lastContent, row.lastContentIv, previewKey, myId, row.partnerId, createdAtEpochMs)
                         ?: "🔒 Encrypted message"
                 } else if (row.lastContentIv != null) {
                     "🔒 Encrypted message"
@@ -1629,8 +1659,10 @@ class WhisperRepository @Inject constructor(
                     // through decryptMemoized like the RPC path — every hub rebuild used to
                     // pay a full ECDH derive per conversation for the same cached ciphertext.
                     // Actual direction first, then the reversed fallback for legacy rows.
-                    decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.senderId, lastMsg.receiverId)
-                        ?: decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.receiverId, lastMsg.senderId)
+                    // V3-FIX: createdAt scopes the legacy fallback to pre-cutoff rows.
+                    val previewEpochMs = WhisperMessageEntity.parseSortEpoch(lastMsg.createdAt)
+                    decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
+                        ?: decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
                         ?: "🔒 Encrypted message"
                 } else if (lastMsg.contentIv != null) {
                     "🔒 Encrypted message"
@@ -2254,6 +2286,9 @@ class WhisperRepository @Inject constructor(
      */
     suspend fun clearAllLocalData() {
         removeAllCachedChannels()
+        // V3-FIX (task F): drop the encrypted image disk cache with the rest of the
+        // account's local data so a following sign-in starts from a clean slate.
+        imageDiskCache.clearAll()
         messageDao.clearAll()
         deletedStore.clearAll()
         outgoingQueue.clearAll()

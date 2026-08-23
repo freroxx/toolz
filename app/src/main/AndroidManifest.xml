@@ -94,6 +94,15 @@
             </intent-filter>
         </activity>
 
+        <!-- V3-FIX (reviewwhisper.md item 6): FCM entry point for Whisper wake pings. -->
+        <service
+            android:name=".push.WhisperPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".service.FlashlightService"
             android:enabled="true"

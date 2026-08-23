@@ -136,6 +136,8 @@ fun WhisperChatScreen(
     var pendingDeleteForEveryone by remember { mutableStateOf<WhisperMessage?>(null) }
     var quickReactionTargetMessage by remember { mutableStateOf<WhisperMessage?>(null) }
     var showKeyVerifyDialog by remember { mutableStateOf(false) }
+    // V3-FIX: in-chat QR verification scanner entry (launched from KeyVerifyDialog).
+    var showQrScanDialog by remember { mutableStateOf(false) }
     var showImageOptions by remember { mutableStateOf(false) }
     var showBypassDialog by remember { mutableStateOf(false) }
     // One-shot expiry: consumed by the next picker result, then cleared so a stale
@@ -349,8 +351,10 @@ fun WhisperChatScreen(
                                     .padding(horizontal = 4.dp, vertical = 4.dp),
                             ) {
                                 uiState.otherUser?.let { user ->
-                                    val status = user.onlineStatus
-                                    val isUserOnline = uiState.isPartnerOnline || status == "Online"
+                                    // V3-FIX (item 8a): typed presence replaces the
+                                    // `== "Online"` literal compare.
+                                    val presence = user.presence
+                                    val isUserOnline = uiState.isPartnerOnline || presence == WhisperPresence.ONLINE
                                     Box {
                                         WhisperAvatar(user, 38.dp)
                                         if (isUserOnline) {
@@ -381,8 +385,9 @@ fun WhisperChatScreen(
                                         }
                                         val subtitle = when {
                                             uiState.isPartnerTyping -> stringResource(R.string.st_Whisper_Typing)
-                                            uiState.isPartnerOnline -> stringResource(R.string.st_Whisper_Online)
-                                            else -> if (status == "Online") stringResource(R.string.st_Whisper_Online) else status
+                                            // V3-FIX (item 8a): localized presence label instead
+                                            // of the raw English model string.
+                                            else -> whisperPresenceLabel(presence)
                                         }
                                         Text(
                                             subtitle,
@@ -828,6 +833,27 @@ fun WhisperChatScreen(
             onVerify = { showKeyVerifyDialog = false; viewModel.verifyKey() },
             onAccept = { showKeyVerifyDialog = false; viewModel.acceptNewKey() },
             onDismiss = { showKeyVerifyDialog = false },
+            // V3-FIX: offer the QR path instead of eyeballing fingerprints.
+            onScanQr = { showKeyVerifyDialog = false; showQrScanDialog = true },
+        )
+    }
+
+    // V3-FIX: QR verification scanner — compares the scanned fingerprint against the one
+    // computed LOCALLY from the stored partner public key (never against server data).
+    val qrExpectedFingerprint = remember(uiState.otherUser?.publicKey) {
+        uiState.otherUser?.publicKey?.let { WhisperCrypto.computeFingerprint(it) }
+    }
+    if (showQrScanDialog) {
+        WhisperQrScanDialog(
+            partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
+            expectedPartnerFingerprint = qrExpectedFingerprint,
+            toastState = toastState,
+            haptic = haptic,
+            onVerified = {
+                showQrScanDialog = false
+                viewModel.verifyKey()
+            },
+            onDismiss = { showQrScanDialog = false },
         )
     }
 
@@ -1346,6 +1372,9 @@ private fun KeyVerifyDialog(
     onVerify: () -> Unit,
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
+    // V3-FIX: when provided, a "Scan verification QR" shortcut is offered next to the
+    // manual compare path.
+    onScanQr: (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1422,7 +1451,17 @@ private fun KeyVerifyDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onVerify) { Text(stringResource(R.string.st_Whisper_Verify), fontWeight = FontWeight.Bold) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // V3-FIX: QR scan shortcut — the whole point is not comparing hex by eye.
+                if (onScanQr != null) {
+                    TextButton(onClick = onScanQr) {
+                        Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.st_Whisper_QrScanButton), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                TextButton(onClick = onVerify) { Text(stringResource(R.string.st_Whisper_Verify), fontWeight = FontWeight.Bold) }
+            }
         },
         dismissButton = {
             Row(verticalAlignment = Alignment.CenterVertically) {

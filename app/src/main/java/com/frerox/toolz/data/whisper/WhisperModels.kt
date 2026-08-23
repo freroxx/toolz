@@ -72,7 +72,57 @@ data class WhisperProfile(
 
     /** First letter of effective name for avatar initials */
     val avatarInitial: String get() = effectiveName.firstOrNull()?.uppercase() ?: "?"
+
+    /**
+     * V3-FIX (item 8a): typed presence derived from [lastSeenAt]. Reuses the lazily
+     * parsed timestamp so recomposition-heavy list rows don't re-parse per frame.
+     */
+    val presence: WhisperPresence get() = WhisperPresence.fromParsed(parsedLastSeen)
 }
+
+/**
+ * V3-FIX (item 8a): replaces the scattered hardcoded `== "Online"` string compares in
+ * UI code with a single typed derivation from the last-seen ISO timestamp.
+ */
+enum class WhisperPresence {
+    ONLINE,
+    RECENT,
+    OFFLINE,
+    UNKNOWN;
+
+    companion object {
+        /** A contact counts as ONLINE for this long after their last presence ping. */
+        const val DEFAULT_ONLINE_WINDOW_MS: Long = 120_000L
+
+        /** Within one hour of lastSeen still reads as RECENT rather than plain OFFLINE. */
+        private const val RECENT_WINDOW_MS: Long = 60L * 60_000L
+
+        fun from(lastSeenAtIso: String?, onlineWindowMs: Long = DEFAULT_ONLINE_WINDOW_MS): WhisperPresence =
+            fromParsed(
+                lastSeenAtIso?.let { iso -> runCatching { java.time.OffsetDateTime.parse(iso) }.getOrNull() },
+                onlineWindowMs,
+            )
+
+        internal fun fromParsed(
+            lastSeen: java.time.OffsetDateTime?,
+            onlineWindowMs: Long = DEFAULT_ONLINE_WINDOW_MS,
+        ): WhisperPresence {
+            if (lastSeen == null) return UNKNOWN
+            val elapsedMs = java.time.Duration.between(lastSeen, java.time.OffsetDateTime.now()).toMillis()
+            // Slightly-future stamps (client/server clock skew) degrade gracefully:
+            // anything inside the online window is ONLINE, never UNKNOWN/OFFLINE.
+            return when {
+                elapsedMs <= onlineWindowMs -> ONLINE
+                elapsedMs <= RECENT_WINDOW_MS -> RECENT
+                else -> OFFLINE
+            }
+        }
+    }
+}
+
+/** V3-FIX (item 8a): free-function form required by the spec; see [WhisperPresence.from]. */
+fun presenceFrom(lastSeenAtIso: String?, onlineWindowMs: Long = 120_000L): WhisperPresence =
+    WhisperPresence.from(lastSeenAtIso, onlineWindowMs)
 
 @Serializable
 data class WhisperProfileUpdate(

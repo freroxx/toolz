@@ -138,9 +138,12 @@ class LocalBackupManager @Inject constructor(
             if (items.contains(BackupItem.WHISPER_STATE)) {
                 _progress.value = "Whisper Local State"
                 val prefsDir = File(context.dataDir, "shared_prefs")
+                // V3-FIX (H-11): whisper_key_trust.xml removed from backup/restore lists —
+                // TOFU key-trust anchors are device-local now. The EncryptedSharedPreferences
+                // ciphertext (whisper_key_trust_enc.xml) is useless after cross-device
+                // restore since its Keystore key does not travel with the backup.
                 val whisperPrefs = listOf(
                     "whisper_deleted_msgs.xml",
-                    "whisper_key_trust.xml",
                     "whisper_mute_prefs.xml",
                     "whisper_hidden_chats.xml",
                     "whisper_outbox.xml"
@@ -614,11 +617,15 @@ class LocalBackupManager @Inject constructor(
         const val PAYLOAD_FORMAT_VERSION = 1
         const val DATABASE_NAME = "toolz_db"
 
+        // V3-FIX (H-11): whisper_key_trust.xml removed — TOFU key-trust anchors are
+        // device-local now; the ESP ciphertext (whisper_key_trust_enc.xml, added to this
+        // exclusion list) is useless after cross-device restore since its Keystore key
+        // does not travel with the backup.
         private val ENCRYPTED_PREF_FILES = setOf(
             "toolz_vault_prefs.xml",
             "ai_settings.xml",
             "whisper_deleted_msgs.xml",
-            "whisper_key_trust.xml",
+            "whisper_key_trust_enc.xml",
             "whisper_mute_prefs.xml",
             "whisper_hidden_chats.xml",
             "whisper_outbox.xml"

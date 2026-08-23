@@ -20,7 +20,10 @@ package com.frerox.toolz.data.whisper
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -34,12 +37,21 @@ import javax.inject.Singleton
  * All writes are suspend + fsync'd commit on IO: key-trust data is security-
  * critical, so it must be durable before the caller proceeds — but it must
  * never block the main thread (the old runBlocking-on-Main workaround caused jank).
+ *
+ * V3-FIX (H-11): TOFU anchors + verified flags moved from the plaintext
+ * whisper_key_trust.xml to EncryptedSharedPreferences (new file
+ * whisper_key_trust_enc.xml, Keystore-backed MasterKey alias "whisper_kt_master")
+ * so they are no longer readable at rest. A one-time idempotent migration copies
+ * any legacy plaintext entries into the encrypted store, then clears + deletes
+ * the old file.
  */
 @Singleton
 class WhisperKeyTrustStore @Inject constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val appContext: Context,
 ) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("whisper_key_trust", Context.MODE_PRIVATE)
+    // Lazy (thread-safe) init so Keystore/ESP setup — and the one-time migration —
+    // run exactly once, on first use, not during Hilt graph construction on Main.
+    private val prefs: SharedPreferences by lazy { createEncryptedPrefs() }
 
     /** The last accepted public key for a user (base64), or null if never seen. */
     fun knownKey(userId: String): String? = prefs.getString("known_$userId", null)
@@ -100,7 +112,66 @@ class WhisperKeyTrustStore @Inject constructor(
         }
     }
 
+    /**
+     * V3-FIX (H-11): creates the EncryptedSharedPreferences-backed store and performs
+     * the one-time legacy plaintext migration. Idempotent — skipped whenever the old
+     * file is missing or already empty (e.g. fresh install or migration completed on a
+     * previous launch).
+     *
+     * Ordering guarantee: the copy into ESP is fsync'd via commit() BEFORE the legacy
+     * file is cleared + deleted, so a crash in between can lose neither anchor set.
+     * If the encrypted-side commit fails, the legacy file is deliberately kept intact
+     * for a retry on next launch.
+     */
+    private fun createEncryptedPrefs(): SharedPreferences {
+        val masterKey = MasterKey.Builder(appContext, MASTER_KEY_ALIAS)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val encrypted = EncryptedSharedPreferences.create(
+            appContext,
+            PREFS_FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+        migrateLegacyPlaintextInto(encrypted)
+        return encrypted
+    }
+
+    private fun migrateLegacyPlaintextInto(target: SharedPreferences) {
+        val legacy = appContext.getSharedPreferences(LEGACY_PREFS_FILE, Context.MODE_PRIVATE)
+        val entries = legacy.all
+        if (entries.isEmpty()) return
+        val editor = target.edit()
+        for ((key, value) in entries) {
+            when (value) {
+                is String -> editor.putString(key, value)
+                is Long -> editor.putLong(key, value)
+                is Int -> editor.putInt(key, value)
+                is Boolean -> editor.putBoolean(key, value)
+                is Float -> editor.putFloat(key, value)
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            }
+        }
+        val ok = editor.commit()
+        if (!ok) {
+            Log.w(TAG, "key-trust ESP migration commit failed; legacy file kept for retry")
+            return
+        }
+        // Clear first so the in-memory legacy prefs snapshot cannot rewrite the file
+        // behind our back, then remove the plaintext file from disk entirely.
+        legacy.edit().clear().commit()
+        File(appContext.applicationInfo.dataDir, "shared_prefs/$LEGACY_PREFS_FILE.xml").delete()
+        Log.i(TAG, "Migrated ${entries.size} key-trust entries into encrypted prefs")
+    }
+
     private companion object {
         const val TAG = "WhisperKeyTrust"
+        // V3-FIX (H-11): new encrypted store file + Keystore master key alias.
+        const val PREFS_FILE = "whisper_key_trust_enc"
+        const val MASTER_KEY_ALIAS = "whisper_kt_master"
+
+        /** Legacy plaintext file migrated once into [PREFS_FILE]; deleted after the copy. */
+        const val LEGACY_PREFS_FILE = "whisper_key_trust"
     }
 }

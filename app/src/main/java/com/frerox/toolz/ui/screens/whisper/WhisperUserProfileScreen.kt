@@ -48,6 +48,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.FriendStatus
 import com.frerox.toolz.data.whisper.KeyTrustStatus
 import com.frerox.toolz.data.whisper.WhisperCrypto
+import com.frerox.toolz.data.whisper.WhisperPresence
 import com.frerox.toolz.data.whisper.asString
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -71,6 +72,8 @@ fun WhisperUserProfileScreen(
     val scope = rememberCoroutineScope()
 
     var showBypassDialog by remember { mutableStateOf(false) }
+    // V3-FIX: QR verification scanner entry on this profile's key-trust card.
+    var showQrScanDialog by remember { mutableStateOf(false) }
     // V2-FIX (verify in-flight guard): track password verification locally so the dialog
     // stays open, locks its buttons and shows progress until the verdict arrives.
     var isVerifyingBypass by remember { mutableStateOf(false) }
@@ -123,6 +126,25 @@ fun WhisperUserProfileScreen(
             toastState.show(it.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
         }
+    }
+
+    // V3-FIX: QR verification scanner — compares against the fingerprint computed locally
+    // from THIS profile's stored public key, not against any server-provided string.
+    val qrExpectedFingerprint = remember(uiState.profile?.publicKey) {
+        uiState.profile?.publicKey?.let { WhisperCrypto.computeFingerprint(it) }
+    }
+    if (showQrScanDialog) {
+        WhisperQrScanDialog(
+            partnerName = uiState.profile?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
+            expectedPartnerFingerprint = qrExpectedFingerprint,
+            toastState = toastState,
+            haptic = haptic,
+            onVerified = {
+                showQrScanDialog = false
+                viewModel.verifyKey()
+            },
+            onDismiss = { showQrScanDialog = false },
+        )
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -223,17 +245,20 @@ fun WhisperUserProfileScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             
-                            // V2-FIX: WhisperProfile exposes onlineStatus only as a formatted
-                            // String (no enum/status type in WhisperModels), so the literal
-                            // compare stays for now.
-                            // DEFERRED-LOCALIZE/TODO-MODEL: switch to a typed presence enum when
-                            // one is added to the model — localizing the raw status string needs
-                            // a model-layer change, not a resource swap.
+                            // V3-FIX (item 8a): typed WhisperPresence derived from
+                            // profile.lastSeenAt replaces the fragile `== "Online"`
+                            // literal compare (the old DEFERRED-LOCALIZE note); the label
+                            // resolves through localized resources via whisperPresenceLabel.
+                            val presence = profile.presence
                             Text(
-                                profile.onlineStatus,
+                                whisperPresenceLabel(presence),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (profile.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (presence == WhisperPresence.ONLINE) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
 
                             Row(
@@ -409,6 +434,19 @@ fun WhisperUserProfileScreen(
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
+                                        }
+                                    }
+
+                                    // V3-FIX: QR scan shortcut — verify this profile's key by
+                                    // scanning their verification QR in person.
+                                    if (keyTrust?.isVerified != true) {
+                                        ToolzTonalExpressiveButton(
+                                            onClick = { haptic.click(); showQrScanDialog = true },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Rounded.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(stringResource(R.string.st_Whisper_QrScanButton), fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }

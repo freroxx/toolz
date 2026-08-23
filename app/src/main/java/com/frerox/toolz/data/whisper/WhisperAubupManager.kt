@@ -51,6 +51,10 @@ class WhisperAubupManager @Inject constructor(
         // R.string.st_Whisper_Aubup_LegacyStorageWarning instead of this constant.
         const val WARNING_LEGACY_STORAGE =
             "Warning: On this Android version the file was saved to shared storage (Downloads/Toolz), where other apps may be able to read it."
+
+        // V3-FIX (multi-account): stable filename prefix — kept identical to the old
+        // scheme so previously-written access files still match the folder scanner.
+        const val ACCESS_FILE_PREFIX = "whisper_access_"
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -63,7 +67,9 @@ class WhisperAubupManager @Inject constructor(
         name: String,
         username: String,
         credential: String,
-        isToken: Boolean = false,
+        // V3-FIX: persisted into PasswordEntity.isToken so type detection no longer
+        // depends on vault-name sniffing. null leaves the flag unknown/legacy.
+        isToken: Boolean? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val cleanUser = username.trim().lowercase()
@@ -83,6 +89,8 @@ class WhisperAubupManager @Inject constructor(
                     username = cleanUser,
                     password = cleanCred,
                     strength = PasswordGenerator.calculateStrength(cleanCred),
+                    // V3-FIX: write the type flag explicitly when known (null keeps it).
+                    isToken = isToken,
                     lastUsedAt = System.currentTimeMillis()
                 )
                 passwordDao.updatePassword(updated)
@@ -93,6 +101,8 @@ class WhisperAubupManager @Inject constructor(
                     username = cleanUser,
                     password = cleanCred,
                     strength = PasswordGenerator.calculateStrength(cleanCred),
+                    // V3-FIX: write the type flag explicitly when known.
+                    isToken = isToken,
                     createdAt = System.currentTimeMillis(),
                     lastUsedAt = System.currentTimeMillis()
                 )
@@ -125,6 +135,28 @@ class WhisperAubupManager @Inject constructor(
         } catch (_: Exception) {
             File(context.filesDir, "Toolz_access").apply { if (!exists()) mkdirs() }
         }
+    }
+
+    /**
+     * V3-FIX (multi-account): access files are now named after the human-readable
+     * display name so a user owning several Whisper accounts can tell the files apart
+     * in Downloads/Toolz. SanitizedDisplayName keeps only [A-Za-z0-9_-] and is capped
+     * at 24 chars; fallback chain is display name -> username -> literal "account"
+     * (empty after sanitization falls through to the next candidate). The
+     * whisper_access_ prefix is preserved so old files still scan.
+     */
+    private fun accessFileStem(displayName: String?, username: String): String {
+        val candidates = listOfNotNull(
+            displayName?.trim()?.takeIf { it.isNotEmpty() },
+            username.trim().takeIf { it.isNotEmpty() },
+        )
+        for (candidate in candidates) {
+            val sanitized = candidate.filter { c ->
+                c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c == '_' || c == '-'
+            }.take(24)
+            if (sanitized.isNotEmpty()) return sanitized
+        }
+        return "account"
     }
 
     suspend fun createAccessFile(
@@ -160,10 +192,11 @@ class WhisperAubupManager @Inject constructor(
             }
 
             val toolzDir = resolveToolzDir()
-            // P1 privacy: filename no longer leaks hash of raw username; use only sanitized 8-char prefix.
-            val rawUser = username.trim().lowercase()
-            val cleanUser = rawUser.replace(Regex("[^a-z0-9_]"), "_").take(16)
-            val targetFile = File(toolzDir, "whisper_access_${cleanUser}.enc")
+            // P1 privacy: filenames no longer embed a hash of the raw username.
+            // V3-FIX (multi-account): the visible stem is now the sanitized display name
+            // (fallback username) so multiple Whisper accounts produce distinct files;
+            // whisper_access_ prefix kept for scanner backward-compat.
+            val targetFile = File(toolzDir, "${ACCESS_FILE_PREFIX}${accessFileStem(displayName, username)}.enc")
 
             FileOutputStream(targetFile).use { output ->
                 output.write(encryptedText.toByteArray(Charsets.UTF_8))
@@ -199,7 +232,11 @@ class WhisperAubupManager @Inject constructor(
 
         // P2-14 FIX: Don't misclassify hex passwords as tokens. Only trust vault name "Anon".
         // V2-FIX B4: an explicit caller hint wins; heuristic only when metadata can't tell.
-        val resolvedIsToken = isToken ?: (matched?.name?.contains("Anon", ignoreCase = true) == true)
+        // V3-FIX: read precedence is caller hint -> persisted entity flag -> legacy
+        // name-substring heuristic (only for rows predating the isToken column).
+        val resolvedIsToken = isToken
+            ?: matched?.isToken
+            ?: (matched?.name?.contains("Anon", ignoreCase = true) == true)
         val authType = if (resolvedIsToken) "TOKEN" else "PASSWORD"
 
         createAccessFile(
@@ -216,16 +253,50 @@ class WhisperAubupManager @Inject constructor(
             // V2-FIX B5: full-vault load kept — no existing PasswordDao query matches the
             // url-domain OR name-prefix predicate (see note in createAccessFileForUser);
             // adding a scoped DAO query is deferred.
+            // V3-FIX: returned entities carry the persisted isToken flag — consumers
+            // should prefer it over the name-substring heuristic.
             val all = passwordDao.getAllPasswordsSync()
-            all.filter { entity ->
+            val matched = all.filter { entity ->
                 entity.url?.contains("whisper.toolz.app", ignoreCase = true) == true ||
                 entity.name.startsWith("Whisper", ignoreCase = true)
             }
+            // V3-FIX (multi-account): most-recent-first everywhere. PasswordEntity carries
+            // a date field (lastUsedAt, bumped on every upsert/login) — primary sort key,
+            // descending. Tie-breaks: newer createdAt first, then case-insensitive
+            // username ascending so ordering stays deterministic across scans when
+            // timestamps are equal.
+            matched.sortedWith(
+                compareByDescending<PasswordEntity> { it.lastUsedAt }
+                    .thenByDescending { it.createdAt }
+                    .thenBy { it.username.lowercase() }
+            )
         }.getOrDefault(emptyList())
     }
 
-    suspend fun scanToolzFolderForAccessFiles(): List<File> = withContext(Dispatchers.IO) {
+    /**
+     * V3-FIX (multi-account): [vaultAccounts] enables conservative filename-level
+     * dedupe against known vault rows; defaults to none for legacy callers.
+     */
+    suspend fun scanToolzFolderForAccessFiles(
+        vaultAccounts: List<PasswordEntity> = emptyList(),
+    ): List<File> = withContext(Dispatchers.IO) {
         runCatching {
+            // V3-FIX (multi-account): skip an .enc file whose embedded stem clearly
+            // equals a vault account's username (old naming scheme wrote the sanitized
+            // username) so restoring from the vault doesn't offer a redundant duplicate.
+            // LIMITATION: this is filename-only heuristics. Payload-level dedupe (two
+            // differently-named files holding the SAME credential) requires decrypting
+            // every .enc with a Whisper Code we don't have at scan time and is
+            // deliberately deferred — hiding a genuine second account behind a false
+            // "duplicate" would be worse than showing a rare duplicate row.
+            val knownStems = buildSet {
+                vaultAccounts.forEach { acct ->
+                    acct.username.trim().lowercase().takeIf { it.isNotEmpty() }?.let { add(it) }
+                    // Vault names look like "Whisper: user" / "Whisper Anon: user".
+                    acct.name.substringAfter(':', "").trim().lowercase()
+                        .takeIf { it.isNotEmpty() }?.let { add(it) }
+                }
+            }
             // Scan both scoped (Q+ writes) and legacy public dir for backward compat.
             val scopedDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
             @Suppress("DEPRECATION")
@@ -236,7 +307,7 @@ class WhisperAubupManager @Inject constructor(
                 val listed = dir.listFiles() ?: continue
                 files += listed.filter { file ->
                     file.isFile && file.name.lowercase().endsWith(".enc") &&
-                    (file.name.lowercase().contains("whisper") || file.name.lowercase().startsWith("whisper_access"))
+                    (file.name.lowercase().contains("whisper") || file.name.lowercase().startsWith(ACCESS_FILE_PREFIX))
                 }
             }
             // Also scan app-internal fallback (used if external unavailable)
@@ -246,7 +317,13 @@ class WhisperAubupManager @Inject constructor(
                     files += listed.filter { it.isFile && it.name.lowercase().endsWith(".enc") }
                 }
             }
-            files.sortedByDescending { it.lastModified() }
+            // Most-recent-first kept (spec b); dedupe applied after sorting.
+            files.sortedByDescending { it.lastModified() }.filterNot { file ->
+                val stem = file.name.lowercase()
+                    .removePrefix(ACCESS_FILE_PREFIX)
+                    .removeSuffix(".enc")
+                stem.isNotBlank() && stem in knownStems
+            }
         }.getOrDefault(emptyList())
     }
 

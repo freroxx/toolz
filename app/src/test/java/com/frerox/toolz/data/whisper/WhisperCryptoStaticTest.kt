@@ -77,4 +77,17 @@ class WhisperCryptoStaticTest {
         assertTrue(WhisperTombstone.isTombstone(WhisperTombstone.DISPLAY_TEXT))
         assertTrue(WhisperTombstone.isTombstone(WhisperTombstone.CONTENT_LEGACY))
     }
+
+    @Test
+    fun legacyAadFallback_isScopedToPreCutoffRows() {
+        // V3-FIX (scoped legacy-AAD retirement): the no-AAD / constant-AAD retries may
+        // only run for rows created STRICTLY before 2026-09-01T00:00:00Z.
+        // Undated rows parse to 0L and stay legacy-eligible; Long.MAX_VALUE (the
+        // "unknown age" default) is never legacy.
+        assertTrue(WhisperCrypto.legacyFallbackAllowed(0L))
+        assertTrue(WhisperCrypto.legacyFallbackAllowed(WhisperCrypto.LEGACY_AAD_CUTOFF_EPOCH_MS - 1))
+        assertFalse(WhisperCrypto.legacyFallbackAllowed(WhisperCrypto.LEGACY_AAD_CUTOFF_EPOCH_MS))
+        assertFalse(WhisperCrypto.legacyFallbackAllowed(WhisperCrypto.LEGACY_AAD_CUTOFF_EPOCH_MS + 1))
+        assertFalse(WhisperCrypto.legacyFallbackAllowed(Long.MAX_VALUE))
+    }
 }

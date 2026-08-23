@@ -152,6 +152,10 @@
     <string name="st_Whisper_Aubup_CreateBackup">Create Access File</string>
     <string name="cd_Whisper_Aubup_Rescan">Rescan</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Saved in Downloads/Toolz</string>
+    <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
+    <string name="st_Whisper_Aubup_VaultFoundCount">Password Vault accounts found (%d)</string>
+    <string name="st_Whisper_Aubup_FilesFoundCount">Access files found (%d)</string>
+    <string name="st_Whisper_Aubup_Today">Today</string>
     <string name="st_Whisper_Tab_Chats">Chats</string>
     <string name="st_Whisper_Tab_Friends">Friends</string>
     <string name="st_Whisper_Tab_Discover">Discover</string>
@@ -210,6 +214,10 @@
     <string name="st_Whisper_Chat_AddFriend">Add Friend</string>
     <string name="st_Whisper_Chat_Yesterday">Yesterday</string>
     <string name="st_Whisper_Online">Online</string>
+    <!-- V3-FIX (item 8a): localized presence labels for non-online states. -->
+    <string name="st_Whisper_Presence_Recent">Recently active</string>
+    <string name="st_Whisper_Presence_Offline">Offline</string>
+    <string name="st_Whisper_Presence_Unknown">Presence unknown</string>
     <string name="st_Whisper_Typing">typing…</string>
     <string name="st_Whisper_Review">Review</string>
     <string name="st_Whisper_Unblock">Unblock</string>
@@ -282,6 +290,20 @@
     <string name="st_Whisper_YourFingerprint">Your fingerprint</string>
     <string name="st_Whisper_KeyChanged_Warning">Tip: Ask if they recently reinstalled. If the fingerprint on their device matches, it\'s safe to accept.</string>
     <string name="st_Whisper_Verify">Verify</string>
+    <!-- V3-FIX: QR fingerprint verification -->
+    <string name="st_Whisper_QrShowButton">Show verification QR</string>
+    <string name="st_Whisper_QrScanButton">Scan verification QR</string>
+    <string name="st_Whisper_QrDialogTitle">Verify safety number</string>
+    <string name="st_Whisper_QrDialogDesc">Your partner scans this code to verify your safety number. It only contains your username and your encryption fingerprint.</string>
+    <string name="cd_Whisper_VerifyQr">Verification QR code</string>
+    <string name="st_Whisper_ScanDialogTitle">Scan verification code</string>
+    <string name="st_Whisper_QrScanHint">Point the camera at %s\'s verification QR code</string>
+    <string name="st_Whisper_QrCameraRationale">Whisper needs camera access to scan verification codes. Camera frames never leave your device.</string>
+    <string name="st_Whisper_QrGrantCamera">Grant camera access</string>
+    <string name="st_Whisper_QrVerifiedToast">Verified — this is really %s</string>
+    <string name="st_Whisper_QrMismatchTitle">Possible impersonation!</string>
+    <string name="st_Whisper_QrMismatchDesc">The scanned code does NOT match the safety number computed on this device for %s\'s encryption key. Someone may be impersonating them or intercepting your messages. Do NOT accept this key.</string>
+    <string name="st_Whisper_Error_QrInvalid">That is not a Whisper verification code.</string>
     <string name="st_Whisper_AcceptAnyway">Accept anyway</string>
     <string name="st_Whisper_FriendRequestSent">Friend request sent</string>
     <string name="st_Whisper_FriendRequestReceived">Friend request received</string>
@@ -356,6 +378,14 @@
     <string name="st_Whisper_Onboarding_Kicker4">WHISPER IS ALL YOURS</string>
     <string name="st_Whisper_Onboarding_PageOf">Page %1$d of %2$d</string>
     <!-- Whisper notification channels -->
+    <string name="st_Whisper_Notif_NewMessage">New Whisper message</string>
+
+    <string name="st_Whisper_Notif_OpenToRead">Open Whisper to read it</string>
+
+    <string name="st_Whisper_Notif_SummaryText">New encrypted messages</string>
+
+    <string name="st_Whisper_Notif_FriendRequest">New friend request</string>
+
     <string name="st_Whisper_Notification_ChannelName">Messages</string>
     <string name="st_Whisper_Notification_ChannelDesc">End-to-end encrypted Whisper messages</string>
     <string name="st_Whisper_Notification_ChannelSummaryName">Message summaries</string>

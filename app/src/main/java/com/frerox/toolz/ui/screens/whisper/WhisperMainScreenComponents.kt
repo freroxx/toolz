@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.R
+import com.frerox.toolz.data.whisper.WhisperPresence
 import com.frerox.toolz.data.whisper.WhisperProfile
 import com.frerox.toolz.ui.components.bouncyClick
 
@@ -34,6 +35,19 @@ import com.frerox.toolz.ui.components.bouncyClick
 
 /** L-15 FIX (reviewwhisper.md): single online-indicator color instead of three literals. */
 internal val WhisperOnlineGreen = Color(0xFF4CAF50)
+
+/**
+ * V3-FIX (item 8a): localized presence labels replacing the hardcoded English
+ * "Online" string compares. Reuses the existing st_Whisper_Online resource;
+ * RECENT / OFFLINE / UNKNOWN have dedicated keys added to all four locales.
+ */
+@Composable
+internal fun whisperPresenceLabel(presence: WhisperPresence): String = when (presence) {
+    WhisperPresence.ONLINE -> stringResource(R.string.st_Whisper_Online)
+    WhisperPresence.RECENT -> stringResource(R.string.st_Whisper_Presence_Recent)
+    WhisperPresence.OFFLINE -> stringResource(R.string.st_Whisper_Presence_Offline)
+    WhisperPresence.UNKNOWN -> stringResource(R.string.st_Whisper_Presence_Unknown)
+}
 
 /**
  * L-16 FIX (reviewwhisper.md): cache-buster derived from the profile's server-side

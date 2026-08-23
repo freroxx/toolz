@@ -154,6 +154,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     lateinit var settingsRepository: SettingsRepository
 
     @Inject
+    lateinit var whisperPushTokenStore: com.frerox.toolz.push.WhisperPushTokenStore
+
+    @Inject
     lateinit var vibrationManager: VibrationManager
 
     @Inject
@@ -174,6 +177,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // V3-FIX (reviewwhisper.md item 6): upload any FCM token parked before login.
+        lifecycleScope.launch { whisperPushTokenStore.retryPendingIfAny() }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.setBackgroundDrawableResource(android.R.color.background_dark)

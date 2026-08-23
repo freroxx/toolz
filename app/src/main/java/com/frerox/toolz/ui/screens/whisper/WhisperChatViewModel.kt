@@ -60,6 +60,9 @@ class WhisperChatViewModel @Inject constructor(
     // `CoroutineScope(NonCancellable + Dispatchers.IO)` in onCleared().
     @com.frerox.toolz.di.ApplicationScope private val appScope: CoroutineScope,
     private val undoBufferStore: com.frerox.toolz.data.whisper.WhisperUndoBufferStore,
+    // V3-FIX (task F): encrypted disk tier between the memory LRU and the network so
+    // scrolling no longer re-downloads/re-decrypts every image after process death.
+    private val imageDiskCache: WhisperImageDiskCache,
     // V2-FIX (reviewwhisper.md) V-15: handle is retained so the draft can survive process death.
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -790,8 +793,40 @@ class WhisperChatViewModel @Inject constructor(
                     partnerPublicKey = key
                 }
 
-                repository.downloadEncryptedImage(attachment, peerId, key)
+                // V3-FIX (task F): disk-cache tier. The entry is bound to the fingerprint
+                // of the key the bytes decrypt under, so a partner key change can never
+                // serve stale ciphertext under this conversation's name. Any fault here
+                // is a silent miss (the cache logs it once) and falls through to download.
+                val peerKeyFp = key?.let { crypto.fingerprint(it) }
+                if (peerKeyFp != null) {
+                    val fromDisk = imageDiskCache.get(
+                        messageId = message.id,
+                        keyFp = peerKeyFp,
+                        expiresAtEpochMs = attachment.expiresAtEpochSeconds?.times(1000),
+                    )
+                    if (fromDisk != null) {
+                        val snapshot = imageCacheMutex.withLock {
+                            decryptedImageCache[message.id] = fromDisk
+                            decryptedImageCache.toMap()
+                        }
+                        _uiState.update { it.copy(decryptedImageBytes = snapshot) }
+                        return@launch
+                    }
+                }
+
+                // V3-FIX (scoped legacy-AAD retirement): pass the message's creation time so
+                // the constant-AAD legacy retry only applies to pre-cutoff images.
+                repository.downloadEncryptedImage(
+                    attachment,
+                    peerId,
+                    key,
+                    WhisperMessageEntity.parseSortEpoch(message.createdAt),
+                )
                     .onSuccess { bytes ->
+                        // V3-FIX (task F): persist the decrypted bytes as Keystore-encrypted
+                        // ciphertext BEFORE the memory insert; best-effort (never throws).
+                        // Only the encrypted blob lands on disk — never plaintext.
+                        peerKeyFp?.let { fp -> imageDiskCache.put(message.id, fp, bytes) }
                         // V2-FIX (reviewwhisper.md) V-5: insert into the true-LRU cache under
                         // the mutex; eviction (eldest by ACCESS order) happens automatically.
                         val snapshot = imageCacheMutex.withLock {

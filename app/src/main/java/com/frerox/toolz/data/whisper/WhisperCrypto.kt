@@ -70,8 +70,31 @@ class WhisperCrypto @Inject constructor(
          * (cached ciphertext is re-fetched/decrypted once into the Room cache), then flip
          * to FALSE in a dedicated release so cross-chat replay protection has no silent
          * escape hatch anymore. New ciphertext is ALWAYS written with bound AAD.
+         *
+         * V3-FIX (scoped legacy-AAD retirement): this flag no longer applies globally —
+         * it only gates the fallback for rows created BEFORE
+         * [LEGACY_AAD_CUTOFF_EPOCH_MS] (see [legacyFallbackAllowed]). Post-cutoff
+         * ciphertext never falls back regardless of this flag's value.
          */
         internal var LEGACY_AAD_FALLBACK_ENABLED: Boolean = true
+
+        /**
+         * V3-FIX (scoped legacy-AAD retirement): epoch millis of 2026-09-01T00:00:00Z.
+         * Ciphertext CREATED strictly before this instant may still take the legacy
+         * fallback paths (no-AAD messages / constant-AAD attachments); anything created
+         * at or after the cutoff must authenticate through direction-bound AAD only.
+         * Rows whose timestamp cannot be parsed are mapped to 0L by callers
+         * (see [WhisperMessageEntity.parseSortEpoch]) — undated = treated as legacy.
+         */
+        const val LEGACY_AAD_CUTOFF_EPOCH_MS: Long = 1_788_220_800_000L
+
+        /**
+         * V3-FIX: pure, unit-test-friendly eligibility rule for the legacy fallback
+         * branches. Lives beside the cutoff constant so the policy can never drift
+         * from the constant itself.
+         */
+        fun legacyFallbackAllowed(createdAtEpochMs: Long): Boolean =
+            createdAtEpochMs < LEGACY_AAD_CUTOFF_EPOCH_MS
 
         /**
          * SHA-256 fingerprint of a base64 public key, rendered as 8 groups of 4
@@ -288,6 +311,13 @@ class WhisperCrypto @Inject constructor(
      * uniqueness enforcement; AAD format is intentionally unchanged. Duplicate inserts
      * are already collapsed by the client UUID primary key, so a replayed delivery
      * cannot create a second visible row.
+     *
+     * V3-FIX (scoped legacy-AAD retirement): the no-AAD retry runs ONLY when
+     * [messageCreatedAtEpochMs] is pre-cutoff ([legacyFallbackAllowed]) AND
+     * [LEGACY_AAD_FALLBACK_ENABLED] is set — new messages never fall back regardless of
+     * the flag. The default [Long.MAX_VALUE] means "never legacy": callers decrypting
+     * cached/historical rows MUST pass the row's createdAt parsed to epoch millis
+     * (undated rows parse to 0L = treated as legacy-eligible).
      */
     fun decryptMessage(
         cipherText: String,
@@ -295,6 +325,7 @@ class WhisperCrypto @Inject constructor(
         peerPublicKeyBase64: String?,
         senderId: String,
         receiverId: String,
+        messageCreatedAtEpochMs: Long = Long.MAX_VALUE,
     ): String? {
         // Whisper v1 never accepts a cleartext downgrade. Only authenticated AEAD payloads
         // are renderable; legacy/plain broadcast payloads are intentionally rejected.
@@ -315,9 +346,10 @@ class WhisperCrypto @Inject constructor(
             val aadPlainBytes = runCatching { aadCipher.doFinal(cipherBytes) }.getOrNull()
             if (aadPlainBytes != null) {
                 String(aadPlainBytes, Charsets.UTF_8)
-            } else if (LEGACY_AAD_FALLBACK_ENABLED) {
+            } else if (LEGACY_AAD_FALLBACK_ENABLED && legacyFallbackAllowed(messageCreatedAtEpochMs)) {
                 // Legacy rows predating AAD binding: decrypt without it. Gated by
-                // LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion.
+                // LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion — and
+                // V3-FIX: additionally scoped to pre-cutoff rows only.
                 val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding")
                 legacyCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
                 val legacyPlainBytes = legacyCipher.doFinal(cipherBytes)
@@ -347,7 +379,21 @@ class WhisperCrypto @Inject constructor(
         }
     }
 
-    fun decryptAttachment(cipherBytes: ByteArray, ivBase64: String?, senderPublicKeyBase64: String?, senderId: String, receiverId: String): ByteArray? {
+    /**
+     * V3-FIX (scoped legacy-AAD retirement): the constant-AAD retry for pre-fix rows
+     * runs ONLY when [messageCreatedAtEpochMs] is pre-cutoff ([legacyFallbackAllowed])
+     * AND [LEGACY_AAD_FALLBACK_ENABLED] is set. The default [Long.MAX_VALUE] means
+     * "never legacy" — callers decrypting cached/historical attachments MUST pass the
+     * message's createdAt parsed to epoch millis (undated rows parse to 0L = legacy).
+     */
+    fun decryptAttachment(
+        cipherBytes: ByteArray,
+        ivBase64: String?,
+        senderPublicKeyBase64: String?,
+        senderId: String,
+        receiverId: String,
+        messageCreatedAtEpochMs: Long = Long.MAX_VALUE,
+    ): ByteArray? {
         if (cipherBytes.size < 16 || ivBase64.isNullOrBlank() || senderPublicKeyBase64.isNullOrBlank()) return null
         val secretKey = deriveSharedKey(senderPublicKeyBase64) ?: return null
         return try {
@@ -356,7 +402,8 @@ class WhisperCrypto @Inject constructor(
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(AES_GCM_TAG_LEN, iv))
             // Try bound AAD first; fall back to legacy constant-only AAD for pre-fix rows
-            // (gated by LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion).
+            // (gated by LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion —
+            // and V3-FIX: additionally scoped to pre-cutoff rows only).
             val boundAad = aadFor(senderId, receiverId) + ATTACHMENT_AAD
             val gcmSpec = GCMParameterSpec(AES_GCM_TAG_LEN, iv)
             val bound = runCatching {
@@ -365,7 +412,7 @@ class WhisperCrypto @Inject constructor(
                 cipher.doFinal(cipherBytes)
             }.getOrNull()
             if (bound != null) return bound
-            if (!LEGACY_AAD_FALLBACK_ENABLED) return null
+            if (!LEGACY_AAD_FALLBACK_ENABLED || !legacyFallbackAllowed(messageCreatedAtEpochMs)) return null
             val legacy = Cipher.getInstance("AES/GCM/NoPadding")
             legacy.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
             legacy.updateAAD(ATTACHMENT_AAD)

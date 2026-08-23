@@ -65,6 +65,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -885,7 +887,14 @@ private fun MergedChatsAndFriendsTab(
                                     size = 48.dp,
                                     onLongClick = { haptic.longClick(); onViewAvatarFull(friend) }
                                 )
-                                if (friend.onlineStatus == "Online") {
+                                // V3-FIX (item 8a): enum-derived presence replaces the
+                                // `== "Online"` literal; the localized label is attached to
+                                // the color-only dot as an accessibility bonus for TalkBack.
+                                val friendPresence = friend.presence
+                                // V3-FIX: whisperPresenceLabel is @Composable and cannot be
+                                // invoked inside the non-composable semantics lambda — hoist it.
+                                val friendPresenceLabel = whisperPresenceLabel(friendPresence)
+                                if (friendPresence == WhisperPresence.ONLINE) {
                                     Box(
                                         modifier = Modifier
                                             .size(12.dp)
@@ -893,6 +902,9 @@ private fun MergedChatsAndFriendsTab(
                                             .clip(CircleShape)
                                             .background(WhisperOnlineGreen)
                                             .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                            .semantics {
+                                                contentDescription = friendPresenceLabel
+                                            }
                                     )
                                 }
                             }
@@ -969,7 +981,9 @@ private fun ConversationCard(
     onLongClick: () -> Unit,
 ) {
     val unread = conversation.unreadCount > 0
-    val isOnline = conversation.otherUser.onlineStatus == "Online"
+    // V3-FIX (item 8a): typed presence instead of the "Online" literal compare.
+    val presence = conversation.otherUser.presence
+    val isOnline = presence == WhisperPresence.ONLINE
 
     // Animated online dot pulse — only runs for contacts that are actually online,
     // so offline conversations never burn battery with an infinite animation.
@@ -1072,11 +1086,13 @@ private fun ConversationCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         // Online status as small colored label
-                        if (isOnline) {
+                        // V3-FIX (item 8a): RECENT now gets a localized label too, and the
+                        // text derives from the presence enum instead of the raw flag.
+                        if (isOnline || presence == WhisperPresence.RECENT) {
                             Text(
-                                stringResource(R.string.st_Whisper_Online),
+                                whisperPresenceLabel(presence),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
@@ -1435,7 +1451,18 @@ private fun DiscoverUserCard(
                 ) {
                     Text("@${profile.effectiveUsername}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
-                    Text(profile.onlineStatus, style = MaterialTheme.typography.labelSmall, color = if (profile.onlineStatus == "Online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    // V3-FIX (item 8a): localized presence label instead of the raw
+                    // English model string; enum drives the color.
+                    val discoverPresence = profile.presence
+                    Text(
+                        whisperPresenceLabel(discoverPresence),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (discoverPresence == WhisperPresence.ONLINE) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
                 }
                 if (!profile.isPrivate && !profile.bio.isNullOrBlank()) {
                     Text(
@@ -1531,6 +1558,8 @@ private fun ProfileTab(
     var showAubupInfoDialog by remember { mutableStateOf(false) }
     var showCreateAccessFileDialog by remember { mutableStateOf(false) }
     var showRotateKeyDialog by remember { mutableStateOf(false) }
+    // V3-FIX: QR verification entry point — show my own verification QR for in-person scan.
+    var showVerifyQrDialog by remember { mutableStateOf(false) }
     var isRotatingKey by remember { mutableStateOf(false) }
 
     // Resolved in composition scope: stringResource is composable-only and cannot be
@@ -1830,6 +1859,15 @@ private fun ProfileTab(
                                 Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.cd_Whisper_CopyFingerprint), modifier = Modifier.size(16.dp))
                             }
                         }
+                    }
+                    // V3-FIX: QR path replaces eyeballing the 8 hex groups — partner scans this.
+                    ToolzTonalExpressiveButton(
+                        onClick = { haptic.click(); showVerifyQrDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.st_Whisper_QrShowButton), fontWeight = FontWeight.SemiBold)
                     }
                     ToolzOutlinedExpressiveButton(
                         onClick = {
@@ -2201,6 +2239,17 @@ private fun ProfileTab(
                     Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
                 }
             }
+        )
+    }
+
+    // V3-FIX: verification QR dialog — encodes whisper-verify:<username>:<fingerprint>.
+    // viewModel.myFingerprint is the same cached value shown in the fingerprint card above.
+    val myQrFingerprint = viewModel.myFingerprint
+    if (showVerifyQrDialog && myQrFingerprint != null) {
+        WhisperVerifyQrDialog(
+            username = profile.effectiveUsername,
+            fingerprint = myQrFingerprint,
+            onDismiss = { showVerifyQrDialog = false },
         )
     }
 

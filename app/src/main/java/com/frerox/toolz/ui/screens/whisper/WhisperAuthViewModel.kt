@@ -175,17 +175,69 @@ class WhisperAuthViewModel @Inject constructor(
             )
     }
 
+    // V3-FIX (multi-account): last completed scan is cached so switching between
+    // accounts reuses the sheet contents instead of forcing a redundant rescan.
+    private var lastScanResult: AubupRecoveryState.ScanResult? = null
+
     fun startAubupScan() {
         viewModelScope.launch {
             _aubupState.value = AubupRecoveryState.Scanning
             delay(400) // Visual feedback for smooth scanning transition
             val vaultAccounts = aubupManager.scanVaultForWhisperAccounts()
-            val accessFiles = aubupManager.scanToolzFolderForAccessFiles()
-            _aubupState.value = AubupRecoveryState.ScanResult(
+            // V3-FIX (multi-account): vault rows passed in so already-stored accounts are
+            // conservatively deduped out of the .enc file list (filename-level only).
+            val accessFiles = aubupManager.scanToolzFolderForAccessFiles(vaultAccounts)
+            val result = AubupRecoveryState.ScanResult(
                 vaultAccounts = vaultAccounts,
                 accessFiles = accessFiles,
             )
+            lastScanResult = result
+            _aubupState.value = result
         }
+    }
+
+    /**
+     * V3-FIX (multi-account): entry point when the recovery sheet opens. An existing
+     * ScanResult or an in-flight scan is reused as-is so users can switch accounts
+     * without rescanning; anything else kicks off a fresh scan.
+     */
+    fun beginAubupFlow() {
+        when (_aubupState.value) {
+            is AubupRecoveryState.ScanResult, is AubupRecoveryState.Scanning -> Unit
+            else -> startAubupScan()
+        }
+    }
+
+    /**
+     * V3-FIX (multi-account): called after the post-restore credential dialog is
+     * dismissed. Returns the state to the cached ScanResult (with the consumed entry
+     * pruned) instead of leaving it at Restored, so reopening the sheet still shows the
+     * remaining entries; falls back to a fresh scan when nothing is cached.
+     */
+    fun resumeAubupAfterRestore() {
+        val cached = lastScanResult
+        if (cached != null) {
+            _aubupState.value = cached
+        } else {
+            startAubupScan()
+        }
+    }
+
+    /** V3-FIX (multi-account): drops a consumed entry from the cached ScanResult. */
+    private fun pruneCachedScan(vaultRemove: PasswordEntity? = null, fileRemove: java.io.File? = null) {
+        val cached = lastScanResult ?: return
+        lastScanResult = cached.copy(
+            vaultAccounts = if (vaultRemove != null) {
+                cached.vaultAccounts.filterNot { it.id == vaultRemove.id }
+            } else {
+                cached.vaultAccounts
+            },
+            accessFiles = if (fileRemove != null) {
+                cached.accessFiles.filterNot { it == fileRemove }
+            } else {
+                cached.accessFiles
+            },
+        )
     }
 
     fun resetAubupState() {
@@ -228,12 +280,13 @@ class WhisperAuthViewModel @Inject constructor(
     // V2-FIX A-M2: callers that KNOW the account kind (same contract as
     // createAccessFileForUser's isToken param, e.g. the live session's
     // authManager.isAnonymousTokenUser) pass an explicit hint; only when none is
-    // provided do we fall back to the vault-name substring heuristic. A dedicated
-    // stored flag would need a PasswordEntity column — deferred (see B5 note).
+    // provided do we fall back to the vault-name substring heuristic.
+    // V3-FIX: the persisted PasswordEntity.isToken flag now sits between the hint
+    // and the legacy name-substring fallback.
     fun restoreFromVault(account: PasswordEntity, isTokenHint: Boolean? = null) {
         viewModelScope.launch {
             _submitting.value = true
-            val isToken = isTokenHint ?: account.name.contains("Anon", ignoreCase = true)
+            val isToken = isTokenHint ?: account.isToken ?: account.name.contains("Anon", ignoreCase = true)
 
             val result = if (isToken) {
                 authManager.loginWithToken(account.password)
@@ -247,6 +300,9 @@ class WhisperAuthViewModel @Inject constructor(
                 // the automatic navigate. Without this ordering the authState navigate
                 // fires first and the Restored dialog flashes for one frame then disappears
                 // because the composable is popped.
+                // V3-FIX (multi-account): prune the restored account from the cached scan
+                // so "remaining entries" are shown when the sheet reopens.
+                pruneCachedScan(vaultRemove = account)
                 _aubupState.value = AubupRecoveryState.Restored(
                     username = account.username,
                     authType = if (isToken) "TOKEN" else "PASSWORD",
@@ -271,6 +327,11 @@ class WhisperAuthViewModel @Inject constructor(
             aubupManager.decryptAccessFile(file, whisperCode)
                 .onSuccess { payload ->
                     loginWithPayload(payload)
+                    // V3-FIX (multi-account): a successfully restored file leaves the
+                    // cached scan so the sheet only lists the remaining entries.
+                    if (_aubupState.value is AubupRecoveryState.Restored) {
+                        pruneCachedScan(fileRemove = file)
+                    }
                 }
                 .onFailure { err ->
                     // V2-FIX A-M3: UiText payload (see restoreFromVault).

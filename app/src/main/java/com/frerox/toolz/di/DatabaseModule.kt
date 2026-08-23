@@ -86,6 +86,16 @@ object DatabaseModule {
         }
     }
 
+    // V3-FIX: 48 -> 49 adds passwords.isToken (nullable Boolean) so the Whisper
+    // account type (64-char anon token vs password) is persisted metadata instead of
+    // a vault-name substring heuristic. Matches the @ColumnInfo(defaultValue = "NULL")
+    // declared on PasswordEntity.isToken; existing rows stay NULL (= unknown/legacy).
+    private val MIGRATION_48_49 = object : Migration(48, 49) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE passwords ADD COLUMN isToken INTEGER DEFAULT NULL")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -107,7 +117,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_47_48)
+        .addMigrations(MIGRATION_47_48, MIGRATION_48_49)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -146,7 +156,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_47_48)
+                    .addMigrations(MIGRATION_47_48, MIGRATION_48_49)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

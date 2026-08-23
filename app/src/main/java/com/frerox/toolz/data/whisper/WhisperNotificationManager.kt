@@ -175,9 +175,9 @@ class WhisperNotificationManager @Inject constructor(
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
-            .setContentTitle("New Whisper message")
+            .setContentTitle(context.getString(R.string.st_Whisper_Notif_NewMessage))
             // Never copy decrypted content to the lock screen or notification history.
-            .setContentText("Open Whisper to read it")
+            .setContentText(context.getString(R.string.st_Whisper_Notif_OpenToRead))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setGroup(GROUP_KEY)
@@ -190,7 +190,7 @@ class WhisperNotificationManager @Inject constructor(
         val summaryNotification = NotificationCompat.Builder(context, SUMMARY_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
             .setContentTitle("Whisper")
-            .setContentText("New encrypted messages")
+            .setContentText(context.getString(R.string.st_Whisper_Notif_SummaryText))
             .setGroup(GROUP_KEY)
             .setGroupSummary(true)
             .setAutoCancel(true)
@@ -229,8 +229,8 @@ class WhisperNotificationManager @Inject constructor(
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
-            .setContentTitle("New Friend Request")
-            .setContentText("$fromName wants to be your friend on Whisper")
+            .setContentTitle(context.getString(R.string.st_Whisper_Notif_FriendRequest))
+            .setContentText(fromName)
             // Sender names and requests stay off the lock screen like message notifications.
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setGroup(GROUP_KEY)

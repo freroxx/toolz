@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.data.password
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -29,6 +30,9 @@ data class PasswordEntity(
     val password: String,
     val strength: Int, // 0-4
     val pwnedCount: Int? = null,
+    // V3-FIX: for Whisper vault entries records whether the credential is a 64-char
+    // anon token; null = unknown/legacy.
+    @ColumnInfo(defaultValue = "NULL") val isToken: Boolean? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val lastUsedAt: Long = System.currentTimeMillis(),
     val passwordHistory: List<String> = emptyList()

@@ -151,6 +151,10 @@
     <string name="st_Whisper_Aubup_CreateBackup">Criar arquivo de acesso</string>
     <string name="cd_Whisper_Aubup_Rescan">Verificar novamente</string>
     <string name="st_Whisper_Aubup_AccessFileLocation">Salvo em Downloads/Toolz</string>
+    <!-- V3-FIX (multi-account): recovery scan section headers carry counts. -->
+    <string name="st_Whisper_Aubup_VaultFoundCount">Contas encontradas no Cofre de senhas (%d)</string>
+    <string name="st_Whisper_Aubup_FilesFoundCount">Arquivos de acesso encontrados (%d)</string>
+    <string name="st_Whisper_Aubup_Today">Hoje</string>
     <string name="st_Whisper_Tab_Chats">Conversas</string>
     <string name="st_Whisper_Tab_Friends">Amigos</string>
     <string name="st_Whisper_Tab_Discover">Descobrir</string>
@@ -209,6 +213,10 @@
     <string name="st_Whisper_Chat_AddFriend">Adicionar Amigo</string>
     <string name="st_Whisper_Chat_Yesterday">Ontem</string>
     <string name="st_Whisper_Online">Online</string>
+    <!-- V3-FIX (item 8a): localized presence labels for non-online states. -->
+    <string name="st_Whisper_Presence_Recent">Ativo recentemente</string>
+    <string name="st_Whisper_Presence_Offline">Desconectado</string>
+    <string name="st_Whisper_Presence_Unknown">Presença desconhecida</string>
     <string name="st_Whisper_Typing">escrevendo…</string>
     <string name="st_Whisper_Review">Revisar</string>
     <string name="st_Whisper_Unblock">Desbloquear</string>
@@ -281,6 +289,20 @@
     <string name="st_Whisper_YourFingerprint">Sua impressão digital</string>
     <string name="st_Whisper_KeyChanged_Warning">Só continue se a impressão digital for igual à mostrada no dispositivo dele. Se não for, a pessoa pode estar sendo falsificada.</string>
     <string name="st_Whisper_Verify">Verificar</string>
+    <!-- V3-FIX: verificação por código QR -->
+    <string name="st_Whisper_QrShowButton">Mostrar QR de verificação</string>
+    <string name="st_Whisper_QrScanButton">Escanear QR de verificação</string>
+    <string name="st_Whisper_QrDialogTitle">Verificar número de segurança</string>
+    <string name="st_Whisper_QrDialogDesc">Seu contato escaneia este código para verificar seu número de segurança. Ele contém apenas seu nome de usuário e sua impressão digital de criptografia.</string>
+    <string name="cd_Whisper_VerifyQr">Código QR de verificação</string>
+    <string name="st_Whisper_ScanDialogTitle">Escanear código de verificação</string>
+    <string name="st_Whisper_QrScanHint">Aponte a câmera para o código QR de verificação de %s</string>
+    <string name="st_Whisper_QrCameraRationale">O Whisper precisa de acesso à câmera para escanear códigos de verificação. As imagens nunca saem do seu aparelho.</string>
+    <string name="st_Whisper_QrGrantCamera">Permitir acesso à câmera</string>
+    <string name="st_Whisper_QrVerifiedToast">Verificado — é realmente %s</string>
+    <string name="st_Whisper_QrMismatchTitle">Possível personificação!</string>
+    <string name="st_Whisper_QrMismatchDesc">O código escaneado NÃO corresponde ao número de segurança calculado neste aparelho para a chave de %s. Alguém pode estar se passando por essa pessoa ou interceptando suas mensagens. NÃO aceite esta chave.</string>
+    <string name="st_Whisper_Error_QrInvalid">Este não é um código de verificação do Whisper.</string>
     <string name="st_Whisper_AcceptAnyway">Aceitar mesmo assim</string>
     <string name="st_Whisper_FriendRequestSent">Solicitação de amizade enviada</string>
     <string name="st_Whisper_FriendRequestReceived">Solicitação de amizade recebida</string>
@@ -355,6 +377,14 @@
     <string name="st_Whisper_Onboarding_Kicker3">O WHISPER É SEGURO</string>
     <string name="st_Whisper_Onboarding_Kicker4">O WHISPER É SEU</string>
     <string name="st_Whisper_Onboarding_PageOf">Página %1$d de %2$d</string>
+    <string name="st_Whisper_Notif_NewMessage">Nova mensagem do Whisper</string>
+
+    <string name="st_Whisper_Notif_OpenToRead">Abra o Whisper para ler</string>
+
+    <string name="st_Whisper_Notif_SummaryText">Novas mensagens criptografadas</string>
+
+    <string name="st_Whisper_Notif_FriendRequest">Nova solicitação de amizade</string>
+
     <string name="st_Whisper_Notification_ChannelName">Mensagens</string>
     <string name="st_Whisper_Notification_ChannelDesc">Mensagens do Whisper criptografadas de ponta a ponta</string>
     <string name="st_Whisper_Notification_ChannelSummaryName">Resumos de mensagens</string>

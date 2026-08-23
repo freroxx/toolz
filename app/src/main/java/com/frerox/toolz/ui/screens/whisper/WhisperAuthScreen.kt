@@ -60,6 +60,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -249,7 +250,9 @@ fun WhisperAuthScreen(
                     onNormalizeToken = viewModel::normalizeToken,
                     onLostAccountClick = {
                         showAubupRecoverySheet = true
-                        viewModel.startAubupScan()
+                        // V3-FIX (multi-account): reuses a cached ScanResult when present
+                        // so switching accounts doesn't force a rescan.
+                        viewModel.beginAubupFlow()
                     },
                     onCopyToken = { token, restoreTo ->
                         val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
@@ -293,6 +296,11 @@ fun WhisperAuthScreen(
                 },
                 onDismiss = {
                     restoredCredentials = null
+                    // V3-FIX (multi-account): return the recovery state to the cached
+                    // ScanResult (consumed entry pruned) instead of leaving it at Restored,
+                    // so reopening the sheet still lists the remaining entries and users
+                    // can switch accounts without rescanning.
+                    viewModel.resumeAubupAfterRestore()
                     onAuthenticated()
                 }
             )
@@ -1466,8 +1474,9 @@ fun WhisperAubupRecoveryModalSheet(
                     } else {
                         // Tier 1: Vault Accounts
                         if (hasVault) {
+                            // V3-FIX (multi-account): section headers carry counts.
                             Text(
-                                stringResource(R.string.st_Whisper_Aubup_VaultFound),
+                                stringResource(R.string.st_Whisper_Aubup_VaultFoundCount, aubupState.vaultAccounts.size),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
@@ -1488,16 +1497,53 @@ fun WhisperAubupRecoveryModalSheet(
                                             tint = Color(0xFF8E24AA),
                                             modifier = Modifier.size(24.dp)
                                         )
+                                        // V3-FIX (multi-account): display name prominent,
+                                        // username secondary, TOKEN/PASSWORD badge resolved
+                                        // from the persisted isToken flag (name-sniffing only
+                                        // for legacy rows), plus a short relative date.
                                         Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            ) {
+                                                Text(
+                                                    vaultAccountDisplayName(account),
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                )
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = if (account.isToken ?: account.name.contains("Anon", ignoreCase = true)) {
+                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                    } else {
+                                                        MaterialTheme.colorScheme.surfaceContainerHighest
+                                                    },
+                                                ) {
+                                                    Text(
+                                                        // V3-FIX: prefer the persisted isToken flag;
+                                                        // name-sniffing only for legacy rows (flag null).
+                                                        if (account.isToken ?: account.name.contains("Anon", ignoreCase = true)) stringResource(R.string.st_Whisper_Aubup_TokenAccount) else stringResource(R.string.st_Whisper_Aubup_PasswordAccount),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    )
+                                                }
+                                            }
                                             Text(
-                                                account.username,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                if (account.name.contains("Anon", ignoreCase = true)) stringResource(R.string.st_Whisper_Aubup_TokenAccount) else stringResource(R.string.st_Whisper_Aubup_PasswordAccount),
+                                                text = buildString {
+                                                    append("@").append(account.username)
+                                                    append(" · ")
+                                                    // V3-FIX (multi-account): short relative date
+                                                    // (Today / dd MMM) from the vault row's date.
+                                                    append(vaultAccountRelativeDate(account.lastUsedAt))
+                                                },
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                         ToolzExpressiveButton(
@@ -1513,7 +1559,7 @@ fun WhisperAubupRecoveryModalSheet(
                         // Tier 2: Access Files (.enc)
                         if (hasFiles) {
                             Text(
-                                stringResource(R.string.st_Whisper_Aubup_FileFound),
+                                stringResource(R.string.st_Whisper_Aubup_FilesFoundCount, aubupState.accessFiles.size),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold,
@@ -1539,16 +1585,33 @@ fun WhisperAubupRecoveryModalSheet(
                                             modifier = Modifier.size(24.dp)
                                         )
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                file.name,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            ) {
+                                                Text(
+                                                    file.name,
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                )
+                                                // V3-FIX (multi-account): short relative date so the
+                                                // most-recent-first ordering is visible to the user.
+                                                Text(
+                                                    vaultFileRelativeDate(file),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
                                             Text(
                                                 // V2-FIX AU-M6: hardcoded caption.
                                                 text = stringResource(R.string.st_Whisper_Aubup_AccessFileLocation),
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                         ToolzOutlinedExpressiveButton(
@@ -1678,4 +1741,48 @@ fun WhisperCredentialRevealedDialog(
             }
         }
     )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// V3-FIX (multi-account): recovery-row helpers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * V3-FIX (multi-account): vault rows store "Whisper: <handle>" / "Whisper Anon:
+ * <handle>" — surface the human-readable part prominently; anything that doesn't
+ * follow the convention falls back to the raw username.
+ */
+private fun vaultAccountDisplayName(account: com.frerox.toolz.data.password.PasswordEntity): String {
+    val name = account.name.trim()
+    if (!name.startsWith("Whisper", ignoreCase = true)) return account.username
+    return name.substringAfter(':', "").trim().ifEmpty { account.username }
+}
+
+/**
+ * V3-FIX (multi-account): short relative date for recovery rows — localized "Today"
+ * string for the current calendar day, otherwise "dd MMM" via a locale-aware
+ * DateTimeFormatter. Year omitted on purpose: access files are short-lived artifacts.
+ */
+@Composable
+private fun vaultAccountRelativeDate(epochMillis: Long): String {
+    val context = LocalContext.current
+    return remember(epochMillis) {
+        if (epochMillis <= 0L) return@remember ""
+        val zone = java.time.ZoneId.systemDefault()
+        val date = java.time.Instant.ofEpochMilli(epochMillis).atZone(zone).toLocalDate()
+        if (date == java.time.LocalDate.now(zone)) {
+            context.getString(R.string.st_Whisper_Aubup_Today)
+        } else {
+            val locale = context.resources.configuration.locales[0]
+            java.time.format.DateTimeFormatter.ofPattern("dd MMM", locale).format(date)
+        }
+    }
+}
+
+/** V3-FIX (multi-account): same relative-date treatment for .enc file rows. */
+@Composable
+private fun vaultFileRelativeDate(file: java.io.File): String {
+    val modified = file.lastModified()
+    if (modified <= 0L) return ""
+    return vaultAccountRelativeDate(modified)
 }

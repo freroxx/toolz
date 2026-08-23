@@ -41,6 +41,21 @@ serve(async (request) => {
   const userId = await extractVerifiedUserId(jwt);
   if (!userId) return json({ error: "Invalid token" }, 401);
 
+  // V3-FIX (round 3): destructive-endpoint rate limiting. Identity is the verified
+  // sub (always available post-auth), and the limiter RPC runs BEFORE doing any work.
+  // Service-role env is resolved up front too: every later step needs it.
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const baseUrl = Deno.env.get("SUPABASE_URL");
+  if (!serviceRole || !baseUrl) return json({ error: "Server misconfigured" }, 503);
+
+  // V3-FIX (round 3): gate call with p_ok=false — a failure row stands unless the
+  // request ultimately succeeds, in which case an ok=true row is recorded right
+  // before the GoTrue admin delete below. rate_limited → 429; any other RPC error
+  // fails closed → 503 abort.
+  const gate = await destructiveAttempt(serviceRole, baseUrl, "delete-account", userId, false);
+  if (!gate) return json({ error: "Rate limiter unavailable" }, 503);
+  if (gate.limited) return json({ error: "Too many attempts — try again later" }, 429);
+
   // Enforce JWT freshness for delete: iat must be within 5 minutes to prevent replay of stolen old token.
   const iatOk = await isJwtFresh(jwt, 5 * 60 * 1000);
   if (!iatOk) return json({ error: "Session too old — please re-login to delete" }, 401);
@@ -68,17 +83,14 @@ serve(async (request) => {
   if (password) {
     // Verify password by attempting a GoTrue password grant with the caller's email.
     // We fetch the caller's email via service_role admin getUser.
-    const serviceRoleTmp = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const baseUrlTmp = Deno.env.get("SUPABASE_URL");
-    if (!serviceRoleTmp || !baseUrlTmp) {
-      return json({ error: "Server misconfigured" }, 500);
-    }
+    // V3-FIX (round 3): serviceRole/baseUrl are hoisted above (the limiter gate needs
+    // them before any work), so the temporary copies are gone.
     // FAIL CLOSED: if the admin lookup cannot confirm whether this account even has a
     // password, deletion must not proceed — a stolen JWT must never be sufficient.
     let adminRes: Response;
     try {
-      adminRes = await fetch(`${baseUrlTmp}/auth/v1/admin/users/${userId}`, {
-        headers: { apikey: serviceRoleTmp, Authorization: `Bearer ${serviceRoleTmp}` },
+      adminRes = await fetch(`${baseUrl}/auth/v1/admin/users/${userId}`, {
+        headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
       });
     } catch (_) {
       return json({ error: "Password verification unavailable" }, 503);
@@ -98,7 +110,7 @@ serve(async (request) => {
       }
       if (!email.endsWith("@whisper.toolz.app")) {
         // Non-anon must have password proof; verify via password grant.
-        const verifyRes = await fetch(`${baseUrlTmp}/auth/v1/token?grant_type=password`, {
+        const verifyRes = await fetch(`${baseUrl}/auth/v1/token?grant_type=password`, {
           method: "POST",
           headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY") ?? "", "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
@@ -109,10 +121,6 @@ serve(async (request) => {
       return json({ error: "Password verification failed" }, 503);
     }
   }
-
-  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const baseUrl = Deno.env.get("SUPABASE_URL");
-  if (!serviceRole || !baseUrl) return json({ error: "Server misconfigured" }, 500);
 
   // M-5 FIX (reviewwhisper.md): purge owned rows BEFORE the GoTrue delete, under service
   // role. The old flow let the CLIENT run RLS-scoped postgrest deletes AFTER user
@@ -139,6 +147,13 @@ serve(async (request) => {
     console.error("whisper_purge_account_data failed", purgeRes.status);
     return json({ error: "Account cleanup failed" }, 502);
   }
+
+  // V3-FIX (round 3): the request has passed every check — flip the attempt to
+  // ok=true BEFORE the irreversible GoTrue admin delete. Same mapping as the gate:
+  // rate_limited → 429, any other RPC error fails closed (503) with nothing deleted.
+  const success = await destructiveAttempt(serviceRole, baseUrl, "delete-account", userId, true);
+  if (!success) return json({ error: "Rate limiter unavailable" }, 503);
+  if (success.limited) return json({ error: "Too many attempts — try again later" }, 429);
 
   const upstream = await fetch(`${baseUrl}/auth/v1/admin/users/${userId}`, {
     method: "DELETE",
@@ -184,6 +199,41 @@ async function isJwtFresh(jwt: string, maxAgeMs: number): Promise<boolean> {
 async function extractVerifiedUserId(jwt: string): Promise<string | null> {
   const payload = await verifyProjectJwt(jwt);
   return typeof payload?.sub === "string" ? payload.sub : null;
+}
+
+// V3-FIX (round 3): shared limiter call for destructive endpoints. Calls the
+// service-role-only whisper_destructive_attempt RPC (migration 20260828), which
+// counts + locks out + records the attempt atomically.
+//   • { limited: true }  → caller must map to a 429 response.
+//   • { limited: false } → attempt admitted; prior-window count is in `prior`.
+//   • null               → RPC failed for any other reason — CALLERS MUST FAIL CLOSED
+//                          (503 abort); no destructive work may happen untracked.
+async function destructiveAttempt(
+  serviceRole: string,
+  baseUrl: string,
+  endpoint: string,
+  identity: string,
+  ok: boolean,
+): Promise<{ limited: boolean; prior: number } | null> {
+  try {
+    const res = await fetch(`${baseUrl}/rest/v1/rpc/whisper_destructive_attempt`, {
+      method: "POST",
+      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_endpoint: endpoint, p_identity: identity, p_ok: ok }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) {
+      const count = await res.json().catch(() => 0);
+      return { limited: false, prior: typeof count === "number" ? count : 0 };
+    }
+    const bodyText = await res.text().catch(() => "");
+    if (bodyText.includes("rate_limited")) return { limited: true, prior: -1 };
+    console.error("whisper_destructive_attempt failed", res.status, bodyText);
+    return null;
+  } catch (err) {
+    console.error("whisper_destructive_attempt threw", err);
+    return null;
+  }
 }
 
 function json(body: unknown, status: number) {

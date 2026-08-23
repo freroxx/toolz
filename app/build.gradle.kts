@@ -31,6 +31,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.hilt.android)
+    alias(libs.plugins.google.services)
 }
 
 // H-10 FIX (reviewwhisper.md): export Room schemas so every future version bump ships
@@ -290,6 +291,10 @@ dependencies {
     
     ksp(libs.androidx.room.compiler)
     ksp(libs.moshi.kotlin.codegen)
+
+    // Firebase Cloud Messaging — Whisper push wake-ups (data-only; no content transits FCM)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     // Supabase — Whisper messaging
     implementation(platform(libs.supabase.bom))
