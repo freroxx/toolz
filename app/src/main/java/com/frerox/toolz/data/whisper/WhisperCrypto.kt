@@ -132,6 +132,16 @@ class WhisperCrypto @Inject constructor(
      * so a failed publish can be rolled back by deleting the staged alias — the
      * old private key is never destroyed before the server acknowledges its replacement.
      */
+    /**
+     * V4-FIX: true while a staged rotation exists but has not been committed/aborted.
+     * Used by the repository to distinguish an interrupted rotation from a reinstall
+     * so the reinstall key-republish never fights the rotation protocol.
+     */
+    fun hasStagedAliases(): Boolean = runCatching {
+        val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        keyStore.aliases().toList().any { it.startsWith(STAGED_ALIAS_PREFIX) }
+    }.getOrDefault(false)
+
     private fun activeAlias(): String {
         synchronized(rotationLock) {
             val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)

@@ -51,7 +51,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -384,18 +387,33 @@ class WhisperRepository @Inject constructor(
             // data). Reinstalling with a DIFFERENT key now flows through the key-change
             // review flow instead of silently clobbering the server's key.
             val needsKey = pubKey != null && existing.publicKey.isNullOrBlank()
+            // V4-FIX (field report): reinstall divergence — uninstalling wipes the
+            // AndroidKeyStore identity, but this profile row keeps the PREVIOUS
+            // install's public key. Every contact then encrypts to a key this device
+            // can no longer open ("[Encrypted message]" both directions) and the two
+            // fingerprints disagree. Whisper is single-device per account, so when no
+            // staged rotation is in flight we republish THIS device's key; contacts
+            // receive it as a fresh server update and auto-pin within the freshness
+            // window, restoring readability automatically.
+            val reinstallDivergence = pubKey != null &&
+                !existing.publicKey.isNullOrBlank() &&
+                existing.publicKey != pubKey &&
+                !crypto.hasStagedAliases()
+            if (reinstallDivergence) {
+                android.util.Log.w("WhisperRepo", "Reinstall detected: republishing local public key for ${currentId.take(8)}…")
+            }
 
-            if (needsKey || cleanUsername != null || needsDisplayName) {
+            if (needsKey || reinstallDivergence || cleanUsername != null || needsDisplayName) {
                 // Build the body without nulls: a null field would be serialized as
                 // "field": null and NULL the server column (e.g. username) on self-heal.
                 val body = buildJsonObject {
-                    if (needsKey) put("public_key", pubKey!!)
+                    if (needsKey || reinstallDivergence) put("public_key", pubKey!!)
                     cleanUsername?.let { put("username", it) }
                     if (needsDisplayName) put("display_name", metaDisplayName!!)
                 }
                 db.from("profiles").update(body) { filter { eq("id", currentId) } }
                 existing.copy(
-                    publicKey = if (needsKey) pubKey else existing.publicKey,
+                    publicKey = if (needsKey || reinstallDivergence) pubKey else existing.publicKey,
                     username = cleanUsername ?: existing.username,
                     displayName = if (needsDisplayName) metaDisplayName else existing.displayName
                 )
@@ -2064,12 +2082,63 @@ class WhisperRepository @Inject constructor(
     // authoritative via profiles.last_seen_at ([updateLastSeen]); the subscribe flows below
     // keep their public Flow APIs but now rely on authenticated Postgres/DB data only.
     suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {
-        // Intentional no-op (broadcast emission removed); signature kept for API compatibility.
+        // V4-FIX (field report): typing died when the plaintext R-M1 emissions were
+        // removed. Restored with an ENCRYPTED payload — the boolean is sealed with the
+        // pairwise attachment cipher (bound AAD), so eavesdroppers on the public
+        // channel see random bytes and outsiders cannot forge valid events.
+        runCatching {
+            val peerPub = peerKeyFor(targetUserId) ?: return
+            val plain = buildJsonObject {
+                put("sender_id", myId)
+                put("is_typing", isTyping)
+                put("ts", java.time.Instant.now().toEpochMilli())
+            }.toString().toByteArray()
+            val (cipherBytes, ivB64) = crypto.encryptAttachment(
+                bytes = plain,
+                recipientPublicKeyBase64 = peerPub,
+                senderId = myId,
+                receiverId = targetUserId,
+            ) ?: return
+            val channel = getOrJoinBroadcastChannel("typing_" + conversationKey(myId, targetUserId))
+            channel.broadcast(
+                event = "typing",
+                payload = BroadcastPayload.Json(buildJsonObject {
+                    put("sender_id", myId)
+                    put("iv", ivB64)
+                    put("ct", android.util.Base64.encodeToString(cipherBytes, android.util.Base64.NO_WRAP))
+                }),
+            )
+        }
     }
 
-    fun subscribeToTypingStatus(otherUserId: String): Flow<Boolean> = emptyFlow()
-    // V2-FIX (reviewwhisper.md) R-M1: no DB-backed substitute exists for typing state,
-    // so this Flow never emits (API kept so the chat screen compiles unchanged).
+    fun subscribeToTypingStatus(otherUserId: String): Flow<Boolean> = callbackFlow {
+        val name = "typing_" + conversationKey(myId, otherUserId)
+        val channel = getOrJoinBroadcastChannel(name)
+        val broadcasts = channel.broadcastFlow("typing")
+        val job = launch { broadcasts.collect { rb ->
+            try {
+                val json = (rb.payload as? BroadcastPayload.Json)?.value?.jsonObject ?: return@collect
+                val senderId = json["sender_id"]?.jsonPrimitive?.content
+                val iv = json["iv"]?.jsonPrimitive?.content
+                val ctB64 = json["ct"]?.jsonPrimitive?.content
+                if (senderId != otherUserId || iv.isNullOrBlank() || ctB64.isNullOrBlank()) return@collect
+                if (isUserBlockedByMe(otherUserId)) return@collect
+                // Strict post-cutoff decryption: only a sender holding the shared key
+                // can produce ciphertext that authenticates under our direction AAD.
+                val plain = crypto.decryptAttachment(
+                    cipherBytes = android.util.Base64.decode(ctB64, android.util.Base64.NO_WRAP),
+                    ivBase64 = iv,
+                    senderPublicKeyBase64 = peerKeyFor(otherUserId),
+                    senderId = otherUserId,
+                    receiverId = myId,
+                    messageCreatedAtEpochMs = System.currentTimeMillis(),
+                ) ?: return@collect
+                val isTyping = Json.parseToJsonElement(plain.decodeToString()).jsonObject["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
+                trySend(isTyping)
+            } catch (_: Exception) { }
+        } }
+        awaitClose { job.cancel(); appScope.launch { removeCachedChannel(name, channel) } }
+    }
 
     suspend fun sendPresence(targetUserId: String, isOnline: Boolean) {
         // Intentional no-op (broadcast emission removed); callers keep last_seen_at fresh
