@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import {
+// V2-FIX (reviewwhisper.md): module-level declarations were spliced INSIDE the import
+// braces below (invalid syntax); the helper now lives under the completed import.
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 // Lazily-built JWKS verifier: building at module-eval time would throw on a cold
 // start if SUPABASE_URL were ever absent, turning EVERY request into a 500.
@@ -12,9 +14,6 @@ function jwks() {
   }
   return _remoteJWKS;
 }
-  createRemoteJWKSet,
-  jwtVerify,
-} from "https://esm.sh/jose@5.9.6";
 
 // Deletes the caller's GoTrue user account (and everything cascade-deleted from it).
 // The bearer token is genuinely verified in-function: signature and exp are checked
@@ -25,9 +24,11 @@ function jwks() {
 // P0-4 FIX (reviewwhisper.md): A stolen JWT alone must NOT delete the account.
 // For non-anon users (email != *@whisper.toolz.app) the client must also send
 // X-Whisper-Password which is verified here by re-authenticating via GoTrue's
-// token endpoint before the service_role delete. Anon token users are exempt
-// from the password but MUST send X-Whisper-Confirm-Ts (M-6) and their JWT must
-// be very fresh (<5 min iat).
+// token endpoint before the service_role delete. V2-FIX (reviewwhisper.md): the
+// code requires BOTH headers from every caller — X-Whisper-Password is mandatory
+// too (it is only *verified* against GoTrue for non-anon accounts); anon-token
+// users additionally rely on X-Whisper-Confirm-Ts (M-6) plus a very fresh
+// (<5 min iat) JWT.
 //
 // M-5 FIX: ALL application-data cleanup happens HERE, under service role, BEFORE
 // the GoTrue identity is deleted — no more fragile client-side post-delete cleanup.
@@ -45,16 +46,21 @@ serve(async (request) => {
   if (!iatOk) return json({ error: "Session too old — please re-login to delete" }, 401);
 
   // Confirmation nonce. M-6 FIX (reviewwhisper.md): MANDATORY for anon-token users —
-  // they have no password proof, so a fresh confirmation timestamp is the second factor;
-  // an attacker replaying a stolen fresh JWT can no longer simply omit the header.
-  // For password accounts it stays optional (the X-Whisper-Password grant is the proof).
+  // they have no verified password proof, so a fresh confirmation timestamp is the
+  // second factor; an attacker replaying a stolen fresh JWT can no longer simply omit
+  // the header. V2-FIX (reviewwhisper.md): the header comment above used to claim the
+  // password was optional for anon accounts — the code has always required both
+  // headers, so the comments now match the code (required for ALL callers; the GoTrue
+  // password grant below only runs for non-anon accounts).
   const password = request.headers.get("X-Whisper-Password");
   const confirmTs = request.headers.get("X-Whisper-Confirm-Ts");
   if (!password || !confirmTs) {
     return json({ error: "Missing confirmation" }, 400);
   }
   {
-    const ts = parseInt(confirmTs, 10);
+    // V2-FIX (reviewwhisper.md): reject non-digit input before parseInt — values like
+    // "12abc" or "0x10" must not parse partially into a plausible-looking timestamp.
+    const ts = /^\d+$/.test(confirmTs) ? parseInt(confirmTs, 10) : NaN;
     if (isNaN(ts) || Math.abs(Date.now() - ts) > 5 * 60 * 1000) {
       return json({ error: "Invalid confirmation timestamp" }, 400);
     }
@@ -83,7 +89,14 @@ serve(async (request) => {
     try {
       const adminJson = await adminRes.json();
       const email = adminJson?.email as string | undefined;
-      if (email && !email.endsWith("@whisper.toolz.app")) {
+      // V2-FIX (reviewwhisper.md): FAIL CLOSED — the old `if (email && ...)` skipped
+      // password proof entirely when the lookup returned no email, so any account
+      // GoTrue answered without an email could be deleted with a stolen JWT alone.
+      // A missing email means we cannot tell which identity type this is: refuse.
+      if (!email) {
+        return json({ error: "Cannot verify identity type" }, 403);
+      }
+      if (!email.endsWith("@whisper.toolz.app")) {
         // Non-anon must have password proof; verify via password grant.
         const verifyRes = await fetch(`${baseUrlTmp}/auth/v1/token?grant_type=password`, {
           method: "POST",
@@ -101,36 +114,30 @@ serve(async (request) => {
   const baseUrl = Deno.env.get("SUPABASE_URL");
   if (!serviceRole || !baseUrl) return json({ error: "Server misconfigured" }, 500);
 
-  // M-5 FIX (reviewwhisper.md): purge owned rows BEFORE the GoTrue delete, via service
+  // M-5 FIX (reviewwhisper.md): purge owned rows BEFORE the GoTrue delete, under service
   // role. The old flow let the CLIENT run RLS-scoped postgrest deletes AFTER user
   // deletion, matching a JWT sub that no longer corresponds to a live user — fragile,
   // and silently no-op if Supabase ever revokes sessions on delete.
-  const cleanupTargets: Array<[string, string]> = [
-    ["messages", `sender_id=eq.${userId}`],
-    ["message_reactions", `user_id=eq.${userId}`],
-    ["friends", `user_a=eq.${userId}`],
-    ["friends", `user_b=eq.${userId}`],
-    ["whisper_blocks", `blocker_id=eq.${userId}`],
-    ["whisper_blocks", `blocked_id=eq.${userId}`],
-    ["profiles", `id=eq.${userId}`],
-    // FK-cascaded tables (whisper_upload_quota, whisper_deleted_tombstones,
-    // whisper_discover_quota) clean themselves when auth.users row goes; deleted here
-    // anyway so a failed GoTrue delete can never leave half-purged state behind.
-    ["whisper_upload_quota", `user_id=eq.${userId}`],
-    ["whisper_deleted_tombstones", `user_id=eq.${userId}`],
-    ["whisper_discover_quota", `user_id=eq.${userId}`],
-  ];
-  for (const [table, filter] of cleanupTargets) {
-    try {
-      await fetch(`${baseUrl}/rest/v1/${table}?${filter}`, {
-        method: "DELETE",
-        headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
-      });
-    } catch (cleanupError) {
-      console.error(`cleanup failed for ${table}`, cleanupError);
-      // Fail closed: do not delete the identity while its data may be orphaned.
-      return json({ error: "Account cleanup failed" }, 502);
-    }
+  // V2-FIX (reviewwhisper.md): the per-table REST loop (two tables needed OR filters it
+  // could not express atomically) is replaced by ONE service-role-only RPC
+  // (migration 20260827) that deletes from every application table in a single
+  // transaction — either everything is purged or nothing is.
+  let purgeRes: Response;
+  try {
+    purgeRes = await fetch(`${baseUrl}/rest/v1/rpc/whisper_purge_account_data`, {
+      method: "POST",
+      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_uid: userId }),
+    });
+  } catch (purgeError) {
+    console.error("whisper_purge_account_data threw", purgeError);
+    // Fail closed: do not delete the identity while its data may be orphaned.
+    return json({ error: "Account cleanup failed" }, 502);
+  }
+  // Fail closed: do not delete the identity while its data may be orphaned.
+  if (!purgeRes.ok) {
+    console.error("whisper_purge_account_data failed", purgeRes.status);
+    return json({ error: "Account cleanup failed" }, 502);
   }
 
   const upstream = await fetch(`${baseUrl}/auth/v1/admin/users/${userId}`, {

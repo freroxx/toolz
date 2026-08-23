@@ -19,6 +19,8 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.music.MusicDao
@@ -52,6 +54,38 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    /**
+     * V2-FIX (reviewwhisper.md) H-10: whisper chronological ordering moved from ISO
+     * string comparison to a numeric [sortEpoch] column. Adds the column with the same
+     * DEFAULT (0) the entity declares via @ColumnInfo, then backfills every existing
+     * row by parsing its createdAt (Instant.parse, OffsetDateTime.parse fallback,
+     * epoch 0 on failure) through a single prepared statement loop.
+     */
+    private val MIGRATION_47_48 = object : Migration(47, 48) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE whisper_messages ADD COLUMN sortEpoch INTEGER NOT NULL DEFAULT 0")
+
+            data class Row(val id: String, val createdAtIso: String?)
+            val rows = mutableListOf<Row>()
+            db.query("SELECT id, createdAt FROM whisper_messages").use { cursor ->
+                val idIdx = cursor.getColumnIndexOrThrow("id")
+                val createdIdx = cursor.getColumnIndexOrThrow("createdAt")
+                while (cursor.moveToNext()) {
+                    rows.add(Row(cursor.getString(idIdx), if (cursor.isNull(createdIdx)) null else cursor.getString(createdIdx)))
+                }
+            }
+
+            db.compileStatement("UPDATE whisper_messages SET sortEpoch = ? WHERE id = ?").use { stmt ->
+                for (row in rows) {
+                    stmt.clearBindings()
+                    stmt.bindLong(1, com.frerox.toolz.data.whisper.WhisperMessageEntity.parseSortEpoch(row.createdAtIso))
+                    stmt.bindString(2, row.id)
+                    stmt.executeUpdateDelete()
+                }
+            }
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
@@ -71,6 +105,9 @@ object DatabaseModule {
             dbName
         )
         .openHelperFactory(factory)
+        // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
+        // must ship one (see AppDatabase comment).
+        .addMigrations(MIGRATION_47_48)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -109,6 +146,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
+                    .addMigrations(MIGRATION_47_48)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

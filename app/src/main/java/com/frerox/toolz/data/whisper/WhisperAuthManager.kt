@@ -85,16 +85,31 @@ class WhisperAuthManager @Inject constructor(
                 connection.requestMethod = "POST"
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 30_000
-                connection.doOutput = false
                 connection.setRequestProperty("Authorization", "Bearer $token")
                 connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
                 connection.setRequestProperty("Content-Type", "application/json")
+                // V2-FIX W-A1: the password now travels in the JSON POST body field
+                // "whisperPassword" (preferred — avoids credentials in header logs/proxies).
+                // The X-Whisper-Password header is KEPT for backend compatibility during
+                // transition (the edge function reads it today; it will be updated to
+                // prefer the body separately).
+                connection.doOutput = true
+                val body = buildJsonObject {
+                    if (!isTokenUser && !password.isNullOrBlank()) {
+                        put("whisperPassword", password)
+                    }
+                }.toString()
                 // P0-4: forward password confirmation for server-side verification (omitted for anon token users)
                 if (!isTokenUser && !password.isNullOrBlank()) {
                     connection.setRequestProperty("X-Whisper-Password", password)
                 }
                 // Also include a fresh confirmation nonce (timestamp) to prevent replay beyond 5 min
                 connection.setRequestProperty("X-Whisper-Confirm-Ts", System.currentTimeMillis().toString())
+                connection.setFixedLengthStreamingMode(body.toByteArray(Charsets.UTF_8).size)
+                connection.outputStream.use { out ->
+                    out.write(body.toByteArray(Charsets.UTF_8))
+                    out.flush()
+                }
                 if (connection.responseCode !in 200..299) {
                     val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                     error(errorBody.take(200).ifBlank { "HTTP ${connection.responseCode}" })
@@ -212,6 +227,16 @@ class WhisperAuthManager @Inject constructor(
         }
     }
 
+    /**
+     * Signs in an anonymous-token user by trying the historically valid
+     * (virtualEmail, virtualPassword) derivation schemes, most-likely-first.
+     *
+     * V2-FIX W-A5: this legacy candidate list is FROZEN for backward compatibility —
+     * every entry maps to real accounts created under an older derivation scheme and
+     * must keep working. Prune entries ONLY after a deprecation window long enough to
+     * assume those account generations are gone (and never reorder/remove the current
+     * scheme entry).
+     */
     suspend fun loginWithToken(rawToken: String): Result<Unit> = runCatching {
         val cleanToken = normalizeToken(rawToken)
         require(isValidToken(cleanToken)) { "That token doesn't look right. Check for missing or extra characters." }
@@ -256,9 +281,16 @@ class WhisperAuthManager @Inject constructor(
     fun normalizeToken(raw: String): String = raw.trim().replace(Regex("[^0-9a-fA-F]"), "").lowercase()
     fun isValidToken(token: String): Boolean = token.length == 64 && token.all { it in '0'..'9' || it in 'a'..'f' }
 
-    fun isInvalidCredentials(throwable: Throwable): Boolean =
-        (throwable is RestException && throwable.error == "invalid_grant") ||
-        throwable.message?.contains("Invalid login credentials", ignoreCase = true) == true
+    // V2-FIX W-A7: prefer structural detection — RestException error code
+    // ("invalid_grant") or HTTP status 400 — over exception message text matching,
+    // which breaks if GoTrue/localization changes wording. The message match remains
+    // only as a last-resort fallback for non-RestException transports.
+    fun isInvalidCredentials(throwable: Throwable): Boolean {
+        if (throwable is RestException) {
+            return throwable.error == "invalid_grant" || throwable.statusCode == 400
+        }
+        return throwable.message?.contains("Invalid login credentials", ignoreCase = true) == true
+    }
 
     suspend fun signOut(): Result<Unit> = runCatching {
         supabase.auth.signOut()

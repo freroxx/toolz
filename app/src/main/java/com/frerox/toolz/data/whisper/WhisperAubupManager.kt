@@ -43,6 +43,14 @@ class WhisperAubupManager @Inject constructor(
     companion object {
         fun isValidWhisperCode(code: String): Boolean =
             code.length == 6 && code.all { it in '0'..'9' }
+
+        // V2-FIX B3: on pre-Android-Q devices the access file is written to the legacy
+        // PUBLIC Downloads dir, where other apps may read it. Callers append this to the
+        // success toast when Build.VERSION.SDK_INT < 29. English-only here (non-UI data
+        // layer) — MainScreen now appends the localized
+        // R.string.st_Whisper_Aubup_LegacyStorageWarning instead of this constant.
+        const val WARNING_LEGACY_STORAGE =
+            "Warning: On this Android version the file was saved to shared storage (Downloads/Toolz), where other apps may be able to read it."
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -136,14 +144,16 @@ class WhisperAubupManager @Inject constructor(
             )
             val jsonString = json.encodeToString(payload)
 
-            // P0-2 NOTE: 6-digit code = 1M entropy. CryptoManager uses PBKDF2 65536 + random 16-byte salt.
+            // P0-2 NOTE: 6-digit code = 1M entropy. CryptoManager now hardens this file
+            // with PBKDF2 310000 iterations + random 16-byte salt (V2-FIX B1; legacy
+            // .enc files at 65536 still decrypt via the fallback path).
             // Offline brute-force remains trivial if .enc is exfiltrated; mitigation is user
             // choosing long random password OR future 8+ alphanum requirement. For 1.0 we
             // keep 6-digit for compat but document KDF params and add rate-limit on decrypt
             // (decryptAccessFile is throttled at UI 300ms + caller delay).
-            val (encryptedText, success) = CryptoManager.encryptAes(
+            val (encryptedText, success) = CryptoManager.encryptWithPassphrase(
                 plaintext = jsonString,
-                password = whisperCode.toCharArray(),
+                passphrase = whisperCode.toCharArray(),
             )
             if (!success || encryptedText.isBlank()) {
                 error("Encryption failed with the provided Whisper Code.")
@@ -167,8 +177,15 @@ class WhisperAubupManager @Inject constructor(
         displayName: String?,
         whisperCode: String,
         fallbackCredential: String? = null,
+        // V2-FIX B4: explicit token classification from the caller when known (e.g. the
+        // live session). null keeps the backward-compatible vault-name heuristic.
+        isToken: Boolean? = null,
     ): Result<File> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim().lowercase()
+        // V2-FIX B5: loads the whole vault; a DAO-scoped query would be preferable, but
+        // PasswordDao has no whisper-specific filtered query today (getPasswordsByDomain
+        // matches name LIKE '%domain%' and would miss "Whisper: user" entries whose url
+        // is null) — deferred to avoid touching the shared Room schema in this pass.
         val allPasswords = passwordDao.getAllPasswordsSync()
         val matched = allPasswords.find {
             (it.url?.contains("whisper.toolz.app", ignoreCase = true) == true || it.name.startsWith("Whisper", ignoreCase = true)) &&
@@ -181,8 +198,9 @@ class WhisperAubupManager @Inject constructor(
         }
 
         // P2-14 FIX: Don't misclassify hex passwords as tokens. Only trust vault name "Anon".
-        val isToken = matched?.name?.contains("Anon", ignoreCase = true) == true
-        val authType = if (isToken) "TOKEN" else "PASSWORD"
+        // V2-FIX B4: an explicit caller hint wins; heuristic only when metadata can't tell.
+        val resolvedIsToken = isToken ?: (matched?.name?.contains("Anon", ignoreCase = true) == true)
+        val authType = if (resolvedIsToken) "TOKEN" else "PASSWORD"
 
         createAccessFile(
             username = cleanUser,
@@ -195,6 +213,9 @@ class WhisperAubupManager @Inject constructor(
 
     suspend fun scanVaultForWhisperAccounts(): List<PasswordEntity> = withContext(Dispatchers.IO) {
         runCatching {
+            // V2-FIX B5: full-vault load kept — no existing PasswordDao query matches the
+            // url-domain OR name-prefix predicate (see note in createAccessFileForUser);
+            // adding a scoped DAO query is deferred.
             val all = passwordDao.getAllPasswordsSync()
             all.filter { entity ->
                 entity.url?.contains("whisper.toolz.app", ignoreCase = true) == true ||
@@ -246,9 +267,11 @@ class WhisperAubupManager @Inject constructor(
     }
 
     private fun decryptCiphertext(cipherText: String, whisperCode: String): WhisperAccessPayload {
-        val (decryptedJson, success) = CryptoManager.decryptAes(
+        // V2-FIX B1: hardened 310000-iteration format first, legacy 65536 fallback so
+        // pre-B1 .enc access files keep decrypting.
+        val (decryptedJson, success) = CryptoManager.decryptWithPassphrase(
             combinedBase64 = cipherText,
-            password = whisperCode.toCharArray(),
+            passphrase = whisperCode.toCharArray(),
         )
         if (!success || decryptedJson.isBlank()) {
             error("Incorrect Whisper Code or corrupted access file.")

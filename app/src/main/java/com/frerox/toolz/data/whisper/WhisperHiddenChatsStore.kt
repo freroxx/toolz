@@ -19,11 +19,14 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -54,16 +57,25 @@ class WhisperHiddenChatsStore @Inject constructor(
     }
 
     /** Hide a chat from the chats tab, recording when it was hidden. */
-    fun hideChat(userId: String) = synchronized(lock) {
+    // V2-FIX (reviewwhisper.md): mutators are suspend and fsync'd commit() runs inside
+    // Dispatchers.IO — the old synchronous commit() on the caller (main) thread caused
+    // jank/ANR risk on every hide.
+    suspend fun hideChat(userId: String) {
         val now = System.currentTimeMillis()
-        prefs.edit().putLong("hidden_$userId", now).commit()
+        val ok = withContext(Dispatchers.IO) {
+            synchronized(lock) { prefs.edit().putLong("hidden_$userId", now).commit() }
+        }
+        if (!ok) Log.w(TAG, "hideChat commit failed for $userId")
         _hiddenChats.update { it + (userId to now) }
     }
 
     /** Bring a chat back to the chats tab. */
-    fun unhideChat(userId: String) = synchronized(lock) {
-        if (userId !in _hiddenChats.value) return@synchronized
-        prefs.edit().remove("hidden_$userId").commit()
+    suspend fun unhideChat(userId: String) {
+        if (userId !in _hiddenChats.value) return
+        val ok = withContext(Dispatchers.IO) {
+            synchronized(lock) { prefs.edit().remove("hidden_$userId").commit() }
+        }
+        if (!ok) Log.w(TAG, "unhideChat commit failed for $userId")
         _hiddenChats.update { it - userId }
     }
 
@@ -73,8 +85,15 @@ class WhisperHiddenChatsStore @Inject constructor(
     fun isHidden(userId: String): Boolean = _hiddenChats.value.containsKey(userId)
 
     /** Wipe every hidden-chat record on this device (account deletion). */
-    fun clearAll() = synchronized(lock) {
-        prefs.edit().clear().commit()
+    suspend fun clearAll() {
+        val ok = withContext(Dispatchers.IO) {
+            synchronized(lock) { prefs.edit().clear().commit() }
+        }
+        if (!ok) Log.w(TAG, "clearAll commit failed")
         _hiddenChats.update { emptyMap() }
+    }
+
+    private companion object {
+        const val TAG = "WhisperHiddenChats"
     }
 }

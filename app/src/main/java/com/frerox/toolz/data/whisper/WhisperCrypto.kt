@@ -126,8 +126,13 @@ class WhisperCrypto @Inject constructor(
         }
     }
 
-    private fun genStagedAlias(): String =
-        STAGED_ALIAS_PREFIX + System.currentTimeMillis()
+    // V2-FIX W6: millisecond timestamps alone can collide (rapid rotations / clock
+    // granularity); append 4 bytes of SecureRandom entropy so staged aliases stay unique.
+    private fun genStagedAlias(): String {
+        val entropy = ByteArray(4).also { SecureRandom().nextBytes(it) }
+        return STAGED_ALIAS_PREFIX + System.currentTimeMillis() + "_" +
+            entropy.joinToString("") { "%02x".format(it) }
+    }
 
     private fun createKeyPairUnder(alias: String) {
         val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEYSTORE_PROVIDER)
@@ -142,7 +147,9 @@ class WhisperCrypto @Inject constructor(
         try {
             activeAlias()
         } catch (e: Exception) {
-            android.util.Log.e("WhisperCrypto", "Key pair generation failed", e)
+            // V2-FIX W8: never swallow keystore bootstrap failures silently — degraded
+            // keystore state (E2EE unavailable until fixed) must be diagnosable from logs.
+            android.util.Log.w("WhisperCrypto", "Key pair generation failed; E2EE degraded until keystore recovers", e)
         }
     }
 
@@ -169,7 +176,12 @@ class WhisperCrypto @Inject constructor(
     private fun parsePublicKey(base64PublicKey: String): PublicKey? {
         return try {
             val cleanKey = base64PublicKey.trim()
-            val bytes = Base64.decode(cleanKey, Base64.DEFAULT)
+            // V2-FIX W5: strict RFC 4648 decoding via java.util.Base64 so malformed peer
+            // keys fail closed instead of being leniently stripped (android.util.Base64
+            // .DEFAULT skips invalid chars). Matches computeFingerprint semantics; server
+            // keys are standard base64 so no caller regression. Decode errors are wrapped
+            // by the surrounding try/catch and logged.
+            val bytes = java.util.Base64.getDecoder().decode(cleanKey)
             val keySpec = X509EncodedKeySpec(bytes)
             val keyFactory = KeyFactory.getInstance("EC")
             keyFactory.generatePublic(keySpec)
@@ -233,6 +245,15 @@ class WhisperCrypto @Inject constructor(
      * Encrypts a chat message with AAD binding to the exact conversation direction
      * (senderId/receiverId from the message row), so ciphertext replayed into another
      * chat — or with swapped participants — can never authenticate.
+     *
+     * V2-FIX W3 (replay resistance, documented-only): AAD binds the conversation but
+     * NOT a message sequence/counter, so re-sending identical ciphertext WITHIN the
+     * same chat still authenticates. Closing that requires server-side uniqueness
+     * enforcement (rejecting duplicate ciphertext/UUID per conversation) — deliberately
+     * not enforced here mid-flight because changing the AAD format would orphan cached
+     * history. The client's UUID primary key already dedupes INSERTS (OnConflictStrategy),
+     * so replayed deliveries collapse instead of duplicating rows; do not change the
+     * [aadFor] wire format without a dual-derive migration.
      */
     fun encryptMessage(
         plainText: String,
@@ -262,6 +283,11 @@ class WhisperCrypto @Inject constructor(
      * Decrypts a chat message. Tries the direction-bound AAD first; if that fails the
      * payload is retried WITHOUT AAD so legacy (pre-AAD) rows keep decrypting — history
      * must never break after this upgrade.
+     *
+     * V2-FIX W3 (see [encryptMessage]): same-chat replay protection requires server-side
+     * uniqueness enforcement; AAD format is intentionally unchanged. Duplicate inserts
+     * are already collapsed by the client UUID primary key, so a replayed delivery
+     * cannot create a second visible row.
      */
     fun decryptMessage(
         cipherText: String,
@@ -410,22 +436,36 @@ class WhisperCrypto @Inject constructor(
 
     /** Promotes a staged pair to active and destroys the previous key. Call only after the server accepted the new public key. */
     fun commitStagedKeyPair(staged: StagedKeyPair): Boolean {
-        return try {
+        var committed = false
+        try {
             synchronized(rotationLock) {
                 val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-                if (!keyStore.containsAlias(staged.alias)) return false
+                if (!keyStore.containsAlias(staged.alias)) return@synchronized
                 val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
                 val previous = prefs.getString(PREF_ACTIVE_ALIAS, null)
-                prefs.edit().putString(PREF_ACTIVE_ALIAS, staged.alias).apply()
+                // V2-FIX W7: persist the active-alias pointer SYNCHRONOUSLY (commit)
+                // before destroying anything, so a failed write or crash can never leave
+                // us pointing at an already-deleted key.
+                if (!prefs.edit().putString(PREF_ACTIVE_ALIAS, staged.alias).commit()) {
+                    android.util.Log.e("WhisperCrypto", "Failed to persist active alias; previous key kept intact")
+                    return@synchronized
+                }
+                committed = true
+                // V2-FIX W7: delete the PREVIOUS key only AFTER the pointer persisted,
+                // and never let its failure fail the rotation. NOTE: history encrypted
+                // under the old key becomes undecryptable once destroyed if the local
+                // cache was not migrated first — accepted trade-off (re-encryption is
+                // deliberately NOT implemented here).
                 if (previous != null && previous != staged.alias && keyStore.containsAlias(previous)) {
-                    keyStore.deleteEntry(previous)
+                    runCatching { keyStore.deleteEntry(previous) }
+                        .onFailure { android.util.Log.w("WhisperCrypto", "Previous key cleanup failed (rotation still valid)", it) }
                 }
             }
-            true
         } catch (e: Exception) {
             android.util.Log.e("WhisperCrypto", "Key commit failed", e)
-            false
+            return false
         }
+        return committed
     }
 
     /** Rolls an unpublished staged pair back — the old key remains active and intact. */

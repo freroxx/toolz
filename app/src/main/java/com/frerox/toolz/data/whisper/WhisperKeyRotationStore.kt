@@ -2,7 +2,10 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,12 +31,18 @@ class WhisperKeyRotationStore @Inject constructor(
 
     fun lastRotateMs(): Long = prefs.getLong(KEY_LAST_ROTATE, 0L)
 
-    fun markRotated(now: Long = System.currentTimeMillis()) {
-        prefs.edit().putLong(KEY_LAST_ROTATE, now).commit()
+    // V2-FIX (reviewwhisper.md): markRotated is suspend and fsync'd commit() runs inside
+    // Dispatchers.IO — a synchronous commit() on the main thread (heartbeat/rotation UI
+    // paths) risks jank/ANR.
+    suspend fun markRotated(now: Long = System.currentTimeMillis()) {
+        val ok = withContext(Dispatchers.IO) {
+            prefs.edit().putLong(KEY_LAST_ROTATE, now).commit()
+        }
+        if (!ok) Log.w(TAG, "markRotated commit failed")
     }
 
     /** True if interval elapsed since last rotation. Better: 30d + 0-6h jitter to avoid fleet thundering herd. */
-    fun shouldRotate(now: Long = System.currentTimeMillis()): Boolean {
+    suspend fun shouldRotate(now: Long = System.currentTimeMillis()): Boolean {
         val last = lastRotateMs()
         if (last == 0L) {
             // Seed on first run — don't rotate immediately, just record.
@@ -45,14 +54,16 @@ class WhisperKeyRotationStore @Inject constructor(
         return (now - last) >= (ROTATE_INTERVAL_MS + jitter)
     }
 
-    fun clear() {
-        prefs.edit().clear().commit()
+    suspend fun clear() {
+        val ok = withContext(Dispatchers.IO) { prefs.edit().clear().commit() }
+        if (!ok) Log.w(TAG, "clear commit failed")
     }
 
     // Exposed for ViewModel logging
     fun intervalDays(): Int = (ROTATE_INTERVAL_MS / (24 * 60 * 60 * 1000)).toInt()
 
     companion object {
+        private const val TAG = "WhisperKeyRotation"
         const val KEY_LAST_ROTATE = "last_rotate_ms"
         /** 30 days — referenced by WhisperRepository key-change classification (P0-1). */
         const val ROTATE_INTERVAL_MS = 30L * 24 * 60 * 60 * 1000

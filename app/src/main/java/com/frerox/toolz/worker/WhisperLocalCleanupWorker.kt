@@ -21,15 +21,23 @@ class WhisperLocalCleanupWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val deletedMessagesStore: WhisperDeletedMessagesStore,
 ) : CoroutineWorker(context, workerParams) {
-    override suspend fun doWork(): ListenableWorker.Result = try {
-        deletedMessagesStore.evictOldest()
-        ListenableWorker.Result.success()
-    } catch (e: kotlinx.coroutines.CancellationException) {
-        // WorkManager cancels this coroutine on stop; rethrow so cancellation is honored.
-        throw e
-    } catch (_: Exception) {
-        // The operation is local and idempotent; a future periodic pass can safely retry it,
-        // so a persistent failure just ends this run instead of churning the retry queue.
-        ListenableWorker.Result.failure()
+    companion object {
+        private const val TAG = "WhisperCleanup"
     }
+
+    override suspend fun doWork(): ListenableWorker.Result =
+        // V2-FIX L-?: the body is wrapped so a failure is always LOGGED (observability) —
+        // the old bare failure() gave zero signal about recurring local-cleanup breakage.
+        runCatching { deletedMessagesStore.evictOldest() }.fold(
+            onSuccess = { ListenableWorker.Result.success() },
+            onFailure = { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (com.frerox.toolz.BuildConfig.DEBUG) {
+                    android.util.Log.w(TAG, "whisper local cleanup failed", e)
+                } else {
+                    android.util.Log.w(TAG, "whisper local cleanup failed: ${e.javaClass.name}")
+                }
+                ListenableWorker.Result.failure()
+            },
+        )
 }

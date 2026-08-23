@@ -5,9 +5,12 @@
 
 package com.frerox.toolz.data.whisper
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Index
+import java.time.Instant
+import java.time.OffsetDateTime
 
 @Entity(
     tableName = "whisper_messages",
@@ -30,7 +33,11 @@ data class WhisperMessageEntity(
     val createdAt: String,
     val replyToContent: String? = null,
     val replyToSenderName: String? = null,
-    val isDeletedForEveryone: Boolean = false
+    val isDeletedForEveryone: Boolean = false,
+    // V2-FIX (reviewwhisper.md) H-10: numeric sort key derived from createdAt so Room can
+    // order chronologically even when ISO strings compare inconsistently. defaultValue
+    // matches MIGRATION_47_48's "ADD COLUMN ... DEFAULT 0" (Room validates both sides).
+    @ColumnInfo(defaultValue = "0") val sortEpoch: Long = 0
 ) {
     fun toModel(): WhisperMessage = WhisperMessage(
         id = id,
@@ -46,6 +53,20 @@ data class WhisperMessageEntity(
         // Cached pending rows render as a neutral placeholder instead of a real bubble.
         isPending = content == "[message pending sync]"
     )
+
+    companion object {
+        /**
+         * V2-FIX (reviewwhisper.md) H-10: parses an ISO-8601 timestamp ("...Z" or with a
+         * UTC offset) into epoch millis for [sortEpoch]; falls back to 0L on blank input
+         * or unparseable text instead of crashing the insert path.
+         */
+        fun parseSortEpoch(iso: String?): Long {
+            if (iso.isNullOrBlank()) return 0L
+            return runCatching { Instant.parse(iso).toEpochMilli() }
+                .recoverCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }
+                .getOrDefault(0L)
+        }
+    }
 }
 
 fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
@@ -68,5 +89,9 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     createdAt = createdAt,
     replyToContent = null,
     replyToSenderName = replyToSenderName,
-    isDeletedForEveryone = isDeletedForEveryone
+    isDeletedForEveryone = isDeletedForEveryone,
+    // V2-FIX (reviewwhisper.md) H-10: every entity construction site goes through this
+    // mapper (server rows, pending ghosts, delivered outbox rows), so deriving the
+    // monotonic sort key here covers all of them.
+    sortEpoch = WhisperMessageEntity.parseSortEpoch(createdAt)
 )

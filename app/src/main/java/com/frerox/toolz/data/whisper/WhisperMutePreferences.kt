@@ -19,11 +19,14 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -112,8 +115,15 @@ class WhisperMutePreferences @Inject constructor(
     }
 
     /** Wipe every mute record on this device (account deletion). */
-    fun clearAll() {
-        prefs.edit().clear().apply()
+    // V2-FIX (reviewwhisper.md): apply() → durable commit() inside Dispatchers.IO so the
+    // wipe is guaranteed on disk before account deletion proceeds and never blocks Main.
+    suspend fun clearAll() {
+        val ok = withContext(Dispatchers.IO) { prefs.edit().clear().commit() }
+        if (!ok) Log.w(TAG, "clearAll commit failed")
         _mutedUsers.update { emptySet() }
+    }
+
+    private companion object {
+        const val TAG = "WhisperMutePrefs"
     }
 }

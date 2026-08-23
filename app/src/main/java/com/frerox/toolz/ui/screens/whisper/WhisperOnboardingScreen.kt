@@ -34,6 +34,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,9 +73,12 @@ fun WhisperOnboardingScreen(
     // Onboarding contains key-generation details — never capture this screen.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
+    // V2-FIX O-H1: the four kickers are prominent headings and were hardcoded English.
+    // The step data is built inside composition, so kickers resolve via stringResource
+    // like the titles/descriptions.
     val onboardingSteps = listOf(
         OnboardingStep(
-            kicker = "WELCOME TO WHISPER",
+            kicker = stringResource(R.string.st_Whisper_Onboarding_Kicker1),
             title = stringResource(R.string.st_Whisper_Onboarding_Title1),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc1),
             icon = Icons.AutoMirrored.Rounded.Chat,
@@ -80,7 +86,7 @@ fun WhisperOnboardingScreen(
             shape = MaterialShapes.Cookie9Sided,
         ),
         OnboardingStep(
-            kicker = "WHISPER IS FRIENDLY",
+            kicker = stringResource(R.string.st_Whisper_Onboarding_Kicker2),
             title = stringResource(R.string.st_Whisper_Onboarding_Title2),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc2),
             icon = Icons.Rounded.Explore,
@@ -88,7 +94,7 @@ fun WhisperOnboardingScreen(
             shape = MaterialShapes.Pill,
         ),
         OnboardingStep(
-            kicker = "WHISPER IS SECURE",
+            kicker = stringResource(R.string.st_Whisper_Onboarding_Kicker3),
             title = stringResource(R.string.st_Whisper_Onboarding_Title3),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc3),
             icon = Icons.Rounded.EnhancedEncryption,
@@ -96,7 +102,7 @@ fun WhisperOnboardingScreen(
             shape = MaterialShapes.Clover4Leaf,
         ),
         OnboardingStep(
-            kicker = "WHISPER IS ALL YOURS",
+            kicker = stringResource(R.string.st_Whisper_Onboarding_Kicker4),
             title = stringResource(R.string.st_Whisper_Onboarding_Title4),
             description = stringResource(R.string.st_Whisper_Onboarding_Desc4),
             icon = Icons.Rounded.VerifiedUser,
@@ -121,7 +127,11 @@ fun WhisperOnboardingScreen(
         )
 
         Column(
-            modifier = Modifier.fillMaxSize(),
+            // V2-FIX O-M1: the root column ignored status-bar insets; content could draw
+            // under the status bar on edge-to-edge devices.
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(48.dp))
@@ -167,12 +177,26 @@ fun WhisperOnboardingScreen(
                             },
                             label = "indicatorColor",
                         )
+                        // Resolved in composition — the semantics block below is not
+                        // composable, so it consumes the pre-built string.
+                        val pageOfCd = stringResource(
+                            R.string.st_Whisper_Onboarding_PageOf,
+                            index + 1,
+                            onboardingSteps.size,
+                        )
                         Box(
                             modifier = Modifier
                                 .height(8.dp)
                                 .width(width)
                                 .clip(CircleShape)
                                 .background(indicatorColor)
+                                // V2-FIX O-M2: the dots were purely decorative to
+                                // accessibility services — announce the selected state and
+                                // page position.
+                                .semantics {
+                                    selected = active
+                                    contentDescription = pageOfCd
+                                }
                         )
                     }
                 }

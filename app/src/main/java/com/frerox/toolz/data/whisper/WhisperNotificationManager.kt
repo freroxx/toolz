@@ -47,15 +47,29 @@ class WhisperNotificationManager @Inject constructor(
 ) {
     companion object {
         const val CHANNEL_ID = "whisper_messages"
-        const val CHANNEL_NAME = "Whisper Messages"
+        // V2-FIX M-M?: dedicated low-importance channel for group summaries — silencing the
+        // ambient summary must not mute per-message notifications (and vice versa).
+        // Channel names/descriptions resolve from string resources at runtime so they
+        // follow the device locale (see createChannel()).
+        const val SUMMARY_CHANNEL_ID = "whisper_message_summary"
         private const val TAG = "WhisperNotifMgr"
         private const val GROUP_KEY = "com.frerox.toolz.WHISPER_MESSAGES"
         private const val REQUEST_CODE_BASE = 9000
         private const val SUMMARY_NOTIF_ID = 8999
         private const val FIRST_MESSAGE_NOTIF_ID = 1000
-        // Keep this band well below the friend-request range (2_100_000_000+) and small
-        // enough that REQUEST_CODE_BASE + id never approaches Int.MAX_VALUE.
+        // Keep this band small enough that REQUEST_CODE_BASE + id never approaches
+        // Int.MAX_VALUE. V2-FIX M-H?: friend-request ids moved OUT of the old 2_100_000_000+
+        // range into a dedicated band directly ABOVE this one — see FRIEND_REQUEST_* below.
         private const val LAST_MESSAGE_NOTIF_ID = 1_000_000
+
+        /**
+         * V2-FIX M-H?: dedicated ID band for friend-request notifications so they can never
+         * collide with per-sender conversation ids ([FIRST_MESSAGE_NOTIF_ID],
+         * [LAST_MESSAGE_NOTIF_ID)). Range: 2_000_000 .. 2_099_999 — disjoint from the
+         * conversation band and from SUMMARY_NOTIF_ID.
+         */
+        private const val FRIEND_REQUEST_NOTIF_ID_BASE = 2_000_000
+        private const val FRIEND_REQUEST_NOTIF_ID_SPAN = 100_000
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
@@ -94,13 +108,22 @@ class WhisperNotificationManager @Inject constructor(
     private fun createChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            CHANNEL_NAME,
+            context.getString(R.string.st_Whisper_Notification_ChannelName),
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "End-to-end encrypted Whisper messages"
+            description = context.getString(R.string.st_Whisper_Notification_ChannelDesc)
             enableVibration(true)
         }
         notifManager.createNotificationChannel(channel)
+        // V2-FIX M-M?: low-importance channel hosting ONLY the group summary notification.
+        val summaryChannel = NotificationChannel(
+            SUMMARY_CHANNEL_ID,
+            context.getString(R.string.st_Whisper_Notification_ChannelSummaryName),
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = context.getString(R.string.st_Whisper_Notification_ChannelSummaryDesc)
+        }
+        notifManager.createNotificationChannel(summaryChannel)
     }
 
     private fun observeAppLifecycle() {
@@ -120,13 +143,19 @@ class WhisperNotificationManager @Inject constructor(
     ) {
         // Skip if muted
         if (mutePrefs.isMuted(senderId)) {
-            Log.d(TAG, "User $senderName ($senderId) is muted — skipping notification")
+            // V2-FIX M-M?: sender names/ids never appear in release logs (privacy).
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                Log.d(TAG, "User $senderName ($senderId) is muted — skipping notification")
+            }
             return
         }
 
         // Skip notification if the app is in foreground AND the user is already in that specific chat
         if (isInForeground && currentChatId == senderId) {
-            Log.d(TAG, "User in chat with $senderName — skipping notification")
+            // V2-FIX M-M?: same release-log hygiene as above — no ids in release.
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                Log.d(TAG, "User in chat with $senderName ($senderId) — skipping notification")
+            }
             return
         }
 
@@ -156,7 +185,9 @@ class WhisperNotificationManager @Inject constructor(
             .setContentIntent(pendingIntent)
             .build()
 
-        val summaryNotification = NotificationCompat.Builder(context, CHANNEL_ID)
+        // V2-FIX M-M?: the group summary posts on its own low-importance channel so it can
+        // be silenced independently of the per-message notifications.
+        val summaryNotification = NotificationCompat.Builder(context, SUMMARY_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_whisper_notif)
             .setContentTitle("Whisper")
             .setContentText("New encrypted messages")
@@ -177,10 +208,10 @@ class WhisperNotificationManager @Inject constructor(
         }
     }
 
-    /** Friend request notification — uses stable sender id to avoid display-name collisions. Distinct range from messages to avoid overwrite. */
+    /** Friend request notification — stable sender id avoids display-name collisions. V2-FIX M-H?: id lives in the dedicated FRIEND_REQUEST_* band, disjoint from conversation ids. */
     fun showFriendRequestNotification(fromId: String, fromName: String) {
         if (isInForeground) return
-        val notifId = ((fromId.hashCode() and 0x7FFFFFFF) % 100_000) + 2_100_000_000
+        val notifId = friendRequestNotifId(fromId)
         // Tapping the notification opens MainActivity and surfaces the request list;
         // there is no chat to deep-link into, so only the request flag is passed.
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -219,7 +250,34 @@ class WhisperNotificationManager @Inject constructor(
     /** Dismiss notification when user opens chat */
     fun cancelMessageNotification(senderId: String) {
         notifManager.cancel(senderNotifId(senderId))
+        // V2-FIX M-M?: drop the group summary once its last child is gone.
+        maybeCancelGroupSummary()
     }
+
+    /**
+     * V2-FIX M-M?: the group summary used to outlive every child — a lone "Whisper / New
+     * encrypted messages" notification stayed in the shade until tapped. After any
+     * message-band child is cancelled, query the ACTIVE notification list and cancel the
+     * summary when no child remains (friend requests share the group key but post in their
+     * own band and do not count as message children).
+     */
+    private fun maybeCancelGroupSummary() {
+        try {
+            val hasActiveChild = notifManager.activeNotifications.any { sbn ->
+                sbn.id != SUMMARY_NOTIF_ID &&
+                    sbn.id in FIRST_MESSAGE_NOTIF_ID until LAST_MESSAGE_NOTIF_ID &&
+                    sbn.notification.group == GROUP_KEY
+            }
+            if (!hasActiveChild) notifManager.cancel(SUMMARY_NOTIF_ID)
+        } catch (_: Exception) {
+            // activeNotifications is best-effort (some OEM builds misbehave); worst case
+            // the summary lingers until the next cancel pass.
+        }
+    }
+
+    /** Stable id for a friend-request notification inside [FRIEND_REQUEST_NOTIF_ID_BASE, +SPAN). */
+    private fun friendRequestNotifId(fromId: String): Int =
+        FRIEND_REQUEST_NOTIF_ID_BASE + ((fromId.hashCode() and 0x7FFFFFFF) % FRIEND_REQUEST_NOTIF_ID_SPAN)
 
     private fun senderNotifId(senderId: String): Int = synchronized(senderNotifIds) {
         senderNotifIds[senderId]?.let { return it }

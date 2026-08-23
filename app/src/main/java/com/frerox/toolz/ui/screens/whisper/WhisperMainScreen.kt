@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.ui.screens.whisper
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -32,6 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -109,6 +111,9 @@ fun WhisperMainScreen(
     val context = LocalContext.current
 
     var showBypassDialog by remember { mutableStateOf(false) }
+    // V2-FIX (verify in-flight guard): track password verification locally so the dialog
+    // stays open, locks its buttons and shows progress until the verdict arrives.
+    var isVerifyingBypass by remember { mutableStateOf(false) }
 
     // Conversation previews contain decrypted content — never allow screenshots/recents capture.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
@@ -118,38 +123,49 @@ fun WhisperMainScreen(
         // disable the bypass (previously disabling needed no verification at all), and
         // the toast wording is unified + localized.
         WhisperScreenshotBypassDialog(
-            onDismiss = { showBypassDialog = false },
+            isVerifying = isVerifyingBypass,
+            onDismiss = { if (!isVerifyingBypass) showBypassDialog = false },
             onConfirm = { password ->
+                if (isVerifyingBypass) return@WhisperScreenshotBypassDialog
                 scope.launch {
-                    // FIX: surface WHY verification failed instead of blaming the password
-                    // for lockouts/service errors.
-                    when (verifyWhisperBypass(password)) {
-                        WhisperBypassVerdict.Granted -> {
-                            val enabling = !screenshotBypassEnabled
-                            viewModel.setScreenshotBypass(enabling)
-                            toastState.show(
-                                context.getString(
-                                    if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
-                                    else R.string.st_Whisper_Bypass_ProtectionOn
-                                ),
-                                WhisperToastType.SUCCESS
-                            )
+                    isVerifyingBypass = true
+                    try {
+                        // FIX: surface WHY verification failed instead of blaming the password
+                        // for lockouts/service errors.
+                        when (verifyWhisperBypass(password)) {
+                            WhisperBypassVerdict.Granted -> {
+                                val enabling = !screenshotBypassEnabled
+                                viewModel.setScreenshotBypass(enabling)
+                                toastState.show(
+                                    context.getString(
+                                        if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                        else R.string.st_Whisper_Bypass_ProtectionOn
+                                    ),
+                                    WhisperToastType.SUCCESS
+                                )
+                            }
+                            WhisperBypassVerdict.Denied ->
+                                toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.RateLimited ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.Unavailable ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
                         }
-                        WhisperBypassVerdict.Denied ->
-                            toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.RateLimited ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.Unavailable ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
+                    } finally {
+                        isVerifyingBypass = false
+                        showBypassDialog = false
                     }
                 }
-                showBypassDialog = false
             }
         )
     }
 
     val pagerState = rememberPagerState(initialPage = 0) { 3 }
     var isLoggingOut by rememberSaveable { mutableStateOf(false) }
+
+    // V2-FIX M-M1: aggregate unread once per conversations change instead of re-summing
+    // inside both the top bar badge and every bottom-nav item on each recomposition.
+    val totalUnreadCount by remember { derivedStateOf { uiState.conversations.sumOf { it.unreadCount } } }
 
     LaunchedEffect(isAuthenticated) {
         if (isAuthenticated == false && !isLoggingOut) {
@@ -182,10 +198,27 @@ fun WhisperMainScreen(
     var triggerProfileSaveFromDialog by remember { mutableStateOf(0) }
     var triggerProfileDiscardFromDialog by remember { mutableStateOf(0) }
 
+    // V2-FIX M-H3: system back while the profile tab holds unsaved edits must hit the
+    // same intercept path as a tab tap — open the existing unsaved-changes dialog with
+    // no target tab, so Save/Discard resolve exactly like the intercept route.
+    BackHandler(enabled = hasUnsavedProfileChanges && pagerState.currentPage == 2) {
+        pendingTabSwitchIndex = null
+        showUnsavedChangesDialog = true
+    }
+
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
             toastState.show(it.asString(context), WhisperToastType.ERROR)
             viewModel.clearError()
+        }
+    }
+
+    // V2-FIX (reviewwhisper.md): success/info events (e.g. auto key rotation) surface
+    // through the dedicated info channel instead of the error one.
+    LaunchedEffect(uiState.infoMessage) {
+        uiState.infoMessage?.let {
+            toastState.show(it.asString(context), WhisperToastType.SUCCESS)
+            viewModel.clearInfo()
         }
     }
 
@@ -226,10 +259,9 @@ fun WhisperMainScreen(
                         }
                     },
                     actions = {
-                        // Computed once and shared by the top bar and nav badge.
-                        val totalUnread = uiState.conversations.sumOf { it.unreadCount }
-                        if (totalUnread > 0 && pagerState.currentPage != 0) {
-                            Badge { Text(totalUnread.coerceAtMost(99).toString()) }
+                        // V2-FIX M-M1: reads the hoisted aggregation (see above).
+                        if (totalUnreadCount > 0 && pagerState.currentPage != 0) {
+                            Badge { Text(totalUnreadCount.coerceAtMost(99).toString()) }
                             Spacer(Modifier.width(16.dp))
                         }
                     }
@@ -238,8 +270,7 @@ fun WhisperMainScreen(
             bottomBar = {
                 ExpressiveNavigationBar {
                     tabs.forEachIndexed { index, (label, icon, selectedIcon) ->
-                        val totalUnread = uiState.conversations.sumOf { it.unreadCount }
-                        val unread = if (index == 0) totalUnread else 0
+                        val unread = if (index == 0) totalUnreadCount else 0
                         val pendingCount = if (index == 0) uiState.pendingIncomingRequests.size else 0
                         ExpressiveNavigationBarItem(
                             selected = pagerState.currentPage == index,
@@ -551,13 +582,17 @@ fun WhisperMainScreen(
         val mutedMsg = stringResource(R.string.st_Whisper_MutedNotifications)
         val unblockedMsg = stringResource(R.string.st_Whisper_UserUnblocked)
         val blockedMsg = stringResource(R.string.st_Whisper_UserBlocked)
-        var isBlocked by remember(convo.otherUser.id) { mutableStateOf(false) }
+        // V2-FIX M-H4: the sheet used to render before isBlocked resolved, flashing
+        // "Block" for a user who was actually blocked (and vice versa). Fetch starts at
+        // selection; null = unresolved and keeps the block row disabled until it lands.
+        var blockState by remember(convo.otherUser.id) { mutableStateOf<Boolean?>(null) }
         LaunchedEffect(convo.otherUser.id) {
-            isBlocked = viewModel.isBlockedByMe(convo.otherUser.id)
+            blockState = runCatching { viewModel.isBlockedByMe(convo.otherUser.id) }.getOrNull()
         }
         ChatOptionsSheet(
             convo = convo,
-            isBlocked = isBlocked,
+            isBlocked = blockState == true,
+            blockStateResolved = blockState != null,
             onDismiss = { selectedConvoForOptions = null },
             onViewProfile = {
                 val uId = convo.otherUser.id
@@ -749,6 +784,23 @@ private fun MergedChatsAndFriendsTab(
 ) {
     val haptic = rememberToolzHapticFeedback()
 
+    // V2-FIX M-M4: an initial-load failure used to render as the generic empty state.
+    // Track whether an error was observed while every list was empty and offer a retry.
+    var sawErrorWhileEmpty by remember { mutableStateOf(false) }
+    val listsEmpty = uiState.conversations.isEmpty() && uiState.friends.isEmpty() &&
+        uiState.pendingIncomingRequests.isEmpty()
+    LaunchedEffect(uiState.error, listsEmpty) {
+        if (uiState.error != null && listsEmpty) sawErrorWhileEmpty = true
+    }
+    LaunchedEffect(uiState.isLoading) {
+        if (uiState.isLoading) sawErrorWhileEmpty = false
+    }
+
+    // V2-FIX L16: a server paging race can hand back two rows for the same partner;
+    // the list below keys on otherUser.id, so de-duplicate first or LazyColumn throws
+    // "duplicate key". (WhisperConversation exposes no conversationId to fall back to.)
+    val conversations = remember(uiState.conversations) { uiState.conversations.distinctBy { it.otherUser.id } }
+
     if (uiState.isLoading && uiState.conversations.isEmpty() && uiState.friends.isEmpty()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -767,12 +819,18 @@ private fun MergedChatsAndFriendsTab(
         return
     }
 
-    if (uiState.conversations.isEmpty() && uiState.friends.isEmpty() && uiState.pendingIncomingRequests.isEmpty()) {
-        WhisperEmptyState(
-            icon = Icons.AutoMirrored.Rounded.Chat,
-            title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
-            subtitle = stringResource(R.string.st_Whisper_Chats_EmptySubtitle),
-        )
+    if (listsEmpty) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // V2-FIX M-M4: modest retry banner above the empty state after a failure.
+            if (sawErrorWhileEmpty) {
+                InitialLoadRetryBanner(onRetry = { haptic.click(); viewModel.loadAll() })
+            }
+            WhisperEmptyState(
+                icon = Icons.AutoMirrored.Rounded.Chat,
+                title = stringResource(R.string.st_Whisper_Chats_EmptyTitle),
+                subtitle = stringResource(R.string.st_Whisper_Chats_EmptySubtitle),
+            )
+        }
         return
     }
 
@@ -794,6 +852,8 @@ private fun MergedChatsAndFriendsTab(
                     reqItem = reqItem,
                     onAccept = { haptic.success(); viewModel.acceptFriendRequest(reqItem.friendship.id) },
                     onDecline = { haptic.click(); viewModel.declineFriendRequest(reqItem.friendship.id) },
+                    // V2-FIX L14: the card now opens the requester's profile instead of being inert.
+                    onOpenProfile = { onNavigateToProfile(reqItem.friendship.userA) },
                 )
             }
         }
@@ -850,11 +910,11 @@ private fun MergedChatsAndFriendsTab(
         }
 
         // Conversations List
-        if (uiState.conversations.isNotEmpty()) {
+        if (conversations.isNotEmpty()) {
             item {
-                SectionHeader(stringResource(R.string.st_Whisper_MessagesCount, uiState.conversations.size))
+                SectionHeader(stringResource(R.string.st_Whisper_MessagesCount, conversations.size))
             }
-            itemsIndexed(uiState.conversations, key = { _, c -> c.otherUser.id }) { _, convo ->
+            itemsIndexed(conversations, key = { _, c -> c.otherUser.id }) { _, convo ->
                 ConversationCard(
                     conversation = convo,
                     onClick = {
@@ -866,6 +926,36 @@ private fun MergedChatsAndFriendsTab(
                         onLongClickConvo(convo)
                     }
                 )
+            }
+        }
+    }
+}
+
+// V2-FIX M-M4: compact error+retry banner for an empty first load that failed.
+@Composable
+private fun InitialLoadRetryBanner(onRetry: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Rounded.CloudOff, null, modifier = Modifier.size(18.dp))
+            Text(
+                stringResource(R.string.st_Whisper_LoadFailed_Chats),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            ToolzTonalExpressiveButton(onClick = onRetry) {
+                Icon(Icons.Rounded.Refresh, null, Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.st_Whisper_Retry), style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -1023,11 +1113,13 @@ private fun FriendRequestCard(
     reqItem: WhisperFriendRequestItem,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
+    // V2-FIX L14: card-level action (friendship.userA is always the requester).
+    onOpenProfile: () -> Unit,
 ) {
     val profile = reqItem.senderProfile
     val friendship = reqItem.friendship
 
-    ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+    ExpressiveCard(onClick = onOpenProfile, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1075,7 +1167,7 @@ private fun FriendRequestCard(
                     Text(stringResource(R.string.st_Whisper_Friends_Accept), style = MaterialTheme.typography.labelSmall)
                 }
                 ToolzOutlinedExpressiveButton(onClick = onDecline) {
-                    Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Close, stringResource(R.string.cd_Whisper_DeclineRequest), Modifier.size(16.dp))
                 }
             }
         }
@@ -1098,6 +1190,11 @@ private fun DiscoverTab(
     val haptic = rememberToolzHapticFeedback()
     val discoverLoadFailed by viewModel.discoverLoadFailed.collectAsStateWithLifecycle()
 
+    // V2-FIX M-M2: O(1) membership checks for the per-row friend/pending badges instead
+    // of scanning both lists once per visible card on every recomposition.
+    val friendIds = remember(uiState.friends) { HashSet(uiState.friends.map { it.id }) }
+    val pendingOutgoingIds = remember(uiState.pendingOutgoing) { HashSet(uiState.pendingOutgoing.map { it.userB }) }
+
     // M-15 FIX (reviewwhisper.md): the UI-side 400ms debounce on top of the VM's own
     // 300ms debounce added ~700ms perceived lag; the VM-side debounce alone governs.
     LaunchedEffect(searchQuery) {
@@ -1110,6 +1207,14 @@ private fun DiscoverTab(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it },
                 placeholder = { Text(stringResource(R.string.st_Whisper_Discover_SearchPlaceholder)) },
+                // V2-FIX M-M3: WhisperViewModel exposes no isSearching flag (out of scope),
+                // so distinguish query-active work from global loading locally — a small
+                // inline progress ring only while a search query is actually in flight.
+                trailingIcon = {
+                    if (uiState.isLoading && searchQuery.isNotBlank()) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -1135,8 +1240,8 @@ private fun DiscoverTab(
                     modifier = Modifier.fadingEdges(top = 8.dp, bottom = 24.dp),
                 ) {
                     itemsIndexed(uiState.searchResults, key = { _, p -> p.id }) { _, profile ->
-                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
-                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+                        val isAlreadyFriend = profile.id in friendIds
+                        val isPendingOutgoing = profile.id in pendingOutgoingIds
 
                         DiscoverUserCard(
                             profile = profile,
@@ -1202,8 +1307,8 @@ private fun DiscoverTab(
                         }
 
                         items(uiState.recommendedProfiles, key = { "rec_${it.id}" }) { profile ->
-                            val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
-                            val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+                            val isAlreadyFriend = profile.id in friendIds
+                            val isPendingOutgoing = profile.id in pendingOutgoingIds
 
                             DiscoverUserCard(
                                 profile = profile,
@@ -1230,8 +1335,8 @@ private fun DiscoverTab(
                     }
 
                     items(uiState.discoverProfiles, key = { "disc_${it.id}" }) { profile ->
-                        val isAlreadyFriend = uiState.friends.any { it.id == profile.id }
-                        val isPendingOutgoing = uiState.pendingOutgoing.any { it.userB == profile.id }
+                        val isAlreadyFriend = profile.id in friendIds
+                        val isPendingOutgoing = profile.id in pendingOutgoingIds
 
                         DiscoverUserCard(
                             profile = profile,
@@ -1296,7 +1401,9 @@ private fun DiscoverUserCard(
     onAddFriend: () -> Unit,
     onViewAvatarFull: () -> Unit,
 ) {
-    ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+    // V2-FIX L14: the card itself now opens the profile instead of being an inert
+    // clickable wrapper around its own buttons.
+    ExpressiveCard(onClick = onViewProfile, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1319,7 +1426,7 @@ private fun DiscoverUserCard(
                         Icon(Icons.Rounded.Lock, stringResource(R.string.st_Whisper_Private), tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
                     }
                     if (isAlreadyFriend) {
-                        Icon(Icons.Rounded.VerifiedUser, "Friend", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.VerifiedUser, stringResource(R.string.cd_Whisper_FriendBadge), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                 }
                 Row(
@@ -1435,6 +1542,8 @@ private fun ProfileTab(
     val hiddenMsg = stringResource(R.string.st_Whisper_HiddenFromDiscover)
     val visibleMsg = stringResource(R.string.st_Whisper_VisibleInDiscover)
     val profileSavedMsg = stringResource(R.string.st_Whisper_ProfileSaved)
+    // M-M8 copy feedback (existing shared "credential copied" key).
+    val credentialCopiedMsg = stringResource(R.string.st_Whisper_CredentialCopied)
 
     // Track unsaved changes and notify parent
     val hasUnsaved = displayName != initialDisplayName || bio != initialBio || 
@@ -1444,26 +1553,9 @@ private fun ProfileTab(
         onUnsavedChangesChanged(hasUnsaved)
     }
 
-    // Save trigger from UnsavedChangesDialog
-    LaunchedEffect(saveTrigger) {
-        if (saveTrigger > 0) {
-            viewModel.updateProfile(displayName, bio, isPrivate, isHidden) {
-                toastState.show(profileSavedMsg, WhisperToastType.SUCCESS)
-                onProfileSaved()
-            }
-        }
-    }
-
-    // Discard trigger from UnsavedChangesDialog
-    LaunchedEffect(discardTrigger) {
-        if (discardTrigger > 0) {
-            displayName = initialDisplayName
-            bio = initialBio
-            isPrivate = initialIsPrivate
-            isHidden = initialIsHidden
-        }
-    }
-
+    // V2-FIX L15: doSave is declared before its callers so the dialog save trigger routes
+    // through the SAME logic as the Save button — identical diff-toasts and one success
+    // path that clears the parent flag / pending tab switch (failure keeps them pending).
     fun doSave() {
         val prevName = initialDisplayName
         val prevBio = initialBio
@@ -1478,6 +1570,25 @@ private fun ProfileTab(
             if (isHidden != prevHidden) toasts.add(if (isHidden) hiddenMsg else visibleMsg)
             if (toasts.isEmpty()) toasts.add(profileSavedMsg)
             toastState.show(toasts.joinToString(" · "), WhisperToastType.SUCCESS)
+            // Unified completion; never runs on failure, so a pending tab switch survives.
+            onProfileSaved()
+        }
+    }
+
+    // Save trigger from UnsavedChangesDialog — routed through doSave()
+    LaunchedEffect(saveTrigger) {
+        if (saveTrigger > 0) {
+            doSave()
+        }
+    }
+
+    // Discard trigger from UnsavedChangesDialog
+    LaunchedEffect(discardTrigger) {
+        if (discardTrigger > 0) {
+            displayName = initialDisplayName
+            bio = initialBio
+            isPrivate = initialIsPrivate
+            isHidden = initialIsHidden
         }
     }
 
@@ -1495,6 +1606,10 @@ private fun ProfileTab(
                     stream.use { s ->
                         // Bound the read so a huge picker image can never exhaust memory.
                         val bytes = s.readBounded(MAX_AVATAR_READ_BYTES)
+                        // V2-FIX L17 (comment-only): GetContent cannot guarantee a MIME type —
+                        // sniffing magic bytes is overkill here and PickVisualMedia is NOT a
+                        // drop-in replacement for every vendor picker, so keep the
+                        // conservative image/jpeg fallback and let the server validate.
                         val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
                         bytes to mimeType
                     }
@@ -1502,7 +1617,10 @@ private fun ProfileTab(
                 result
                     .onSuccess { (bytes, mimeType) -> viewModel.uploadAvatar(bytes, mimeType) }
                     .onFailure { err ->
-                        if (err is kotlinx.coroutines.CancellationException) return@onFailure
+                        // V2-FIX L18: runCatching swallows CancellationException — rethrow so
+                        // leaving the screen mid-read actually cancels instead of surfacing
+                        // a bogus "could not read image" toast.
+                        if (err is kotlinx.coroutines.CancellationException) throw err
                         toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
                     }
             }
@@ -1510,8 +1628,15 @@ private fun ProfileTab(
     }
 
     val pickTrigger by viewModel.pickPhotoTrigger.collectAsStateWithLifecycle()
+    // V2-FIX M-H1: pickPhotoTrigger is a hot StateFlow — its last value used to re-fire on
+    // every collection restart (tab re-entry, process recreation), silently relaunching
+    // the picker. Consume one-shot via the VM AND keep the last-consumed counter in
+    // rememberSaveable so recreation can't replay an already-handled trigger.
+    var lastConsumedPickTrigger by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(pickTrigger) {
-        if (pickTrigger > 0) {
+        if (pickTrigger > lastConsumedPickTrigger) {
+            lastConsumedPickTrigger = pickTrigger
+            viewModel.consumePickPhotoTrigger()
             imagePickerLauncher.launch("image/*")
         }
     }
@@ -1570,6 +1695,8 @@ private fun ProfileTab(
                 modifier = Modifier.clickable {
                     haptic.click()
                     clipboardManager.setText(androidx.compose.ui.text.AnnotatedString("@${profile.effectiveUsername}"))
+                    // V2-FIX M-M8: copy now confirms with haptic (click above) + toast.
+                    toastState.show(credentialCopiedMsg, WhisperToastType.SUCCESS)
                 }
             ) {
                 Row(
@@ -1583,7 +1710,7 @@ private fun ProfileTab(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy username", modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.cd_Whisper_CopyUsername), modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -1644,7 +1771,14 @@ private fun ProfileTab(
         // My encryption fingerprint card
         val myFingerprint = viewModel.myFingerprint
         if (myFingerprint != null) {
-            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+            // V2-FIX L14: the inert ExpressiveCard(onClick = {}) wrapper is gone — a plain
+            // Surface keeps the identical look without dead press feedback; the real
+            // actions stay on the copy button and the rotate button below.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1690,8 +1824,10 @@ private fun ProfileTab(
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()
                                 clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(myFingerprint))
+                                // V2-FIX M-M8: copy now confirms with haptic (click above) + toast.
+                                toastState.show(credentialCopiedMsg, WhisperToastType.SUCCESS)
                             }) {
-                                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy fingerprint", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.cd_Whisper_CopyFingerprint), modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -1741,7 +1877,7 @@ private fun ProfileTab(
                     }) {
                         Icon(
                             Icons.Rounded.Info,
-                            contentDescription = "Access File Info",
+                            contentDescription = stringResource(R.string.st_Whisper_AccessFileInfo),
                             modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -1790,7 +1926,7 @@ private fun ProfileTab(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            SectionHeader("Privacy & Discovery")
+            SectionHeader(stringResource(R.string.st_Whisper_Section_PrivacyDiscovery))
 
             // Profile Visibility: Public vs Private
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1832,8 +1968,10 @@ private fun ProfileTab(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(stringResource(R.string.st_Whisper_HideFromDiscover), fontWeight = FontWeight.Bold)
+                        // V2-FIX M-H2: reuse the identical existing copy from the
+                        // hide-from-discover confirm dialog instead of a hardcoded literal.
                         Text(
-                            "You won't appear in recommendations or search. People can only find you if you add them first.",
+                            stringResource(R.string.st_Whisper_HideDiscoverConfirmDesc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -2029,10 +2167,15 @@ private fun ProfileTab(
                                 isCreating = false
                                 showCreateAccessFileDialog = false
                                 haptic.success()
-                                toastState.show(
-                                    context.getString(R.string.st_Whisper_Aubup_FileCreatedSuccess, profile.effectiveUsername),
-                                    WhisperToastType.SUCCESS
-                                )
+                                // V2-FIX B3: pre-Q devices write to the world-readable
+                                // legacy Downloads dir — warn loudly on the success toast.
+                                var createdMsg = context.getString(R.string.st_Whisper_Aubup_FileCreatedSuccess, profile.effectiveUsername)
+                                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+                                    // Localized here (UI layer); the English-only constant in
+                                    // WhisperAubupManager.WARNING_LEGACY_STORAGE is no longer used.
+                                    createdMsg += "\n" + context.getString(R.string.st_Whisper_Aubup_LegacyStorageWarning)
+                                }
+                                toastState.show(createdMsg, WhisperToastType.SUCCESS)
                             },
                             onError = { err ->
                                 isCreating = false
@@ -2071,8 +2214,9 @@ private fun ProfileTab(
             },
             title = { Text(stringResource(R.string.st_Whisper_RotateKey_Title), fontWeight = FontWeight.Bold) },
             text = {
+                // V2-FIX M-H2: the exact copy already exists as a resource — reuse it.
                 Text(
-                    "Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.",
+                    stringResource(R.string.st_Whisper_RotateKey_Desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2158,8 +2302,16 @@ private fun ProfileTab(
         val isTokenUser = viewModel.isAnonymousTokenUser
         var passwordInput by remember { mutableStateOf("") }
         var passwordVisible by remember { mutableStateOf(false) }
+        // V2-FIX M-M5: mirror the rotate-key busy pattern — the VM has no deleting flag,
+        // so track it locally; buttons lock and a spinner runs until the deletion verdict
+        // arrives (a surfaced error releases the hold since deleteAccount reports
+        // failures only through handleError).
+        var isDeletingAccount by remember { mutableStateOf(false) }
+        LaunchedEffect(uiState.error) {
+            if (uiState.error != null) isDeletingAccount = false
+        }
         AlertDialog(
-            onDismissRequest = { showDeleteAccountDialog = false },
+            onDismissRequest = { if (!isDeletingAccount) showDeleteAccountDialog = false },
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             icon = {
@@ -2197,9 +2349,11 @@ private fun ProfileTab(
                             leadingIcon = { Icon(Icons.Rounded.Lock, null) },
                             trailingIcon = {
                                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    // V2-FIX M-H2: existing localized content descriptions.
                                     Icon(
                                         if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                        contentDescription = if (passwordVisible) "Hide password" else "Show password"
+                                        contentDescription = if (passwordVisible) stringResource(R.string.cd_Whisper_HidePassword)
+                                        else stringResource(R.string.cd_Whisper_ShowPassword)
                                     )
                                 }
                             },
@@ -2215,24 +2369,31 @@ private fun ProfileTab(
             confirmButton = {
                 ToolzExpressiveButton(
                     onClick = {
-                        showDeleteAccountDialog = false
+                        isDeletingAccount = true
                         viewModel.deleteAccount(
                             password = if (isTokenUser) null else passwordInput.ifBlank { null }
                         ) {
+                            isDeletingAccount = false
+                            showDeleteAccountDialog = false
                             onLoggedOut()
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    enabled = isTokenUser || passwordInput.isNotBlank(),
+                    enabled = (isTokenUser || passwordInput.isNotBlank()) && !isDeletingAccount,
                 ) {
-                    Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
+                    if (isDeletingAccount) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    } else {
+                        Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
                 ToolzOutlinedExpressiveButton(
                     onClick = { showDeleteAccountDialog = false },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isDeletingAccount,
                 ) {
                     Text(stringResource(R.string.st_Whisper_Friends_Cancel), fontWeight = FontWeight.SemiBold)
                 }
@@ -2434,6 +2595,9 @@ private fun FriendOptionsSheet(
 private fun ChatOptionsSheet(
     convo: WhisperConversation,
     isBlocked: Boolean,
+    // V2-FIX M-H4: false while the block state is still being fetched — the block row
+    // renders indeterminate/disabled instead of flashing the wrong action.
+    blockStateResolved: Boolean,
     onDismiss: () -> Unit,
     onViewProfile: () -> Unit,
     onClearChat: () -> Unit,
@@ -2484,10 +2648,12 @@ private fun ChatOptionsSheet(
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
             WhisperOptionsListItem(
-                leadingIcon = if (isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
-                iconTint = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                label = if (isBlocked) stringResource(R.string.st_Whisper_UnblockUser) else stringResource(R.string.st_Whisper_BlockUser),
-                labelColor = if (isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                leadingIcon = if (blockStateResolved && isBlocked) Icons.Rounded.LockOpen else Icons.Rounded.Block,
+                iconTint = if (blockStateResolved && isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                label = if (blockStateResolved && isBlocked) stringResource(R.string.st_Whisper_UnblockUser)
+                else stringResource(R.string.st_Whisper_BlockUser),
+                labelColor = if (blockStateResolved && isBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                enabled = blockStateResolved,
                 onClick = onToggleBlock,
             )
 
@@ -2528,7 +2694,14 @@ private fun FullScreenAvatarDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true),
+        // V2-FIX L19: draw the dialog edge-to-edge so the scrim covers the status and
+        // navigation bars; interactive content stays clear of them via safeDrawing
+        // padding below while the text keeps its white color.
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+            dismissOnClickOutside = true,
+        ),
     ) {
         Box(
             modifier = Modifier
@@ -2545,7 +2718,16 @@ private fun FullScreenAvatarDialog(
                         scaleX = scale.value
                         scaleY = scale.value
                     }
-                    .clickable(enabled = false, onClick = {}) // consume clicks so outer dismiss works
+                    // V2-FIX M-M6: clickable(enabled = false) does NOT consume pointers —
+                    // taps fell through to the scrim and dismissed the dialog. A no-op
+                    // clickable with a real interaction source and null indication
+                    // consumes every pointer event silently.
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    )
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(horizontal = 32.dp)
             ) {
                 // Avatar display

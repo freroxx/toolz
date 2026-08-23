@@ -18,6 +18,15 @@ import io.github.jan.supabase.storage.upload
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * V2-FIX L-?: thrown by [WhisperEncryptedImageHost.download] when the image HOST itself
+ * reports the blob as gone — HTTP 403 (expired/revoked, e.g. a disappearing image) or
+ * 404 (deleted). Distinct from generic transport/HTTP failures so the UI can label the
+ * attachment "Expired" instead of "Failed to load". Callers currently catch the generic
+ * Result failure; UI wiring is deferred.
+ */
+class DownloadExpiredException(message: String) : Exception(message)
+
 /** Calls the authenticated Edge Function with automatic Supabase Storage fallback. */
 @Singleton
 class WhisperEncryptedImageHost @Inject constructor(
@@ -159,14 +168,20 @@ class WhisperEncryptedImageHost @Inject constructor(
             try {
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
                 connection.readTimeout = READ_TIMEOUT_MS
-                if (connection.responseCode in 300..399) {
+                val responseCode = connection.responseCode
+                if (responseCode in 300..399) {
                     val location = connection.getHeaderField("Location") ?: error("Invalid redirect")
                     val redirectHost = runCatching { URL(location).host }.getOrNull() ?: error("Invalid redirect")
                     val redirectAllowed = supabaseHost != null && (redirectHost == supabaseHost || redirectHost.endsWith(".$supabaseHost"))
                     if (redirectHost != "i.ibb.co" && redirectHost != "ibb.co" && !redirectAllowed) error("Invalid image host.")
                     error("Redirects not supported for images.")
                 }
-                if (connection.responseCode !in 200..299) error("Image is no longer available.")
+                // V2-FIX L-?: 403/404 from the host means the blob expired or was deleted —
+                // surface a STRUCTURED signal (not a generic failure) so the UI can label it.
+                if (responseCode == 403 || responseCode == 404) {
+                    throw DownloadExpiredException("Image is no longer available (HTTP $responseCode).")
+                }
+                if (responseCode !in 200..299) error("Image is no longer available.")
                 if (connection.contentLength > DOWNLOAD_MAX_BYTES) error("Image is too large.")
                 connection.inputStream.use { input ->
                     // Capped read: never buffer more than the download ceiling into memory,

@@ -38,6 +38,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -58,7 +60,8 @@ class WhisperChatViewModel @Inject constructor(
     // `CoroutineScope(NonCancellable + Dispatchers.IO)` in onCleared().
     @com.frerox.toolz.di.ApplicationScope private val appScope: CoroutineScope,
     private val undoBufferStore: com.frerox.toolz.data.whisper.WhisperUndoBufferStore,
-    savedStateHandle: SavedStateHandle,
+    // V2-FIX (reviewwhisper.md) V-15: handle is retained so the draft can survive process death.
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     val otherUserId: String = checkNotNull(savedStateHandle["otherUserId"])
@@ -96,19 +99,73 @@ class WhisperChatViewModel @Inject constructor(
     private var searchDebounceJob: Job? = null
     private var isCurrentlyTyping = false
 
+    // V2-FIX (reviewwhisper.md) V-1: read receipts only fire while the chat is on screen.
+    // Wired from the Screen's ON_START/ON_STOP; gates both the Room collector and the
+    // realtime auto-mark-read path (see requestMarkPartnerRead).
+    @Volatile private var isChatVisible = false
+
+    // V2-FIX (reviewwhisper.md) V-2: optimistic sends live ONLY in uiState today, so any
+    // Room re-emission used to make them vanish. They are mirrored here by clientId and
+    // re-included in every merge until their server row shows up in Room (echo match) or
+    // the send resolves.
+    private val pendingMessagesById = java.util.concurrent.ConcurrentHashMap<String, WhisperMessage>()
+
+    // V2-FIX (reviewwhisper.md) L: in-flight image downloads are deduped by message id —
+    // recomposition used to fire parallel identical downloads for one bubble.
+    private val inFlightImageLoads = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    // V2-FIX (reviewwhisper.md) V-3: pagination state lives outside WhisperChatUiState —
+    // the models file is outside this task's edit scope. Same semantics, separate flows.
+    private val _isLoadingOlder = MutableStateFlow(false)
+    val isLoadingOlder: StateFlow<Boolean> = _isLoadingOlder.asStateFlow()
+    private val _reachedOldest = MutableStateFlow(false)
+    val reachedOldest: StateFlow<Boolean> = _reachedOldest.asStateFlow()
+
     // H-4 FIX (reviewwhisper.md): the undo buffer is now WRITE-THROUGH persisted via
     // WhisperUndoBufferStore — a process death inside the 30-second window no longer
     // silently destroys the restore data while partner rows are tombstoned remotely.
     private val deletedMessagesUndoBuffer = mutableListOf<WhisperMessage>()
+    // V2-FIX (reviewwhisper.md) V-12: all undo-buffer persistence is serialized through a
+    // single Job; later requests cancel superseded ones so the terminal wipe always wins.
+    private var undoSaveJob: Job? = null
+    // V2-FIX (reviewwhisper.md) V-12: countdown restarts while a window is open are capped.
+    private var undoCountdownExtensions = 0
     private var pendingIdCounter = 0L
     // Per-message in-flight reactions prevent double-tap races against the server.
     private val pendingReactions = mutableMapOf<String, MutableSet<String>>()
 
+    // V2-FIX (reviewwhisper.md) V-15: draft persistence for process-death recovery.
+    private var draftPersistJob: Job? = null
+
     companion object {
-        private const val MAX_DECRYPTED_IMAGES = 20
+        // V2-FIX (reviewwhisper.md) V-5: 20 decoded images was ~2× what a chat session
+        // needs resident; tightened to 8 with true LRU eviction (see imageCache below).
+        private const val MAX_DECRYPTED_IMAGES = 8
 
         /** H-4: persisted buffers older than 2× the undo window are dropped on resume. */
         const val UNDO_RESUME_WINDOW_MS = 60_000L
+
+        /** V2-FIX (reviewwhisper.md) V-12: max countdown restarts within one undo window. */
+        private const val MAX_UNDO_EXTENSIONS = 5
+
+        /** V2-FIX (reviewwhisper.md) L-17: max reaction-sync deferrals before forcing. */
+        private const val MAX_REACTION_SYNC_DEFERRALS = 10
+
+        /** V2-FIX (reviewwhisper.md) V-3: page size when fetching older history. */
+        private const val OLDER_PAGE_SIZE = 50
+
+        /** V2-FIX (reviewwhisper.md) V-15: SavedStateHandle key for the draft text. */
+        private const val KEY_DRAFT = "whisper_chat_draft"
+    }
+
+    // V2-FIX (reviewwhisper.md) V-5: true LRU cache (accessOrder=true) guarded by a Mutex.
+    // The old FIFO "drop the first key" eviction could evict the most-recently-viewed
+    // image; access-order LinkedHashMap evicts the least-recently-used one. The uiState
+    // map stays an immutable snapshot of this authoritative cache.
+    private val imageCacheMutex = Mutex()
+    private val decryptedImageCache = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>): Boolean =
+            size > MAX_DECRYPTED_IMAGES
     }
 
     // H-9 FIX (reviewwhisper.md): read receipts are COALESCED. Every incoming message /
@@ -116,6 +173,10 @@ class WhisperChatViewModel @Inject constructor(
     // REST write per event. A trailing 250 ms debounce collapses them into one write.
     private var markReadJob: Job? = null
     private fun requestMarkPartnerRead() {
+        // V2-FIX (reviewwhisper.md) V-1: backgrounded chats must not burn read receipts —
+        // the partner would see "read" for messages the user never looked at. This single
+        // gate covers both the Room collector path and the realtime auto-mark path.
+        if (!isChatVisible) return
         markReadJob?.cancel()
         markReadJob = viewModelScope.launch {
             delay(250)
@@ -125,10 +186,20 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    /** V2-FIX (reviewwhisper.md) V-1: wired from the Screen lifecycle (ON_START/ON_STOP). */
+    fun onChatVisibilityChanged(visible: Boolean) {
+        val wasVisible = isChatVisible
+        isChatVisible = visible
+        // Coming back to the foreground runs exactly one mark-read pass for anything
+        // that arrived while the chat was hidden.
+        if (visible && !wasVisible) requestMarkPartnerRead()
+    }
+
     init {
         notificationManager.currentChatId = otherUserId
         notificationManager.cancelMessageNotification(otherUserId)
-        hiddenChatsStore.unhideChat(otherUserId)
+        // V2-FIX (reviewwhisper.md): unhideChat is suspend + IO commit now.
+        viewModelScope.launch { hiddenChatsStore.unhideChat(otherUserId) }
         _uiState.update { it.copy(isMuted = mutePrefs.isMuted(otherUserId)) }
         // Keep the mute flag in sync when a timed mute expires while the chat is open.
         viewModelScope.launch {
@@ -136,6 +207,8 @@ class WhisperChatViewModel @Inject constructor(
                 _uiState.update { it.copy(isMuted = otherUserId in muted) }
             }
         }
+        // V2-FIX (reviewwhisper.md) V-15: restore the draft after process death.
+        _draftText.value = savedStateHandle.get<String>(KEY_DRAFT).orEmpty()
         restorePersistedUndoBuffer()
         loadInitialData()
         subscribeToChat()
@@ -166,6 +239,9 @@ class WhisperChatViewModel @Inject constructor(
     private fun handleError(err: Throwable, context: String) {
         val mapped = WhisperErrorMapper.map(err, context)
         if (WhisperErrorMapper.isSessionExpired(err)) {
+            // V2-FIX (reviewwhisper.md) L: stop every live subscription BEFORE signOut so
+            // dying collectors can't fire more authenticated requests or UI events.
+            cancelLiveJobs()
             viewModelScope.launch {
                 authManager.signOut()
                 _sessionExpired.emit(Unit)
@@ -175,10 +251,28 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
+    /** V2-FIX (reviewwhisper.md) L: single teardown for all tracked live jobs. */
+    private fun cancelLiveJobs() {
+        realtimeJob?.cancel()
+        typingSubscriptionJob?.cancel()
+        typingDebounceJob?.cancel()
+        presenceJob?.cancel()
+        markReadJob?.cancel()
+        searchDebounceJob?.cancel()
+        reactionSyncJobs.values.forEach { it.cancel() }
+        reactionSyncJobs.clear()
+        messagesCollectionJob?.cancel()
+    }
+
     private fun loadInitialData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
+            // V2-FIX (reviewwhisper.md) M-8/V-11: the profile is fetched exactly ONCE here
+            // (forceRefresh) and reused for partnerPublicKey + otherUser. NOTE: the key-trust
+            // and message-sync paths below still force-refresh internally inside the
+            // repository — threading this already-fetched profile through them requires
+            // repository signature changes that are outside this task's edit scope.
             // 1. Load other user's profile
             repository.getProfile(otherUserId, forceRefresh = true)
                 .onSuccess { profile ->
@@ -206,8 +300,13 @@ class WhisperChatViewModel @Inject constructor(
                 }
 
             // 3. Load block status
-            val (blockedByMe, blockedByOther) = repository.getBlockStatus(otherUserId)
-            _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
+            // V2-FIX (reviewwhisper.md) L-18: getBlockStatus returns a raw Pair and can
+            // throw; the old direct destructure crashed the whole initial-load coroutine.
+            runCatching { repository.getBlockStatus(otherUserId) }
+                .onSuccess { (blockedByMe, blockedByOther) ->
+                    _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
+                }
+                .onFailure { err -> handleError(err, "getBlockStatus") }
 
             // 4. Load key trust status (fingerprints + key-change detection)
             loadKeyTrust()
@@ -226,15 +325,34 @@ class WhisperChatViewModel @Inject constructor(
 
     fun verifyKey() {
         viewModelScope.launch {
-            repository.verifyUserKey(otherUserId)
-            loadKeyTrust()
+            // V2-FIX (reviewwhisper.md) H-4/V-4: failures used to vanish silently, leaving
+            // the user thinking the key was verified when it wasn't.
+            runCatching { repository.verifyUserKey(otherUserId) }
+                .onSuccess { verified ->
+                    if (!verified) {
+                        _uiState.update {
+                            it.copy(error = UiText.StringResource(R.string.st_Whisper_KeyVerify_Failed))
+                        }
+                    }
+                    loadKeyTrust()
+                }
+                .onFailure { err -> handleError(err, "verifyUserKey") }
         }
     }
 
     fun acceptNewKey() {
         viewModelScope.launch {
-            repository.acceptNewKey(otherUserId)
-            loadKeyTrust()
+            // V2-FIX (reviewwhisper.md) H-4/V-4: same silent-failure hole as verifyKey.
+            runCatching { repository.acceptNewKey(otherUserId) }
+                .onSuccess { accepted ->
+                    if (!accepted) {
+                        _uiState.update {
+                            it.copy(error = UiText.StringResource(R.string.st_Whisper_KeyAccept_Failed))
+                        }
+                    }
+                    loadKeyTrust()
+                }
+                .onFailure { err -> handleError(err, "acceptNewKey") }
         }
     }
 
@@ -246,6 +364,17 @@ class WhisperChatViewModel @Inject constructor(
         if (messagesCollectionJob?.isActive != true) {
             messagesCollectionJob = viewModelScope.launch {
                 repository.getMessagesFlow(otherUserId).collect { newMessages ->
+                    // V2-FIX (reviewwhisper.md) H-2/V-2: retire optimistic pendings whose
+                    // server echo just appeared in Room (same sender + identical content),
+                    // BEFORE merging — the update lambda below stays side-effect free.
+                    // Kept OUTSIDE _uiState.update because that lambda may be re-executed.
+                    pendingMessagesById.entries.removeAll { (_, pendingMsg) ->
+                        newMessages.any { roomRow ->
+                            roomRow.senderId == pendingMsg.senderId &&
+                                !roomRow.isPending &&
+                                roomRow.content.trim() == pendingMsg.content.trim()
+                        }
+                    }
                     _uiState.update { state ->
                         // CRITICAL: Preserve transient metadata (decrypted content, reactions,
                         // enriched reply data) that isn't persisted in the basic message entity.
@@ -265,14 +394,26 @@ class WhisperChatViewModel @Inject constructor(
                                     reactions = if (pendingReactions[newMsg.id].isNullOrEmpty()) newMsg.reactions else existing.reactions,
                                     replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
                                     replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
-                                    isPending = existing.isPending || newMsg.isPending
+                                    // V2-FIX (reviewwhisper.md) M-3/V-2: take the fresh state.
+                                    // The old `existing.isPending || newMsg.isPending` OR-merge
+                                    // stuck rows in the pulsing "pending" style forever once a
+                                    // transient pending flag was ever observed.
+                                    isPending = newMsg.isPending
                                 )
                             } else newMsg
                         } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
 
-                        // Strict chronological order (ISO timestamps sort lexicographically),
-                        // with unsent pending messages pinned to the bottom of the list.
-                        val sorted = merged.sortedWith(compareBy({ it.createdAt }, { if (it.isPending) 1 else 0 }))
+                        // V2-FIX (reviewwhisper.md) H-2/V-2: Room only emits persisted rows,
+                        // so every Room re-emission used to silently drop in-flight optimistic
+                        // sends. Re-append pendings whose server id has NOT appeared yet; they
+                        // leave this list via the echo-retire above or the send resolving.
+                        val unresolvedPending =
+                            pendingMessagesById.values.filter { it.id !in newIds && !it.isDeletedForEveryone }
+
+                        // V2-FIX (reviewwhisper.md) M-4/V-7: single shared ordering (safe
+                        // createdAt parse, pending pinned last) instead of the raw-string
+                        // compareBy used here before — both paths sorted differently.
+                        val sorted = sortedMessages(merged + unresolvedPending)
 
                         state.copy(
                             messages = sorted,
@@ -297,6 +438,30 @@ class WhisperChatViewModel @Inject constructor(
                 .onFailure { err ->
                     handleError(err, "getMessagesSync")
                 }
+        }
+    }
+
+    /**
+     * V2-FIX (reviewwhisper.md) H-3/V-3: fetch the previous history page using the oldest
+     * loaded row as the beforeCreatedAt cursor. The repository already upserts fetched
+     * rows into Room, so prepending happens through the existing live flow — no manual
+     * list surgery here. Page exhaustion flips [reachedOldest].
+     */
+    fun loadOlderMessages() {
+        if (_isLoadingOlder.value || _reachedOldest.value) return
+        val oldestLoaded = uiState.value.messages
+            .firstOrNull { !it.isPending && it.createdAt.isNotBlank() } ?: return
+        _isLoadingOlder.value = true
+        viewModelScope.launch {
+            try {
+                repository.getMessages(otherUserId, limit = OLDER_PAGE_SIZE, beforeCreatedAt = oldestLoaded.createdAt)
+                    .onSuccess { page ->
+                        if (page.size < OLDER_PAGE_SIZE) _reachedOldest.value = true
+                    }
+                    .onFailure { err -> handleError(err, "getMessagesPage") }
+            } finally {
+                _isLoadingOlder.value = false
+            }
         }
     }
 
@@ -384,11 +549,14 @@ class WhisperChatViewModel @Inject constructor(
      * is still in flight, the server snapshot would clobber the optimistic state — defer
      * instead of overwriting, until the pending set drains.
      */
-    private fun scheduleReactionSync(messageId: String, delayMs: Long = 400) {
+    private fun scheduleReactionSync(messageId: String, delayMs: Long = 400, deferrals: Int = 0) {
         reactionSyncJobs[messageId]?.cancel()
         reactionSyncJobs[messageId] = viewModelScope.launch {
             delay(delayMs)
-            if (pendingReactions[messageId].isNullOrEmpty()) {
+            // V2-FIX (reviewwhisper.md) L-17: the deferral loop was unbounded — a stuck
+            // in-flight toggle deferred forever. After 10 deferrals force one sync.
+            val forceAfterCap = deferrals >= MAX_REACTION_SYNC_DEFERRALS
+            if (pendingReactions[messageId].isNullOrEmpty() || forceAfterCap) {
                 val reactionMap = repository.getReactionsForMessages(listOf(messageId)).getOrNull()
                 if (reactionMap != null) {
                     val updatedList = reactionMap[messageId] ?: emptyList()
@@ -401,7 +569,7 @@ class WhisperChatViewModel @Inject constructor(
                 }
             } else {
                 // My optimistic toggle is still in flight — re-schedule instead of clobbering.
-                scheduleReactionSync(messageId, delayMs = 800)
+                scheduleReactionSync(messageId, delayMs = 800, deferrals = deferrals + 1)
             }
         }
     }
@@ -467,6 +635,10 @@ class WhisperChatViewModel @Inject constructor(
         val replyTarget = uiState.value.replyingToMessage
         _draftText.value = ""
         clearReplyTarget()
+        // V2-FIX (reviewwhisper.md) M-6/V-9: sending ends typing — cancel the debounce so
+        // it can't flip the typing flag back on after the message went out.
+        typingDebounceJob?.cancel()
+        isCurrentlyTyping = false
         sendTypingSignal(false)
         val trimmedContent = content.trim()
         val replySnippet = replyTarget?.let { target ->
@@ -486,28 +658,37 @@ class WhisperChatViewModel @Inject constructor(
             content = trimmedContent,
             replyToId = replyTarget?.id,
             replyToContent = replySnippet,
-            replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User",
+            // V2-FIX (reviewwhisper.md) M-5/V-8: never persist display names ("You"/"User").
+            // The quoted sender is resolved from the id at render time; the VM stores ids only.
+            replyToSenderName = null,
             isPending = true,
             createdAt = java.time.Instant.now().toString()
         )
+        // V2-FIX (reviewwhisper.md) H-2/V-2: register the optimistic row so Room
+        // re-emissions can't make it vanish mid-flight.
+        pendingMessagesById[optimisticMsg.id] = optimisticMsg
 
         _uiState.update { state ->
-            state.copy(messages = state.messages + optimisticMsg)
+            state.copy(messages = sortedMessages(state.messages + optimisticMsg))
         }
 
         viewModelScope.launch {
             repository.sendMessage(otherUserId, trimmedContent, replyTarget?.id)
                 .onSuccess { newMsg ->
+                    pendingMessagesById.remove(optimisticMsg.id)
                     _uiState.update { state ->
                         val filtered = state.messages.filter { it.id != optimisticMsg.id && it.id != newMsg.id }
+                        // V2-FIX (reviewwhisper.md) M-5/V-8: id-only enrichment — the quoted
+                        // sender name is resolved at render time from the stored ids.
                         val enrichedMsg = newMsg.copy(
                             replyToContent = replySnippet,
-                            replyToSenderName = if (replyTarget?.senderId == myUserId) "You" else uiState.value.otherUser?.effectiveName ?: "User"
+                            replyToSenderName = null
                         )
                         state.copy(messages = sortedMessages(filtered + enrichedMsg))
                     }
                 }
                 .onFailure { err ->
+                    pendingMessagesById.remove(optimisticMsg.id)
                     // Only restore the draft if the user hasn't already typed something
                     // newer; the reply target likewise survives only if still unset.
                     if (_draftText.value.isBlank()) _draftText.value = originalText
@@ -548,64 +729,81 @@ class WhisperChatViewModel @Inject constructor(
     fun sendImageFromUri(context: Context, uri: android.net.Uri, expiresAfterSeconds: Long?) {
         viewModelScope.launch {
             // Bounded read off the main thread; the spinner stays up until sendImage resolves.
+            // V2-FIX (reviewwhisper.md) M-9/V-10: readBoundedImageBytes' size cap throws
+            // IllegalArgumentException with a specific user-facing message — the old
+            // runCatching collapsed it into the generic "couldn't read" text.
+            var oversizeMessage: UiText? = null
             val bytes = withContext(Dispatchers.IO) {
-                runCatching {
+                try {
                     context.contentResolver.openInputStream(uri)?.use { readBoundedImageBytes(it, context) }
-                }.getOrNull()
+                } catch (e: IllegalArgumentException) {
+                    oversizeMessage = e.message?.let { UiText.DynamicString(it) }
+                    null
+                }
             }
             if (bytes == null) {
-                _uiState.update { it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_ReadImage)) }
+                _uiState.update {
+                    it.copy(error = oversizeMessage ?: UiText.StringResource(R.string.st_Whisper_Error_ReadImage))
+                }
                 return@launch
             }
             val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
             // Compress before encrypt to stay within the edge-function body limit.
-            val compressed = compressImageForUpload(bytes, mimeType)
-            // If compression succeeded the bytes are JPEG; otherwise keep the source mime.
-            val outMime = if (compressed === bytes) mimeType else "image/jpeg"
+            // V2-FIX (reviewwhisper.md) M-10/V-14: the chosen format is returned explicitly —
+            // alpha-preserving PNG output is no longer mislabeled (and re-encoded) as JPEG.
+            val (compressed, outMime) = compressImageForUpload(bytes, mimeType)
             sendImage(compressed, outMime, expiresAfterSeconds)
         }
     }
 
     fun loadEncryptedImage(message: WhisperMessage) {
-        if (_uiState.value.decryptedImageBytes.containsKey(message.id)) return
         val attachment = WhisperImageAttachment.fromMessageContent(message.content) ?: return
         // Never cache bytes for a disappearing image that has already expired.
         if (attachment.expiresAtEpochSeconds != null &&
             java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds
         ) {
-            _uiState.update { it.copy(decryptedImageBytes = it.decryptedImageBytes - message.id) }
+            viewModelScope.launch {
+                imageCacheMutex.withLock { decryptedImageCache.remove(message.id) }
+                _uiState.update { it.copy(decryptedImageBytes = it.decryptedImageBytes - message.id) }
+            }
             return
         }
+        // V2-FIX (reviewwhisper.md) L-19: dedupe concurrent downloads of the same message.
+        if (!inFlightImageLoads.add(message.id)) return
         viewModelScope.launch {
-            // Ensure we have a public key for decryption. If it's a message from 'me', 
-            // we need the receiver's key (since we encrypted it for them). 
-            // If it's from someone else, we need the sender's key.
-            val peerId = if (message.senderId == myUserId) message.receiverId else message.senderId
-            
-            val key = partnerPublicKey.takeIf { peerId == otherUserId }
-                ?: repository.getProfile(peerId).getOrNull()?.publicKey
-                // Fall back to the key this device last accepted for that peer so
-                // cached ciphertext stays decryptable after a process restart.
-                ?: repository.getDecryptionKey(peerId)
-            
-            if (key != null && peerId == otherUserId) {
-                partnerPublicKey = key
-            }
+            try {
+                // V2-FIX (reviewwhisper.md) V-5: a cache hit also REFRESHES LRU recency.
+                val cached = imageCacheMutex.withLock { decryptedImageCache[message.id] }
+                if (cached != null) return@launch
+                // Ensure we have a public key for decryption. If it's a message from 'me',
+                // we need the receiver's key (since we encrypted it for them).
+                // If it's from someone else, we need the sender's key.
+                val peerId = if (message.senderId == myUserId) message.receiverId else message.senderId
 
-            repository.downloadEncryptedImage(attachment, peerId, key)
-                .onSuccess { bytes ->
-                    _uiState.update { state ->
-                        // Bound the in-memory image cache with strict FIFO/LRU order so long chats can't exhaust memory.
-                        val cache = LinkedHashMap<String, ByteArray>(state.decryptedImageBytes)
-                        while (cache.size >= MAX_DECRYPTED_IMAGES) {
-                            val oldest = cache.keys.firstOrNull() ?: break
-                            cache.remove(oldest)
-                        }
-                        cache[message.id] = bytes
-                        state.copy(decryptedImageBytes = cache)
-                    }
+                val key = partnerPublicKey.takeIf { peerId == otherUserId }
+                    ?: repository.getProfile(peerId).getOrNull()?.publicKey
+                    // Fall back to the key this device last accepted for that peer so
+                    // cached ciphertext stays decryptable after a process restart.
+                    ?: repository.getDecryptionKey(peerId)
+
+                if (key != null && peerId == otherUserId) {
+                    partnerPublicKey = key
                 }
-                .onFailure { error -> handleError(error, "downloadEncryptedImage") }
+
+                repository.downloadEncryptedImage(attachment, peerId, key)
+                    .onSuccess { bytes ->
+                        // V2-FIX (reviewwhisper.md) V-5: insert into the true-LRU cache under
+                        // the mutex; eviction (eldest by ACCESS order) happens automatically.
+                        val snapshot = imageCacheMutex.withLock {
+                            decryptedImageCache[message.id] = bytes
+                            decryptedImageCache.toMap()
+                        }
+                        _uiState.update { it.copy(decryptedImageBytes = snapshot) }
+                    }
+                    .onFailure { error -> handleError(error, "downloadEncryptedImage") }
+            } finally {
+                inFlightImageLoads.remove(message.id)
+            }
         }
     }
 
@@ -699,7 +897,9 @@ class WhisperChatViewModel @Inject constructor(
                     // not destroy the earlier batch — undo restores everything together.
                     deletedMessagesUndoBuffer.addAll(deletedList)
                     // H-4: durable write-through so process death cannot eat the buffer.
-                    viewModelScope.launch { undoBufferStore.save(deletedMessagesUndoBuffer.toList()) }
+                    // V2-FIX (reviewwhisper.md) V-12: routed through the single serialized
+                    // save channel (was an untracked fire-and-forget launch racing the wipe).
+                    persistUndoBuffer(deletedMessagesUndoBuffer.toList())
                     _uiState.update { state ->
                         val deletedIds = deletedList.map { it.id }.toSet()
                         state.copy(messages = state.messages.filter { it.id !in deletedIds })
@@ -712,8 +912,36 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    /** Shared 30s countdown; expires by discarding the persisted + in-memory buffers. */
+    /**
+     * V2-FIX (reviewwhisper.md) V-12: ONE serialized persistence channel for the undo
+     * buffer. Each request cancels the previous save, so an older snapshot can never land
+     * AFTER the terminal wipe and resurrect restore data for already-discarded messages.
+     */
+    private fun persistUndoBuffer(entries: List<WhisperMessage>) {
+        undoSaveJob?.cancel()
+        undoSaveJob = appScope.launch {
+            runCatching { undoBufferStore.save(entries) }
+                .onFailure { WhisperErrorMapper.log(it, "undoBufferSave") }
+        }
+    }
+
+    /**
+     * Shared 30s countdown; expires by discarding the persisted + in-memory buffers.
+     * V2-FIX (reviewwhisper.md) V-12: restarts while a window is open are capped at
+     * [MAX_UNDO_EXTENSIONS] — past the cap the window finalizes immediately instead of
+     * being extended indefinitely by repeated clears.
+     */
     private fun startUndoCountdown() {
+        val extendingWindow = undoTimerJob?.isActive == true || _undoState.value.secondsRemaining > 0
+        if (extendingWindow) {
+            if (undoCountdownExtensions >= MAX_UNDO_EXTENSIONS) {
+                finalizeUndoWindow(cancelTimer = true)
+                return
+            }
+            undoCountdownExtensions++
+        } else {
+            undoCountdownExtensions = 0
+        }
         _undoState.value = WhisperUndoUiState(clearedCount = deletedMessagesUndoBuffer.size, secondsRemaining = 30)
         undoTimerJob?.cancel()
         undoTimerJob = viewModelScope.launch {
@@ -721,10 +949,17 @@ class WhisperChatViewModel @Inject constructor(
                 _undoState.update { it.copy(secondsRemaining = sec) }
                 delay(1_000)
             }
-            deletedMessagesUndoBuffer.clear()
-            undoBufferStore.save(emptyList())
-            _undoState.value = WhisperUndoUiState()
+            finalizeUndoWindow()
         }
+    }
+
+    /** V2-FIX (reviewwhisper.md) V-12: terminal wipe — always wins over pending saves. */
+    private fun finalizeUndoWindow(cancelTimer: Boolean = false) {
+        if (cancelTimer) undoTimerJob?.cancel()
+        deletedMessagesUndoBuffer.clear()
+        persistUndoBuffer(emptyList())
+        _undoState.value = WhisperUndoUiState()
+        undoCountdownExtensions = 0
     }
 
     fun undoClearChat() {
@@ -737,6 +972,7 @@ class WhisperChatViewModel @Inject constructor(
             repository.restoreMessages(toRestore)
                 .onSuccess {
                     deletedMessagesUndoBuffer.clear()
+                    undoCountdownExtensions = 0
                     undoBufferStore.clear()
                     loadMessages()
                 }
@@ -792,6 +1028,13 @@ class WhisperChatViewModel @Inject constructor(
 
     fun updateDraft(text: String) {
         _draftText.value = text
+        // V2-FIX (reviewwhisper.md) V-15: debounce-persist the draft so a process death
+        // mid-typing doesn't lose it; restored in init from the same SavedStateHandle.
+        draftPersistJob?.cancel()
+        draftPersistJob = viewModelScope.launch {
+            delay(300)
+            savedStateHandle[KEY_DRAFT] = text
+        }
         if (text.isNotBlank()) {
             if (!isCurrentlyTyping) {
                 isCurrentlyTyping = true
@@ -818,12 +1061,22 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    /** P2-7 FIX: Chronological order via Instant parse (ISO lex is reliable but fractional seconds variance), pending pinned last. */
+    /**
+     * P2-7 FIX: Chronological order with pending pinned last.
+     * V2-FIX (reviewwhisper.md) M-4/V-7: the ONE shared ordering for every path (Room
+     * merge, send echo, realtime echo, image sends). Keys are parsed ONCE per message —
+     * decorating first avoids re-running Instant.parse on every comparison, and a safe
+     * parse (Instant.MIN fallback) replaces the old unguarded raw-string compare in the
+     * Room path / per-comparison parse here.
+     */
     private fun sortedMessages(messages: List<WhisperMessage>): List<WhisperMessage> =
-        messages.sortedWith(compareBy(
-            { runCatching { java.time.Instant.parse(it.createdAt) }.getOrNull() ?: java.time.Instant.MIN },
-            { if (it.isPending) 1 else 0 }
-        ))
+        messages
+            .map { msg -> Triple(msg, msg.createdAt.parseIsoInstant(), if (msg.isPending) 1 else 0) }
+            .sortedWith(compareBy({ it.second }, { it.third }))
+            .map { it.first }
+
+    private fun String.parseIsoInstant(): java.time.Instant =
+        runCatching { Instant.parse(this) }.getOrDefault(java.time.Instant.MIN)
 
     private fun sendPresenceSignal(isOnline: Boolean) {
         viewModelScope.launch {
@@ -904,6 +1157,8 @@ class WhisperChatViewModel @Inject constructor(
                                     state.copy(messages = mutableList)
                                 } else {
                                     // Enrich reply metadata for live message
+                                    // V2-FIX (reviewwhisper.md) M-5/V-8: ids only — the quoted
+                                    // sender name is resolved at render time on the Screen.
                                     val enrichedMsg = if (newMsg.replyToId != null && (newMsg.replyToContent == null || newMsg.replyToContent.startsWith("whisper:image:"))) {
                                         val replyTarget = state.messages.find { it.id == newMsg.replyToId }
                                         if (replyTarget != null) {
@@ -916,7 +1171,7 @@ class WhisperChatViewModel @Inject constructor(
                                             }
                                             newMsg.copy(
                                                 replyToContent = content,
-                                                replyToSenderName = if (replyTarget.senderId == myId) "You" else state.otherUser?.effectiveName ?: "User"
+                                                replyToSenderName = null
                                             )
                                         } else newMsg
                                     } else newMsg
@@ -933,6 +1188,9 @@ class WhisperChatViewModel @Inject constructor(
                                             it.id.startsWith("pending_") && it.content.trim() == enrichedMsg.content.trim()
                                         }
                                         if (echoIndex >= 0) {
+                                            // V2-FIX (reviewwhisper.md) V-2: retire the optimistic
+                                            // mirror too, so the Room merge won't resurrect it.
+                                            pendingMessagesById.remove(filtered[echoIndex].id)
                                             filtered.removeAt(echoIndex)
                                         } else {
                                             filtered.removeAll { it.id == enrichedMsg.id }
@@ -1000,8 +1258,17 @@ class WhisperChatViewModel @Inject constructor(
                             scheduleReactionSync(event.messageId)
                         }
                         is WhisperChatEvent.DeleteEvent -> {
+                            // V2-FIX (reviewwhisper.md) M-11/V-13: a remote delete used to remove
+                            // the row outright, which reads like the message never existed (and
+                            // desynced from Room, which still holds the row until re-sync). Mirror
+                            // the LOCAL delete-for-everyone rendering: same tombstone model.
                             _uiState.update { state ->
-                                state.copy(messages = state.messages.filter { it.id != event.messageId })
+                                val updated = state.messages.map { msg ->
+                                    if (msg.id == event.messageId && !msg.isDeletedForEveryone) {
+                                        msg.copy(content = WhisperTombstone.DISPLAY_TEXT, contentIv = null)
+                                    } else msg
+                                }
+                                state.copy(messages = updated)
                             }
                         }
                     }
@@ -1012,6 +1279,12 @@ class WhisperChatViewModel @Inject constructor(
     /** Reconnects all realtime listeners after a network failure or retry cap. */
     fun reconnectRealtime() {
         _uiState.update { it.copy(isRealtimeDisconnected = false) }
+        // V2-FIX (reviewwhisper.md) M-2/V-6: the old subscriptions were never cancelled, so
+        // every reconnect stacked ANOTHER collector per channel — duplicated UI events and
+        // leaked jobs. Cancel the old jobs before respawning their replacements.
+        realtimeJob?.cancel()
+        typingSubscriptionJob?.cancel()
+        presenceJob?.cancel()
         subscribeToChat()
         subscribeToTyping()
         subscribeToPresence()
@@ -1042,13 +1315,8 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    fun onScrolledUp() {
-        _uiState.update { it.copy(unreadMessagesScrolledUp = it.unreadMessagesScrolledUp + 1) }
-    }
-
-    fun onScrolledToBottom() {
-        _uiState.update { it.copy(unreadMessagesScrolledUp = 0) }
-    }
+    // V2-FIX (reviewwhisper.md) L-16: onScrolledUp/onScrolledToBottom removed — they
+    // maintained unreadMessagesScrolledUp but nothing ever called them (dead state).
 
     override fun onCleared() {
         super.onCleared()
@@ -1061,19 +1329,21 @@ class WhisperChatViewModel @Inject constructor(
             runCatching { repository.sendPresence(otherUserId, false) }
                 .onFailure { android.util.Log.w("WhisperChatVM", "presence-off signal failed", it) }
         }
-        realtimeJob?.cancel()
-        typingSubscriptionJob?.cancel()
-        typingDebounceJob?.cancel()
-        presenceJob?.cancel()
+        // V2-FIX (reviewwhisper.md) L-20: shared teardown for all tracked live jobs.
+        cancelLiveJobs()
         undoTimerJob?.cancel()
-        reactionSyncJobs.values.forEach { it.cancel() }
-        reactionSyncJobs.clear()
-        messagesCollectionJob?.cancel()
-        searchDebounceJob?.cancel()
+        draftPersistJob?.cancel()
+        undoSaveJob?.cancel()
+        // V2-FIX (reviewwhisper.md) V-15: flush the debounced draft synchronously — the
+        // debounced write would otherwise be cancelled with viewModelScope.
+        savedStateHandle[KEY_DRAFT] = _draftText.value
     }
 }
 
 private const val MAX_LOCAL_IMAGE_BYTES = 5 * 1024 * 1024 - 16 // transport cap minus AES-GCM tag
+
+/** V2-FIX (reviewwhisper.md) V-14: source formats that can carry transparency. */
+private val ALPHA_CAPABLE_MIMES = setOf("image/png", "image/webp")
 
 private fun readBoundedImageBytes(input: java.io.InputStream, context: Context): ByteArray {
     val output = ByteArrayOutputStream()
@@ -1089,11 +1359,16 @@ private fun readBoundedImageBytes(input: java.io.InputStream, context: Context):
     return output.toByteArray()
 }
 
-private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): ByteArray =
+/**
+ * V2-FIX (reviewwhisper.md) V-14: returns the upload payload plus its ACTUAL mime —
+ * sources with alpha (PNG/WebP detectable via bitmap.hasAlpha()) are re-encoded as PNG
+ * instead of being flattened into JPEG, which composites transparency onto black.
+ */
+private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): Pair<ByteArray, String> =
     withContext(Dispatchers.Default) {
         runCatching {
             // P1-10 FIX: Handle EXIF rotation so portrait photos don't upload sideways.
-            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes
+            var bitmap = decodeBoundedBitmap(bytes, 1920, 1920) ?: return@withContext bytes to mimeType
             // Apply EXIF orientation before scaling — use original bytes' EXIF (JPEG).
             try {
                 val exif = androidx.exifinterface.media.ExifInterface(java.io.ByteArrayInputStream(bytes))
@@ -1123,13 +1398,17 @@ private suspend fun compressImageForUpload(bytes: ByteArray, mimeType: String): 
             } else {
                 bitmap
             }
+            // V2-FIX (reviewwhisper.md) V-14: keep transparency for alpha-capable sources.
+            val keepAlpha = mimeType in ALPHA_CAPABLE_MIMES && scaledBitmap.hasAlpha()
+            val format = if (keepAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val outMime = if (keepAlpha) "image/png" else "image/jpeg"
             val out = ByteArrayOutputStream()
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+            scaledBitmap.compress(format, 82, out)
             if (scaledBitmap != bitmap) {
                 scaledBitmap.recycle()
             }
             bitmap.recycle()
             val result = out.toByteArray()
-            if (result.isNotEmpty() && result.size < bytes.size) result else bytes
-        }.getOrDefault(bytes)
+            if (result.isNotEmpty() && result.size < bytes.size) result to outMime else bytes to mimeType
+        }.getOrDefault(bytes to mimeType)
     }

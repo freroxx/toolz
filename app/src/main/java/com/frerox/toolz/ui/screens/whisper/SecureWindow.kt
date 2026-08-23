@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.whisper
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.view.Window
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -21,7 +22,12 @@ private fun Context.findActivity(): Activity? = generateSequence(this) { (it as?
  *  disables FLAG_SECURE for EVERY Whisper screen, not just the one showing the toggle.
  *  Intentional (a per-screen bypass would still expose the recents preview), but it is
  *  global rather than per-screen. */
-private var secureWindowRefCount = 0
+// V2-FIX H-16: per-window refcounting — the old process-global Int was wrong once more
+// than one Activity/window hosted SecureWindow: a dispose on one screen dropped the shared
+// count to zero and cleared FLAG_SECURE for a DIFFERENT window that still needed it.
+// Counts are now tracked per android.view.Window under the same lock, and flags are only
+// mutated on each window's own count transitions (0→1 adds, →0 clears).
+private val secureWindowRefCounts = mutableMapOf<Window, Int>()
 private val secureWindowLock = Any()
 
 @Composable
@@ -35,18 +41,34 @@ fun SecureWindow(bypassEnabled: Boolean = false) {
             val needsSecure = !bypassEnabled
             if (needsSecure) {
                 synchronized(secureWindowLock) {
-                    if (secureWindowRefCount == 0) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                    secureWindowRefCount++
+                    val newCount = (secureWindowRefCounts[window] ?: 0) + 1
+                    secureWindowRefCounts[window] = newCount
+                    if (newCount == 1) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 }
             } else {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                // V2-FIX H-16: the bypass path clears ONLY its own host window, and only
+                // while that window's requirement has flipped off (no remaining hosts on
+                // this window want the flag). Other windows' entries are never touched.
+                synchronized(secureWindowLock) {
+                    if ((secureWindowRefCounts[window] ?: 0) == 0) {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
             }
 
             onDispose {
                 if (needsSecure) {
                     synchronized(secureWindowLock) {
-                        secureWindowRefCount = (secureWindowRefCount - 1).coerceAtLeast(0)
-                        if (secureWindowRefCount == 0) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        // V2-FIX H-16: dispose decrements THIS window's count; the flag is
+                        // cleared only when this window's last host leaves. A missing entry
+                        // means another dispose already cleaned this window up.
+                        val current = secureWindowRefCounts[window] ?: return@synchronized
+                        if (current <= 1) {
+                            secureWindowRefCounts.remove(window)
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            secureWindowRefCounts[window] = current - 1
+                        }
                     }
                 }
             }

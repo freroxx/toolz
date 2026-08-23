@@ -92,6 +92,13 @@ class WhisperViewModel @Inject constructor(
         _pickPhotoTrigger.value += 1
     }
 
+    // V2-FIX M-H1: one-shot consumption — after the screen launches the picker it resets
+    // the trigger so a collection restart (tab re-entry, process recreation) can never
+    // re-fire the last value and silently relaunch the photo picker.
+    fun consumePickPhotoTrigger() {
+        _pickPhotoTrigger.value = 0
+    }
+
     val isAuthenticated: StateFlow<Boolean?> = authManager.isAuthenticated
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -108,21 +115,7 @@ class WhisperViewModel @Inject constructor(
     init {
         observeMutes()
         observeHiddenChats()
-
-        // Surfacing dropped outbox entries: if the delivery scheduler permanently gives
-        // up on a queued message, the user must know it never arrived.
-        droppedCollectorJob = viewModelScope.launch {
-            outgoingQueue.droppedClientIds.collect { dropped ->
-                for (clientId in dropped) {
-                    // One notice per clientId; later duplicates are ignored.
-                    if (droppedNotifiedClientIds.add(clientId)) {
-                        _uiState.update {
-                            it.copy(error = UiText.StringResource(R.string.st_Whisper_Error_MessageFailed))
-                        }
-                    }
-                }
-            }
-        }
+        startDroppedCollector()
 
         viewModelScope.launch {
             isAuthenticated.collect { auth ->
@@ -133,6 +126,8 @@ class WhisperViewModel @Inject constructor(
                     subscribeToMessages()
                     subscribeToFriends()
                     startHeartbeat()
+                    // V2-FIX L-?: restart the dropped-entry collector — signOut cancels it.
+                    startDroppedCollector()
                 } else if (auth == false) {
                     // Tear down every subscription and cached account state so a dead
                     // session never keeps retrying against the network.
@@ -142,12 +137,40 @@ class WhisperViewModel @Inject constructor(
                     stopHeartbeat()
                     // Clear account-scoped local state so next login doesn't see previous user's hidden chats/mutes.
                     hiddenChatsStore.clearAll()
-                    // Keep mutePrefs per-account? Clear for now to avoid cross-account leak (review HIGH).
-                    // Mutes are per-device but logically per-account; clear on logout.
+                    // V2-FIX (reviewwhisper.md): resolved review question at this site — mutes are wiped
+                    // GLOBALLY on sign-out, NOT scoped per account. Decision: WhisperMutePreferences is a
+                    // single-account SharedPreferences store (no account-keyed prefix support), so per-
+                    // account scoping would require a storage migration; the global wipe is the simplest
+                    // correct guard against cross-account mute leakage between logins.
                     runCatching { mutePrefs.clearAll() }
                     runCatching { keyRotationStore.clear() }
                     droppedNotifiedClientIds.clear()
                     _uiState.update { WhisperUiState() }
+                }
+            }
+        }
+    }
+
+    // Surfacing dropped outbox entries: if the delivery scheduler permanently gives
+    // up on a queued message, the user must know it never arrived.
+    // V2-FIX L-?: extracted so signOut can cancel the collector (it restarts on re-auth).
+    private fun startDroppedCollector() {
+        droppedCollectorJob?.cancel()
+        droppedCollectorJob = viewModelScope.launch {
+            outgoingQueue.droppedClientIds.collect { dropped ->
+                // One notice per clientId; later duplicates are ignored. V2-FIX L-?: burst
+                // drops are AGGREGATED into a single notice with the count instead of
+                // stacking N identical toasts (the toast queue caps at 5 anyway).
+                val fresh = dropped.filter { droppedNotifiedClientIds.add(it) }
+                if (fresh.isEmpty()) return@collect
+                _uiState.update { state ->
+                    if (fresh.size == 1) {
+                        state.copy(error = UiText.StringResource(R.string.st_Whisper_Error_MessageFailed))
+                    } else {
+                        // Aggregated notice with the count formatted via context.getString at
+                        // display time (toast hosts resolve UiText through asString(context)).
+                        state.copy(error = UiText.StringResource(R.string.st_Whisper_Error_MessagesRemoved, fresh.size))
+                    }
                 }
             }
         }
@@ -198,9 +221,15 @@ class WhisperViewModel @Inject constructor(
         repository.updateProfile(WhisperProfileUpdate(publicKey = staged.publicKeyBase64))
             .onSuccess {
                 crypto.commitStagedKeyPair(staged)
+                // V2-FIX H-?: the active key just changed — my cached fingerprint is stale.
+                refreshFingerprint()
                 keyRotationStore.markRotated()
                 android.util.Log.i("WhisperVM", "Auto-rotated Whisper key (${keyRotationStore.intervalDays()}d FS)")
-                _uiState.update { it.copy(error = UiText.DynamicString("Security key refreshed (${keyRotationStore.intervalDays()}d rotation)")) }
+                // V2-FIX L-?: rotation success is not an error — surface it via the dedicated
+                // info field instead of polluting the error toast channel.
+                _uiState.update {
+                    it.copy(infoMessage = UiText.StringResource(R.string.st_Whisper_Info_KeyRefreshed))
+                }
             }
             .onFailure {
                 // Publish failed: delete the staged pair; the old key remains active so
@@ -291,27 +320,27 @@ class WhisperViewModel @Inject constructor(
             .onSuccess { convos ->
                 val muted = mutePrefs.mutedUsers.value
                 val mapped = convos.map { it.copy(isMuted = it.otherUser.id in muted) }
+                // V2-FIX L-?: compute the unhide list OUTSIDE the _uiState.update lambda —
+                // MutableStateFlow.update may re-run its lambda under contention, so any
+                // side effect inside could fire twice (duplicate unhide writes).
+                // The hidden snapshot is read immediately before the state write so a chat
+                // hidden while this network call was in flight is still honored.
+                val hidden = hiddenChatsStore.hiddenChats.value
                 val toUnhide = mutableListOf<String>()
-                _uiState.update { state ->
-                    // Re-read the hidden-chats snapshot at write time: a chat hidden while
-                    // this network call was in flight must not resurrect from a stale map
-                    // captured before the request started.
-                    val hidden = hiddenChatsStore.hiddenChats.value
-                    val filtered = mapped.filter { convo ->
-                        val hideTime = hidden[convo.otherUser.id] ?: return@filter true
-                        val lastEpoch = runCatching {
-                            java.time.OffsetDateTime.parse(convo.lastMessage.createdAt).toInstant().toEpochMilli()
-                        }.getOrNull()
-                        if (lastEpoch != null && lastEpoch > hideTime) {
-                            // Partner sent a new message after the chat was hidden → bring it back
-                            toUnhide.add(convo.otherUser.id)
-                            true
-                        } else {
-                            false
-                        }
+                val filtered = mapped.filter { convo ->
+                    val hideTime = hidden[convo.otherUser.id] ?: return@filter true
+                    val lastEpoch = runCatching {
+                        java.time.OffsetDateTime.parse(convo.lastMessage.createdAt).toInstant().toEpochMilli()
+                    }.getOrNull()
+                    if (lastEpoch != null && lastEpoch > hideTime) {
+                        // Partner sent a new message after the chat was hidden → bring it back
+                        toUnhide.add(convo.otherUser.id)
+                        true
+                    } else {
+                        false
                     }
-                    state.copy(conversations = filtered)
                 }
+                _uiState.update { it.copy(conversations = filtered) }
                 toUnhide.forEach { viewModelScope.launch { hiddenChatsStore.unhideChat(it) } }
 
                 // Clear notifications for any conversations that have been read (read receipts)
@@ -346,7 +375,8 @@ class WhisperViewModel @Inject constructor(
     }
 
     fun hideChat(userId: String) {
-        hiddenChatsStore.hideChat(userId)
+        // V2-FIX (reviewwhisper.md): store mutators are suspend + IO commit now.
+        viewModelScope.launch { hiddenChatsStore.hideChat(userId) }
     }
 
     fun clearChatHistory(userId: String) {
@@ -601,6 +631,9 @@ class WhisperViewModel @Inject constructor(
                 username = current.username,
                 displayName = current.displayName,
                 whisperCode = whisperCode,
+                // V2-FIX B4: the exported profile is always the live session's user, so
+                // pass an explicit token flag instead of relying on vault-name guessing.
+                isToken = authManager.isAnonymousTokenUser,
             ).onSuccess { file ->
                 onSuccess(file)
             }.onFailure { err ->
@@ -621,6 +654,8 @@ class WhisperViewModel @Inject constructor(
             repository.updateProfile(update)
                 .onSuccess {
                     crypto.commitStagedKeyPair(staged)
+                    // V2-FIX H-?: active key changed — recompute the cached fingerprint.
+                    refreshFingerprint()
                     repository.getMyProfile(forceRefresh = true).onSuccess { p ->
                         _uiState.update { it.copy(currentProfile = p) }
                     }
@@ -653,6 +688,9 @@ class WhisperViewModel @Inject constructor(
         messagesJob?.cancel()
         friendsJob?.cancel()
         loadAllJob?.cancel()
+        // V2-FIX L-?: also stop the dropped-entry collector — nothing surfaced after
+        // sign-out belongs to the next session (it restarts on re-auth).
+        droppedCollectorJob?.cancel()
         viewModelScope.launch {
             authManager.signOut()
                 .onFailure { err -> android.util.Log.w("WhisperVM", "signOut failed: ${err.message}", err) }
@@ -671,8 +709,33 @@ class WhisperViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** Fingerprint of my own public key, for sharing with friends to verify in person. Cached to avoid KeyStore I/O on every composition. */
-    val myFingerprint: String? by lazy { crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) } }
+    /** V2-FIX L-?: clears the dedicated success/info message (see [WhisperUiState.infoMessage]). */
+    fun clearInfo() {
+        _uiState.update { it.copy(infoMessage = null) }
+    }
+
+    // V2-FIX H-?: the fingerprint used to be `by lazy`, i.e. cached for the VM's lifetime —
+    // after a key rotation it kept showing the OLD fingerprint until process death. It is
+    // now private state recomputed via [refreshFingerprint] on every rotation success path.
+    private var cachedMyFingerprint: String? = null
+    private var isMyFingerprintComputed = false
+
+    /**
+     * Fingerprint of my own public key, for sharing with friends to verify in person.
+     * Cached so composition doesn't hit KeyStore on every read; invalidated by
+     * [refreshFingerprint] whenever the active key changes.
+     */
+    val myFingerprint: String?
+        get() {
+            if (!isMyFingerprintComputed) refreshFingerprint()
+            return cachedMyFingerprint
+        }
+
+    /** Recomputes my public-key fingerprint from the CURRENT KeyStore entry. */
+    private fun refreshFingerprint() {
+        cachedMyFingerprint = crypto.getPublicKeyBase64()?.let { crypto.fingerprint(it) }
+        isMyFingerprintComputed = true
+    }
 
     private fun subscribeToMessages() {
         val myId = authManager.currentUserId ?: return
@@ -707,6 +770,9 @@ class WhisperViewModel @Inject constructor(
                         // Hidden and muted chats never notify.
                         if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
                         if (mutePrefs.isMuted(msg.senderId)) return@collect
+                        // V2-FIX L-?: notification-path profile lookups route through
+                        // repository.getProfile, which is backed by its 5-minute profileCache —
+                        // no extra per-notification RPC beyond the cache TTL.
                         val senderProfile = repository.getProfile(msg.senderId).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
                         notificationManager.showMessageNotification(
@@ -739,6 +805,8 @@ class WhisperViewModel @Inject constructor(
                     val myId = authManager.currentUserId
                     if (friendship.userB == myId && friendship.status == "pending") {
                         if (mutePrefs.isMuted(friendship.userA)) return@collect
+                        // V2-FIX L-?: same cached path as message notifications —
+                        // repository.getProfile serves from its 5-minute profileCache.
                         val senderProfile = repository.getProfile(friendship.userA).getOrNull()
                         val senderName = senderProfile?.effectiveName ?: "Someone"
                         notificationManager.showFriendRequestNotification(friendship.userA, senderName)

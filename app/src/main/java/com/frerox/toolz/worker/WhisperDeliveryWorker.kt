@@ -18,7 +18,18 @@ class WhisperDeliveryWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val repository: WhisperRepository,
 ) : CoroutineWorker(context, workerParams) {
+
+    companion object {
+        // V2-FIX M-M?: cap on WorkManager runs (~5) before the worker gives up and reports
+        // failure; per-message drop accounting (attempts → noteDropped) stays upstream.
+        private const val MAX_DELIVERY_ATTEMPTS = 5
+    }
+
     override suspend fun doWork(): ListenableWorker.Result = try {
+        // V2-FIX M-H?: transient failures must propagate so WorkManager backoff engages.
+        // flushOutgoingMessages() throws when the flush itself cannot proceed (offline,
+        // storage/transport errors); per-message permanent rejections are handled inside
+        // the repository (attempts++, then drop + notify), so they never reach here.
         repository.flushOutgoingMessages()
         ListenableWorker.Result.success()
     } catch (e: CancellationException) {
@@ -27,7 +38,12 @@ class WhisperDeliveryWorker @AssistedInject constructor(
         throw e
     } catch (e: Exception) {
         // Permanent failures (bad request, forbidden, gone) can never succeed on retry;
-        // only transient errors belong in the backoff queue (L-3).
-        if (WhisperErrorMapper.isPermanentError(e)) ListenableWorker.Result.failure() else ListenableWorker.Result.retry()
+        // their drop handling lives upstream, so end as success instead of churning the
+        // queue. Transient failures retry with backoff, capped at MAX_DELIVERY_ATTEMPTS.
+        when {
+            WhisperErrorMapper.isPermanentError(e) -> ListenableWorker.Result.success()
+            runAttemptCount >= MAX_DELIVERY_ATTEMPTS - 1 -> ListenableWorker.Result.failure()
+            else -> ListenableWorker.Result.retry()
+        }
     }
 }

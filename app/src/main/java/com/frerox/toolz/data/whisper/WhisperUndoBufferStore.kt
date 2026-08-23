@@ -7,6 +7,7 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -55,10 +56,13 @@ class WhisperUndoBufferStore @Inject constructor(
                 put("messages", json.encodeToString(messages.takeLast(MAX_BUFFERED_MESSAGES)))
             }
             withContext(Dispatchers.IO) {
-                prefs.edit()
+                // V2-FIX (reviewwhisper.md): commit result checked — a silent failure used
+                // to leave the undo buffer un-persisted while the UI believed it durable.
+                val ok = prefs.edit()
                     .putString(KEY_PAYLOAD, payload.toString())
                     .putLong(KEY_SAVED_AT, now)
                     .commit()
+                if (!ok) Log.w(TAG, "save commit failed (${messages.size} message(s) at risk)")
             }
         }
     }
@@ -80,9 +84,11 @@ class WhisperUndoBufferStore @Inject constructor(
 
     suspend fun clear() {
         mutex.withLock {
-            withContext(Dispatchers.IO) {
+            // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
+            val ok = withContext(Dispatchers.IO) {
                 prefs.edit().remove(KEY_PAYLOAD).remove(KEY_SAVED_AT).commit()
             }
+            if (!ok) Log.w(TAG, "clear commit failed")
         }
     }
 
@@ -90,6 +96,7 @@ class WhisperUndoBufferStore @Inject constructor(
         this as? kotlinx.serialization.json.JsonObject
 
     private companion object {
+        const val TAG = "WhisperUndoBuffer"
         const val KEY_PAYLOAD = "undo_payload"
         const val KEY_SAVED_AT = "saved_at"
         const val MAX_BUFFERED_MESSAGES = 2_000

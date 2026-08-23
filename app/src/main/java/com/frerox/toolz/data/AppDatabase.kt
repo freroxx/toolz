@@ -101,7 +101,7 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class
     ],
-    version = 47,
+    version = 48,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

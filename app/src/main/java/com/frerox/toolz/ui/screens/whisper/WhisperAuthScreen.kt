@@ -26,6 +26,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -87,9 +90,12 @@ fun WhisperAuthScreen(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val submitting by viewModel.submitting.collectAsStateWithLifecycle()
     val generatedToken by viewModel.generatedToken.collectAsStateWithLifecycle()
+    // V2-FIX A-M4: bumps on every (re)generation so the UI can reset stale copied/saved flags.
+    val generatedTokenVersion by viewModel.generatedTokenVersion.collectAsStateWithLifecycle()
     val usernameAvailability by viewModel.usernameAvailability.collectAsStateWithLifecycle()
     val screenshotBypassEnabled by viewModel.screenshotBypassEnabled.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val toastState = rememberWhisperToastState()
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
@@ -174,7 +180,8 @@ fun WhisperAuthScreen(
                 showAubupRecoverySheet = false
             }
             is AubupRecoveryState.Error -> {
-                toastState.show(s.message, WhisperToastType.ERROR)
+                // V2-FIX A-M3: Error now carries UiText.
+                toastState.show(s.message.asString(context), WhisperToastType.ERROR)
             }
             else -> {}
         }
@@ -230,6 +237,7 @@ fun WhisperAuthScreen(
                     authState = authState,
                     isLoading = submitting || authState is WhisperAuthState.Loading,
                     generatedToken = generatedToken?.token,
+                    generatedTokenVersion = generatedTokenVersion,
                     usernameAvailability = usernameAvailability,
                     toastState = toastState,
                     onCheckUsername = viewModel::checkUsernameAvailable,
@@ -255,6 +263,7 @@ fun WhisperAuthScreen(
         if (showAubupRecoverySheet) {
             WhisperAubupRecoveryModalSheet(
                 aubupState = aubupState,
+                toastState = toastState,
                 onDismiss = {
                     showAubupRecoverySheet = false
                     viewModel.resetAubupState()
@@ -262,13 +271,26 @@ fun WhisperAuthScreen(
                 onRestoreVault = viewModel::restoreFromVault,
                 onRestoreFile = viewModel::restoreFromAccessFile,
                 onRestoreBytes = viewModel::restoreFromAccessBytes,
+                // V2-FIX AU-M5: file reads moved off main into the ViewModel (1 MB cap).
+                onImportAccessBytes = viewModel::importAccessBytes,
                 onRescan = viewModel::startAubupScan,
             )
         }
 
         if (restoredCredentials != null) {
+            // V2-FIX AU-H1: credential copy now routes through the same clipboard-expiry
+            // pipeline as token copy — the previous clip is captured and scheduled for
+            // restore via WorkManager, and confirmation goes through the in-app toast
+            // host instead of a system Toast that lingers over this SecureWindow screen.
             WhisperCredentialRevealedDialog(
                 restored = restoredCredentials!!,
+                onCopyCredential = { credential ->
+                    val previousClip = clipboard.getText()?.text
+                    clipboard.setText(AnnotatedString(credential))
+                    val systemClipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                    viewModel.scheduleTokenClipboardExpiry(credential, previousClip, systemClipboard)
+                    toastState.show(context.getString(R.string.st_Whisper_CredentialCopied), WhisperToastType.INFO)
+                },
                 onDismiss = {
                     restoredCredentials = null
                     onAuthenticated()
@@ -292,6 +314,7 @@ private fun WhisperAuthContent(
     authState: WhisperAuthState,
     isLoading: Boolean,
     generatedToken: String?,
+    generatedTokenVersion: Int,
     usernameAvailability: UsernameAvailability,
     toastState: WhisperToastState,
     onCheckUsername: (String) -> Unit,
@@ -307,6 +330,21 @@ private fun WhisperAuthContent(
 ) {
     // 0 = Username, 1 = Token
     var selectedMode by remember { mutableIntStateOf(0) }
+
+    // V2-FIX AU-M2 + AU-M3: every auth form field is remembered with rememberSaveable and
+    // hoisted ABOVE the AnimatedContent containers. AnimatedContent disposes the outgoing
+    // content's state, so fields previously lived (and died) inside the section
+    // composables — switching Username<->Token or SignIn<->Register wiped whatever the
+    // user had typed. Hoisted here, the entered text survives both tab switches and
+    // configuration changes/process death.
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var displayName by rememberSaveable { mutableStateOf("") }
+    var registerMode by rememberSaveable { mutableStateOf(false) }   // SignIn <-> Register
+    var tokenInput by rememberSaveable { mutableStateOf("") }
+    var tokenDisplayName by rememberSaveable { mutableStateOf("") }
+    var tokenLoginMode by rememberSaveable { mutableStateOf(false) } // New account <-> I have a token
 
     Column(
         modifier = modifier
@@ -345,13 +383,35 @@ private fun WhisperAuthContent(
                     isLoading = isLoading,
                     usernameAvailability = usernameAvailability,
                     onCheckUsername = onCheckUsername,
+                    username = username,
+                    onUsernameChange = { raw ->
+                        val formatted = raw.lowercase().filter { char -> char.isLetterOrDigit() || char == '_' }
+                        username = formatted
+                        // Availability pre-check only matters while registering.
+                        if (registerMode) onCheckUsername(formatted)
+                    },
+                    password = password,
+                    onPasswordChange = { password = it },
+                    confirmPassword = confirmPassword,
+                    onConfirmPasswordChange = { confirmPassword = it },
+                    displayName = displayName,
+                    onDisplayNameChange = { displayName = it },
+                    isRegisterMode = registerMode,
+                    onRegisterModeChange = { registerMode = it },
                     onLogin = onLoginUsername,
                     onRegister = onRegisterUsername,
                 )
                 1 -> TokenAuthSection(
                     isLoading = isLoading,
                     generatedToken = generatedToken,
+                    generatedTokenVersion = generatedTokenVersion,
                     toastState = toastState,
+                    tokenInput = tokenInput,
+                    onTokenInputChange = { tokenInput = it },
+                    tokenDisplayName = tokenDisplayName,
+                    onTokenDisplayNameChange = { tokenDisplayName = it },
+                    isLoginMode = tokenLoginMode,
+                    onLoginModeChange = { tokenLoginMode = it },
                     onGenerate = onGenerateToken,
                     onRegister = onRegisterToken,
                     onLogin = onLoginToken,
@@ -460,11 +520,21 @@ private fun UsernameAuthSection(
     isLoading: Boolean,
     usernameAvailability: UsernameAvailability,
     onCheckUsername: (String) -> Unit,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    confirmPassword: String,
+    onConfirmPasswordChange: (String) -> Unit,
+    displayName: String,
+    onDisplayNameChange: (String) -> Unit,
+    isRegisterMode: Boolean,
+    onRegisterModeChange: (Boolean) -> Unit,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String, String) -> Unit,
 ) {
-    var isRegisterMode by remember { mutableStateOf(false) }
-
+    // V2-FIX AU-M3: field values and the mode toggle are hoisted to WhisperAuthContent —
+    // AnimatedContent here only animates between the two form layouts.
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ToolzConnectedButtonGroup(
             selectedIndex = if (isRegisterMode) 1 else 0,
@@ -472,7 +542,7 @@ private fun UsernameAuthSection(
                 stringResource(R.string.st_Whisper_Auth_SignIn),
                 stringResource(R.string.st_Whisper_Auth_CreateAccount),
             ),
-            onOptionSelected = { isRegisterMode = it == 1 },
+            onOptionSelected = { onRegisterModeChange(it == 1) },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -490,6 +560,14 @@ private fun UsernameAuthSection(
                 },
                 isRegister = registerMode,
                 usernameAvailability = usernameAvailability,
+                username = username,
+                onUsernameChange = onUsernameChange,
+                password = password,
+                onPasswordChange = onPasswordChange,
+                confirmPassword = confirmPassword,
+                onConfirmPasswordChange = onConfirmPasswordChange,
+                displayName = displayName,
+                onDisplayNameChange = onDisplayNameChange,
                 onCheckUsername = onCheckUsername,
                 onLogin = onLogin,
                 onRegister = onRegister,
@@ -503,26 +581,37 @@ private fun UsernameAuthSection(
 private fun UsernameAuthForm(
     isLoading: Boolean,
     ctaLabel: String,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    confirmPassword: String,
+    onConfirmPasswordChange: (String) -> Unit,
+    displayName: String,
+    onDisplayNameChange: (String) -> Unit,
     onLogin: (String, String) -> Unit,
     onRegister: (String, String, String) -> Unit,
     isRegister: Boolean = false,
     usernameAvailability: UsernameAvailability = UsernameAvailability.Idle,
+    // V2-FIX A-H2: used by the Unavailable "tap to retry" affordance.
     onCheckUsername: (String) -> Unit = {},
 ) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var displayName by remember { mutableStateOf("") }
-    
     var showPassword by remember { mutableStateOf(false) }
     var touchedConfirm by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val haptic = rememberToolzHapticFeedback()
 
     val passwordsMatch = !isRegister || password == confirmPassword
+
+    // V2-FIX A-H2: Unavailable (offline / server error) no longer dead-ends registration.
+    // Format-valid usernames may still submit — the server final-validates availability;
+    // the UI shows a hint that verification failed instead of silently blocking.
+    val availabilityOk = usernameAvailability is UsernameAvailability.Available ||
+        usernameAvailability is UsernameAvailability.Unavailable
+
     val canSubmit = if (isRegister) {
         username.isNotBlank() && password.length >= 10 && passwordsMatch && !isLoading &&
-        usernameAvailability is UsernameAvailability.Available && displayName.isNotBlank()
+        availabilityOk && displayName.isNotBlank()
     } else {
         username.isNotBlank() && password.length >= 10 && !isLoading
     }
@@ -545,11 +634,7 @@ private fun UsernameAuthForm(
     ) {
         OutlinedTextField(
             value = username,
-            onValueChange = {
-                val formatted = it.lowercase().filter { char -> char.isLetterOrDigit() || char == '_' }
-                username = formatted
-                if (isRegister) onCheckUsername(formatted)
-            },
+            onValueChange = { onUsernameChange(it) },
             label = { Text(if (isRegister) stringResource(R.string.st_Whisper_Auth_ChooseUsernameLabel) else stringResource(R.string.st_Whisper_Auth_UsernameLabel)) },
             leadingIcon = { Icon(Icons.Rounded.Person, null) },
             trailingIcon = {
@@ -559,11 +644,17 @@ private fun UsernameAuthForm(
                         is UsernameAvailability.Available -> Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
                         is UsernameAvailability.Taken -> Icon(Icons.Rounded.Cancel, null, tint = MaterialTheme.colorScheme.error)
                         is UsernameAvailability.Invalid -> Icon(Icons.Rounded.Error, null, tint = MaterialTheme.colorScheme.error)
+                        // V2-FIX A-H2: verification failed (offline etc.) — warn, don't hide.
+                        is UsernameAvailability.Unavailable -> Icon(Icons.Rounded.CloudOff, null, tint = MaterialTheme.colorScheme.tertiary)
                         else -> {}
                     }
                 }
             },
-            isError = isRegister && (usernameAvailability is UsernameAvailability.Taken || usernameAvailability is UsernameAvailability.Invalid),
+            isError = isRegister && (
+                usernameAvailability is UsernameAvailability.Taken ||
+                    usernameAvailability is UsernameAvailability.Invalid ||
+                    usernameAvailability is UsernameAvailability.Unavailable
+                ),
             supportingText = if (isRegister) {
                 {
                     when (usernameAvailability) {
@@ -571,6 +662,13 @@ private fun UsernameAuthForm(
                         is UsernameAvailability.Available -> Text(stringResource(R.string.st_Whisper_Auth_UsernameAvailable))
                         is UsernameAvailability.Checking -> Text(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
                         is UsernameAvailability.Invalid -> Text(usernameAvailability.reason.asString())
+                        // V2-FIX A-H2: retry affordance — tapping re-runs the availability
+                        // check. Registration stays possible; the server final-validates.
+                        is UsernameAvailability.Unavailable -> Text(
+                            stringResource(R.string.st_Whisper_Auth_UsernameUnavailable),
+                            modifier = Modifier.clickable { onCheckUsername(username) },
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
                         else -> {}
                     }
                 }
@@ -584,7 +682,7 @@ private fun UsernameAuthForm(
 
         OutlinedTextField(
             value = password,
-            onValueChange = { password = it },
+            onValueChange = { onPasswordChange(it) },
             label = { Text(stringResource(R.string.st_Whisper_Auth_Password)) },
             leadingIcon = { Icon(Icons.Rounded.Password, null) },
             trailingIcon = {
@@ -616,7 +714,7 @@ private fun UsernameAuthForm(
         if (isRegister) {
             OutlinedTextField(
                 value = confirmPassword,
-                onValueChange = { confirmPassword = it; touchedConfirm = true },
+                onValueChange = { onConfirmPasswordChange(it); touchedConfirm = true },
                 label = { Text(stringResource(R.string.st_Whisper_Auth_ConfirmPassword)) },
                 leadingIcon = { Icon(Icons.Rounded.Password, null) },
                 visualTransformation = PasswordVisualTransformation(),
@@ -636,7 +734,7 @@ private fun UsernameAuthForm(
             
             OutlinedTextField(
                 value = displayName,
-                onValueChange = { displayName = it },
+                onValueChange = { onDisplayNameChange(it) },
                 label = { Text(stringResource(R.string.st_Whisper_Auth_DisplayName)) },
                 leadingIcon = { Icon(Icons.Rounded.Badge, null) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -662,6 +760,34 @@ private fun UsernameAuthForm(
                 } else {
                     Text(ctaLabel, fontWeight = FontWeight.Bold)
                 }
+            }
+        }
+
+        // V2-FIX AU-M4: a silently disabled CTA gives no feedback — list exactly which
+        // requirements are still unmet. Reuses existing error strings where possible.
+        if (!canSubmit && !isLoading) {
+            val unmetRequirements = buildList {
+                if (isRegister && username.isNotBlank() && (username.length < 3 || username.length > 20)) {
+                    add(stringResource(R.string.st_Whisper_Error_UsernameLength))
+                }
+                if (password.length < 10) add(stringResource(R.string.st_Whisper_Auth_PasswordMinLength))
+                if (isRegister && password.isNotEmpty() && confirmPassword.isNotEmpty() && !passwordsMatch) {
+                    add(stringResource(R.string.st_Whisper_Auth_PasswordsDoNotMatch))
+                }
+                if (isRegister && displayName.isBlank()) {
+                    add(stringResource(R.string.st_Whisper_Auth_ChooseDisplayName))
+                }
+                if (isRegister && usernameAvailability is UsernameAvailability.Checking) {
+                    add(stringResource(R.string.st_Whisper_Auth_UsernameChecking))
+                }
+            }
+            if (unmetRequirements.isNotEmpty()) {
+                Text(
+                    text = unmetRequirements.joinToString(separator = "  ·  "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -700,15 +826,22 @@ private fun PasswordStrengthMeter(password: String) {
 private fun TokenAuthSection(
     isLoading: Boolean,
     generatedToken: String?,
+    generatedTokenVersion: Int,
     toastState: WhisperToastState,
+    tokenInput: String,
+    onTokenInputChange: (String) -> Unit,
+    tokenDisplayName: String,
+    onTokenDisplayNameChange: (String) -> Unit,
+    isLoginMode: Boolean,
+    onLoginModeChange: (Boolean) -> Unit,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
     onLogin: (String) -> Unit,
     onNormalizeToken: (String) -> String,
     onCopyToken: (token: String, restoreTo: String?) -> Unit,
 ) {
-    var isLoginMode by remember { mutableStateOf(false) }
-
+    // V2-FIX AU-M3: mode toggle and field values are hoisted — AnimatedContent only
+    // animates between layouts and no longer owns any text state.
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TokenExplainerCard()
 
@@ -718,7 +851,7 @@ private fun TokenAuthSection(
                 stringResource(R.string.st_Whisper_Auth_NewAccount),
                 stringResource(R.string.st_Whisper_Auth_IHaveAToken),
             ),
-            onOptionSelected = { isLoginMode = it == 1 },
+            onOptionSelected = { onLoginModeChange(it == 1) },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -728,12 +861,21 @@ private fun TokenAuthSection(
             label = "tokenMode",
         ) { loginMode ->
             if (loginMode) {
-                TokenLoginForm(isLoading = isLoading, onLogin = onLogin, onNormalizeToken = onNormalizeToken)
+                TokenLoginForm(
+                    isLoading = isLoading,
+                    tokenInput = tokenInput,
+                    onTokenInputChange = onTokenInputChange,
+                    onLogin = onLogin,
+                    onNormalizeToken = onNormalizeToken,
+                )
             } else {
                 TokenRegisterForm(
                     isLoading = isLoading,
                     generatedToken = generatedToken,
+                    generatedTokenVersion = generatedTokenVersion,
                     toastState = toastState,
+                    displayName = tokenDisplayName,
+                    onDisplayNameChange = onTokenDisplayNameChange,
                     onGenerate = onGenerate,
                     onRegister = onRegister,
                     onCopyToken = onCopyToken,
@@ -779,10 +921,12 @@ private fun TokenExplainerCard() {
 @Composable
 private fun TokenLoginForm(
     isLoading: Boolean,
+    tokenInput: String,
+    onTokenInputChange: (String) -> Unit,
     onLogin: (String) -> Unit,
     onNormalizeToken: (String) -> String,
 ) {
-    var tokenInput by remember { mutableStateOf("") }
+    // V2-FIX AU-M2/AU-M3: tokenInput is hoisted (rememberSaveable in WhisperAuthContent).
     val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
 
@@ -794,13 +938,13 @@ private fun TokenLoginForm(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
             value = tokenInput,
-            onValueChange = { if (it.length <= 80) tokenInput = it },
+            onValueChange = { if (it.length <= 80) onTokenInputChange(it) },
             label = { Text(stringResource(R.string.st_Whisper_Auth_PasteToken)) },
             leadingIcon = { Icon(Icons.Rounded.Key, null) },
             trailingIcon = {
                 ToolzExpressiveIconButton(onClick = {
                     haptic.click()
-                    clipboard.getText()?.text?.let { tokenInput = it }
+                    clipboard.getText()?.text?.let { if (it.length <= 80) onTokenInputChange(it) }
                 }) { Icon(Icons.Rounded.ContentPaste, stringResource(R.string.cd_Paste)) }
             },
             isError = hasInvalidChars,
@@ -836,7 +980,10 @@ private fun TokenLoginForm(
 private fun TokenRegisterForm(
     isLoading: Boolean,
     generatedToken: String?,
+    generatedTokenVersion: Int,
     toastState: WhisperToastState,
+    displayName: String,
+    onDisplayNameChange: (String) -> Unit,
     onGenerate: () -> Unit,
     onRegister: (displayName: String) -> Unit,
     onCopyToken: (token: String, restoreTo: String?) -> Unit,
@@ -844,11 +991,21 @@ private fun TokenRegisterForm(
     var isCopied by remember { mutableStateOf(false) }
     var hasSavedToken by remember { mutableStateOf(false) }
     var revealToken by remember { mutableStateOf(false) }
-    var displayName by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
     val haptic = rememberToolzHapticFeedback()
     val nameFocusRequester = remember { FocusRequester() }
     val context = LocalContext.current
+
+    // V2-FIX A-M4: a regenerated token burns the old credential — reset the copied/saved
+    // affordances so the UI never claims the OLD token is still copied, and re-prompt the
+    // user to save the NEW one before continuing.
+    LaunchedEffect(generatedTokenVersion) {
+        if (generatedTokenVersion > 0) {
+            isCopied = false
+            hasSavedToken = false
+            revealToken = false
+        }
+    }
 
     LaunchedEffect(isCopied) {
         if (isCopied) hasSavedToken = true
@@ -974,7 +1131,7 @@ private fun TokenRegisterForm(
             } else {
                 OutlinedTextField(
                     value = displayName,
-                    onValueChange = { displayName = it },
+                    onValueChange = { onDisplayNameChange(it) },
                     label = { Text(stringResource(R.string.st_Whisper_Auth_ChooseDisplayName)) },
                     leadingIcon = { Icon(Icons.Rounded.Badge, null) },
                     singleLine = true,
@@ -1028,10 +1185,12 @@ private fun String.maskedHex(): String {
 @Composable
 fun WhisperAubupRecoveryModalSheet(
     aubupState: AubupRecoveryState,
+    toastState: WhisperToastState,
     onDismiss: () -> Unit,
     onRestoreVault: (com.frerox.toolz.data.password.PasswordEntity) -> Unit,
     onRestoreFile: (java.io.File, String) -> Unit,
     onRestoreBytes: (ByteArray, String) -> Unit,
+    onImportAccessBytes: (android.net.Uri, (Result<ByteArray>) -> Unit) -> Unit,
     onRescan: () -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
@@ -1044,12 +1203,18 @@ fun WhisperAubupRecoveryModalSheet(
     val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
+        // V2-FIX AU-M5: bytes are read on the ViewModel's IO dispatcher with a hard 1 MB
+        // cap (the old callback did a blocking readBytes() on main). Read failures and
+        // oversize files surface through the in-app toast host.
         uri?.let {
-            val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() }
-            if (bytes != null) {
-                uploadedBytesForCode = bytes
-                whisperCodeInput = ""
-                codeError = null
+            onImportAccessBytes(it) { result ->
+                result.onSuccess { bytes ->
+                    uploadedBytesForCode = bytes
+                    whisperCodeInput = ""
+                    codeError = null
+                }.onFailure {
+                    toastState.show(context.getString(R.string.st_Whisper_Error_AccessFileUnreadable), WhisperToastType.ERROR)
+                }
             }
         }
     }
@@ -1100,13 +1265,18 @@ fun WhisperAubupRecoveryModalSheet(
                     )
                 }
                 ToolzExpressiveIconButton(onClick = { haptic.click(); onRescan() }) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "Rescan", modifier = Modifier.size(20.dp))
+                    // V2-FIX AU-M6: content description was hardcoded English.
+                    Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.cd_Whisper_Aubup_Rescan), modifier = Modifier.size(20.dp))
                 }
             }
 
             HorizontalDivider()
 
             when (aubupState) {
+                // V2-FIX AU-M1: Idle previously fell through to a blank sheet. It is the
+                // transient state right after opening (startAubupScan flips to Scanning),
+                // so render it exactly like Scanning instead of showing nothing.
+                is AubupRecoveryState.Idle,
                 is AubupRecoveryState.Scanning -> {
                     Column(
                         modifier = Modifier
@@ -1120,6 +1290,67 @@ fun WhisperAubupRecoveryModalSheet(
                             stringResource(R.string.st_Whisper_Aubup_Scanning),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // V2-FIX AU-M1: recovery errors were only toasted (and invisible once the
+                // toast dismissed) — now rendered inline with a retry affordance.
+                is AubupRecoveryState.Error -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Text(
+                            text = aubupState.message.asString(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                        ToolzExpressiveButton(
+                            onClick = {
+                                haptic.click()
+                                onRescan()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            // Reuses the existing localized "Retry" string.
+                            Text(stringResource(R.string.st_Whisper_Retry), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // V2-FIX AU-M1: Restored promotes to the credential dialog almost
+                // immediately; show brief graceful feedback instead of a blank sheet.
+                is AubupRecoveryState.Restored -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            stringResource(R.string.st_Whisper_Aubup_CredentialRevealedTitle),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
@@ -1314,7 +1545,8 @@ fun WhisperAubupRecoveryModalSheet(
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text(
-                                                "Downloads/Toolz",
+                                                // V2-FIX AU-M6: hardcoded caption.
+                                                text = stringResource(R.string.st_Whisper_Aubup_AccessFileLocation),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1344,8 +1576,6 @@ fun WhisperAubupRecoveryModalSheet(
                         }
                     }
                 }
-
-                else -> {}
             }
 
             Spacer(Modifier.height(16.dp))
@@ -1356,11 +1586,10 @@ fun WhisperAubupRecoveryModalSheet(
 @Composable
 fun WhisperCredentialRevealedDialog(
     restored: AubupRecoveryState.Restored,
+    onCopyCredential: (credential: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val haptic = rememberToolzHapticFeedback()
-    val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1430,8 +1659,11 @@ fun WhisperCredentialRevealedDialog(
                             )
                             ToolzExpressiveIconButton(onClick = {
                                 haptic.click()
-                                clipboardManager.setText(AnnotatedString(restored.credential))
-                                android.widget.Toast.makeText(context, context.getString(R.string.st_Whisper_CredentialCopied), android.widget.Toast.LENGTH_SHORT).show()
+                                // V2-FIX AU-H1: copying used to bypass the clipboard-expiry
+                                // pipeline and confirm via a system Toast. The caller now
+                                // captures the previous clip, schedules the 60 s expiry via
+                                // WorkManager and confirms through the app toast host.
+                                onCopyCredential(restored.credential)
                             }) {
                                 Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.cd_Whisper_CopyCredential), modifier = Modifier.size(16.dp))
                             }

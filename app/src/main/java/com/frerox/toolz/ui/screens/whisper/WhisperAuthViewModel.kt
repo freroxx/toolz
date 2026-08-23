@@ -30,6 +30,12 @@ sealed class UsernameAvailability {
     object Available : UsernameAvailability()
     object Taken : UsernameAvailability()
     data class Invalid(val reason: UiText) : UsernameAvailability()
+
+    // V2-FIX A-H2: the availability check failed (offline / server error). This used to
+    // collapse to Idle, silently dead-ending registration because the CTA only enabled
+    // on `Available`. The server still final-validates, so the UI treats this as
+    // "unverified, may proceed".
+    object Unavailable : UsernameAvailability()
 }
 
 sealed class AubupRecoveryState {
@@ -44,7 +50,10 @@ sealed class AubupRecoveryState {
         val authType: String,
         val credential: String,
     ) : AubupRecoveryState()
-    data class Error(val message: String) : AubupRecoveryState()
+
+    // V2-FIX A-M3: carries UiText instead of a raw English String so recovery errors
+    // are localizable at the consumption site (screen resolves via asString()).
+    data class Error(val message: UiText) : AubupRecoveryState()
 }
 
 @HiltViewModel
@@ -56,6 +65,11 @@ class WhisperAuthViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val aubupManager: WhisperAubupManager,
 ) : AndroidViewModel(application) {
+
+    companion object {
+        /** V2-FIX AU-M5: hard cap for picked access-file imports (encrypted payload is tiny). */
+        const val MAX_ACCESS_FILE_BYTES: Int = 1 * 1024 * 1024 // 1 MB
+    }
 
     val screenshotBypassEnabled: StateFlow<Boolean> = settingsRepository.whisperScreenshotBypass
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -72,6 +86,12 @@ class WhisperAuthViewModel @Inject constructor(
     val submitting: StateFlow<Boolean> = _submitting.asStateFlow()
     private val _generatedToken = MutableStateFlow<WhisperAnonToken?>(null)
     val generatedToken: StateFlow<WhisperAnonToken?> = _generatedToken.asStateFlow()
+
+    // V2-FIX A-M4: increments every time the anon token is (re)generated. The screen
+    // observes this to reset its "copied/saved" affordances — a rolled token burns the
+    // old credential, so stale UI claiming the OLD token was copied must not survive.
+    private val _generatedTokenVersion = MutableStateFlow(0)
+    val generatedTokenVersion: StateFlow<Int> = _generatedTokenVersion.asStateFlow()
 
     private val _usernameAvailability = MutableStateFlow<UsernameAvailability>(UsernameAvailability.Idle)
     val usernameAvailability: StateFlow<UsernameAvailability> = _usernameAvailability.asStateFlow()
@@ -90,10 +110,27 @@ class WhisperAuthViewModel @Inject constructor(
         }
         viewModelScope.launch {
             authManager.sessionStatus.collectLatest { status ->
+                // V2-FIX A-H1: the old `else -> Idle` catch-all mapped EVERY unknown or
+                // transient status to Idle — e.g. a SessionStatus.RefreshFailure (token
+                // refresh retrying on flaky network) downgraded an Authenticated user
+                // back to the sign-in form mid-session. Enumerate all statuses from the
+                // supabase-kt 3.x API used here explicitly; only a real "no session"
+                // state may sign the UI out, everything unknown/transient keeps the
+                // previous state.
                 when (status) {
                     is SessionStatus.Initializing -> _authState.value = WhisperAuthState.Loading
                     is SessionStatus.Authenticated -> _authState.value = WhisperAuthState.Authenticated
-                    else -> _authState.value = WhisperAuthState.Idle
+                    // Both NotAuthenticated flavors mean there is genuinely no session:
+                    // isSignOut=true is an explicit sign-out; isSignOut=false is emitted
+                    // once after init when no stored session exists (fresh install /
+                    // previously signed out). Not mapping the latter to Idle would leave
+                    // logged-out users stranded behind the 15 s splash fallback below.
+                    is SessionStatus.NotAuthenticated -> _authState.value = WhisperAuthState.Idle
+                    // Transient: refresh failed but will retry — keep previous state and
+                    // never downgrade an Authenticated session to Idle.
+                    is SessionStatus.RefreshFailure -> Unit
+                    // Unknown future statuses must never silently sign the user out.
+                    else -> Unit
                 }
             }
         }
@@ -155,11 +192,48 @@ class WhisperAuthViewModel @Inject constructor(
         _aubupState.value = AubupRecoveryState.Idle
     }
 
-    fun restoreFromVault(account: PasswordEntity) {
+    /**
+     * V2-FIX AU-M5: reads the user-picked .enc access file OFF the main thread with a
+     * hard size cap — the old picker callback did `readBytes()` directly in
+     * composition-triggered UI code, freezing the main thread on large/crooked files.
+     * Fails the returned Result on IO errors or when the file exceeds 1 MB.
+     */
+    fun importAccessBytes(uri: android.net.Uri, onResult: (Result<ByteArray>) -> Unit) {
+        viewModelScope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val resolver = getApplication<Application>().contentResolver
+                    val bytes = resolver.openInputStream(uri)?.use { input ->
+                        val buffer = java.io.ByteArrayOutputStream()
+                        val chunk = ByteArray(64 * 1024)
+                        var total = 0
+                        while (true) {
+                            val read = input.read(chunk)
+                            if (read < 0) break
+                            total += read
+                            require(total <= MAX_ACCESS_FILE_BYTES) { "Access file exceeds the ${MAX_ACCESS_FILE_BYTES / (1024 * 1024)} MB limit" }
+                            buffer.write(chunk, 0, read)
+                        }
+                        buffer.toByteArray()
+                    }
+                    // require's contract smart-casts bytes to non-null ByteArray below.
+                    require(bytes != null && bytes.isNotEmpty()) { "Could not read the selected file" }
+                    bytes
+                }
+            }
+            onResult(result)
+        }
+    }
+
+    // V2-FIX A-M2: callers that KNOW the account kind (same contract as
+    // createAccessFileForUser's isToken param, e.g. the live session's
+    // authManager.isAnonymousTokenUser) pass an explicit hint; only when none is
+    // provided do we fall back to the vault-name substring heuristic. A dedicated
+    // stored flag would need a PasswordEntity column — deferred (see B5 note).
+    fun restoreFromVault(account: PasswordEntity, isTokenHint: Boolean? = null) {
         viewModelScope.launch {
             _submitting.value = true
-            // P2-14 FIX: Don't misclassify hex passwords as tokens — only Anon name.
-            val isToken = account.name.contains("Anon", ignoreCase = true)
+            val isToken = isTokenHint ?: account.name.contains("Anon", ignoreCase = true)
 
             val result = if (isToken) {
                 authManager.loginWithToken(account.password)
@@ -180,7 +254,12 @@ class WhisperAuthViewModel @Inject constructor(
                 )
                 _authState.value = WhisperAuthState.Authenticated
             }.onFailure { err ->
-                _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with stored credentials")
+                // V2-FIX A-M3: wrap in UiText; reuse the existing generic error string
+                // when the throwable carries no message.
+                _aubupState.value = AubupRecoveryState.Error(
+                    err.message?.let(UiText::DynamicString)
+                        ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                )
             }
             _submitting.value = false
         }
@@ -194,7 +273,11 @@ class WhisperAuthViewModel @Inject constructor(
                     loginWithPayload(payload)
                 }
                 .onFailure { err ->
-                    _aubupState.value = AubupRecoveryState.Error(err.message ?: "Failed to decrypt Access File")
+                    // V2-FIX A-M3: UiText payload (see restoreFromVault).
+                    _aubupState.value = AubupRecoveryState.Error(
+                        err.message?.let(UiText::DynamicString)
+                            ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                    )
                     _submitting.value = false
                 }
         }
@@ -208,7 +291,11 @@ class WhisperAuthViewModel @Inject constructor(
                     loginWithPayload(payload)
                 }
                 .onFailure { err ->
-                    _aubupState.value = AubupRecoveryState.Error(err.message ?: "Failed to decrypt Access File")
+                    // V2-FIX A-M3: UiText payload (see restoreFromVault).
+                    _aubupState.value = AubupRecoveryState.Error(
+                        err.message?.let(UiText::DynamicString)
+                            ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                    )
                     _submitting.value = false
                 }
         }
@@ -237,7 +324,11 @@ class WhisperAuthViewModel @Inject constructor(
                 isToken = payload.authType == "TOKEN"
             )
         }.onFailure { err ->
-            _aubupState.value = AubupRecoveryState.Error(err.message ?: "Login failed with restored credentials")
+            // V2-FIX A-M3: UiText payload (see restoreFromVault).
+            _aubupState.value = AubupRecoveryState.Error(
+                err.message?.let(UiText::DynamicString)
+                    ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+            )
         }
         _submitting.value = false
     }
@@ -256,7 +347,11 @@ class WhisperAuthViewModel @Inject constructor(
                 .onSuccess { available ->
                     _usernameAvailability.value = if (available) UsernameAvailability.Available else UsernameAvailability.Taken
                 }
-                .onFailure { _usernameAvailability.value = UsernameAvailability.Idle }
+                // V2-FIX A-H2: a failed check (offline, server error) must NOT collapse
+                // to Idle — that silently dead-ended registration because the CTA gated
+                // on `Available`. Surface an explicit Unavailable state; the server
+                // final-validates on submit.
+                .onFailure { _usernameAvailability.value = UsernameAvailability.Unavailable }
         }
     }
 
@@ -322,7 +417,13 @@ class WhisperAuthViewModel @Inject constructor(
     }
 
     fun generateToken() {
+        rollGeneratedToken()
+    }
+
+    /** V2-FIX A-M4: single funnel for (re)generation so the version counter never drifts. */
+    private fun rollGeneratedToken() {
         _generatedToken.value = authManager.generateAnonToken()
+        _generatedTokenVersion.value++
     }
 
     fun registerWithGeneratedToken(displayName: String, customUsername: String? = null) {
@@ -358,7 +459,7 @@ class WhisperAuthViewModel @Inject constructor(
                     _authState.value = WhisperAuthState.Error(formatError(it))
                     // A failed registration must not leave a usable token floating around:
                     // roll a fresh one so the old credential is burned on both sides.
-                    _generatedToken.value = authManager.generateAnonToken()
+                    rollGeneratedToken()
                 }
             _submitting.value = false
         }
@@ -378,7 +479,11 @@ class WhisperAuthViewModel @Inject constructor(
                 .onSuccess {
                     _authState.value = WhisperAuthState.Authenticated
                     val myProfile = repository.getMyProfile(forceRefresh = true).getOrNull()
-                    val userHandle = myProfile?.effectiveUsername ?: "anon_${cleanToken.take(6)}"
+                    // V2-FIX A-M1: the old fallback label embedded a 6-char prefix of the
+                    // raw token in the vault entry — partial credential material leaking
+                    // into storage/UI. Use a random UUID suffix like registration instead.
+                    val userHandle = myProfile?.effectiveUsername
+                        ?: ("anon_" + java.util.UUID.randomUUID().toString().replace("-", "").take(8))
                     aubupManager.upsertWhisperVaultEntry("Whisper Anon: $userHandle", userHandle, cleanToken, isToken = true)
                 }
                 .onFailure {

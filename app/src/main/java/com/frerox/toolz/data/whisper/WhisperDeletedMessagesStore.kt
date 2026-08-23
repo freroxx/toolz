@@ -2,6 +2,7 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,9 +55,12 @@ class WhisperDeletedMessagesStore @Inject constructor(
         val existing = withContext(Dispatchers.IO) { loadAll() }
         val now = System.currentTimeMillis()
         val merged = capById(existing + ids.associateWith { now })
-        withContext(Dispatchers.IO) {
+        // V2-FIX (reviewwhisper.md): commit() result is checked — a silent disk failure
+        // used to update only the in-memory state and lose tombstones on restart.
+        val ok = withContext(Dispatchers.IO) {
             prefs.edit().putStringSet("deleted_message_ids", merged.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
         }
+        if (!ok) Log.w(TAG, "persist commit failed (${ids.size} id(s) at risk)")
         _deletedIds.value = merged.keys
     }
 
@@ -90,9 +94,11 @@ class WhisperDeletedMessagesStore @Inject constructor(
         mutex.withLock {
             // M-18 FIX: read off-main (see persist).
             val existing = withContext(Dispatchers.IO) { loadAll() } - messageIds.toSet()
-            withContext(Dispatchers.IO) {
+            // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
+            val ok = withContext(Dispatchers.IO) {
                 prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
             }
+            if (!ok) Log.w(TAG, "unmarkMessagesDeleted commit failed")
             _deletedIds.value = existing.keys
         }
     }
@@ -106,20 +112,25 @@ class WhisperDeletedMessagesStore @Inject constructor(
         val capped = capById(raw)
         val removed = raw.size - capped.size
         if (removed > 0) {
-            withContext(Dispatchers.IO) {
+            // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
+            val ok = withContext(Dispatchers.IO) {
                 prefs.edit().putStringSet("deleted_message_ids", capped.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
             }
+            if (!ok) Log.w(TAG, "evictOldest commit failed")
             _deletedIds.value = capped.keys
         }
         removed
     }
 
     suspend fun clearAll() = mutex.withLock {
-        withContext(Dispatchers.IO) { prefs.edit().remove("deleted_message_ids").commit() }
+        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
+        val ok = withContext(Dispatchers.IO) { prefs.edit().remove("deleted_message_ids").commit() }
+        if (!ok) Log.w(TAG, "clearAll commit failed")
         _deletedIds.value = emptySet()
     }
 
     private companion object {
+        const val TAG = "WhisperDeletedMsgs"
         const val MAX_TOMBSTONES = 5_000
     }
 }

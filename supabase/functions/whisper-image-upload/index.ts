@@ -1,6 +1,8 @@
 // Supabase Edge Function: upload encrypted Whisper image bytes to ImgBB.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import {
+// V2-FIX (reviewwhisper.md): module-level declarations were spliced INSIDE the import
+// braces below (invalid syntax); the helper now lives under the completed import.
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 // Lazily-built JWKS verifier: building at module-eval time would throw on a cold
 // start if SUPABASE_URL were ever absent, turning EVERY request into a 500.
@@ -13,13 +15,13 @@ function jwks() {
   }
   return _remoteJWKS;
 }
-  createRemoteJWKSet,
-  jwtVerify,
-} from "https://esm.sh/jose@5.9.6";
 
-// M-19 FIX (reviewwhisper.md): lowered from 32 MB to 12 MB. The real client pipeline
-// caps ciphertext at 5 MiB -> ~6.7 MiB PNG -> ~8.9 MiB base64, so 12 MB bounds abuse
-// without ever rejecting a legitimate payload.
+// M-19 FIX (reviewwhisper.md): 12 MB local abuse bound. The real client pipeline
+// caps ciphertext at 5 MiB -> ~6.7 MiB PNG -> ~8.9 MiB base64, so this ceiling never
+// rejects a legitimate payload. It is deliberately independent of ImgBB's own
+// documented upload limit (~32 MB), which is not an abuse bound of ours.
+// V2-FIX (reviewwhisper.md): stale comment claimed "lowered from 32 MB" as if ImgBB's
+// acceptance window were the constraint — it never was.
 const MAX_BASE64_LENGTH = 12 * 1024 * 1024;
 const MIN_EXPIRY = 60;
 const MAX_EXPIRY = 15_552_000;
@@ -54,8 +56,13 @@ serve(async (request) => {
   if (!userId) return json({ error: "Unauthorized" }, 401);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  if (!supabaseUrl || !anonKey) return json({ error: "Server misconfigured" }, 500);
+  // V2-FIX (reviewwhisper.md): quota RPCs are now service-role-only (uid-parameterized),
+  // so the anon key is no longer needed here; the service role key is mandatory.
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl) return json({ error: "Server misconfigured" }, 500);
+  // Fail closed: without the service role key the uid-parameterized RPCs are
+  // unreachable, so uploads must not proceed.
+  if (!serviceRoleKey) return json({ error: "Server misconfigured" }, 503);
 
   // Parse + validate the payload BEFORE consuming quota (M-3 FIX part 1): invalid or
   // oversized bodies no longer burn one of the caller's scarce daily slots.
@@ -89,44 +96,64 @@ serve(async (request) => {
 
   // Atomic per-user daily quota via RPC — serializes concurrent bursts, no undercount.
   // FAIL CLOSED (was fail-open): an RPC outage must not become an unlimited upload
-  // window. The RPC ships with migration 20260822; if it is missing, uploads stay down.
+  // window. The RPC ships with migration 20260822 (uid-parameterized variant: 20260827);
+  // if it is missing, uploads stay down.
+  // V2-FIX (reviewwhisper.md): called with the SERVICE ROLE key and the verified userId
+  // as p_uid — the old user-token forwarding let any authenticated caller increment an
+  // arbitrary row once the RPC took p_uid; the RPC itself now rejects non-service callers.
   const today = new Date().toISOString().slice(0, 10);
+
+  // Best-effort compensating decrement (M-3 FIX part 2): an ImgBB outage must not eat
+  // the caller's daily slots. Floor-at-zero semantics live in the SQL function; a rare
+  // concurrent double-refund only makes the counter slightly more generous. Declared
+  // before the increment so the over-limit path can refund too.
+  // V2-FIX (reviewwhisper.md): takes its dependencies as parameters — TS/Deno do not
+  // propagate null-narrowing of captured env consts into nested closures, so relying
+  // on the outer guards alone type-checks as string | undefined.
+  async function refundQuota(baseUrl: string, serviceKey: string, uid: string, day: string): Promise<void> {
+    try {
+      await fetch(`${baseUrl}/rest/v1/rpc/whisper_refund_upload_quota`, {
+        method: "POST",
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_uid: uid, p_day: day }),
+      });
+    } catch (refundError) {
+      console.error("whisper_refund_upload_quota failed (best-effort)", refundError);
+    }
+  }
+
   try {
     const quotaRes = await fetch(`${supabaseUrl}/rest/v1/rpc/whisper_increment_upload_quota`, {
       method: "POST",
       headers: {
-        apikey: anonKey,
-        Authorization: authHeader,
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ p_day: today }),
+      body: JSON.stringify({ p_uid: userId, p_day: today }),
     });
     if (!quotaRes.ok) {
-      console.error("whisper_increment_upload_quota failed", quotaRes.status, await quotaRes.text());
+      // V2-FIX (reviewwhisper.md): log status code + first 120 chars only — full
+      // PostgREST bodies can carry row data or internal details into the logs.
+      const errText = (await quotaRes.text().catch(() => "")).slice(0, 120);
+      console.error("whisper_increment_upload_quota failed", quotaRes.status, errText);
       return json({ error: "Upload quota service unavailable" }, 503);
     }
     const count = Number(await quotaRes.json());
     if (count > QUOTA_PER_DAY) {
+      // V2-FIX (reviewwhisper.md): the increment already happened, so an over-limit
+      // attempt must be refunded or every rejected upload permanently inflates the
+      // counter and locks the user out early.
+      await refundQuota(supabaseUrl, serviceRoleKey, userId, today);
       return json({ error: "Daily upload limit reached" }, 429);
     }
   } catch (quotaError) {
     console.error("whisper_increment_upload_quota failed", quotaError);
     return json({ error: "Upload quota service unavailable" }, 503);
-  }
-
-  // Best-effort compensating decrement (M-3 FIX part 2): an ImgBB outage must not eat
-  // the caller's daily slots. Floor-at-zero semantics live in the SQL function; a rare
-  // concurrent double-refund only makes the counter slightly more generous.
-  async function refundQuota(): Promise<void> {
-    try {
-      await fetch(`${supabaseUrl}/rest/v1/rpc/whisper_refund_upload_quota`, {
-        method: "POST",
-        headers: { apikey: anonKey, Authorization: authHeader, "Content-Type": "application/json" },
-        body: JSON.stringify({ p_day: today }),
-      });
-    } catch (refundError) {
-      console.error("whisper_refund_upload_quota failed (best-effort)", refundError);
-    }
   }
 
   const form = new FormData();
@@ -146,16 +173,40 @@ serve(async (request) => {
     });
   } catch (uploadError) {
     console.error("ImgBB upload threw", uploadError);
-    await refundQuota();
+    await refundQuota(supabaseUrl, serviceRoleKey, userId, today);
     return json({ error: "Encrypted image upload failed" }, 502);
   }
 
   let result: any;
-  try { result = await upstream.json(); } catch { await refundQuota(); return json({ error: "Encrypted image upload failed" }, 502); }
+  try { result = await upstream.json(); } catch { await refundQuota(supabaseUrl, serviceRoleKey, userId, today); return json({ error: "Encrypted image upload failed" }, 502); }
   if (!upstream.ok || !result?.success) {
     console.error("ImgBB upload failed", upstream.status);
-    await refundQuota();
+    await refundQuota(supabaseUrl, serviceRoleKey, userId, today);
     return json({ error: "Encrypted image upload failed" }, 502);
+  }
+
+  // V2-FIX (reviewwhisper.md): record ownership so whisper-image-delete can authorize
+  // deletions object-level (the delete capability alone was a bearer token anyone could
+  // replay). Best-effort: a bookkeeping failure must never fail a completed upload.
+  try {
+    const ownershipRes = await fetch(`${supabaseUrl}/rest/v1/whisper_image_ownership`, {
+      method: "POST",
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        image_id: result.data.id ?? null,
+        delete_url: result.data.delete_url,
+        url: result.data.url,
+      }),
+    });
+    if (!ownershipRes.ok) console.error("whisper_image_ownership insert failed", ownershipRes.status);
+  } catch (ownershipError) {
+    console.error("whisper_image_ownership insert threw (best-effort)", ownershipError);
   }
 
   return json({

@@ -71,6 +71,9 @@ fun WhisperUserProfileScreen(
     val scope = rememberCoroutineScope()
 
     var showBypassDialog by remember { mutableStateOf(false) }
+    // V2-FIX (verify in-flight guard): track password verification locally so the dialog
+    // stays open, locks its buttons and shows progress until the verdict arrives.
+    var isVerifyingBypass by remember { mutableStateOf(false) }
 
     // User profile data is sensitive — never capture this screen.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
@@ -78,32 +81,39 @@ fun WhisperUserProfileScreen(
     if (showBypassDialog) {
         // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(
-            onDismiss = { showBypassDialog = false },
+            isVerifying = isVerifyingBypass,
+            onDismiss = { if (!isVerifyingBypass) showBypassDialog = false },
             onConfirm = { password ->
+                if (isVerifyingBypass) return@WhisperScreenshotBypassDialog
                 scope.launch {
-                    // FIX: surface WHY verification failed instead of blaming the password
-                    // for lockouts/service errors.
-                    when (verifyWhisperBypass(password)) {
-                        WhisperBypassVerdict.Granted -> {
-                            val enabling = !screenshotBypassEnabled
-                            viewModel.setScreenshotBypass(enabling)
-                            toastState.show(
-                                context.getString(
-                                    if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
-                                    else R.string.st_Whisper_Bypass_ProtectionOn
-                                ),
-                                WhisperToastType.SUCCESS
-                            )
+                    isVerifyingBypass = true
+                    try {
+                        // FIX: surface WHY verification failed instead of blaming the password
+                        // for lockouts/service errors.
+                        when (verifyWhisperBypass(password)) {
+                            WhisperBypassVerdict.Granted -> {
+                                val enabling = !screenshotBypassEnabled
+                                viewModel.setScreenshotBypass(enabling)
+                                toastState.show(
+                                    context.getString(
+                                        if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
+                                        else R.string.st_Whisper_Bypass_ProtectionOn
+                                    ),
+                                    WhisperToastType.SUCCESS
+                                )
+                            }
+                            WhisperBypassVerdict.Denied ->
+                                toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.RateLimited ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.Unavailable ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
                         }
-                        WhisperBypassVerdict.Denied ->
-                            toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.RateLimited ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.Unavailable ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
+                    } finally {
+                        isVerifyingBypass = false
+                        showBypassDialog = false
                     }
                 }
-                showBypassDialog = false
             }
         )
     }
@@ -123,7 +133,19 @@ fun WhisperUserProfileScreen(
                         // M-17: verification happens inside the dialog for both directions.
                         showBypassDialog = true
                     },
-                    title = { Text(uiState.profile?.effectiveName ?: "", fontWeight = FontWeight.Bold) },
+                    // V2-FIX: placeholder title while the profile loads instead of a blank bar.
+                    title = {
+                        val loadedProfile = uiState.profile
+                        if (loadedProfile == null) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Loading),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(loadedProfile.effectiveName, fontWeight = FontWeight.Bold)
+                        }
+                    },
                     navigationIcon = {
                         ToolzExpressiveIconButton(onClick = { haptic.click(); onNavigateBack() }) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_Back))
@@ -201,6 +223,12 @@ fun WhisperUserProfileScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             
+                            // V2-FIX: WhisperProfile exposes onlineStatus only as a formatted
+                            // String (no enum/status type in WhisperModels), so the literal
+                            // compare stays for now.
+                            // DEFERRED-LOCALIZE/TODO-MODEL: switch to a typed presence enum when
+                            // one is added to the model — localizing the raw status string needs
+                            // a model-layer change, not a resource swap.
                             Text(
                                 profile.onlineStatus,
                                 style = MaterialTheme.typography.labelMedium,
@@ -261,7 +289,13 @@ fun WhisperUserProfileScreen(
 
                         // Bio Card
                         if (!profile.bio.isNullOrBlank()) {
-                            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                            // V2-FIX L14: inert ExpressiveCard(onClick = {}) replaced with a
+                            // visually identical Surface — a bio has no card-level action.
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(32.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Text(
                                         stringResource(R.string.st_Whisper_Profile_Bio),
@@ -282,7 +316,16 @@ fun WhisperUserProfileScreen(
                         // E2EE Security Verification Card
                         if (profile.publicKey != null) {
                             val keyTrust = uiState.keyTrust
-                            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                            // V2-FIX: hash the public key once per key value — this used to run
+                            // SHA-256 inside the Text on every recomposition.
+                            val computedFingerprint = remember(profile.publicKey) { profile.publicKey?.let { computeFingerprint(it) } }
+                            // V2-FIX L14: inert ExpressiveCard(onClick = {}) replaced with a
+                            // visually identical Surface; actions live on the buttons below.
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(32.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
                                 Column(
                                     modifier = Modifier.padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -329,7 +372,7 @@ fun WhisperUserProfileScreen(
                                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                                     ) {
                                         Text(
-                                            text = uiState.keyTrust?.partnerFingerprint ?: profile.publicKey?.let { computeFingerprint(it) } ?: stringResource(R.string.st_Whisper_Unverified),
+                                            text = uiState.keyTrust?.partnerFingerprint ?: computedFingerprint ?: stringResource(R.string.st_Whisper_Unverified),
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
@@ -405,7 +448,20 @@ fun WhisperUserProfileScreen(
                                     }
                                 }
                                 FriendStatus.PENDING -> {
-                                    if (partnerSentRequest) {
+                                    if (record == null) {
+                                        // V2-FIX: PENDING without a friendship record yet — render a
+                                        // neutral pending row instead of a dead Cancel button whose
+                                        // action requires record.id.
+                                        ToolzOutlinedExpressiveButton(
+                                            onClick = {},
+                                            enabled = false,
+                                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                                        ) {
+                                            Icon(Icons.Rounded.HourglassTop, null, Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(stringResource(R.string.st_Whisper_Friends_Pending), fontWeight = FontWeight.Bold)
+                                        }
+                                    } else if (partnerSentRequest) {
                                         ToolzTonalExpressiveButton(
                                             onClick = { haptic.click(); viewModel.acceptFriendRequest() },
                                             modifier = Modifier.fillMaxWidth().height(52.dp),

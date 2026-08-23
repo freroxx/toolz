@@ -41,27 +41,44 @@ sealed interface WhisperBypassVerdict {
     data object Unavailable : WhisperBypassVerdict
 }
 
-suspend fun verifyWhisperBypass(input: String): WhisperBypassVerdict {
+suspend fun verifyWhisperBypass(input: String): WhisperBypassVerdict =
+    verifyWhisperBypass(input, ::openBypassConnection)
+
+/**
+ * V2-FIX T-?: injectable transport seam for testability. Behavior is identical to the
+ * public overload; tests pass a [urlOpener] factory that returns a fake/stub
+ * [HttpURLConnection] so no network is needed to exercise verdict mapping.
+ */
+internal suspend fun verifyWhisperBypass(
+    input: String,
+    urlOpener: (String) -> HttpURLConnection,
+): WhisperBypassVerdict {
     val trimmed = input.trim()
     if (trimmed.isEmpty() || trimmed.length > 256) return WhisperBypassVerdict.Denied
 
     return try {
-        withContext(Dispatchers.IO) { verifyBypassRemotely(trimmed) } ?: WhisperBypassVerdict.Unavailable
+        withContext(Dispatchers.IO) { verifyBypassRemotely(trimmed, urlOpener) } ?: WhisperBypassVerdict.Unavailable
     } catch (_: Exception) {
         // Fail closed — an offline attacker gets nothing.
         WhisperBypassVerdict.Unavailable
     }
 }
 
+/** Default real transport: opens the Edge Function URL (kept separate so the seam stays injectable). */
+private fun openBypassConnection(url: String): HttpURLConnection =
+    URL(url).openConnection() as HttpURLConnection
+
 /** Back-compat Boolean wrapper (unit tests + simple callers). */
 suspend fun isWhisperBypassPassword(input: String): Boolean =
     verifyWhisperBypass(input) == WhisperBypassVerdict.Granted
 
 /** Returns the verdict, or null when the service is unavailable (no verdict at all). */
-private fun verifyBypassRemotely(password: String): WhisperBypassVerdict? {
+private fun verifyBypassRemotely(
+    password: String,
+    urlOpener: (String) -> HttpURLConnection,
+): WhisperBypassVerdict? {
     val body = JSONObject().put("password", password).toString().toByteArray(Charsets.UTF_8)
-    val connection = URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-bypass-verify")
-        .openConnection() as HttpURLConnection
+    val connection = urlOpener("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-bypass-verify")
     try {
         connection.requestMethod = "POST"
         connection.connectTimeout = 10_000
@@ -76,11 +93,17 @@ private fun verifyBypassRemotely(password: String): WhisperBypassVerdict? {
             ?.bufferedReader()?.use { it.readText() }.orEmpty()
 
         if (connection.responseCode !in 200..299) {
-            // Field-diagnosis aid: name the exact status/body behind a non-verdict.
-            android.util.Log.w(
-                "WhisperBypass",
-                "bypass-verify HTTP ${connection.responseCode}: ${responseText.take(200)}",
-            )
+            // Field-diagnosis aid: name the exact status behind a non-verdict.
+            // V2-FIX L-?: release-log hygiene — the error BODY can carry server internals;
+            // it is logged only in debug builds, release logs just the status code.
+            if (BuildConfig.DEBUG) {
+                android.util.Log.w(
+                    "WhisperBypass",
+                    "bypass-verify HTTP ${connection.responseCode}: ${responseText.take(200)}",
+                )
+            } else {
+                android.util.Log.w("WhisperBypass", "bypass-verify HTTP ${connection.responseCode}")
+            }
         }
 
         return when {

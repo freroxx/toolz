@@ -19,6 +19,7 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,23 +53,28 @@ class WhisperKeyTrustStore @Inject constructor(
     /** Accept a key as "known" without marking it verified. Durable, off-main. */
     suspend fun rememberKey(userId: String, publicKey: String) {
         val now = System.currentTimeMillis()
+        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once — a
+        // silently dropped trust record would re-trigger MITM warnings on next send.
         withContext(Dispatchers.IO) {
-            prefs.edit()
+            val ok = prefs.edit()
                 .putString("known_$userId", publicKey)
                 .putLong("known_ts_$userId", now)
                 .commit()
+            if (!ok) Log.w(TAG, "rememberKey commit failed for $userId")
         }
     }
 
     /** Accept a key as known AND verified (fingerprint compared in person). Durable, off-main. */
     suspend fun markVerified(userId: String, publicKey: String) {
         val now = System.currentTimeMillis()
+        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
         withContext(Dispatchers.IO) {
-            prefs.edit()
+            val ok = prefs.edit()
                 .putString("known_$userId", publicKey)
                 .putString("verified_$userId", publicKey)
                 .putLong("known_ts_$userId", now)
                 .commit()
+            if (!ok) Log.w(TAG, "markVerified commit failed for $userId")
         }
     }
 
@@ -77,16 +83,24 @@ class WhisperKeyTrustStore @Inject constructor(
         // known_ts_ is removed too — a stale timestamp could otherwise skew the
         // expected-rotation heuristic if the user is re-added later.
         // M-7 FIX (reviewwhisper.md): commit() is fsync'd — must never run on Main.
+        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
         withContext(Dispatchers.IO) {
-            prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").commit()
+            val ok = prefs.edit().remove("known_$userId").remove("verified_$userId").remove("known_ts_$userId").commit()
+            if (!ok) Log.w(TAG, "forgetUser commit failed for $userId")
         }
     }
 
     /** Wipe every trust record on this device (account deletion). */
     suspend fun clearAll() {
         // M-7 FIX: same as forgetUser — durable write off the calling thread.
+        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
         withContext(Dispatchers.IO) {
-            prefs.edit().clear().commit()
+            val ok = prefs.edit().clear().commit()
+            if (!ok) Log.w(TAG, "clearAll commit failed")
         }
+    }
+
+    private companion object {
+        const val TAG = "WhisperKeyTrust"
     }
 }

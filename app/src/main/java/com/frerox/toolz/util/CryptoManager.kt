@@ -44,6 +44,15 @@ object CryptoManager {
     private const val AES_KEY_SIZE = 256
     private const val CHACHA20_KEY_SIZE = 256
     private const val PBKDF2_ITERATIONS = 65536
+    // V2-FIX B1: OWASP-recommended PBKDF2-HMAC-SHA256 iteration count, used ONLY by the
+    // dedicated encryptWithPassphrase/decryptWithPassphrase helpers (Whisper access
+    // files). The shared PBKDF2_ITERATIONS stays frozen at 65536 because SmartEncrypter
+    // users hold stored ciphertext derived with it; raising the constant in place would
+    // permanently break decryption of that data.
+    private const val PBKDF2_ITERATIONS_HARDENED = 310000
+    // First byte of hardened-format payloads ('V'). Legacy payloads start with random
+    // salt bytes, so a collision is handled by the legacy fallback in decryptWithPassphrase.
+    private const val HARDENED_FORMAT_MARKER: Byte = 0x56
     private const val SALT_SIZE = 16
     private const val IV_SIZE = 12
     private const val TAG_SIZE = 128
@@ -139,19 +148,91 @@ object CryptoManager {
     /**
      * AES-256-GCM Decryption
      * Expects: salt + iv + ciphertext as Base64 string
+     *
+     * V2-FIX B1: format frozen (65536 iterations) for backward compatibility with
+     * previously stored data; see [decryptWithPassphrase] for the hardened path.
      */
     fun decryptAes(combinedBase64: String, password: CharArray): Pair<String, Boolean> {
         return try {
-            val combined = Base64.decode(combinedBase64, Base64.NO_WRAP)
-            if (combined.size < SALT_SIZE + IV_SIZE) {
+            decodeSaltedLayout(Base64.decode(combinedBase64, Base64.NO_WRAP), password, PBKDF2_ITERATIONS)
+        } catch (e: AEADBadTagException) {
+            Pair("Invalid password or corrupted data", false)
+        } catch (e: Exception) {
+            Pair("Decryption failed: ${e.message}", false)
+        }
+    }
+
+    // ── Hardened passphrase helpers (V2-FIX B1) ─────────────────────────────────────
+    // The Whisper access .enc file protects a live credential behind a 6-digit code, so
+    // it uses a dedicated KDF-hardened path WITHOUT changing encryptAes/decryptAes,
+    // whose on-disk format must stay stable for SmartEncrypter-stored data.
+
+    /**
+     * AES-256-GCM encryption hardened for low-entropy passphrases:
+     * PBKDF2-HMAC-SHA256 at 310000 iterations.
+     * Output: marker byte 'V' + salt(16) + iv(12) + ciphertext+tag, Base64(NO_WRAP).
+     */
+    fun encryptWithPassphrase(plaintext: String, passphrase: CharArray): Pair<String, Boolean> {
+        return try {
+            val salt = ByteArray(SALT_SIZE).apply { SecureRandom().nextBytes(this) }
+            val iv = ByteArray(IV_SIZE).apply { SecureRandom().nextBytes(this) }
+
+            val key = deriveKey(passphrase, salt, AES_KEY_SIZE, PBKDF2_ITERATIONS_HARDENED)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
+
+            val plaintextBytes = plaintext.toByteArray(Charsets.UTF_8)
+            val ciphertext = cipher.doFinal(plaintextBytes)
+
+            // Clear sensitive data
+            plaintextBytes.fill(0.toByte())
+
+            val combined = byteArrayOf(HARDENED_FORMAT_MARKER) + salt + iv + ciphertext
+            Pair(Base64.encodeToString(combined, Base64.NO_WRAP), true)
+        } catch (e: Exception) {
+            Pair("Encryption failed: ${e.message}", false)
+        }
+    }
+
+    /**
+     * Decrypts [encryptWithPassphrase] output. Tries the marker-prefixed hardened
+     * (310000-iteration) format first, then falls back to the legacy unmarked
+     * 65536-iteration salt|iv|ciphertext layout so old .enc access files keep working;
+     * this also covers a legacy file whose first random salt byte happens to collide
+     * with the marker byte. Error semantics match [decryptAes].
+     */
+    fun decryptWithPassphrase(combinedBase64: String, passphrase: CharArray): Pair<String, Boolean> {
+        val combined = try {
+            Base64.decode(combinedBase64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            return Pair("Decryption failed: ${e.message}", false)
+        }
+        if (combined.isNotEmpty() && combined[0] == HARDENED_FORMAT_MARKER) {
+            val hardened = decodeSaltedLayout(
+                combined.copyOfRange(1, combined.size),
+                passphrase,
+                PBKDF2_ITERATIONS_HARDENED,
+            )
+            if (hardened.second) return hardened
+        }
+        return decodeSaltedLayout(combined, passphrase, PBKDF2_ITERATIONS)
+    }
+
+    /**
+     * Shared salt|iv|ciphertext layout decoder parameterized by iteration count so the
+     * legacy (65536) and hardened (310000) formats share one implementation.
+     */
+    private fun decodeSaltedLayout(payload: ByteArray, password: CharArray, iterations: Int): Pair<String, Boolean> {
+        return try {
+            if (payload.size < SALT_SIZE + IV_SIZE) {
                 return Pair("Malformed encrypted data", false)
             }
 
-            val salt = combined.sliceArray(0 until SALT_SIZE)
-            val iv = combined.sliceArray(SALT_SIZE until SALT_SIZE + IV_SIZE)
-            val ciphertext = combined.sliceArray(SALT_SIZE + IV_SIZE until combined.size)
+            val salt = payload.sliceArray(0 until SALT_SIZE)
+            val iv = payload.sliceArray(SALT_SIZE until SALT_SIZE + IV_SIZE)
+            val ciphertext = payload.sliceArray(SALT_SIZE + IV_SIZE until payload.size)
 
-            val key = deriveKey(password, salt, AES_KEY_SIZE)
+            val key = deriveKey(password, salt, AES_KEY_SIZE, iterations)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_SIZE, iv))
 
@@ -228,10 +309,14 @@ object CryptoManager {
         }
     }
 
-    private fun deriveKey(password: CharArray, salt: ByteArray, keySize: Int): SecretKeySpec {
+    private fun deriveKey(password: CharArray, salt: ByteArray, keySize: Int): SecretKeySpec =
+        // Legacy default (65536 iterations) preserved for all pre-B1 callers.
+        deriveKey(password, salt, keySize, PBKDF2_ITERATIONS)
+
+    private fun deriveKey(password: CharArray, salt: ByteArray, keySize: Int, iterations: Int): SecretKeySpec {
         return try {
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            val spec: KeySpec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, keySize)
+            val spec: KeySpec = PBEKeySpec(password, salt, iterations, keySize)
             val tmp = factory.generateSecret(spec)
             SecretKeySpec(tmp.encoded, "AES")
         } catch (e: Exception) {

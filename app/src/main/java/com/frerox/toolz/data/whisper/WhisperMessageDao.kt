@@ -16,14 +16,19 @@ interface WhisperMessageDao {
      * The subselect bounds memory/CPU for power users with huge threads while
      * preserving chronological order for the UI; the paged DAO path was never
      * wired up, so this is the practical guard against unbounded loads.
+     *
+     * V2-FIX (reviewwhisper.md) H-10: ORDER BY now keys on the numeric [sortEpoch]
+     * (derived from createdAt) with created_at as a stable tiebreaker, both
+     * directions consistent — ISO string comparison alone misorders rows whose
+     * timestamps carry differing offsets/precision.
      */
     @Query("""
         SELECT * FROM (
             SELECT * FROM whisper_messages 
             WHERE (senderId = :myId AND receiverId = :otherId) 
                OR (senderId = :otherId AND receiverId = :myId)
-            ORDER BY createdAt DESC LIMIT 500
-        ) ORDER BY createdAt ASC
+            ORDER BY sortEpoch DESC, createdAt DESC LIMIT 500
+        ) ORDER BY sortEpoch ASC, createdAt ASC
     """)
     fun getMessages(myId: String, otherId: String): Flow<List<WhisperMessageEntity>>
 

@@ -113,6 +113,8 @@
     <string name="st_Whisper_Auth_SaveTokenWarning">Save this token! It cannot be recovered.</string>
     <string name="st_Whisper_Auth_CopyToContinue">Copy token to continue</string>
     <string name="st_Whisper_Auth_ChooseDisplayName">Choose a display name</string>
+    <string name="st_Whisper_Auth_UsernameUnavailable">Couldn\'t verify availability</string>
+    <string name="st_Whisper_Auth_PasswordMinLength">Password must be at least 10 characters</string>
     <string name="st_Whisper_Vault_SecuredTitle">Secured in Vault</string>
     <string name="st_Whisper_Vault_SecuredDesc">Your credentials will be automatically saved to your Toolz Vault for safe keeping.</string>
     <string name="st_Whisper_Vault_Name">Whisper: %s</string>
@@ -140,12 +142,16 @@
     <string name="st_Whisper_Aubup_SaveAccessFileDesc">Export an encrypted .enc backup file with a 6-digit Whisper Code</string>
     <string name="st_Whisper_Aubup_InfoTitle">What is an Access File?</string>
     <string name="st_Whisper_Aubup_InfoDesc">An Access File is an offline encrypted backup of your Whisper account credentials. It is encrypted using AES-256 with a 6-digit numeric Whisper Code of your choice and saved into your Downloads/Toolz folder. If you ever switch devices or lose access, you can recover your account instantly by providing this file and your 6-digit code.</string>
+    <string name="st_Whisper_AccessFileInfo">Access File Info</string>
     <string name="st_Whisper_Aubup_FileCreatedSuccess">Access File saved to Downloads/Toolz/whisper_access_%s.enc</string>
+    <string name="st_Whisper_Aubup_LegacyStorageWarning">Note: on this Android version the file is saved to shared storage where other apps can read it.</string>
     <string name="st_Whisper_Aubup_CustomDesignBadge">Whisper E2EE</string>
     <string name="st_Whisper_Aubup_TokenAccount">Anonymous Token</string>
     <string name="st_Whisper_Aubup_PasswordAccount">Username &amp; Password</string>
     <string name="st_Whisper_Aubup_GotIt">Got It</string>
     <string name="st_Whisper_Aubup_CreateBackup">Create Access File</string>
+    <string name="cd_Whisper_Aubup_Rescan">Rescan</string>
+    <string name="st_Whisper_Aubup_AccessFileLocation">Saved in Downloads/Toolz</string>
     <string name="st_Whisper_Tab_Chats">Chats</string>
     <string name="st_Whisper_Tab_Friends">Friends</string>
     <string name="st_Whisper_Tab_Discover">Discover</string>
@@ -208,6 +214,8 @@
     <string name="st_Whisper_Review">Review</string>
     <string name="st_Whisper_Unblock">Unblock</string>
     <string name="st_Whisper_Undo">Undo (%ds)</string>
+    <string name="st_Whisper_Loading">Loading…</string>
+    <string name="st_Whisper_LoadFailed_Chats">Couldn\'t load your chats.</string>
     <string name="st_Whisper_PartnerTyping">%s is typing…</string>
     <string name="st_Whisper_ReplyingTo">Replying to %s</string>
     <string name="st_Whisper_You">You</string>
@@ -220,10 +228,13 @@
     <string name="st_Whisper_HideFromDiscover">Hide from Discover</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Unable to verify this key.</string>
     <string name="st_Whisper_Error_KeyAcceptFailed">Unable to accept this key.</string>
+    <string name="st_Whisper_KeyVerify_Failed">Couldn\'t verify the key. Check your connection.</string>
+    <string name="st_Whisper_KeyAccept_Failed">Couldn\'t accept the new key. Try again.</string>
     <string name="st_Whisper_Bypass_Title">Authentication Required</string>
     <string name="st_Whisper_Bypass_PasswordLabel">Password</string>
     <string name="st_Whisper_SelectClearRange">Select how far back to clear</string>
     <string name="st_Whisper_ProfileVisibility">Profile Visibility</string>
+    <string name="st_Whisper_Section_PrivacyDiscovery">Privacy &amp; Discovery</string>
     <string name="st_Whisper_DeleteAccount">Delete Account</string>
     <string name="st_Whisper_HideDiscoverConfirmTitle">Hide from Discover?</string>
     <string name="st_Whisper_HideDiscoverConfirmDesc">You won\'t appear in recommendations or search. People can only find you if you add them first.</string>
@@ -284,7 +295,10 @@
     <string name="st_Whisper_LoadingImage">Loading encrypted image…</string>
     <string name="st_Whisper_ImageLoadFailed">Couldn\'t load image</string>
     <string name="st_Whisper_ImageSaved">Image saved to gallery</string>
+    <string name="st_Whisper_SaveToGallery_Title">Save outside Whisper?</string>
+    <string name="st_Whisper_SaveToGallery_Desc">This image will be saved to your gallery unencrypted and may be backed up by other apps.</string>
     <string name="st_Whisper_Save">Save</string>
+    <string name="st_Whisper_ImageExpiry_Title">Image visibility</string>
     <string name="st_Whisper_ImageExpiryDesc">Images are encrypted before upload. Choose when this image should disappear.</string>
     <string name="st_Whisper_Expiry_Never">Keep in chat</string>
     <string name="st_Whisper_Expiry_1m">Disappear in 1 minute</string>
@@ -299,6 +313,8 @@
     <string name="st_Whisper_Error_InvalidToken">That token doesn\'t look right. Check for missing or extra characters.</string>
     <string name="st_Whisper_Error_TokenNotRecognized">Token not recognized. Double-check it and try again.</string>
     <string name="st_Whisper_Error_Generic">Something went wrong. Try again.</string>
+    <string name="st_Whisper_Error_AccessFileUnreadable">Couldn\'t read that file (max 1 MB).</string>
+    <string name="st_Whisper_Error_MessagesRemoved">%1$d messages couldn\'t be sent and were removed.</string>
     <string name="st_Whisper_Error_SessionExpired">Your session expired. Please sign in again.</string>
     <string name="st_Whisper_Error_InvalidCredentials">Invalid username or password</string>
     <string name="st_Whisper_Error_UsernameExists">An account with this username already exists</string>
@@ -334,6 +350,16 @@
     <string name="st_Whisper_Onboarding_GetStarted">Begin Your Journey</string>
     <string name="st_Whisper_Onboarding_Next">Continue</string>
     <string name="st_Whisper_OnboardingSkip">Skip</string>
+    <string name="st_Whisper_Onboarding_Kicker1">WELCOME TO WHISPER</string>
+    <string name="st_Whisper_Onboarding_Kicker2">WHISPER IS FRIENDLY</string>
+    <string name="st_Whisper_Onboarding_Kicker3">WHISPER IS SECURE</string>
+    <string name="st_Whisper_Onboarding_Kicker4">WHISPER IS ALL YOURS</string>
+    <string name="st_Whisper_Onboarding_PageOf">Page %1$d of %2$d</string>
+    <!-- Whisper notification channels -->
+    <string name="st_Whisper_Notification_ChannelName">Messages</string>
+    <string name="st_Whisper_Notification_ChannelDesc">End-to-end encrypted Whisper messages</string>
+    <string name="st_Whisper_Notification_ChannelSummaryName">Message summaries</string>
+    <string name="st_Whisper_Notification_ChannelSummaryDesc">Summary of unread Whisper conversations</string>
     <!-- Whisper: Auth - Registration -->
     <string name="st_Whisper_Auth_ChooseUsername">@ Username</string>
     <string name="st_Whisper_Auth_UsernameAvailable">Available ✓</string>
@@ -363,6 +389,10 @@
     <string name="cd_Whisper_SendMessage">Send message</string>
     <string name="cd_Whisper_Reply">Reply</string>
     <string name="cd_Whisper_EncryptedImage">Encrypted image</string>
+    <string name="cd_Whisper_FriendBadge">Friend</string>
+    <string name="cd_Whisper_CopyUsername">Copy username</string>
+    <string name="cd_Whisper_CopyFingerprint">Copy fingerprint</string>
+    <string name="cd_Whisper_DeclineRequest">Decline request</string>
     <string name="st_Whisper_MessageSemantics">Message. Swipe right to reply, double tap for reactions.</string>
     <!-- Accessibility content descriptions -->
     <string name="cd_Back">Go back</string>
@@ -3042,6 +3072,7 @@
     <string name="st_Whisper_RotateKey_Desc">Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.</string>
     <string name="st_Whisper_RotateKey_Action">Rotate Key</string>
     <string name="st_Whisper_RotateKey_Success">Encryption key rotated successfully</string>
+    <string name="st_Whisper_Info_KeyRefreshed">Security key refreshed automatically.</string>
     <string name="st_Whisper_RotateKey_Failed">Failed to rotate encryption key</string>
     <string name="st_Whisper_Bypass_ProtectionOff">Screenshot protection disabled</string>
     <string name="st_Whisper_Bypass_ProtectionOn">Screenshot protection enabled</string>

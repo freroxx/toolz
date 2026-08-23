@@ -2,11 +2,13 @@ package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -53,20 +55,26 @@ class WhisperOutgoingQueue @Inject constructor(
 
     /** Records that a message was permanently dropped so the UI can surface the loss. */
     fun noteDropped(clientId: String) {
-        // StateFlow update is lock-free; keep synchronous so callers don't need to be suspend.
-        _droppedClientIds.value = (_droppedClientIds.value + clientId).let { if (it.size > 200) it.toList().takeLast(200).toSet() else it }
+        // V2-FIX (reviewwhisper.md): read-modify-write via StateFlow.update — the old
+        // `_value = _value + x` pattern could lose concurrent drops.
+        _droppedClientIds.update { capDropped(it + clientId) }
     }
 
     /** Drop the whole outbox (account deletion). */
     suspend fun clearAll() = mutex.withLock {
         saveInternal(emptyList())
+        // V2-FIX (reviewwhisper.md): a wiped account must not keep surfacing stale
+        // drop notices from the previous account's outbox.
+        _droppedClientIds.update { emptySet() }
     }
 
     private suspend fun saveInternal(entries: List<WhisperQueuedMessage>) {
         val toPersist = if (entries.size > MAX_ENTRIES) {
-            val overflow = entries.dropLast(MAX_ENTRIES)
-            _droppedClientIds.value = (_droppedClientIds.value + overflow.map { it.clientId }).let { if (it.size > 200) it.toList().takeLast(200).toSet() else it }
-            entries.takeLast(MAX_ENTRIES)
+            // V2-FIX (reviewwhisper.md): retain the OLDEST entries instead of the newest so
+            // delivery order stays monotonic; the evicted newest go to the drop ledger.
+            val evicted = entries.drop(MAX_ENTRIES)
+            _droppedClientIds.update { capDropped(it + evicted.map { q -> q.clientId }) }
+            entries.take(MAX_ENTRIES)
         } else {
             entries
         }
@@ -74,13 +82,25 @@ class WhisperOutgoingQueue @Inject constructor(
         val encoded = json.encodeToString(toPersist)
         // commit() must survive process death, but never on Main — withContext(IO) keeps ANR-free
         // while still synchronous (commit returns only after fsync).
-        withContext(Dispatchers.IO) {
+        val ok = withContext(Dispatchers.IO) {
             prefs.edit().putString(KEY, encoded).commit()
+        }
+        if (!ok) {
+            // V2-FIX (reviewwhisper.md): a failed commit silently lost the queue before;
+            // mirror every affected client id into the drop ledger so the loss surfaces.
+            Log.w(TAG, "Outbox commit failed; ${toPersist.size} queued message(s) marked dropped")
+            _droppedClientIds.update { capDropped(it + toPersist.map { q -> q.clientId }) }
         }
     }
 
+    /** Keeps the in-memory drop ledger bounded. */
+    private fun capDropped(ids: Set<String>): Set<String> =
+        if (ids.size > MAX_DROPPED_LEDGER) ids.toList().takeLast(MAX_DROPPED_LEDGER).toSet() else ids
+
     private companion object {
+        const val TAG = "WhisperOutbox"
         const val KEY = "ciphertext_outbox"
         const val MAX_ENTRIES = 100
+        const val MAX_DROPPED_LEDGER = 200
     }
 }

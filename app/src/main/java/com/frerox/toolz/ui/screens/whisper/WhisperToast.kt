@@ -34,9 +34,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,10 +54,19 @@ enum class WhisperToastType {
 data class WhisperToastData(
     val message: String,
     val type: WhisperToastType = WhisperToastType.ERROR,
-    val id: Long = System.currentTimeMillis()
+    // V2-FIX L-?: dead `= System.currentTimeMillis()` default removed — show() always
+    // supplies the monotonic id, so the default only invited accidental duplicate ids.
+    val id: Long
 )
 
 @Stable
+/**
+ * Holds the toast queue for one Whisper screen.
+ *
+ * V2-FIX (main-thread confinement): this state is NOT thread-safe. [show], [dismiss] and
+ * the internal queue/counter MUST be called from the Android main thread (Compose UI);
+ * [currentToast] is a StateFlow so composition-side reads are always safe.
+ */
 class WhisperToastState {
     // Monotonic id so two toasts fired within the same millisecond still trigger
     // distinct (re)composition of the toast host animation.
@@ -96,7 +108,9 @@ fun WhisperToastHost(
     hostState: WhisperToastState,
     modifier: Modifier = Modifier
 ) {
-    val currentToast by hostState.currentToast.collectAsState()
+    // V2-FIX L-?: lifecycle-aware collection — stops observing while the UI is stopped
+    // instead of ticking the auto-dismiss timer against a stopped composition.
+    val currentToast by hostState.currentToast.collectAsStateWithLifecycle()
     // The AnimatedVisibility content stays composed for the whole exit transition, but
     // currentToast is already null by then; keep the last non-null toast so the exit
     // animation renders the actual message instead of an empty container.
@@ -193,7 +207,9 @@ private fun WhisperToastItem(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Close,
-                    contentDescription = "Dismiss",
+                    // V2-FIX L-?: hardcoded "Dismiss" replaced with an existing generic
+                    // Whisper resource — no new string id needed.
+                    contentDescription = stringResource(R.string.st_Whisper_Close),
                     tint = contentColor.copy(alpha = 0.7f),
                     modifier = Modifier.size(18.dp)
                 )

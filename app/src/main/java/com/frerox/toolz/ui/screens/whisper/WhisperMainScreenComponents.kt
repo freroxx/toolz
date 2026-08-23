@@ -59,12 +59,16 @@ fun WhisperOptionsListItem(
     onClick: () -> Unit,
     labelColor: Color = MaterialTheme.colorScheme.onSurface,
     iconTint: Color = MaterialTheme.colorScheme.primary,
+    // V2-FIX M-H4: async-resolved rows (e.g. block state) render disabled/indeterminate
+    // until their state lands instead of flashing a wrong default.
+    enabled: Boolean = true,
 ) {
     ListItem(
         leadingContent = { Icon(leadingIcon, null, tint = iconTint) },
         modifier = Modifier
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
     ) {
         Text(label, fontWeight = FontWeight.Medium, color = labelColor)
     }
@@ -169,18 +173,25 @@ fun DiscoverSkeleton() {
 @Composable
 fun String.formatTimestamp(): String {
     val yesterday = stringResource(R.string.st_Whisper_Chat_Yesterday)
-    return try {
-        val dt = java.time.OffsetDateTime.parse(this)
-        val local = dt.atZoneSameInstant(java.time.ZoneId.systemDefault())
-        val now = java.time.ZonedDateTime.now()
-        val days = java.time.temporal.ChronoUnit.DAYS.between(local.toLocalDate(), now.toLocalDate())
-        when {
-            days == 0L -> "${local.hour.toString().padStart(2, '0')}:${local.minute.toString().padStart(2, '0')}"
-            days == 1L -> yesterday
-            days < 7L -> local.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
-            else -> "${local.dayOfMonth}/${local.monthValue}"
-        }
-    } catch (_: Exception) { "" }
+    // V2-FIX M-M7: timestamps are now localized (device locale via SHORT date/time styles)
+    // and parsed once per timestamp value instead of on every recomposition.
+    return remember(this, yesterday) {
+        try {
+            val dt = java.time.OffsetDateTime.parse(this)
+            val local = dt.atZoneSameInstant(java.time.ZoneId.systemDefault())
+            val now = java.time.ZonedDateTime.now()
+            val days = java.time.temporal.ChronoUnit.DAYS.between(local.toLocalDate(), now.toLocalDate())
+            val locale = java.util.Locale.getDefault()
+            when {
+                days == 0L ->
+                    local.format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT).withLocale(locale))
+                days == 1L -> yesterday
+                days < 7L -> local.format(java.time.format.DateTimeFormatter.ofPattern("EEE", locale))
+                else ->
+                    local.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.SHORT).withLocale(locale))
+            }
+        } catch (_: Exception) { "" }
+    }
 }
 
 internal fun java.io.InputStream.readBounded(maxBytes: Int): ByteArray {

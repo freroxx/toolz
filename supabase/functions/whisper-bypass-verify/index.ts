@@ -15,7 +15,9 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import {
   timingSafeEqual,
 } from "https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts";
-import {
+// V2-FIX (reviewwhisper.md): module-level declarations were spliced INSIDE the import
+// braces below (invalid syntax); the helper now lives under the completed import.
+import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
 
 // Lazily-built JWKS verifier: building at module-eval time would throw on a cold
 // start if SUPABASE_URL were ever absent, turning EVERY request into a 500.
@@ -28,9 +30,6 @@ function jwks() {
   }
   return _remoteJWKS;
 }
-  createRemoteJWKSet,
-  jwtVerify,
-} from "https://esm.sh/jose@5.9.6";
 
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_PASSWORD_LENGTH = 256;
@@ -96,12 +95,18 @@ serve(async (request) => {
     return json({ ok: false }, 200); // Don't distinguish malformed from wrong — same verdict shape.
   }
 
-  // Identity for rate limiting: verified JWT sub when available, else client IP
-  // (x-forwarded-for is set by the Supabase edge gateway).
+  // Identity for rate limiting: verified JWT sub when available, else client IP.
+  // V2-FIX (reviewwhisper.md): use the LAST (rightmost) X-Forwarded-For entry — the
+  // LEFTMOST entry is client-spoofable (anyone can send `X-Forwarded-For: 1.2.3.4` and
+  // proxies typically append), so it would let attackers rotate fake identities to
+  // dodge the limiter. The rightmost entry is the one appended by the trusted edge
+  // proxy; fall back to x-real-ip, then "unknown".
   const authHeader = request.headers.get("Authorization") ?? "";
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   const sub = bearer ? await extractVerifiedSub(bearer) : null;
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const rightmostXff = forwardedFor?.split(",").pop()?.trim() ?? "";
+  const ip = rightmostXff || request.headers.get("x-real-ip")?.trim() || "unknown";
   const identity = sub ?? `ip:${ip}`;
 
   const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -111,9 +116,10 @@ serve(async (request) => {
   // M-4 FIX (reviewwhisper.md): the old check-then-insert (SELECT window, compare,
   // INSERT attempt) was two independent REST calls and raced under parallel guesses.
   // The atomic RPC (migration 20260826) performs count + lockout + insert + cleanup in
-  // ONE transaction; it raises P0002 when the identity is locked out. The verdict is
-  // computed BEFORE the call so the correct password also consumes a slot — guessing
-  // campaigns burn their budget whether or not a guess lands mid-window.
+  // ONE transaction; it raises P0002 when the identity is locked out.
+  // V2-FIX (reviewwhisper.md): the previous comment claimed a successful attempt also
+  // consumes lockout budget — wrong: the SQL counts only `ok = false` rows toward the
+  // threshold, so correct passwords never burn the failure budget.
   try {
     const match = await passwordsMatch(candidate, expectedSecret);
 

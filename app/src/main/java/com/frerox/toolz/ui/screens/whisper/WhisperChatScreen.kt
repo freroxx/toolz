@@ -43,6 +43,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +79,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +87,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
@@ -93,12 +98,15 @@ import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -140,35 +148,51 @@ fun WhisperChatScreen(
     // E2EE content never appears in screenshots or recent-app previews.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
 
+    // V2-FIX (reviewwhisper.md) V-1: read receipts only fire while the chat is actually
+    // visible — the VM gates every mark-read path behind this ON_START/ON_STOP signal.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { viewModel.onChatVisibilityChanged(true) }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.onChatVisibilityChanged(false) }
+
+    // S-6 FIX: busy flag keeps the bypass dialog open (and re-entry blocked) until the
+    // verdict arrives, so it can no longer close before success/failure is known.
+    var verifyingBypass by remember { mutableStateOf(false) }
+
     if (showBypassDialog) {
         // M-17 FIX (reviewwhisper.md): password required to enable AND disable; unified copy.
         WhisperScreenshotBypassDialog(
-            onDismiss = { showBypassDialog = false },
+            onDismiss = { if (!verifyingBypass) showBypassDialog = false },
             onConfirm = { password ->
-                scope.launch {
-                    // FIX: surface WHY verification failed instead of blaming the password
-                    // for lockouts/service errors.
-                    when (verifyWhisperBypass(password)) {
-                        WhisperBypassVerdict.Granted -> {
-                            val enabling = !screenshotBypassEnabled
-                            viewModel.setScreenshotBypass(enabling)
-                            toastState.show(
-                                context.getString(
-                                    if (enabling) R.string.st_Whisper_Bypass_ProtectionOff
-                                    else R.string.st_Whisper_Bypass_ProtectionOn
-                                ),
-                                WhisperToastType.SUCCESS
-                            )
+                if (!verifyingBypass) {
+                    verifyingBypass = true
+                    scope.launch {
+                        // FIX: surface WHY verification failed instead of blaming the password
+                        // for lockouts/service errors.
+                        when (verifyWhisperBypass(password)) {
+                            WhisperBypassVerdict.Granted -> {
+                                val enabling = !screenshotBypassEnabled
+                                viewModel.setScreenshotBypass(enabling)
+                                toastState.show(
+                                    context.getString(
+                                        // S-6 FIX: these two branches were swapped — enabling
+                                        // announced "disabled" and vice versa.
+                                        if (enabling) R.string.st_Whisper_Bypass_ProtectionOn
+                                        else R.string.st_Whisper_Bypass_ProtectionOff
+                                    ),
+                                    WhisperToastType.SUCCESS
+                                )
+                            }
+                            WhisperBypassVerdict.Denied ->
+                                toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.RateLimited ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
+                            WhisperBypassVerdict.Unavailable ->
+                                toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
                         }
-                        WhisperBypassVerdict.Denied ->
-                            toastState.show(context.getString(R.string.st_Whisper_Error_InvalidCredentials), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.RateLimited ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_RateLimited), WhisperToastType.ERROR)
-                        WhisperBypassVerdict.Unavailable ->
-                            toastState.show(context.getString(R.string.st_Whisper_Bypass_Unavailable), WhisperToastType.ERROR)
+                        // S-6 FIX: close only AFTER the verdict was handled.
+                        verifyingBypass = false
+                        showBypassDialog = false
                     }
                 }
-                showBypassDialog = false
             }
         )
     }
@@ -191,6 +215,12 @@ fun WhisperChatScreen(
     // Index 0 is now the BOTTOM (newest message).
     val reversedMessages = remember(messages) { messages.asReversed() }
 
+    // V2-FIX (reviewwhisper.md) M-5/V-8: quoted-sender names are resolved from ids at
+    // render time; legacy persisted names are only a fallback (handled in MessageBubble).
+    val messagesById = remember(messages) { messages.associateBy { it.id } }
+    val youLabel = stringResource(R.string.st_Whisper_You)
+    val partnerLabel = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault)
+
     val density = LocalDensity.current
     val isAtBottom by remember(density) {
         derivedStateOf {
@@ -200,6 +230,23 @@ fun WhisperChatScreen(
             listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset < with(density) { 8.dp.toPx() }
         }
     }
+
+    // V2-FIX (reviewwhisper.md) V-3: load one older history page when the user scrolls
+    // near the FAR end of the reverse-layout list (high indices = oldest messages).
+    // Re-entry is guarded inside loadOlderMessages().
+    val isLoadingOlder by viewModel.isLoadingOlder.collectAsStateWithLifecycle()
+    LaunchedEffect(isLoadingOlder) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { firstVisible ->
+                val total = listState.layoutInfo.totalItemsCount
+                if (total > 0 && firstVisible >= total - 8 && !isLoadingOlder) {
+                    viewModel.loadOlderMessages()
+                }
+            }
+    }
+
+    // Toast host is anchored to the INPUT BAR height instead of a fixed 80dp guess.
+    var inputBarHeightPx by remember { mutableIntStateOf(0) }
 
     // Auto-scroll when new messages arrive
     val newestMessageId = remember(messages) { messages.lastOrNull()?.id }
@@ -565,7 +612,15 @@ fun WhisperChatScreen(
                                         isMine = isMine,
                                         isPending = isPending,
                                         isHighlighted = uiState.matchingMessageIds.contains(message.id),
-                                        partnerName = uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault),
+                                        partnerName = partnerLabel,
+                                        // V2-FIX (reviewwhisper.md) V-8: id-based resolution of the
+                                        // quoted sender; null when the target row is unavailable so
+                                        // legacy persisted names still render as fallback.
+                                        resolveReplySenderName = { targetId ->
+                                            messagesById[targetId]?.let { target ->
+                                                if (target.senderId == viewModel.myUserId) youLabel else partnerLabel
+                                            }
+                                        },
                                         decryptedImageBytes = uiState.decryptedImageBytes[message.id],
                                         onLoadImage = { viewModel.loadEncryptedImage(message) },
                                         onImageClick = { bytes, mime ->
@@ -589,7 +644,20 @@ fun WhisperChatScreen(
 
                                 if (showDateSeparator) {
                                     Box(modifier = Modifier.animateItem()) {
-                                        DateSeparator(message.createdAt.extractDate())
+                                        DateSeparator(message.createdAt)
+                                    }
+                                }
+                            }
+
+                            // V2-FIX (reviewwhisper.md) V-3: spinner at the far (oldest) end
+                            // while the previous page loads.
+                            if (isLoadingOlder) {
+                                item(key = "whisper_loading_older") {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                                     }
                                 }
                             }
@@ -652,13 +720,20 @@ fun WhisperChatScreen(
                 }
 
                 // Input bar
-                val draftText by viewModel.draftText.collectAsStateWithLifecycle()
+                // S-1 FIX (reviewwhisper.md): the draft StateFlow is collected INSIDE the
+                // wrapper composable, so a keystroke recomposes only this subtree instead
+                // of the whole Scaffold/column (the old inline collect invalidated every
+                // banner, list and sheet read on each character).
                 var sendPulse by remember { mutableIntStateOf(0) }
                 LaunchedEffect(messages.size) { if (messages.lastOrNull()?.isPending == true) sendPulse++ }
-                
-                MessageInputBar(
+                // Low FIX: remember the (previously unstable) lambdas handed to the bar.
+                val onDraftChanged = remember { { text: String -> viewModel.updateDraft(text) } }
+                val onSend = remember { { text: String -> viewModel.sendMessage(text) } }
+                val onImageClick = remember { { showImageOptions = true } }
+
+                WhisperDraftBoundInputBar(
+                    draftFlow = viewModel.draftText,
                     enabled = uiState.friendStatus == FriendStatus.ACCEPTED && !uiState.isBlockedByMe && !uiState.isBlockedByOther,
-                    draftText = draftText,
                     placeholderText = when {
                         uiState.isBlockedByOther -> stringResource(R.string.st_Whisper_Chat_InputBlocked)
                         uiState.isBlockedByMe -> stringResource(R.string.st_Whisper_Chat_InputUnblock)
@@ -666,16 +741,24 @@ fun WhisperChatScreen(
                         else -> stringResource(R.string.st_Whisper_Chat_InputPlaceholder)
                     },
                     pulseTrigger = sendPulse,
-                    onDraftChanged = { viewModel.updateDraft(it) },
-                    onSend = { viewModel.sendMessage(it) },
-                    onImage = { showImageOptions = true },
                     isUploadingImage = uiState.isUploadingAttachment,
+                    modifier = Modifier.onSizeChanged { inputBarHeightPx = it.height },
+                    onDraftChanged = onDraftChanged,
+                    onSend = onSend,
+                    onImage = onImageClick,
                 )
             }
         }
     }
 
-        WhisperToastHost(hostState = toastState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
+        WhisperToastHost(
+            hostState = toastState,
+            // Low FIX: pad relative to the real input-bar height, not a fixed 80dp.
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = with(density) { inputBarHeightPx.toDp() } + 12.dp)
+        )
     }
 
     // Sheets & Dialogs
@@ -917,7 +1000,7 @@ private fun ReplyPreviewBar(
 private fun QuickReactionDialog(onDismiss: () -> Unit, onEmojiSelected: (String) -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp), title = { Text(stringResource(R.string.st_Whisper_React)) },
         text = { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { Text(it, fontSize = 24.sp, modifier = Modifier.clickable { onEmojiSelected(it) }) }
+            WHISPER_QUICK_REACTIONS.forEach { Text(it, fontSize = 24.sp, modifier = Modifier.clickable { onEmojiSelected(it) }) }
         }}, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Cancel)) } })
 }
 
@@ -1048,7 +1131,7 @@ private fun DeleteMessageSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                listOf("❤️", "😂", "👍", "😮", "😢", "🔥").forEach { emoji ->
+                WHISPER_QUICK_REACTIONS.forEach { emoji ->
                     Surface(
                         onClick = { onReact(emoji) },
                         shape = CircleShape,
@@ -1208,10 +1291,12 @@ private fun ImageExpirySheet(onDismiss: () -> Unit, onSelect: (Long?) -> Unit) {
                 ) {
                     Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
                 }
-                Column {
-                    Text(stringResource(R.string.cd_Whisper_SendImage), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text(stringResource(R.string.st_Whisper_ImageExpiryDesc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                 Column {
+                     // Low FIX: a content-description resource was reused as this sheet's
+                     // TITLE; the dedicated st_Whisper_ImageExpiry_Title now covers it.
+                     Text(stringResource(R.string.st_Whisper_ImageExpiry_Title), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                     Text(stringResource(R.string.st_Whisper_ImageExpiryDesc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                 }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -1368,10 +1453,13 @@ private fun FriendGateBanner(friendStatus: FriendStatus, iAmRequester: Boolean, 
 }
 
 @Composable
-private fun DateSeparator(date: String) {
+private fun DateSeparator(isoTimestamp: String) {
+    // S-5 FIX (reviewwhisper.md): localized SHORT date instead of the raw ISO
+    // "YYYY-MM-DD" slice; formatter remembered per spec (immutable, cheap to share).
+    val dateLabel = remember(isoTimestamp) { isoTimestamp.formatWhisperDate() }
     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            Text(date, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
+            Text(dateLabel, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -1384,6 +1472,7 @@ private fun MessageBubble(
     isPending: Boolean,
     isHighlighted: Boolean,
     partnerName: String,
+    resolveReplySenderName: (String) -> String?,
     decryptedImageBytes: ByteArray?,
     onLoadImage: () -> Unit,
     onImageClick: (ByteArray, String) -> Unit,
@@ -1398,9 +1487,30 @@ private fun MessageBubble(
     // Gesture hints for accessibility (resolved once; the semantics block isn't composable).
     val messageSemanticsCd = stringResource(R.string.st_Whisper_MessageSemantics)
 
+    // V2-FIX (reviewwhisper.md) M-5/V-8: prefer id-based resolution of the quoted sender;
+    // fall back to the legacy persisted name for old rows that carry one.
+    val quotedSenderLabel = message.replyToId?.let(resolveReplySenderName)
+        ?: message.replyToSenderName
+        ?: stringResource(R.string.st_Whisper_UserDefault)
+
+    // S-2 FIX (reviewwhisper.md): search-highlighted bubbles flip to primary/onPrimary so
+    // the highlight is high-contrast; every nested content color derives from this pair.
+    val bubbleContainer = if (isHighlighted) MaterialTheme.colorScheme.primary
+        else if (isMine) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh
+    val bubbleContentColor = if (isHighlighted) MaterialTheme.colorScheme.onPrimary
+        else if (isMine) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+
     // L-7 FIX (reviewwhisper.md): the swipe accumulated only positive drag deltas, so in
     // RTL locales the gesture was effectively dead. The delta is now mirrored for RTL.
     val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+
+    // S-4 FIX (reviewwhisper.md): the reply-swipe thresholds were raw pixel values
+    // (45px/80px ≈ 15dp/27dp on a 3x display), so the gesture needed a different finger
+    // travel on every density. They are density-stable dp now.
+    val swipeMaxPx = with(LocalDensity.current) { SWIPE_REPLY_MAX.toPx() }
+    val swipeTriggerPx = with(LocalDensity.current) { SWIPE_REPLY_TRIGGER.toPx() }
 
     // ── SLIDE TO REPLY STATE ──
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -1437,13 +1547,13 @@ private fun MessageBubble(
             Box(
                 modifier = Modifier
                     .offset { IntOffset(animatedOffsetX.roundToInt(), 0) }
-                    .widthIn(max = 280.dp)
+                    // Low FIX: bubble width is fraction-based (85% of the row) with a hard
+                    // 320dp ceiling — the old fixed 280.dp max ignored both screen size and
+                    // the swipe affordance. weight(fill = false) hugs short content.
+                    .weight(0.85f, fill = false)
+                    .widthIn(max = 320.dp)
                     .clip(bubbleShape)
-                    .background(
-                        if (isHighlighted) MaterialTheme.colorScheme.primary 
-                        else if (isMine) MaterialTheme.colorScheme.primaryContainer 
-                        else MaterialTheme.colorScheme.surfaceContainerHigh
-                    )
+                    .background(bubbleContainer)
                     .alpha(bubbleAlpha)
                     .combinedClickable(
                         onClick = { }, // Click no longer replies to allow for slide
@@ -1452,18 +1562,18 @@ private fun MessageBubble(
                     )
                     // Surface the swipe/double-tap gestures to screen readers.
                     .semantics { contentDescription = messageSemanticsCd }
-                    .pointerInput(layoutDirection) {
+                    .pointerInput(layoutDirection, swipeMaxPx, swipeTriggerPx) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { _, dragAmount ->
                                 // L-7: mirror the delta under RTL so the swipe always runs
                                 // toward the reply affordance side.
                                 val effective = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) -dragAmount else dragAmount
                                 if (effective > 0) {
-                                    offsetX = (offsetX + effective).coerceIn(0f, 80f)
+                                    offsetX = (offsetX + effective).coerceIn(0f, swipeMaxPx)
                                 }
                             },
                             onDragEnd = {
-                                if (offsetX > 45f) {
+                                if (offsetX >= swipeTriggerPx) {
                                     onReply()
                                 }
                                 offsetX = 0f
@@ -1473,14 +1583,23 @@ private fun MessageBubble(
                     }
                     .padding(12.dp)
             ) {
+                // S-2 FIX: nested content inherits onPrimary while highlighted (quote texts,
+                // timestamp, image-state rows) instead of scheme defaults tuned for surfaces.
+                CompositionLocalProvider(LocalContentColor provides bubbleContentColor) {
                 Column {
                     if (message.replyToContent != null) {
-                        Surface(color = Color.Black.copy(0.05f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(bottom = 4.dp).clickable { message.replyToId?.let { onQuotedClick(it) } }) {
+                        // S-2 FIX: on a primary-highlighted bubble the old black@5% quote
+                        // tint is invisible — switch to an onPrimary-based tint + accent.
+                        Surface(
+                            color = if (isHighlighted) bubbleContentColor.copy(alpha = 0.18f) else Color.Black.copy(0.05f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.padding(bottom = 4.dp).clickable { message.replyToId?.let { onQuotedClick(it) } }
+                        ) {
                             Row(Modifier.padding(8.dp)) {
-                                Box(Modifier.width(2.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+                                Box(Modifier.width(2.dp).fillMaxHeight().background(if (isHighlighted) bubbleContentColor else MaterialTheme.colorScheme.primary))
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text(message.replyToSenderName ?: stringResource(R.string.st_Whisper_UserDefault), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(quotedSenderLabel, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     // Image replies are flagged with the attachment prefix by the ViewModel
                                     // (locale-independent, model-based) instead of a display-string sentinel.
                                     val isImage = message.replyToContent?.startsWith(WhisperImageAttachment.MESSAGE_PREFIX) == true
@@ -1504,7 +1623,8 @@ private fun MessageBubble(
                         Text(
                             if (isMine) stringResource(R.string.st_Whisper_YouDeleted) else stringResource(R.string.st_Whisper_PartnerDeleted, partnerName),
                             fontStyle = FontStyle.Italic,
-                            color = (if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f)
+                            // S-2 FIX: derive from the bubble's content color (onPrimary when highlighted).
+                            color = bubbleContentColor.copy(alpha = 0.6f)
                         )
                     } else {
                         val attachment = WhisperImageAttachment.fromMessageContent(message.content)
@@ -1581,7 +1701,8 @@ private fun MessageBubble(
                         val parsedContent = remember(message.content) { message.content.parseMarkdown() }
                         Text(
                             text = parsedContent,
-                            color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            // S-2 FIX: onPrimary while search-highlighted (AA contrast).
+                            color = bubbleContentColor
                         )
                         }
                     }
@@ -1595,29 +1716,57 @@ private fun MessageBubble(
                                 if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
                                 null,
                                 Modifier.size(14.dp),
-                                tint = if (message.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                tint = if (isHighlighted) bubbleContentColor.copy(alpha = 0.8f)
+                                    else if (message.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                             )
                         }
                     }
+                }
                 }
             }
         }
         if (message.reactions.isNotEmpty()) {
             Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                message.reactions.forEach { r -> 
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = true,
-                        enter = scaleIn() + fadeIn(),
-                        exit = scaleOut() + fadeOut()
-                    ) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.clickable { onReactionClick(r.emoji) }) {
-                            Text("${r.emoji} ${if (r.count > 1) r.count else ""}", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 10.sp)
-                        }
+                message.reactions.forEach { r ->
+                    // Low FIX: the AnimatedVisibility here was a no-op (visible = true
+                    // constant) that still allocated animation state per pill.
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.clickable { onReactionClick(r.emoji) }) {
+                        Text("${r.emoji} ${if (r.count > 1) r.count else ""}", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 10.sp)
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * S-1 FIX (reviewwhisper.md): isolates the draft StateFlow collection. Only THIS subtree
+ * recomposes per keystroke; the parent Scaffold/column never sees draft emissions.
+ */
+@Composable
+private fun WhisperDraftBoundInputBar(
+    draftFlow: StateFlow<String>,
+    enabled: Boolean,
+    placeholderText: String,
+    pulseTrigger: Int,
+    isUploadingImage: Boolean,
+    modifier: Modifier = Modifier,
+    onDraftChanged: (String) -> Unit,
+    onSend: (String) -> Unit,
+    onImage: () -> Unit,
+) {
+    val draftText by draftFlow.collectAsStateWithLifecycle()
+    MessageInputBar(
+        modifier = modifier,
+        enabled = enabled,
+        draftText = draftText,
+        placeholderText = placeholderText,
+        pulseTrigger = pulseTrigger,
+        onDraftChanged = onDraftChanged,
+        onSend = onSend,
+        onImage = onImage,
+        isUploadingImage = isUploadingImage,
+    )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -1631,6 +1780,7 @@ private fun MessageInputBar(
     onSend: (String) -> Unit,
     onImage: () -> Unit,
     isUploadingImage: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val performanceMode = LocalPerformanceMode.current
 
@@ -1653,7 +1803,7 @@ private fun MessageInputBar(
     )
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, bottom = 8.dp, top = 4.dp),
         // NOTE: no navigationBarsPadding here — the parent Column already applies
@@ -1713,7 +1863,12 @@ private fun MessageInputBar(
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     maxLines = 5,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    // Low FIX: hardware/IME send action — the keyboard's Send key submits.
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Send
+                    ),
+                    keyboardActions = KeyboardActions(onSend = { if (hasText) onSend(draftText) }),
                     decorationBox = { innerTextField ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (draftText.isEmpty()) {
@@ -1783,15 +1938,42 @@ private fun MessageInputBar(
 /** Extract date string (YYYY-MM-DD) from ISO timestamp */
 fun String.extractDate(): String = if (length >= 10) take(10) else ""
 
+// Low FIX: one shared quick-reaction palette for QuickReactionDialog AND DeleteMessageSheet
+// (the lists used to be duplicated literals that could drift apart).
+private val WHISPER_QUICK_REACTIONS = listOf("❤️", "😂", "👍", "😮", "😢", "🔥")
+
+// S-4 FIX (reviewwhisper.md): density-stable reply-swipe thresholds. The old raw pixel
+// values (45px/80px) equalled ~15dp/27dp on a 3x device and were far too twitchy/lax
+// elsewhere; dp keeps the gesture identical across densities.
+private val SWIPE_REPLY_TRIGGER = 16.dp
+private val SWIPE_REPLY_MAX = 28.dp
+
+/**
+ * S-5 FIX (reviewwhisper.md): locale-aware, zone-aware formatters. DateTimeFormatter is
+ * immutable and thread-safe, so ONE shared instance per style is used instead of the old
+ * per-call ofPattern("HH:mm") allocation; ofLocalizedTime(SHORT) also respects 12h/24h.
+ */
+private val whisperTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+private val whisperDateFormatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
+
 fun String.formatWhisperTime(): String {
     return try {
         val instant = Instant.parse(this)
         val dateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault())
-        dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))
+        dateTime.format(whisperTimeFormatter)
     } catch (e: Exception) {
         // L-10 FIX (reviewwhisper.md): show a raw fallback instead of a blank cell when
         // parsing fails (e.g. legacy rows with non-ISO timestamps).
         if (length >= 16) take(16).replace('T', ' ') else this
+    }
+}
+
+/** S-5 FIX: localized SHORT date (system zone via the parsed calendar date). */
+private fun String.formatWhisperDate(): String {
+    return try {
+        LocalDate.parse(extractDate()).format(whisperDateFormatter)
+    } catch (e: Exception) {
+        extractDate() // legacy fallback: raw YYYY-MM-DD slice
     }
 }
 
@@ -1877,6 +2059,11 @@ private fun WhisperFullScreenImageViewer(
     val scope = rememberCoroutineScope()
     val screen = LocalConfiguration.current
     val density = LocalDensity.current
+
+    // S-3 FIX (reviewwhisper.md): saving an E2EE image exports it OUTSIDE the encryption
+    // boundary (system gallery/MediaStore). The user must opt into that explicitly — the
+    // download button now opens a warning dialog instead of saving silently.
+    var showSaveToGalleryConfirm by remember { mutableStateOf(false) }
     // Decode off the main thread — a full-screen decode can take tens of ms and must
     // never run during composition. Configuration bounds are dp; convert to px first
     // because decodeBoundedBitmap treats its bounds as pixels.
@@ -1970,14 +2157,8 @@ private fun WhisperFullScreenImageViewer(
                 ToolzExpressiveIconButton(
                     onClick = {
                         haptic.click()
-                        scope.launch {
-                            val saved = saveImageToGallery(context, imageBytes, mimeType)
-                            if (saved) {
-                                onShowToast(context.getString(R.string.st_Whisper_ImageSaved), WhisperToastType.SUCCESS)
-                            } else {
-                                onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
-                            }
-                        }
+                        // S-3 FIX: confirm first — the copy lands outside the E2EE boundary.
+                        showSaveToGalleryConfirm = true
                     },
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = Color.Black.copy(alpha = 0.4f),
@@ -1988,6 +2169,38 @@ private fun WhisperFullScreenImageViewer(
                 }
             }
         }
+    }
+
+    // S-3 FIX: save-to-gallery warning — the image leaves the E2EE boundary, so the
+    // user must confirm explicitly.
+    if (showSaveToGalleryConfirm) {
+        AlertDialog(
+            onDismissRequest = { showSaveToGalleryConfirm = false },
+            title = { Text(stringResource(R.string.st_Whisper_SaveToGallery_Title)) },
+            text = {
+                Text(stringResource(R.string.st_Whisper_SaveToGallery_Desc))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSaveToGalleryConfirm = false
+                    scope.launch {
+                        val saved = saveImageToGallery(context, imageBytes, mimeType)
+                        if (saved) {
+                            onShowToast(context.getString(R.string.st_Whisper_ImageSaved), WhisperToastType.SUCCESS)
+                        } else {
+                            onShowToast(context.getString(R.string.st_Whisper_Error_Generic), WhisperToastType.ERROR)
+                        }
+                    }
+                }) {
+                    Text(stringResource(R.string.st_Whisper_Save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveToGalleryConfirm = false }) {
+                    Text(stringResource(R.string.st_Whisper_Cancel))
+                }
+            }
+        )
     }
 }
 
