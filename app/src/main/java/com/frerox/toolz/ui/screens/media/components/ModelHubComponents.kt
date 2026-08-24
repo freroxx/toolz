@@ -100,7 +100,20 @@ fun ModelHubContent(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(BackgroundModel.entries) { model ->
+            // Grouped by task so users find the right engine instantly
+            item { SectionHeader("People & selfies") }
+            items(peopleModels) { model ->
+                ModelCard(
+                    model = model,
+                    isSelected = selectedModel == model,
+                    isDownloaded = downloadedIds.contains(model.id),
+                    isDownloading = downloadingId == model.id,
+                    onClick = { onModelSelect(model) },
+                    onDelete = { onDeleteClick(model) },
+                )
+            }
+            item { SectionHeader("Objects & products") }
+            items(objectModels) { model ->
                 ModelCard(
                     model = model,
                     isSelected = selectedModel == model,
@@ -267,17 +280,37 @@ private fun shortName(model: BackgroundModel): String = when (model.id) {
     "selfie_landscape" -> "Group"
     "selfie_multiclass" -> "Detail+"
     "deeplabv3_objects" -> "Objects"
-    "modnet_hd" -> "HD Matte"
+    "modnet_hd" -> "Portrait HD"
     else -> model.displayName
 }
 
 private fun speedLabel(model: BackgroundModel): String = when (model.id) {
     "selfie_portrait" -> "Instant"
     "selfie_landscape" -> "Instant"
-    "selfie_multiclass" -> "Finest detail"
+    "selfie_multiclass" -> "Hair & clothing detail"
     "deeplabv3_objects" -> "Fast"
-    "modnet_hd" -> "Highest quality"
+    "modnet_hd" -> "Best quality for people"
     else -> "Fast"
+}
+
+private val peopleModels = listOf(
+    BackgroundModel.SELFIE_PORTRAIT,
+    BackgroundModel.MODNET_HD,
+    BackgroundModel.SELFIE_MULTICLASS,
+    BackgroundModel.SELFIE_LANDSCAPE,
+)
+
+private val objectModels = listOf(BackgroundModel.DEEPLABV3_OBJECTS)
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Black,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+    )
 }
 
 private fun iconFor(model: BackgroundModel): ImageVector = when (model.id) {

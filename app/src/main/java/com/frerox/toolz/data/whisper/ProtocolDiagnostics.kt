@@ -37,6 +37,22 @@ object ProtocolDiagnostics {
         Log.d(TAG, event)
     }
 
+    /**
+     * V6-R6: spam control for hot paths (render loops re-decrypt whole history and
+     * used to flood the 60-line ring buffer, crowding out the lines that matter).
+     * Emits at most one line per [intervalMs] per [key], with a running total.
+     */
+    fun logThrottled(key: String, counterKey: String, intervalMs: Long = 10_000, event: String) {
+        val now = System.currentTimeMillis()
+        val last = lastSpamAt[key]
+        if (last == null || now - last >= intervalMs) {
+            lastSpamAt[key] = now
+            log("$event (total=${counters[counterKey] ?: 0})")
+        }
+    }
+
+    private val lastSpamAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     fun increment(counter: String) {
         counters.merge(counter, 1L, Long::plus)
     }

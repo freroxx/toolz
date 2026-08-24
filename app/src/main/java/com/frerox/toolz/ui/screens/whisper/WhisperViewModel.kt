@@ -133,10 +133,15 @@ class WhisperViewModel @Inject constructor(
                 // (reinstall, interrupted rotation), republish immediately so partners'
                 // messages open out of the box instead of triggering the rotate+verify
                 // dance. Idempotent; no-op when already in sync.
+                // V6-R6 (#4): ordering guarantee — runs AFTER getMyProfile() completes
+                // (not a blind timer), so the divergence heal and this republish can't
+                // race; a failed profile-load heal is retried here.
                 viewModelScope.launch {
-                    kotlinx.coroutines.delay(4_000) // let auth/profile settle first
-                    runCatching { repository.republishLocalKeyIfStale() }
-                        .onFailure { WhisperErrorMapper.log(it, "startupRepublish") }
+                    runCatching {
+                        repository.getMyProfile().onSuccess {
+                            repository.republishLocalKeyIfStale()
+                        }
+                    }.onFailure { WhisperErrorMapper.log(it, "startupRepublish") }
                 }
                     loadAll()
                     subscribeToMessages()

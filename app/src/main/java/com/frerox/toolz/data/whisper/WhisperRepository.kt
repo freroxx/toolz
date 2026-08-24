@@ -453,10 +453,13 @@ class WhisperRepository @Inject constructor(
         }
 
         // Every partner public key we might need to derive with, most-likely-first.
+        // V6-R7: the envelope's IN-BAND sender key joins the trial set — delivery no
+        // longer depends on any server-stored view of the partner being fresh.
         val peerCandidates = buildList {
             add(peerKeyFor(partnerId))
             add(extraFreshPeerKey)
             add(peerKeys.value[partnerId])
+            add(WhisperEnvelope.inBandSenderKey(rawContent))
         }.filterNotNull().distinct()
 
         val myKid = WhisperEnvelope.ownKid(crypto)
@@ -479,8 +482,11 @@ class WhisperRepository @Inject constructor(
 
         if (ladderResult == null) {
             ProtocolDiagnostics.increment("envelope.locked")
-            ProtocolDiagnostics.log(
-                "envelope locked: entries=${entries.map { it.first }} peers=${peerCandidates.map { WhisperEnvelope.keyId(it) }} own=$myKid sentByMe=$sentByMe",
+            // V6-R6: throttled — render loops re-decrypt whole history and this line
+            // used to flood the 60-line ring buffer, crowding out keystate/rt.* lines.
+            ProtocolDiagnostics.logThrottled(
+                "envLocked", "envelope.locked",
+                event = "envelope locked: entries=${entries.map { it.first }} peers=${peerCandidates.map { WhisperEnvelope.keyId(it) }} own=$myKid sentByMe=$sentByMe",
             )
             // V6-R6 (#2): convergence trigger — an incoming envelope sealed to a kid
             // that is NOT our current one means the partner used a stale copy of OUR
@@ -676,7 +682,11 @@ class WhisperRepository @Inject constructor(
                 extraFreshPeerKey = extraFresh ?: peerKey,
             )
         }.getOrNull()
-        if (decrypted == null) ProtocolDiagnostics.increment("decrypt.locked")
+        if (decrypted == null) {
+            // V6-R6: throttled — see envelope.locked note above.
+            ProtocolDiagnostics.increment("decrypt.locked")
+            ProtocolDiagnostics.logThrottled("decryptLocked", "decrypt.locked", event = "decrypt locked (cached row)")
+        }
         return copy(content = decrypted ?: oldKeyPlaceholder())
     }
 
@@ -810,9 +820,14 @@ class WhisperRepository @Inject constructor(
                 }
                 st == io.github.jan.supabase.realtime.RealtimeChannel.Status.UNSUBSCRIBED &&
                     wasSubscribed && attempts < MAX_RESUBSCRIBE_ATTEMPTS -> {
-                    val sinceLast = System.currentTimeMillis() - lastSubscribeAttemptAtMs
-                    if (sinceLast < RESUBSCRIBE_MIN_INTERVAL_MS) return@collect
+                    // V6-R6 FIX: the previous skip-when-too-soon logic left the lane
+                    // PERMANENTLY dead when a teardown landed inside the cooldown
+                    // window (status never transitions again → collector idles).
+                    // Cooldown is now a delayed retry — always recovers.
                     attempts++
+                    val now = System.currentTimeMillis()
+                    val earliest = lastSubscribeAttemptAtMs + RESUBSCRIBE_MIN_INTERVAL_MS
+                    if (earliest > now) kotlinx.coroutines.delay(earliest - now)
                     lastSubscribeAttemptAtMs = System.currentTimeMillis()
                     ProtocolDiagnostics.increment("rt.resubscribe")
                     android.util.Log.w("WhisperRepo", "realtime channel $name dropped — resubscribing ($attempts)")
@@ -983,7 +998,15 @@ class WhisperRepository @Inject constructor(
                         put("updated_at", java.time.Instant.now().toString())
                     }
                 }
-                updateProfileRowWithFreshness(currentId, body)
+                // V6-R6 (#4): a FAILED divergence-republish used to vanish inside the
+                // outer runCatching — server kept the stale key, every contact sealed
+                // to it, and the reinstall dance returned with zero diagnostic trail.
+                runCatching { updateProfileRowWithFreshness(currentId, body) }
+                    .onFailure { healError ->
+                        ProtocolDiagnostics.increment("heal.republishFailed")
+                        ProtocolDiagnostics.log("heal: divergence-republish FAILED: ${healError.message}")
+                        throw healError
+                    }
                 existing.copy(
                     publicKey = if (needsKey || reinstallDivergence) pubKey else existing.publicKey,
                     username = cleanUsername ?: existing.username,
@@ -1329,10 +1352,13 @@ class WhisperRepository @Inject constructor(
                 "no_key",
                 "Secure delivery unavailable: no encryption key for this user (server row blank or unreadable).",
             )
+            // V6-R7: ride our current public key IN-BAND so the receiver can open this
+            // message even if their cached/server view of us is stale or polluted.
             val envelope = WhisperEnvelope.encode(
                 candidates.mapNotNull { (kid, pub) ->
                     crypto.encryptMessage(content, pub, currentId, receiverId)?.let { Triple(kid, it.second, it.first) }
-                }
+                },
+                senderPublicKeyBase64 = crypto.getPublicKeyBase64(),
             ) ?: sendFail(
                 "encrypt_failed",
                 "Secure delivery failed: could not encrypt for any known key.",
@@ -1456,7 +1482,7 @@ class WhisperRepository @Inject constructor(
                 }
             }
         }
-        val cipherBytes = WhisperEnvelope.encode(allEntries)!!.toByteArray(Charsets.UTF_8)
+        val cipherBytes = WhisperEnvelope.encode(allEntries, crypto.getPublicKeyBase64())!!.toByteArray(Charsets.UTF_8)
         val iv = IV_ENVELOPE
         
         val (uploadUrl, attachmentId) = encryptedImageHost.upload(
@@ -1532,6 +1558,13 @@ class WhisperRepository @Inject constructor(
                 ?: decodedPng?.let { WhisperEnvelope.decode(rawBytes.decodeToString()) }
         }.getOrNull()
 
+        // V6-R7: in-band sender key joins the trial set (same rationale as text path).
+        val inBandPub = runCatching {
+            WhisperEnvelope.inBandSenderKey(candidateCipher.decodeToString())
+                ?: decodedPng?.let { WhisperEnvelope.inBandSenderKey(rawBytes.decodeToString()) }
+        }.getOrNull()
+        val baseCandidates = (peerCandidates + listOfNotNull(inBandPub)).distinct()
+
         val ownKid = WhisperEnvelope.ownKid(crypto)
 
         // V6-R3 FIX (field report "image sending damaged"): after a partner rotates,
@@ -1587,12 +1620,12 @@ class WhisperRepository @Inject constructor(
             }
         }
 
-        var decrypted = attempt(peerCandidates)
+        var decrypted = attempt(baseCandidates)
         if (decrypted == null && !peerId.isNullOrBlank() && peerId != myIdNow) {
             val fresh = getProfile(peerId, forceRefresh = true).getOrNull()?.publicKey
-            if (fresh != null && fresh !in peerCandidates) {
+            if (fresh != null && fresh !in baseCandidates) {
                 ProtocolDiagnostics.log("imageHeal: retrying with freshly fetched partner key")
-                decrypted = attempt(peerCandidates + fresh)
+                decrypted = attempt(baseCandidates + fresh)
             }
         }
         decrypted ?: run {
@@ -3050,7 +3083,7 @@ class WhisperRepository @Inject constructor(
             channel.broadcast(
                 event = "typing",
                 payload = BroadcastPayload.Json(buildJsonObject {
-                    put("env", WhisperEnvelope.encode(entries)!!)
+                    put("env", WhisperEnvelope.encode(entries, crypto.getPublicKeyBase64())!!)
                 }),
             )
         }
@@ -3075,7 +3108,7 @@ class WhisperRepository @Inject constructor(
         }
         val dbPollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(2_000)
+                kotlinx.coroutines.delay(1_500)
                 try {
                     // V6-R6: null (no/stale row) must map to FALSE and be emitted —
                     // skipping null froze the indicator "on" whenever the sender's
@@ -3115,6 +3148,7 @@ class WhisperRepository @Inject constructor(
                 val candidates = buildList {
                     add(peerKeys.value[otherUserId])
                     add(peerKeyFor(otherUserId))
+                    add(WhisperEnvelope.inBandSenderKey(env)) // V6-R7
                 }.filterNotNull().distinct()
                 var plain = candidates.firstNotNullOfOrNull(::openWith)
                 if (plain == null) {
