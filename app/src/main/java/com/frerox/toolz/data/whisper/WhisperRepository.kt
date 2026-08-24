@@ -1103,10 +1103,19 @@ class WhisperRepository @Inject constructor(
         profileCache.remove(currentId); profileCacheTs.remove(currentId)
     }
 
-    suspend fun updateLastSeen(): Result<Unit> = runCatching {
+    suspend fun updateLastSeen(): Result<Unit> = updateLastSeenInternal(backdateMinutes = 0)
+
+    /**
+     * V6-R6: instant OFFLINE — backdates last_seen beyond the 120s presence window so
+     * partners see "offline / online Xm ago" the moment the app leaves foreground,
+     * without waiting for the window to age out. No schema change needed.
+     */
+    suspend fun goOfflineInstantly(): Result<Unit> = updateLastSeenInternal(backdateMinutes = 3)
+
+    private suspend fun updateLastSeenInternal(backdateMinutes: Long): Result<Unit> = runCatching {
         val currentId = myId
         if (currentId.isBlank()) return@runCatching
-        val now = java.time.OffsetDateTime.now().toString()
+        val now = java.time.OffsetDateTime.now().minusMinutes(backdateMinutes).toString()
         val body = buildJsonObject { put("last_seen_at", now) }
         db.from("profiles").update(body) {
             filter { eq("id", currentId) }
@@ -2327,39 +2336,20 @@ class WhisperRepository @Inject constructor(
         }
 
         val toDeleteIds = allToDelete.map { it.id }.filter { it.isNotBlank() }
-        // V2-FIX (reviewwhisper.md) R-M5: server-side chunk deletions no longer abort on
-        // the first error — every remaining chunk still runs, and a failure is reported
-        // only AFTER local state below is fully consistent (tombstones kept, restore possible).
-        var anyServerChunkFailed = false
+        // V6-R6 SCOPE FIX: clearing history is now STRICTLY LOCAL — the partner's view
+        // is untouched. The old flow deleted MY sent rows server-side, which erased
+        // them from the partner's chat too (they were my rows, after all). Now:
+        //   - local tombstones (per-user, persistent) hide everything on THIS device;
+        //   - remote per-user tombstone mirror kept ONLY for this account's own
+        //     reinstall consistency (partner never reads another user's rows);
+        //   - NO server message deletion at all.
         if (toDeleteIds.isNotEmpty()) {
             // Await durability before erasing Room — otherwise reload could resurrect.
             deletedStore.markMessagesDeletedSuspend(toDeleteIds)
-            // Mirror locally-capped tombstones remotely so eviction never resurrects after reinstall.
-            // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
             runCatchingCE { syncDeletedTombstonesRemote(toDeleteIds) }
             toDeleteIds.forEach { messageDao.deleteMessage(it) }
-            // Server-side deletion limited by RLS to rows I own (my sent messages).
-            // Delete exactly the my-sent subset via id list to keep local/server in sync.
-            val mySentIds = allToDelete.filter { it.senderId == currentId }.map { it.id }.filter { it.isNotBlank() }
-            if (mySentIds.isNotEmpty()) {
-                // Batch delete by ids to avoid range mismatch; chunk 200 per request.
-                for (chunk in mySentIds.chunked(200)) {
-                    val chunkResult = runCatchingCE {
-                        db.from("messages").delete {
-                            filter { isIn("id", chunk) }
-                        }
-                    }
-                    if (chunkResult.isFailure) {
-                        android.util.Log.w("WhisperRepo", "clearMessagesForRange: server delete chunk failed: ${chunkResult.exceptionOrNull()?.message}")
-                        anyServerChunkFailed = true
-                    }
-                }
-            }
         }
         invalidateConversationsCache()
-        if (anyServerChunkFailed) {
-            error("Some server-side message deletions failed; local state was cleared and remains restorable.")
-        }
         allToDelete
     }
 

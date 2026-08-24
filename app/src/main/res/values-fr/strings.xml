@@ -236,6 +236,11 @@
     <string name="st_Whisper_Fs_Title">Secret parfait actif</string>
     <string name="st_Whisper_Fs_Desc">Chaque message est scellé avec sa propre clé à usage unique, détruite juste après usage — même une clé d\'identité compromise ne peut pas déchiffrer vos messages passés.</string>
     <string name="st_Whisper_Locked_Message">Ce message ne peut plus être déchiffré sur cet appareil</string>
+    <string name="st_Whisper_MsgStatus_Title">Statut du message</string>
+    <string name="st_Whisper_MsgStatus_Pending">En attente</string>
+    <string name="st_Whisper_MsgStatus_Sent">Livré</string>
+    <string name="st_Whisper_MsgStatus_Read">Lu</string>
+    <string name="cd_Whisper_DisappearingImage">Image éphémère</string>
     <string name="st_Whisper_Locked_Short">🔒 Message chiffré</string>
     <string name="st_Whisper_HideFromDiscover">Masquer de Découvrir</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Impossible de vérifier cette clé.</string>

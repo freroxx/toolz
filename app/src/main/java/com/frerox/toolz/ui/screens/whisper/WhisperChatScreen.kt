@@ -98,6 +98,7 @@ import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -148,6 +149,8 @@ fun WhisperChatScreen(
     var pendingImageExpiry by remember { mutableStateOf<Long?>(null) }
     var fullScreenImageBytes by remember { mutableStateOf<ByteArray?>(null) }
     var fullScreenImageMimeType by remember { mutableStateOf("image/jpeg") }
+    // V6-R6 (#disappearing): expiry rides with the opened image for the countdown pill.
+    var fullScreenImageExpiresAt by remember { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
 
     // E2EE content never appears in screenshots or recent-app previews.
@@ -598,27 +601,31 @@ fun WhisperChatScreen(
                                 val showDateSeparator = index == reversedMessages.lastIndex ||
                                     reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
 
-                                // V6-R3 UX: fresh bubbles pop in (fade + spring scale);
-                                // historical rows render statically so scrolling never
-                                // replays the effect. Heuristic = row younger than 15s.
+                                // V6-R6 (#animations): fresh bubbles RISE into place
+                                // (fade + upward slide) like mainstream messengers, while
+                                // Modifier.animateItem's placement spring smoothly pushes
+                                // every previous bubble upwards. History renders statically.
                                 val isNewBubble = remember(message.id) {
                                     runCatching {
                                         java.time.OffsetDateTime.parse(message.createdAt).toInstant().toEpochMilli()
                                     }.getOrDefault(0L) > System.currentTimeMillis() - NEW_BUBBLE_WINDOW_MS
                                 }
-                                val appearScale = remember(message.id) {
-                                    androidx.compose.animation.core.Animatable(if (isNewBubble) 0.88f else 1f)
+                                val density = LocalDensity.current
+                                val appearOffsetY = remember(message.id) {
+                                    androidx.compose.animation.core.Animatable(
+                                        if (isNewBubble) with(density) { 16.dp.toPx() } else 0f,
+                                    )
                                 }
                                 val appearAlpha = remember(message.id) {
                                     androidx.compose.animation.core.Animatable(if (isNewBubble) 0f else 1f)
                                 }
                                 LaunchedEffect(message.id, isNewBubble) {
                                     if (!isNewBubble) return@LaunchedEffect
-                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 150)) }
-                                    appearScale.animateTo(
-                                        1f,
+                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 160)) }
+                                    appearOffsetY.animateTo(
+                                        0f,
                                         spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
                                             stiffness = Spring.StiffnessMediumLow,
                                         ),
                                     )
@@ -626,18 +633,17 @@ fun WhisperChatScreen(
 
                                 Box(
                                     modifier = Modifier
-                                        .animateItem()
+                                        .animateItem(
+                                            fadeInSpec = tween(durationMillis = 120),
+                                            placementSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            ),
+                                            fadeOutSpec = tween(durationMillis = 120),
+                                        )
                                         .graphicsLayer {
                                             alpha = appearAlpha.value
-                                            scaleX = appearScale.value
-                                            scaleY = appearScale.value
-                                            // Grow from the sender's edge: my bubbles from the
-                                            // bottom-right, theirs from bottom-left.
-                                            transformOrigin = if (isMine) {
-                                                androidx.compose.ui.graphics.TransformOrigin(1f, 1f)
-                                            } else {
-                                                androidx.compose.ui.graphics.TransformOrigin(0f, 1f)
-                                            }
+                                            translationY = appearOffsetY.value
                                         }
                                 ) {
                                     MessageBubble(
@@ -656,10 +662,11 @@ fun WhisperChatScreen(
                                         },
                                         decryptedImageBytes = uiState.decryptedImageBytes[message.id],
                                         onLoadImage = { viewModel.loadEncryptedImage(message) },
-                                        onImageClick = { bytes, mime ->
+                                        onImageClick = { bytes, mime, expiresAt ->
                                             haptic.click()
                                             fullScreenImageBytes = bytes
                                             fullScreenImageMimeType = mime
+                                            fullScreenImageExpiresAt = expiresAt
                                         },
                                         onReply = { haptic.click(); viewModel.setReplyTarget(message) },
                                         onQuotedClick = { targetId ->
@@ -815,6 +822,16 @@ fun WhisperChatScreen(
         DeleteMessageSheet(
             message = msg,
             isMine = msg.isSentByMe(viewModel.myUserId),
+            // V6-R6 (#receipts): long-press now shows exactly where the message is —
+            // pending / delivered / read.
+            statusLine = if (msg.isSentByMe(viewModel.myUserId)) {
+                when {
+                    msg.isPending || msg.id.startsWith("pending_") ->
+                        MessageStatusLine(Icons.Rounded.Schedule, stringResource(R.string.st_Whisper_MsgStatus_Pending))
+                    msg.isRead -> MessageStatusLine(Icons.Rounded.DoneAll, stringResource(R.string.st_Whisper_MsgStatus_Read))
+                    else -> MessageStatusLine(Icons.Rounded.Done, stringResource(R.string.st_Whisper_MsgStatus_Sent))
+                }
+            } else null,
             onDismiss = { selectedMessageForDelete = null },
             onReply = { selectedMessageForDelete = null; viewModel.setReplyTarget(msg) },
             onReact = { emoji -> selectedMessageForDelete = null; viewModel.toggleReaction(msg, emoji) },
@@ -902,6 +919,7 @@ fun WhisperChatScreen(
 
     fullScreenImageBytes?.let { bytes ->
         WhisperFullScreenImageViewer(
+            expiresAtEpochSeconds = fullScreenImageExpiresAt,
             imageBytes = bytes,
             mimeType = fullScreenImageMimeType,
             onDismiss = { fullScreenImageBytes = null },
@@ -1152,11 +1170,15 @@ private fun ConversationOptionsSheet(
     }
 }
 
+/** V6-R6 (#receipts): long-press status payload for own messages. */
+private data class MessageStatusLine(val icon: androidx.compose.ui.graphics.vector.ImageVector, val label: String)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeleteMessageSheet(
     message: WhisperMessage,
     isMine: Boolean,
+    statusLine: MessageStatusLine?,
     onDismiss: () -> Unit,
     onReply: () -> Unit,
     onReact: (String) -> Unit,
@@ -1175,6 +1197,39 @@ private fun DeleteMessageSheet(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // V6-R6 (#receipts): delivery status header for own messages.
+            if (isMine && statusLine != null) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            statusLine.icon,
+                            contentDescription = null,
+                            tint = if (message.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column {
+                            Text(
+                                stringResource(R.string.st_Whisper_MsgStatus_Title),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                statusLine.label + " · " + message.createdAt.formatWhisperTime(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
             // Quick Emoji Reaction Bar (Expressive circular pills)
             Row(
                 modifier = Modifier
@@ -1552,7 +1607,7 @@ private fun MessageBubble(
     resolveReplySenderName: (String) -> String?,
     decryptedImageBytes: ByteArray?,
     onLoadImage: () -> Unit,
-    onImageClick: (ByteArray, String) -> Unit,
+    onImageClick: (ByteArray, String, Long?) -> Unit,
     onReply: () -> Unit,
     onQuotedClick: (String) -> Unit,
     onDoubleTap: () -> Unit,
@@ -1740,15 +1795,45 @@ private fun MessageBubble(
                             }
                             val bmp = bitmap
                             if (bmp != null) {
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
-                                    modifier = Modifier
-                                        .widthIn(max = 256.dp)
-                                        .heightIn(max = 320.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { decryptedImageBytes?.let { onImageClick(it, attachment.mimeType) } },
-                                )
+                                Box {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = stringResource(R.string.cd_Whisper_EncryptedImage),
+                                        modifier = Modifier
+                                            .widthIn(max = 256.dp)
+                                            .heightIn(max = 320.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                decryptedImageBytes?.let {
+                                                    onImageClick(it, attachment.mimeType, attachment.expiresAtEpochSeconds)
+                                                }
+                                            },
+                                    )
+                                    // V6-R6 (#disappearing): visible cue that this image
+                                    // will self-destruct — timer badge on the thumbnail.
+                                    if (attachment.expiresAtEpochSeconds != null) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = Color.Black.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(6.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Timer,
+                                                    contentDescription = stringResource(R.string.cd_Whisper_DisappearingImage),
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 when {
                                     attachment.expiresAtEpochSeconds?.let { Instant.now().epochSecond >= it } == true -> {
@@ -1815,12 +1900,11 @@ private fun MessageBubble(
                         Text(message.createdAt.formatWhisperTime(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.alpha(0.6f))
                         if (isMine && !message.isDeletedForEveryone) {
                             Spacer(Modifier.width(4.dp))
-                            Icon(
-                                if (message.isRead) Icons.Rounded.DoneAll else Icons.Rounded.Done,
-                                null,
-                                Modifier.size(14.dp),
-                                tint = if (isHighlighted) bubbleContentColor.copy(alpha = 0.8f)
-                                    else if (message.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            MessageStatusTick(
+                                isPending = isPending,
+                                isRead = message.isRead,
+                                isHighlighted = isHighlighted,
+                                bubbleContentColor = bubbleContentColor,
                             )
                         }
                     }
@@ -1840,6 +1924,54 @@ private fun MessageBubble(
             }
         }
     }
+}
+
+/**
+ * V6-R6 (#receipts): animated delivery tick. Pending shows a clock, sent a single
+ * check, read a double-check with a one-shot spring pulse + color tween — the
+ * "read" moment is the payoff and should feel instant and satisfying.
+ */
+@Composable
+private fun MessageStatusTick(
+    isPending: Boolean,
+    isRead: Boolean,
+    isHighlighted: Boolean,
+    bubbleContentColor: Color,
+) {
+    val readPulse = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(isRead) {
+        if (isRead) {
+            readPulse.snapTo(0.55f)
+            readPulse.animateTo(
+                1f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+            )
+        }
+    }
+    val tint by androidx.compose.animation.animateColorAsState(
+        targetValue = when {
+            isHighlighted -> bubbleContentColor.copy(alpha = 0.8f)
+            isRead -> MaterialTheme.colorScheme.primary
+            else -> MaterialTheme.colorScheme.outline
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "statusTickColor",
+    )
+    Icon(
+        imageVector = when {
+            isPending -> Icons.Rounded.Schedule
+            isRead -> Icons.Rounded.DoneAll
+            else -> Icons.Rounded.Done
+        },
+        contentDescription = null,
+        modifier = Modifier
+            .size(14.dp)
+            .graphicsLayer {
+                scaleX = readPulse.value
+                scaleY = readPulse.value
+            },
+        tint = tint,
+    )
 }
 
 /**
@@ -2154,9 +2286,23 @@ private fun String.parseMarkdown(): AnnotatedString {
 private fun WhisperFullScreenImageViewer(
     imageBytes: ByteArray,
     mimeType: String,
+    expiresAtEpochSeconds: Long? = null,
     onDismiss: () -> Unit,
     onShowToast: (String, WhisperToastType) -> Unit
 ) {
+    // V6-R6 (#disappearing): live countdown + AUTO-EXIT. A 1s ticker recomputes the
+    // remaining time; when it hits zero the viewer dismisses itself — the image is
+    // gone, and lingering on a black shell would be dishonest UI.
+    var nowSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(expiresAtEpochSeconds) {
+        if (expiresAtEpochSeconds == null) return@LaunchedEffect
+        while (isActive) {
+            delay(1_000)
+            nowSeconds = System.currentTimeMillis() / 1000
+            if (nowSeconds >= expiresAtEpochSeconds) { onDismiss(); break }
+        }
+    }
+    val remainingSeconds = expiresAtEpochSeconds?.let { (it - nowSeconds).coerceAtLeast(0) }
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
@@ -2200,6 +2346,36 @@ private fun WhisperFullScreenImageViewer(
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.92f))
         ) {
+            // V6-R6 (#disappearing): top-center countdown pill for self-destructing images.
+            if (expiresAtEpochSeconds != null && remainingSeconds != null) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.Black.copy(alpha = 0.55f),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 18.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.Timer,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "%d:%02d".format(remainingSeconds / 60, remainingSeconds % 60),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
             val bmp = bitmap
             if (bmp != null) {
                 var scale by remember { mutableStateOf(1f) }

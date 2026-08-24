@@ -147,6 +147,7 @@ class WhisperViewModel @Inject constructor(
                     subscribeToMessages()
                     subscribeToFriends()
                     startHeartbeat()
+                    observeProcessLifecycleForPresence() // V6-R6: instant presence
                     // V2-FIX L-?: restart the dropped-entry collector — signOut cancels it.
                     startDroppedCollector()
                 } else if (auth == false) {
@@ -209,6 +210,27 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
+    // V6-R6 (#presence): INSTANT online/offline transitions.
+    //  ON_START → last_seen=now   (partners see "online" within one realtime tick)
+    //  ON_STOP  → last_seen=now-3min (beyond the 120s window ⇒ instantly offline,
+    //             rendered as "online Xm ago") — no schema change required.
+    private var presenceLifecycleObserver: androidx.lifecycle.LifecycleEventObserver? = null
+
+    private fun observeProcessLifecycleForPresence() {
+        if (presenceLifecycleObserver != null) return
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START ->
+                    viewModelScope.launch { runCatching { repository.updateLastSeen() } }
+                androidx.lifecycle.Lifecycle.Event.ON_STOP ->
+                    viewModelScope.launch { runCatching { repository.goOfflineInstantly() } }
+                else -> {}
+            }
+        }
+        presenceLifecycleObserver = observer
+        ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+    }
+
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = viewModelScope.launch {
@@ -233,7 +255,10 @@ class WhisperViewModel @Inject constructor(
                     }
                     android.util.Log.w("WhisperVM", "heartbeat failed: ${e.message}")
                 }
-                delay(300_000) // L-17 FIX: 5-min cadence (was 60s) — last_seen churn x fleet matters
+                // V6-R6 (#presence): 60s keepalive — presence reads as "online Xm ago"
+                // with minute granularity; instant transitions are handled by the
+                // lifecycle observer below, this only maintains freshness.
+                delay(60_000)
             }
         }
     }
@@ -821,6 +846,10 @@ class WhisperViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        presenceLifecycleObserver?.let {
+            ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
+        }
+        presenceLifecycleObserver = null
         messagesJob?.cancel()
         friendsJob?.cancel()
         muteJob?.cancel()

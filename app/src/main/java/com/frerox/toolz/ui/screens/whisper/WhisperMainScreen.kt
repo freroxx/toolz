@@ -2142,7 +2142,9 @@ private fun ProfileTab(
                             Icons.Rounded.Info,
                             contentDescription = stringResource(R.string.st_Whisper_AccessFileInfo),
                             modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            // V6-R6 FIX: was tinted primary ON a primary-filled button —
+                            // invisible icon inside a plain colored circle.
+                            tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }

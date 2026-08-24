@@ -237,6 +237,11 @@
     <string name="st_Whisper_Fs_Title">Forward secrecy active</string>
     <string name="st_Whisper_Fs_Desc">Every message is sealed with its own one-time key that is destroyed right after use — even a compromised identity key cannot decrypt your past messages.</string>
     <string name="st_Whisper_Locked_Message">This message can no longer be decrypted on this device</string>
+    <string name="st_Whisper_MsgStatus_Title">Message status</string>
+    <string name="st_Whisper_MsgStatus_Pending">Pending</string>
+    <string name="st_Whisper_MsgStatus_Sent">Delivered</string>
+    <string name="st_Whisper_MsgStatus_Read">Read</string>
+    <string name="cd_Whisper_DisappearingImage">Disappearing image</string>
     <string name="st_Whisper_Locked_Short">🔒 Encrypted message</string>
     <string name="st_Whisper_HideFromDiscover">Hide from Discover</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Unable to verify this key.</string>

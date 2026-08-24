@@ -1137,7 +1137,10 @@ class WhisperChatViewModel @Inject constructor(
 
     private fun sendPresenceSignal(isOnline: Boolean) {
         viewModelScope.launch {
-            repository.sendPresence(otherUserId, isOnline)
+            // V6-R6 (#presence): repository.sendPresence is an intentional no-op
+            // (broadcast lane removed). Entering a chat must STAMP last_seen so the
+            // partner sees "online" immediately, not up to a minute later.
+            if (isOnline) runCatching { repository.updateLastSeen() }
         }
     }
 
