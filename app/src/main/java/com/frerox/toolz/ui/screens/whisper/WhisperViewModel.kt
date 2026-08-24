@@ -211,7 +211,13 @@ class WhisperViewModel @Inject constructor(
                 try {
                     if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                         repository.updateLastSeen()
-                        maybeAutoRotateKey()
+                        // V6-R6: automatic 30-day identity rotation REMOVED. Unlike Signal,
+                        // this app's identity keypair IS the history-decryption key — every
+                        // rotation permanently bricked all prior messages (both directions)
+                        // and forced the rotate+verify dance in the field. Forward secrecy
+                        // now comes from the Double Ratchet's per-message keys, which makes
+                        // identity rotation pure liability. Manual rotate remains available
+                        // as an explicit "reset encryption" action (see rotate dialog).
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -226,40 +232,9 @@ class WhisperViewModel @Inject constructor(
         }
     }
 
-    private suspend fun maybeAutoRotateKey() {
-        // Better cheap FS: 30 days + jitter, retry-safe (only mark on success), no-op if offline.
-        if (!keyRotationStore.shouldRotate()) return
-        // Don't rotate if offline — would stage a key but fail to publish it.
-        if (!isOnline()) return
-        // STAGED rotation: the old key stays active until the server confirms the new
-        // public key. A failed publish rolls back cleanly instead of destroying history.
-        val staged = crypto.stageNewKeyPair() ?: return
-        repository.updateProfile(WhisperProfileUpdate(publicKey = staged.publicKeyBase64))
-            .onSuccess {
-                crypto.commitStagedKeyPair(staged)
-                // V2-FIX H-?: the active key just changed — my cached fingerprint is stale.
-                refreshFingerprint()
-                keyRotationStore.markRotated()
-                android.util.Log.i("WhisperVM", "Auto-rotated Whisper key (${keyRotationStore.intervalDays()}d FS)")
-                // V2-FIX L-?: rotation success is not an error — surface it via the dedicated
-                // info field instead of polluting the error toast channel.
-                _uiState.update {
-                    it.copy(infoMessage = UiText.StringResource(R.string.st_Whisper_Info_KeyRefreshed))
-                }
-            }
-            .onFailure {
-                // Publish failed: delete the staged pair; the old key remains active so
-                // incoming messages encrypted to the server's current key stay readable.
-                crypto.abortStagedKeyPair(staged)
-                android.util.Log.w("WhisperVM", "Auto-rotate failed (will retry): ${it.message}")
-            }
-    }
-
-    private suspend fun isOnline(): Boolean = try {
-        offlineManager.offlineState.first() == com.frerox.toolz.util.OfflineState.ONLINE
-    } catch (_: Exception) {
-        true // If the connectivity signal itself fails, don't block rotation.
-    }
+    // V6-R6: maybeAutoRotateKey() and its isOnline() helper were removed together with
+    // the automatic-rotation trigger in startHeartbeat() — dead code that could be
+    // accidentally re-invoked has no place in a security-critical path.
 
     private fun stopHeartbeat() {
         heartbeatJob?.cancel()

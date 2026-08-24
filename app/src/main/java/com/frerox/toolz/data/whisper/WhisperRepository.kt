@@ -104,6 +104,10 @@ class WhisperRepository @Inject constructor(
         const val MAX_IMAGE_EXPIRY_SECONDS = 15_552_000L
         // V6-R3: bounded resubscribe attempts per channel per process.
         const val MAX_RESUBSCRIBE_ATTEMPTS = 6
+        // V6-R6 (#3): cooldown so the watcher can never amplify a teardown war.
+        const val RESUBSCRIBE_MIN_INTERVAL_MS = 2_500L
+        // V6-R5 (#4): a typing-signal row younger than this means "typing".
+        const val TYPING_SIGNAL_FRESH_MS = 8_000L
     }
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
@@ -478,6 +482,15 @@ class WhisperRepository @Inject constructor(
             ProtocolDiagnostics.log(
                 "envelope locked: entries=${entries.map { it.first }} peers=${peerCandidates.map { WhisperEnvelope.keyId(it) }} own=$myKid sentByMe=$sentByMe",
             )
+            // V6-R6 (#2): convergence trigger — an incoming envelope sealed to a kid
+            // that is NOT our current one means the partner used a stale copy of OUR
+            // published key. Fire the republish immediately so the partner's NEXT send
+            // (force-refreshing) converges without any manual rotate+verify step.
+            // Deduped by the method's own server-compare.
+            if (!sentByMe && entries.none { (kid, _, _) -> kid == myKid }) {
+                ProtocolDiagnostics.increment("keyDrift.sealedToUnknownOwnKid")
+                appScope.launch { runCatching { republishLocalKeyIfStale() } }
+            }
         }
         return maybeHealFromPlaintext(ladderResult, msgSenderId, partnerId, createdAtEpochMs)
     }
@@ -718,7 +731,8 @@ class WhisperRepository @Inject constructor(
                         return@withLock it
                     }
                 } catch (_: Exception) {}
-                // V2-FIX (reviewwhisper.md) L-13: suspend call inside runCatching — use CE-safe variant.
+                // V6-R6 (#3): attribution log — see watchChannelHealth cooldown note.
+                ProtocolDiagnostics.log("rt.teardown[$name]: join-evict(not-SUBSCRIBED)")
                 runCatchingCE { realtime.removeChannel(it) }
             }
             null
@@ -737,6 +751,7 @@ class WhisperRepository @Inject constructor(
                 try {
                     if (concurrent.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) {
                         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
+                        ProtocolDiagnostics.log("rt.teardown[$name]: join-race-loser")
                         runCatchingCE { realtime.removeChannel(channel) }
                         return@withLock concurrent
                     }
@@ -751,6 +766,9 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             if (broadcastChannelCache[name] === channel) broadcastChannelCache.remove(name)
         }
+        // V6-R6 (#3): every teardown names its reason — the "SUBSCRIBED → UNSUBSCRIBING
+        // within 70ms" flap in field logs was unattributable without this.
+        ProtocolDiagnostics.log("rt.teardown[$name]: collector-cancelled")
         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
         runCatchingCE { realtime.removeChannel(channel) }
     }
@@ -772,6 +790,11 @@ class WhisperRepository @Inject constructor(
         var wasSubscribed = false
         var attempts = 0
         var prevStatus: io.github.jan.supabase.realtime.RealtimeChannel.Status? = null
+        // V6-R6 (#3): minimum interval between our own subscribe attempts. Field logs
+        // showed a teardown war (subscribe → instant remove → resubscribe, ~500ms
+        // cycles) that this cooldown defuses while the attribution logs name the
+        // real canceller.
+        var lastSubscribeAttemptAtMs = 0L
         channel.status.collect { st ->
             // V6-R5 (#3): every transition lands in the diagnostics buffer — a dead
             // lane with a healthy-looking status is exactly what the exports must show.
@@ -783,10 +806,14 @@ class WhisperRepository @Inject constructor(
                 st == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED -> {
                     wasSubscribed = true
                     attempts = 0
+                    lastSubscribeAttemptAtMs = System.currentTimeMillis()
                 }
                 st == io.github.jan.supabase.realtime.RealtimeChannel.Status.UNSUBSCRIBED &&
                     wasSubscribed && attempts < MAX_RESUBSCRIBE_ATTEMPTS -> {
+                    val sinceLast = System.currentTimeMillis() - lastSubscribeAttemptAtMs
+                    if (sinceLast < RESUBSCRIBE_MIN_INTERVAL_MS) return@collect
                     attempts++
+                    lastSubscribeAttemptAtMs = System.currentTimeMillis()
                     ProtocolDiagnostics.increment("rt.resubscribe")
                     android.util.Log.w("WhisperRepo", "realtime channel $name dropped — resubscribing ($attempts)")
                     kotlinx.coroutines.delay(500L * attempts)
@@ -1895,12 +1922,17 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName]?.let {
                 // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
+                ProtocolDiagnostics.log("rt.teardown[$channelName]: pre-subscribe-clean(chatpg)")
                 runCatchingCE { realtime.removeChannel(it) }
                 broadcastChannelCache.remove(channelName)
             }
         }
         
         val channel = supabase.channel(channelName)
+
+        // V6-R5: shared realtime-activity clock — updated by BOTH postgres collectors
+        // below and read by the polling fallback. Declared before the collectors.
+        val lastRealtimeEventAtMs = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
 
         // Listen for Postgres Changes on messages. Realtime broadcasts are deliberately
         // NOT consumed: they cannot prove sender identity and are therefore never used as
@@ -2035,7 +2067,6 @@ class WhisperRepository @Inject constructor(
         val seenState = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Boolean>>()
         val reactionSig = java.util.concurrent.ConcurrentHashMap<String, String>()
         val flowStartMs = System.currentTimeMillis()
-        val lastRealtimeEventAtMs = java.util.concurrent.atomic.AtomicLong(flowStartMs)
         var seeded = false
         val pollJob = launch {
             while (isActive) {
@@ -2137,6 +2168,7 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName]?.let {
                 // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
+                ProtocolDiagnostics.log("rt.teardown[$channelName]: pre-subscribe-clean(inbox)")
                 runCatchingCE { realtime.removeChannel(it) }
             }
             broadcastChannelCache.remove(channelName)
@@ -2690,6 +2722,7 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName]?.let {
                 // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
+                ProtocolDiagnostics.log("rt.teardown[$channelName]: pre-subscribe-clean(friends)")
                 runCatchingCE { realtime.removeChannel(it) }
                 broadcastChannelCache.remove(channelName)
             }
@@ -2913,12 +2946,69 @@ class WhisperRepository @Inject constructor(
     // when devices go online/offline) to anyone guessing the channel name. Presence stays
     // authoritative via profiles.last_seen_at ([updateLastSeen]); the subscribe flows below
     // keep their public Flow APIs but now rely on authenticated Postgres/DB data only.
+    // ── V6-R5 (#4): DB-backed typing signal (see 20260831_whisper_typing_signal.sql) ──
+
+    private val typingSignalLastSentAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Throttled to ~1 write per 4s while typing; token is opaque random per write. */
+    private suspend fun sendTypingSignalDb(receiverId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (typingSignalLastSentAtMs[receiverId] ?: 0L) < 3_000) return
+        typingSignalLastSentAtMs[receiverId] = now
+        runCatchingCE {
+            db.from("whisper_typing_signals").upsert(
+                mapOf(
+                    "sender_id" to myId,
+                    "receiver_id" to receiverId,
+                    "signal" to java.util.UUID.randomUUID().toString().replace("-", ""),
+                    "updated_at" to java.time.OffsetDateTime.now().toString(),
+                ),
+            )
+        }.onFailure { ProtocolDiagnostics.increment("typing.dbWriteFail") }
+    }
+
+    private suspend fun clearTypingSignalDb(receiverId: String) {
+        if (typingSignalLastSentAtMs.remove(receiverId) == null) return // never sent → nothing to clear
+        runCatchingCE {
+            db.from("whisper_typing_signals").delete {
+                filter { eq("sender_id", myId); eq("receiver_id", receiverId) }
+            }
+        }
+    }
+
+    @Serializable
+    private data class TypingSignalRow(
+        @SerialName("signal") val signal: String,
+        @SerialName("updated_at") val updatedAt: String,
+    )
+
+    /**
+     * Receiver half of the DB-backed typing lane: REST read of the partner's row.
+     * A row younger than [TYPING_SIGNAL_FRESH_MS] means the partner is typing.
+     * Returns null when the row is absent/unreadable; age decides liveness —
+     * a crashed sender needs no cleanup write since the row simply goes stale.
+     */
+    private suspend fun readTypingSignal(receiverId: String): Boolean? = runCatchingCE {
+        db.from("whisper_typing_signals").select {
+            filter { eq("sender_id", receiverId); eq("receiver_id", myId) }
+            limit(1)
+        }.decodeList<TypingSignalRow>().firstOrNull()
+    }.getOrNull()?.let { row ->
+        runCatching {
+            val age = System.currentTimeMillis() -
+                java.time.OffsetDateTime.parse(row.updatedAt).toInstant().toEpochMilli()
+            age in 0..TYPING_SIGNAL_FRESH_MS
+        }.getOrDefault(false)
+    }
+
     suspend fun sendTypingStatus(targetUserId: String, isTyping: Boolean) {
         // V4-FIX (field report): typing died when the plaintext R-M1 emissions were
         // removed. Restored with an ENCRYPTED payload — the boolean is sealed with the
         // pairwise attachment cipher (bound AAD), so eavesdroppers on the public
         // channel see random bytes and outsiders cannot forge valid events.
         runCatching {
+            // V6-R5 (#4): DB-backed signal — reliable even when broadcasts die.
+            if (isTyping) sendTypingSignalDb(targetUserId) else clearTypingSignalDb(targetUserId)
             // V6-R3: cached read (no RPC when fresh) keeps the candidate keys from
             // going fully stale across the partner's rotation — sealing typing pings
             // to a long-expired key made receivers skip them by kid-match alone.
@@ -2954,6 +3044,31 @@ class WhisperRepository @Inject constructor(
         // V6-R3: broadcast channels die with the socket just like postgres lanes —
         // heal them identically or typing indicators silently vanish.
         val healthJob = watchChannelHealth(this, name, channel)
+
+        // V6-R5 (#4): PRIMARY typing lane — poll the DB signal every 3s. Deterministic
+        // and socket-independent; the broadcast collector below stays as a fast-path.
+        var lastEmittedTyping: Boolean? = null
+        fun emitTyping(value: Boolean) {
+            if (value != lastEmittedTyping) {
+                lastEmittedTyping = value
+                trySend(value)
+            }
+        }
+        val dbPollJob = launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(2_000)
+                try {
+                    // V6-R6: null (no/stale row) must map to FALSE and be emitted —
+                    // skipping null froze the indicator "on" whenever the sender's
+                    // clear-delete landed without a broadcast to carry the false.
+                    emitTyping(readTypingSignal(otherUserId) == true)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    ProtocolDiagnostics.increment("typing.pollError")
+                }
+            }
+        }
         val job = launch { broadcasts.collect { rb ->
             try {
                 val outer = (rb.payload as? BroadcastPayload.Json)?.value?.jsonObject ?: return@collect
@@ -2991,11 +3106,12 @@ class WhisperRepository @Inject constructor(
                 }
                 plain ?: return@collect
                 val isTyping = Json.parseToJsonElement(plain.decodeToString()).jsonObject["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
-                trySend(isTyping)
+                emitTyping(isTyping)
             } catch (_: Exception) { }
         } }
         awaitClose {
             healthJob.cancel()
+            dbPollJob.cancel()
             job.cancel(); appScope.launch { removeCachedChannel(name, channel) }
         }
     }
@@ -3223,6 +3339,7 @@ class WhisperRepository @Inject constructor(
         val toRemove = channelMutex.withLock { broadcastChannelCache.values.toList() }
         broadcastChannelCache.clear()
         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
+        ProtocolDiagnostics.log("rt.teardown[all]: signout-wipe (${toRemove.size} channels)")
         toRemove.forEach { runCatchingCE { realtime.removeChannel(it) } }
     }
 
