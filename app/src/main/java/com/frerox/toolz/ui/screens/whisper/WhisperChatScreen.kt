@@ -1769,10 +1769,34 @@ private fun MessageBubble(
                             // A failed decrypt used to leave "Loading image" up forever. Track a
                             // per-message retry key + a bounded failure window so the user can
                             // re-trigger the load when decryption doesn't resolve.
+                            var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+                            // V6-R6 (#disappearing): live expiry gate — a 1s ticker
+                            // recomposes this bubble so the image (and its badge) flips
+                            // to the honest expired state EXACTLY when the countdown
+                            // ends, no chat re-entry required.
+                            var expiredNow by remember(message.id) { mutableStateOf(false) }
+                            val isExpiredImage = attachment.expiresAtEpochSeconds?.let {
+                                Instant.now().epochSecond >= it
+                            } == true || expiredNow
+                            LaunchedEffect(attachment.expiresAtEpochSeconds) {
+                                if (attachment.expiresAtEpochSeconds == null) return@LaunchedEffect
+                                while (isActive) {
+                                    delay(1_000)
+                                    if (Instant.now().epochSecond >= attachment.expiresAtEpochSeconds) {
+                                        expiredNow = true
+                                        bitmap?.recycle()
+                                        bitmap = null
+                                        break
+                                    }
+                                }
+                            }
                             var imageRetryKey by remember { mutableStateOf(0) }
                             var imageLoadFailed by remember { mutableStateOf(false) }
                             // Reload on first appearance and on every explicit retry.
-                            LaunchedEffect(message.id, imageRetryKey) { onLoadImage() }
+                            // V6-R6: never fetch an already-expired image.
+                            LaunchedEffect(message.id, imageRetryKey, isExpiredImage) {
+                                if (!isExpiredImage) onLoadImage()
+                            }
                             // Give the decrypt a bounded window; if nothing arrives, surface a
                             // retry affordance instead of an endless spinner.
                             LaunchedEffect(message.id, imageRetryKey, decryptedImageBytes, message.isPending) {
@@ -1784,8 +1808,8 @@ private fun MessageBubble(
                                     imageLoadFailed = false
                                 }
                             }
-                            var bitmap by remember { mutableStateOf<Bitmap?>(null) }
                             LaunchedEffect(decryptedImageBytes) {
+                                if (expiredNow || isExpiredImage) return@LaunchedEffect
                                 val newBitmap = withContext(Dispatchers.Default) {
                                     decryptedImageBytes?.let { decodeBoundedBitmap(it, 256, 320) }
                                 }
@@ -1794,7 +1818,7 @@ private fun MessageBubble(
                                 if (old != null && old != newBitmap) old.recycle()
                             }
                             val bmp = bitmap
-                            if (bmp != null) {
+                            if (bmp != null && !isExpiredImage) {
                                 Box {
                                     Image(
                                         bitmap = bmp.asImageBitmap(),
@@ -1805,13 +1829,15 @@ private fun MessageBubble(
                                             .clip(RoundedCornerShape(12.dp))
                                             .clickable {
                                                 decryptedImageBytes?.let {
-                                                    onImageClick(it, attachment.mimeType, attachment.expiresAtEpochSeconds)
+                                                    if (!isExpiredImage) {
+                                                        onImageClick(it, attachment.mimeType, attachment.expiresAtEpochSeconds)
+                                                    }
                                                 }
                                             },
                                     )
                                     // V6-R6 (#disappearing): visible cue that this image
                                     // will self-destruct — timer badge on the thumbnail.
-                                    if (attachment.expiresAtEpochSeconds != null) {
+                                    if (attachment.expiresAtEpochSeconds != null && !isExpiredImage) {
                                         Surface(
                                             shape = RoundedCornerShape(50),
                                             color = Color.Black.copy(alpha = 0.55f),

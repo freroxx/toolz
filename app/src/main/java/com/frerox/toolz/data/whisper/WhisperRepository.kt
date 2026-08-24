@@ -1889,6 +1889,9 @@ class WhisperRepository @Inject constructor(
             filter { eq("sender_id", senderId); eq("receiver_id", myId); eq("is_read", false) }
         }
         messageDao.markAsRead(senderId, myId)
+        // V6-R6 (#ghost-badges): the hub badge reads cached conversation previews —
+        // without invalidating, the unread circle lingered after everything was read.
+        invalidateConversationsCache()
     }
 
     /**
@@ -2129,12 +2132,23 @@ class WhisperRepository @Inject constructor(
         val reactionSig = java.util.concurrent.ConcurrentHashMap<String, String>()
         val flowStartMs = System.currentTimeMillis()
         var seeded = false
+        var lastStatusSubscribed = false
         val pollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(7_000)
+                // V6-R6: 4s cadence + 8s activity window — worst-case delivery gap for
+                // ANY lane failure drops from ~9s to ~4s.
+                kotlinx.coroutines.delay(4_000)
                 try {
-                    // V6-R5: activity-based suppression (see block comment above).
-                    if (System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 15_000) {
+                    val nowSubscribed =
+                        channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
+                    // V6-R6: recovery catch-up — the moment the socket lane comes back,
+                    // run one immediate diff so nothing delivered server-side during
+                    // the outage waits for the next cadence tick.
+                    val justRecovered = nowSubscribed && !lastStatusSubscribed
+                    lastStatusSubscribed = nowSubscribed
+                    if (!justRecovered &&
+                        System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 8_000
+                    ) {
                         continue
                     }
                     ProtocolDiagnostics.increment("rt.pollTick")
@@ -3176,9 +3190,14 @@ class WhisperRepository @Inject constructor(
             table = "profiles"
             filter("id", FilterOperator.EQ, otherUserId)
         }
+        // V6-R6: declared before the collectors that stamp it (activity-based
+        // suppression for the presence poll fallback below).
+        val lastPresenceEventAtMs = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
         val dbJob = launch {
             changes.collect { action ->
                 try {
+                    // V6-R6: realtime presence events suppress the polling fallback.
+                    if (action != null) lastPresenceEventAtMs.set(System.currentTimeMillis())
                     val profile = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperProfile>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperProfile>()
@@ -3203,13 +3222,15 @@ class WhisperRepository @Inject constructor(
         // V6-R3: auto-heal dropped realtime channels (presence).
         val presenceHealthJob = watchChannelHealth(this, name, channel)
 
-        // V6-R4: presence polling fallback — online/last-seen stays fresh even when
+        // V6-R4: presence polling fallback — online/last_seen stays fresh even when
         // the websocket lane is down (REST read of the partner's profile row).
+        // V6-R6 (#presence): same activity-based rule as the chat poller — a socket
+        // that CLAIMS healthy but delivers nothing can no longer freeze presence.
         val presencePollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(20_000)
+                kotlinx.coroutines.delay(10_000)
                 try {
-                    if (channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) {
+                    if (System.currentTimeMillis() - lastPresenceEventAtMs.get() < 25_000) {
                         continue
                     }
                     val profile = runCatchingCE {
