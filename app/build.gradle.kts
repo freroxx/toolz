@@ -217,11 +217,10 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.barcode.scanning)
-    implementation(libs.play.services.tflite.java)
-    implementation(libs.play.services.tflite.gpu)
-    // Bundled TFLite runtime — Play-Services-only runtime (FROM_SYSTEM_ONLY) is missing on
-    // many devices/emulators and fails with "Couldn't find InterpreterFactoryImpl".
-    implementation(libs.tensorflow.lite)
+    // LiteRT (TFLite successor) — bundled runtime, works on every device with zero Play
+    // Services dependency, and ships 16 KB-aligned native libs (Play requirement, Android 15+).
+    // Same org.tensorflow.lite package / classic Interpreter API — no code change needed.
+    implementation(libs.litert)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.text.recognition.chinese)
     implementation(libs.mlkit.text.recognition.devanagari)

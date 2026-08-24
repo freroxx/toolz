@@ -771,7 +771,14 @@ class WhisperRepository @Inject constructor(
     ): kotlinx.coroutines.Job = scope.launch {
         var wasSubscribed = false
         var attempts = 0
+        var prevStatus: io.github.jan.supabase.realtime.RealtimeChannel.Status? = null
         channel.status.collect { st ->
+            // V6-R5 (#3): every transition lands in the diagnostics buffer — a dead
+            // lane with a healthy-looking status is exactly what the exports must show.
+            if (st != prevStatus) {
+                ProtocolDiagnostics.log("rt.status[$name]: $prevStatus → $st")
+                prevStatus = st
+            }
             when {
                 st == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED -> {
                     wasSubscribed = true
@@ -1382,7 +1389,28 @@ class WhisperRepository @Inject constructor(
                 Triple(kid, it.second, android.util.Base64.encodeToString(it.first, android.util.Base64.NO_WRAP))
             }
         }.ifEmpty { error("This image is too large or could not be encrypted.") }
-        val cipherBytes = WhisperEnvelope.encode(imgEntries)!!.toByteArray(Charsets.UTF_8)
+        // V6-R5 FIX (#1): self-addressed copy. The recipient-key copies are only
+        // re-openable by the sender while the exact partner pub used stays known —
+        // after ANY partner rotation the sender could never display their own sent
+        // image again ("very long loading → Couldn't load", sender-only). A copy
+        // sealed to OUR OWN current public key makes the sender view deterministic;
+        // receivers skip this entry by kid-match (they don't hold our private key).
+        val allEntries = buildList {
+            addAll(imgEntries)
+            crypto.getPublicKeyBase64()?.let { ownPub ->
+                crypto.encryptAttachment(imageBytes, ownPub, myIdNow, receiverId)?.let { sealed ->
+                    val kid = WhisperEnvelope.keyId(ownPub)
+                    if (none { it.first == kid }) {
+                        add(Triple(
+                            kid,
+                            sealed.second,
+                            android.util.Base64.encodeToString(sealed.first, android.util.Base64.NO_WRAP),
+                        ))
+                    }
+                }
+            }
+        }
+        val cipherBytes = WhisperEnvelope.encode(allEntries)!!.toByteArray(Charsets.UTF_8)
         val iv = IV_ENVELOPE
         
         val (uploadUrl, attachmentId) = encryptedImageHost.upload(
@@ -1442,12 +1470,15 @@ class WhisperRepository @Inject constructor(
 
         // V5.2: try EVERY plausible partner public key, not just the one handed in —
         // stale pins must never decide whether an image opens.
+        // V6-R5 FIX (#1): include OUR OWN public key as a candidate — the envelope now
+        // carries a self-addressed copy so senders can always re-open their own sends.
         val peerCandidates = buildList {
             add(peerPublicKey)
             peerId?.takeIf { it != myIdNow }?.let {
                 add(peerKeys.value[it])
                 add(peerKeyFor(it))
             }
+            add(crypto.getPublicKeyBase64())
         }.filterNotNull().distinct()
 
         val envelopeEntries = runCatching {
@@ -1462,13 +1493,16 @@ class WhisperRepository @Inject constructor(
         // is therefore one retryable attempt; on total failure we force ONE fresh
         // profile fetch and retry before surfacing the honest failure.
         fun attempt(candidates: List<String>): ByteArray? {
-            val boundPairs: List<Triple<String, String, String>> = buildList {
+            // V6-R5 FIX (#1): explicit DIRECTION PAIRS. The old "sent-by-me" family was
+            // Triple(myId, "", pub) whose empty-receiver resolution produced an impossible
+            // (me, me) AAD — own sent images only ever opened via the legacy fallback.
+            val directions: List<Pair<String, String>> = buildList {
                 if (!peerId.isNullOrBlank() && peerId != myIdNow) {
-                    add(Triple(peerId, myIdNow, peerId))
+                    add(peerId to myIdNow)  // partner's sends: AAD (partner, me)
+                    add(myIdNow to peerId)  // MY sends:        AAD (me, partner)
                 }
-                add(Triple("", myIdNow, ""))
-                candidates.forEach { pub -> add(Triple(myIdNow, "", pub)) } // sent-by-me variants
-            }.distinct()
+                add("" to myIdNow)          // legacy constant-direction rows
+            }
             return if (envelopeEntries != null) {
                 envelopeEntries.firstNotNullOfOrNull { (kid, ivB64, ctB64) ->
                     val bytes = runCatching {
@@ -1479,8 +1513,13 @@ class WhisperRepository @Inject constructor(
                         else -> candidates.filter { WhisperEnvelope.keyId(it) == kid }.ifEmpty { candidates }
                     }
                     pubs.firstNotNullOfOrNull { pub ->
-                        boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                            tryDecrypt(bytes, ivB64, sender.ifEmpty { peerId ?: "" }, receiver.ifEmpty { myIdNow }, pub)
+                        directions.firstNotNullOfOrNull { (sender, receiver) ->
+                            tryDecrypt(
+                                bytes, ivB64,
+                                sender.ifEmpty { peerId ?: "" },
+                                receiver,
+                                pub,
+                            )
                         } ?: runCatching {
                             // direct direction attempt with this pub
                             crypto.decryptAttachment(bytes, ivB64, pub, peerId ?: myIdNow, myIdNow, messageCreatedAtEpochMs)
@@ -1489,13 +1528,13 @@ class WhisperRepository @Inject constructor(
                 }
             } else {
                 candidates.firstNotNullOfOrNull { pub ->
-                    boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                        tryDecrypt(candidateCipher, null, sender, receiver, pub)
+                    directions.firstNotNullOfOrNull { (sender, receiver) ->
+                        tryDecrypt(candidateCipher, null, sender.ifEmpty { peerId ?: "" }, receiver, pub)
                     }
                 } ?: decodedPng?.let {
                     candidates.firstNotNullOfOrNull { pub ->
-                        boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                            tryDecrypt(rawBytes, null, sender, receiver, pub)
+                        directions.firstNotNullOfOrNull { (sender, receiver) ->
+                            tryDecrypt(rawBytes, null, sender.ifEmpty { peerId ?: "" }, receiver, pub)
                         }
                     }
                 }
@@ -1887,6 +1926,7 @@ class WhisperRepository @Inject constructor(
         val pMsgJob = launch {
             merge(incomingChanges, outgoingChanges).collect { action ->
                 try {
+                    if (action != null) lastRealtimeEventAtMs.set(System.currentTimeMillis())
                     val msg = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperMessage>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperMessage>()
@@ -1952,6 +1992,7 @@ class WhisperRepository @Inject constructor(
         val pReactionJob = launch {
             postgresReactionChanges.collect { action ->
                 try {
+                    if (action != null) lastRealtimeEventAtMs.set(System.currentTimeMillis())
                     val row = when (action) {
                         is PostgresAction.Insert -> action.decodeRecord<WhisperMessageReactionRow>()
                         is PostgresAction.Update -> action.decodeRecord<WhisperMessageReactionRow>()
@@ -1981,17 +2022,27 @@ class WhisperRepository @Inject constructor(
         // Websocket delivery must never be a single point of failure. While the
         // channel is NOT subscribed, this lane polls recent rows over REST and emits
         // the SAME events the realtime collector would — new messages, read-receipt
-        // flips, tombstones and authoritative reaction snapshots. First pass seeds
-        // silently (initial load already rendered those rows); later passes emit
-        // only diffs, so a healthy socket costs nothing and a dead one still works.
+        // flips, tombstones and authoritative reaction snapshots.
+        //
+        // V6-R5 FIX (#3), two blind spots removed:
+        //  1. SEED SWALLOW — the first pass used to silently mark rows "seen", so any
+        //     message arriving between screen-open and the first tick was never emitted
+        //     (exact "must re-enter the chat" symptom). Rows newer than [flowStartMs]
+        //     now ALWAYS emit, even during seeding.
+        //  2. STATUS TRUST — polling was skipped while status *claimed* SUBSCRIBED; a
+        //     half-dead socket silenced everything. Suppression is now activity-based:
+        //     poll whenever no realtime event has landed for >15s.
         val seenState = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Boolean>>()
         val reactionSig = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val flowStartMs = System.currentTimeMillis()
+        val lastRealtimeEventAtMs = java.util.concurrent.atomic.AtomicLong(flowStartMs)
         var seeded = false
         val pollJob = launch {
             while (isActive) {
                 kotlinx.coroutines.delay(7_000)
                 try {
-                    if (channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) {
+                    // V6-R5: activity-based suppression (see block comment above).
+                    if (System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 15_000) {
                         continue
                     }
                     ProtocolDiagnostics.increment("rt.pollTick")
@@ -2018,8 +2069,15 @@ class WhisperRepository @Inject constructor(
                         }
                         val stateKey = msg.content to msg.isRead
                         val prev = seenState.put(msg.id, stateKey)
-                        if (!seeded && prev == null) continue // silent seed pass
-                        if (prev == stateKey) continue       // unchanged
+                        if (prev == stateKey && seeded) continue // unchanged, already emitted
+                        if (!seeded && prev == null) {
+                            // Seed pass: emit ONLY rows that arrived after the flow
+                            // started; pre-existing history was already rendered.
+                            val arrivedAfterOpen = runCatching {
+                                WhisperMessageEntity.parseSortEpoch(msg.createdAt) > flowStartMs
+                            }.getOrDefault(false)
+                            if (!arrivedAfterOpen) continue
+                        }
                         val decrypted = decryptRealtimeMessage(msg, otherUserId)
                         val finalMsg = msg.copy(content = decrypted)
                         launch {
@@ -3097,6 +3155,18 @@ class WhisperRepository @Inject constructor(
         }
 
         val status = classifyKeyChange(otherUserId, profile)
+
+        // V6-R5 (#2): per-chat-open key-state snapshot in the diagnostics buffer.
+        // Only kid prefixes (8-hex, already public on the wire) and booleans — never
+        // raw keys or fingerprints. This is what makes residual drift visible in a
+        // diagnostics export instead of requiring guesswork.
+        ProtocolDiagnostics.log(
+            "keystate[${otherUserId.take(6)}…]: pinned=${known?.let { WhisperEnvelope.keyId(it) } ?: "-"} " +
+                "server=${WhisperEnvelope.keyId(currentKey)} " +
+                "device=${crypto.getPublicKeyBase64()?.let { WhisperEnvelope.keyId(it) } ?: "-"} " +
+                "match=${status == KeyTrustStatus.MATCH} verified=${keyTrustStore.verifiedKey(otherUserId) == currentKey} " +
+                "staged=${crypto.hasStagedAliases()}",
+        )
 
         // V2-FIX (reviewwhisper.md) R-H1: an auto-accepted rotation detected here also
         // emits the passive key-change signal — once per (user,key) via receiveKeyNotified,
