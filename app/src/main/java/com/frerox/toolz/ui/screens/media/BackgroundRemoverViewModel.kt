@@ -13,6 +13,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -25,9 +26,6 @@ import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.data.media.MaskDecoder
 import com.frerox.toolz.data.media.ModelDownloadManager
 import com.frerox.toolz.util.BackgroundRemoverEngine
-import com.frerox.toolz.util.ImageUtils
-import com.google.android.gms.tflite.client.TfLiteInitializationOptions
-import com.google.android.gms.tflite.java.TfLite
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import okhttp3.OkHttpClient
@@ -41,11 +39,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import org.tensorflow.lite.InterpreterApi
-import org.tensorflow.lite.InterpreterApi.Options.TfLiteRuntime
-import org.tensorflow.lite.gpu.GpuDelegateFactory
+import org.tensorflow.lite.Interpreter
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -73,7 +68,7 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
     val uiState: StateFlow<BackgroundRemoverUiState> = _uiState.asStateFlow()
 
-    private var tfliteInterpreter: InterpreterApi? = null
+    private var tfliteInterpreter: Interpreter? = null
     private val initMutex = Mutex()
     private var activeJob: Job? = null
 
@@ -184,39 +179,24 @@ class BackgroundRemoverViewModel @Inject constructor(
 
         return@withLock withContext(Dispatchers.IO) {
             try {
-                Log.d("BgRemoverVM", "Init TFLite GPU for ${currentModel.id}")
-                val initOptions = TfLiteInitializationOptions.builder()
-                    .setEnableGpuDelegateSupport(true)
-                    .build()
-                TfLite.initialize(context, initOptions).await()
-
+                // Bundled runtime (org.tensorflow:tensorflow-lite) — works on every device,
+                // no Google Play services module required. XNNPACK is on by default.
                 val modelBuffer = loadModelFile(modelFile)
-                val options = InterpreterApi.Options().apply {
-                    setRuntime(TfLiteRuntime.FROM_SYSTEM_ONLY)
+                val options = Interpreter.Options().apply {
                     setNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
-                    try { addDelegateFactory(GpuDelegateFactory()) } catch (t: Throwable) {
-                        Log.w("BgRemoverVM", "GpuDelegateFactory not available", t)
-                    }
                 }
-                tfliteInterpreter = InterpreterApi.create(modelBuffer, options)
-                Log.d("BgRemoverVM", "GPU interpreter ready for ${currentModel.id}")
+                tfliteInterpreter = Interpreter(modelBuffer, options)
+                Log.d("BgRemoverVM", "Interpreter ready (bundled CPU) for ${currentModel.id}")
                 return@withContext true
             } catch (e: Throwable) {
-                Log.w("BgRemoverVM", "GPU init failed, fallback CPU", e)
-                try {
-                    val modelBuffer = loadModelFile(modelFile)
-                    val cpuOptions = InterpreterApi.Options().apply {
-                        setRuntime(TfLiteRuntime.FROM_SYSTEM_ONLY)
-                        setNumThreads(4)
-                    }
-                    tfliteInterpreter = InterpreterApi.create(modelBuffer, cpuOptions)
-                    Log.d("BgRemoverVM", "CPU interpreter ready for ${currentModel.id}")
-                    return@withContext true
-                } catch (e2: Throwable) {
-                    Log.e("BgRemoverVM", "CPU init failed", e2)
-                    _uiState.update { it.copy(isProcessing = false, error = "AI Engine Init Failed: ${e2.localizedMessage}") }
-                    false
+                Log.e("BgRemoverVM", "Interpreter init failed for ${currentModel.id}", e)
+                _uiState.update {
+                    it.copy(
+                        isProcessing = false,
+                        error = "Couldn't start the AI engine. Open AI models and re-download it.",
+                    )
                 }
+                false
             }
         }
     }
@@ -234,10 +214,14 @@ class BackgroundRemoverViewModel @Inject constructor(
         activeJob = viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true, resultBitmap = null, error = null) }
             try {
-                val bitmap = withContext(Dispatchers.IO) {
-                    ImageUtils.loadOptimizedBitmap(context, uri)
-                } ?: run {
-                    _uiState.update { it.copy(isProcessing = false, error = "Could not load image. Try a different photo.") }
+                val bitmap = loadBitmapRobust(uri)
+                if (bitmap == null) {
+                    _uiState.update {
+                        it.copy(
+                            isProcessing = false,
+                            error = "Couldn't read that photo. If it was shared from another app, try picking it from the gallery.",
+                        )
+                    }
                     return@launch
                 }
                 _uiState.update { it.copy(originalBitmap = bitmap) }
@@ -246,12 +230,77 @@ class BackgroundRemoverViewModel @Inject constructor(
                 } else {
                     _uiState.update { it.copy(isProcessing = false, error = "Download a model from the hub to get started") }
                 }
+            } catch (e: SecurityException) {
+                Log.w("BgRemoverVM", "photo access revoked", e)
+                _uiState.update { it.copy(isProcessing = false, error = "Photo access was revoked — pick the image again.") }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     Log.e("BgRemoverVM", "onImageSelected", e)
-                    _uiState.update { it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}") }
+                    _uiState.update { it.copy(isProcessing = false, error = "Couldn't load image: ${e.localizedMessage}") }
                 }
             }
+        }
+    }
+
+    /**
+     * Stream-first decoder: works with every ContentProvider (photo picker, share sheet,
+     * cloud-backed gallery apps) — unlike decodeFileDescriptor which fails on several
+     * providers/HEIC encoders. Falls back to the descriptor path, then fixes EXIF rotation.
+     */
+    private suspend fun loadBitmapRobust(uri: Uri, maxDim: Int = 4096): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            // Pass 1 — bounds
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDim) sample *= 2
+
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+
+            // Pass 2 — decode via stream, fall back to descriptor for odd providers
+            var bmp: Bitmap? = context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            } ?: run {
+                try {
+                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                        BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, opts)
+                    }
+                } catch (_: Exception) { null }
+            }
+            bmp ?: return@withContext null
+
+            // EXIF rotation (camera captures)
+            val deg = try {
+                context.contentResolver.openInputStream(uri)?.use { ins ->
+                    when (androidx.exifinterface.media.ExifInterface(ins).getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                    )) {
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                        else -> 0
+                    }
+                } ?: 0
+            } catch (_: Exception) { 0 }
+
+            if (deg != 0) {
+                val m = android.graphics.Matrix().apply { postRotate(deg.toFloat()) }
+                val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                if (rotated != bmp) bmp.recycle()
+                bmp = rotated
+            }
+            bmp
+        } catch (e: SecurityException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("BgRemoverVM", "loadBitmapRobust failed for $uri", e)
+            null
         }
     }
 

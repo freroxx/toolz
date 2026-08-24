@@ -236,6 +236,16 @@ data class WhisperReactionSummary(
 sealed interface WhisperChatEvent {
     data class MessageEvent(val message: WhisperMessage) : WhisperChatEvent
     data class ReactionEvent(val messageId: String, val userId: String, val emoji: String) : WhisperChatEvent
+
+    /**
+     * V6-R4: authoritative reaction state for one message, delivered by the polling
+     * fallback lane. Unlike [ReactionEvent] (a delta toggle), this REPLACES the
+     * message's reaction list — idempotent under duplicate/poll delivery.
+     */
+    data class ReactionSnapshotEvent(
+        val messageId: String,
+        val summaries: List<WhisperReactionSummary>,
+    ) : WhisperChatEvent
     data class DeleteEvent(val messageId: String) : WhisperChatEvent
 }
 

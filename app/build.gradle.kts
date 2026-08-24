@@ -219,6 +219,9 @@ dependencies {
     implementation(libs.barcode.scanning)
     implementation(libs.play.services.tflite.java)
     implementation(libs.play.services.tflite.gpu)
+    // Bundled TFLite runtime — Play-Services-only runtime (FROM_SYSTEM_ONLY) is missing on
+    // many devices/emulators and fails with "Couldn't find InterpreterFactoryImpl".
+    implementation(libs.tensorflow.lite)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.text.recognition.chinese)
     implementation(libs.mlkit.text.recognition.devanagari)

@@ -33,6 +33,7 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.upload
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1243,22 +1244,17 @@ class WhisperRepository @Inject constructor(
         if (knownKey != null && receiverPubKey != null && knownKey != receiverPubKey) {
             // P0-1 FIX (reviewwhisper.md): previously EVERY key mismatch hard-blocked
             // sending — including routine monthly fleet auto-rotations — bricking
-            // conversations until manual review. Now only a genuinely unexpected
-            // (stale, non-fresh) change blocks; fresh scheduled rotations are
-            // auto-accepted and pinned so subsequent sends are consistent.
-            if (isFreshServerRotation(receiverProfile)) {
-                keyTrustStore.rememberKey(receiverId, receiverPubKey)
-                // V2-FIX (reviewwhisper.md) R-H1: auto-accepted fresh rotations used to be
-                // completely silent. Emit the passive key-change signal (once per
-                // (user,key) via receiveKeyNotified) so the UI can show a non-blocking
-                // "key rotated automatically" banner. cachePeerKey below will not re-emit
-                // because rememberKey already aligned the trusted key.
-                if (receiveKeyNotified.add("$receiverId|$receiverPubKey")) {
-                    _receiveKeyChanged.tryEmit(receiverId)
-                }
-                cachePeerKey(receiverId, receiverPubKey)
-            } else {
-                error("Safety number changed for this contact. Review and accept the new key before sending.")
+            // conversations until manual review.
+            // V6-R4 FIX (field report "texting requires rotate+verify on BOTH devices"):
+            // the remaining CHANGED branch still hard-blocked, which turned any stale
+            // divergence into a manual dance. Sending now NEVER blocks: the envelope
+            // carries copies for EVERY known candidate key (pinned + fresh below), so
+            // whichever key the recipient actually controls opens it. The mismatch is
+            // surfaced passively via receiveKeyChanged (banner), and the receiver's
+            // proof-of-decryption adopts the right key (see decryptRealtimeMessage).
+            if (receiveKeyNotified.add("$receiverId|$receiverPubKey")) {
+                _receiveKeyChanged.tryEmit(receiverId)
+                ProtocolDiagnostics.log("keyDrift: sending with both pinned+fresh candidates to ${receiverId.take(6)}…")
             }
         }
         // V5: encrypt to EVERY recipient key we know (fresh + pinned). Whichever copy
@@ -1419,7 +1415,11 @@ class WhisperRepository @Inject constructor(
         if (attachment.expiresAtEpochSeconds != null && java.time.Instant.now().epochSecond >= attachment.expiresAtEpochSeconds) {
             error("This disappearing image has expired.")
         }
+        // V6-R4: stage timings in the diagnostics buffer — "very long loading then
+        // Couldn't load" reports need the failing STAGE, not just the exception class.
+        val t0 = System.currentTimeMillis()
         val rawBytes = encryptedImageHost.download(attachment.url).getOrThrow()
+        ProtocolDiagnostics.log("img: downloaded ${rawBytes.size}B in ${System.currentTimeMillis() - t0}ms")
 
         // 1. Attempt to decode via lossless PNG transport (ImgBB host)
         // V3-FIX (task F): thread the device pixel budget through decode() — low-RAM
@@ -1512,6 +1512,9 @@ class WhisperRepository @Inject constructor(
         }
         decrypted ?: run {
             ProtocolDiagnostics.increment("image.decryptFail")
+            ProtocolDiagnostics.log(
+                "img: decrypt FAILED after ${System.currentTimeMillis() - t0}ms — entries=${envelopeEntries?.size ?: 0}, candidates=${peerCandidates.size}, png=${decodedPng != null}",
+            )
             error("Unable to decrypt this image on this device.")
         }
     }
@@ -1806,7 +1809,14 @@ class WhisperRepository @Inject constructor(
                 extraFreshPeerKey = fresh,
             )
             if (retried != null) {
-                adoptFreshKeyIfFresh(peerId, fresh)
+                // V6-R4 FIX: PROOF-based adoption — the fresh key just successfully
+                // authenticated a message from this peer, which is stronger evidence
+                // than any updated_at heuristic. Pin it immediately so every later
+                // send/preview uses the key the partner actually controls (this is
+                // what removes the manual rotate+verify dance end-to-end).
+                runCatchingCE { keyTrustStore.rememberKey(peerId, fresh) }
+                cachePeerKey(peerId, fresh)
+                ProtocolDiagnostics.increment("key.adoptedByProof")
                 return retried
             }
         }
@@ -1967,8 +1977,86 @@ class WhisperRepository @Inject constructor(
         // V6-R3: auto-heal dropped realtime channels (messages + reactions).
         val healthJob = watchChannelHealth(this, channelName, channel)
 
+        // ── V6-R4 POLLING FALLBACK (field report: live lanes dead until re-entry) ──
+        // Websocket delivery must never be a single point of failure. While the
+        // channel is NOT subscribed, this lane polls recent rows over REST and emits
+        // the SAME events the realtime collector would — new messages, read-receipt
+        // flips, tombstones and authoritative reaction snapshots. First pass seeds
+        // silently (initial load already rendered those rows); later passes emit
+        // only diffs, so a healthy socket costs nothing and a dead one still works.
+        val seenState = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Boolean>>()
+        val reactionSig = java.util.concurrent.ConcurrentHashMap<String, String>()
+        var seeded = false
+        val pollJob = launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(7_000)
+                try {
+                    if (channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) {
+                        continue
+                    }
+                    ProtocolDiagnostics.increment("rt.pollTick")
+                    val rows = retryWithBackoff(times = 2, initialDelayMs = 200, maxDelayMs = 400) {
+                        db.from("messages").select {
+                            filter {
+                                or {
+                                    and { eq("sender_id", currentId); eq("receiver_id", otherUserId) }
+                                    and { eq("sender_id", otherUserId); eq("receiver_id", currentId) }
+                                }
+                            }
+                            order("created_at", Order.DESCENDING)
+                            limit(30)
+                        }.decodeList<WhisperMessage>()
+                    }
+                    for (msg in rows.reversed()) {
+                        if (deletedStore.isMessageDeleted(msg.id)) continue
+                        if (msg.isDeletedForEveryone) {
+                            if (seenState.remove(msg.id) != null) {
+                                messageDao.deleteMessage(msg.id)
+                                trySend(WhisperChatEvent.DeleteEvent(msg.id))
+                            }
+                            continue
+                        }
+                        val stateKey = msg.content to msg.isRead
+                        val prev = seenState.put(msg.id, stateKey)
+                        if (!seeded && prev == null) continue // silent seed pass
+                        if (prev == stateKey) continue       // unchanged
+                        val decrypted = decryptRealtimeMessage(msg, otherUserId)
+                        val finalMsg = msg.copy(content = decrypted)
+                        launch {
+                            if (!deletedStore.isMessageDeleted(msg.id)) {
+                                messageDao.insertMessage(msg.toEntity())
+                            }
+                        }
+                        if (prev != null || shouldEmitMessage(msg.id)) {
+                            trySend(WhisperChatEvent.MessageEvent(finalMsg))
+                        }
+                    }
+                    seeded = true
+                    // Authoritative reaction snapshots for everything on screen.
+                    val ids = seenState.keys.toList()
+                    if (ids.isNotEmpty()) {
+                        val map = getReactionsForMessages(ids).getOrDefault(emptyMap())
+                        for ((mid, summaries) in map) {
+                            val sig = summaries.joinToString("|") { s ->
+                                "${s.emoji}:${s.userIds.sorted().joinToString(",")}"
+                            }
+                            if (reactionSig.put(mid, sig) != sig && summaries.isNotEmpty()) {
+                                trySend(WhisperChatEvent.ReactionSnapshotEvent(mid, summaries))
+                            }
+                        }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ProtocolDiagnostics.increment("rt.pollError")
+                    android.util.Log.w("WhisperRepo", "chat poll failed: ${e.message}")
+                }
+            }
+        }
+
         awaitClose {
             healthJob.cancel()
+            pollJob.cancel()
             pMsgJob.cancel()
             pReactionJob.cancel()
             // H-1 FIX: appScope, not ProducerScope — the flow scope is already cancelled
@@ -2898,8 +2986,33 @@ class WhisperRepository @Inject constructor(
         // V6-R3: auto-heal dropped realtime channels (presence).
         val presenceHealthJob = watchChannelHealth(this, name, channel)
 
+        // V6-R4: presence polling fallback — online/last-seen stays fresh even when
+        // the websocket lane is down (REST read of the partner's profile row).
+        val presencePollJob = launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(20_000)
+                try {
+                    if (channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED) {
+                        continue
+                    }
+                    val profile = runCatchingCE {
+                        db.from("profiles").select { filter { eq("id", otherUserId) } }
+                            .decodeList<WhisperProfile>().firstOrNull()
+                    }.getOrNull() ?: continue
+                    val lastSeen = profile.lastSeenAt ?: continue
+                    val lastSeenTs = java.time.OffsetDateTime.parse(lastSeen).toInstant()
+                    trySend(Pair(java.time.Instant.now().minusSeconds(120).isBefore(lastSeenTs), lastSeen))
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    ProtocolDiagnostics.increment("rt.presencePollError")
+                }
+            }
+        }
+
         awaitClose {
             presenceHealthJob.cancel()
+            presencePollJob.cancel()
             dbJob.cancel()
             appScope.launch { removeCachedChannel(name, channel) } // H-1 FIX
         }

@@ -237,6 +237,13 @@ private fun ModelCard(
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${speedLabel(model)} · ${model.resolution}p · ${model.sizeLabel}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                )
             }
 
             if (isDownloading) {
@@ -262,6 +269,15 @@ private fun shortName(model: BackgroundModel): String = when (model.id) {
     "deeplabv3_objects" -> "Objects"
     "modnet_hd" -> "HD Matte"
     else -> model.displayName
+}
+
+private fun speedLabel(model: BackgroundModel): String = when (model.id) {
+    "selfie_portrait" -> "Instant"
+    "selfie_landscape" -> "Instant"
+    "selfie_multiclass" -> "Finest detail"
+    "deeplabv3_objects" -> "Fast"
+    "modnet_hd" -> "Highest quality"
+    else -> "Fast"
 }
 
 private fun iconFor(model: BackgroundModel): ImageVector = when (model.id) {

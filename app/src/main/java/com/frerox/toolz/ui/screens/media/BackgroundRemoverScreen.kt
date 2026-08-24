@@ -72,7 +72,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.frerox.toolz.R
@@ -272,23 +274,19 @@ private fun HeroPane(
     modifier: Modifier = Modifier,
 ) {
     val performanceMode = LocalPerformanceMode.current
-    val ring = rememberInfiniteTransition(label = "hero_ring")
-    val breathe by ring.animateFloat(
-        initialValue = 0.94f, targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "breathe",
-    )
-    val glow by ring.animateFloat(
-        initialValue = 0.25f, targetValue = 0.55f,
-        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "glow",
-    )
+    val breathe = if (performanceMode) 1f else {
+        val t = rememberInfiniteTransition(label = "hero_breathe")
+        t.animateFloat(
+            initialValue = 0.985f, targetValue = 1.015f,
+            animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "breathe",
+        ).value
+    }
 
     Surface(
-        onClick = onPick,
+        onClick = if (hasModel) onPick else onBrowseModels,
         shape = SquircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
         modifier = modifier.padding(16.dp),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -297,70 +295,64 @@ private fun HeroPane(
                 verticalArrangement = Arrangement.Center,
                 modifier = Modifier.padding(horizontal = 32.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    // soft halo
-                    if (!performanceMode) {
-                        Box(
-                            Modifier
-                                .size(132.dp)
-                                .graphicsLayer { scaleX = breathe; scaleY = breathe }
-                                .clip(SquircleShape)
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primary.copy(alpha = glow * 0.35f),
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0f),
-                                        )
-                                    )
-                                ),
+                Surface(
+                    shape = SquircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier
+                        .size(104.dp)
+                        .graphicsLayer { scaleX = breathe; scaleY = breathe },
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            Icons.Rounded.AutoAwesome, null,
+                            modifier = Modifier.size(46.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
-                    }
-                    Surface(
-                        shape = SquircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(96.dp).graphicsLayer { scaleX = breathe; scaleY = breathe },
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(
-                                Icons.Rounded.AutoAwesome, null,
-                                modifier = Modifier.size(44.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
                     }
                 }
 
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(32.dp))
                 Text(
-                    "Remove any background",
-                    style = MaterialTheme.typography.headlineMedium,
+                    "Remove any\nbackground",
+                    style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
-                    "On-device AI · private · offline",
-                    style = MaterialTheme.typography.bodyLarge,
+                    "Pick a photo — AI lifts the subject in seconds.\n100% on-device, nothing leaves your phone.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
                 )
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(36.dp))
 
                 ToolzExpressiveButton(
-                    onClick = onPick,
+                    onClick = if (hasModel) onPick else onBrowseModels,
                     shape = SquircleShape,
-                    modifier = Modifier.height(52.dp),
+                    modifier = Modifier.height(54.dp),
                 ) {
-                    Icon(if (hasModel) Icons.Rounded.AddAPhoto else Icons.Rounded.Memory, null, Modifier.size(18.dp))
+                    Icon(
+                        if (hasModel) Icons.Rounded.AddAPhoto else Icons.Rounded.Memory,
+                        null, Modifier.size(18.dp),
+                    )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        if (hasModel) "Choose a photo" else "Get started",
+                        if (hasModel) "Choose a photo" else "Set up AI model",
                         fontWeight = FontWeight.Bold,
                     )
                 }
 
-                Spacer(Modifier.height(6.dp))
-                TextButton(onClick = onBrowseModels) { Text("AI models") }
+                if (!hasModel) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onPick) {
+                        Text("Or pick a photo first", fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onBrowseModels) { Text("AI models") }
+                }
             }
         }
     }

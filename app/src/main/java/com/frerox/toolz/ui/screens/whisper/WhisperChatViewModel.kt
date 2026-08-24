@@ -1262,6 +1262,21 @@ class WhisperChatViewModel @Inject constructor(
                                 requestMarkPartnerRead()
                             }
                         }
+                        is WhisperChatEvent.ReactionSnapshotEvent -> {
+                            // V6-R4: authoritative state from the polling lane. Never
+                            // clobber messages with in-flight local toggles; those
+                            // reconcile via scheduleReactionSync after the write lands.
+                            if (pendingReactions[event.messageId].isNullOrEmpty()) {
+                                _uiState.update { state ->
+                                    val updated = state.messages.map { msg ->
+                                        if (msg.id == event.messageId) {
+                                            if (msg.reactions == event.summaries) msg else msg.copy(reactions = event.summaries)
+                                        } else msg
+                                    }
+                                    state.copy(messages = updated)
+                                }
+                            }
+                        }
                         is WhisperChatEvent.ReactionEvent -> {
                             // Skip echoes of my own toggles: the optimistic UI update already
                             // applied this change, and re-applying would double-flip it.

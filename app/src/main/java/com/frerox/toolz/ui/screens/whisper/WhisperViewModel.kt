@@ -128,6 +128,16 @@ class WhisperViewModel @Inject constructor(
                     launch { runCatching { repository.pullRemoteTombstones() }
                 // PHASE 2 (roadmap §2.3): keep our signed prekey bundle published.
                 viewModelScope.launch { prekeyManager.ensurePublished(authManager.currentUserId ?: return@launch) } }
+                // V6-R4 FIX (#2): proactive identity-key self-heal at startup — if the
+                // published profiles.public_key ever drifts from THIS device's key
+                // (reinstall, interrupted rotation), republish immediately so partners'
+                // messages open out of the box instead of triggering the rotate+verify
+                // dance. Idempotent; no-op when already in sync.
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(4_000) // let auth/profile settle first
+                    runCatching { repository.republishLocalKeyIfStale() }
+                        .onFailure { WhisperErrorMapper.log(it, "startupRepublish") }
+                }
                     loadAll()
                     subscribeToMessages()
                     subscribeToFriends()
