@@ -613,7 +613,7 @@ fun WhisperChatScreen(
                                 val density = LocalDensity.current
                                 val appearOffsetY = remember(message.id) {
                                     androidx.compose.animation.core.Animatable(
-                                        if (isNewBubble) with(density) { 16.dp.toPx() } else 0f,
+                                        if (isNewBubble) with(density) { 12.dp.toPx() } else 0f,
                                     )
                                 }
                                 val appearAlpha = remember(message.id) {
@@ -621,12 +621,15 @@ fun WhisperChatScreen(
                                 }
                                 LaunchedEffect(message.id, isNewBubble) {
                                     if (!isNewBubble) return@LaunchedEffect
-                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 160)) }
+                                    // V6-R6: NO overshoot anywhere — zero-bounce springs on
+                                    // identical timing curves so the incoming bubble and the
+                                    // pushed-up stack move as one rigid, smooth column.
+                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 140)) }
                                     appearOffsetY.animateTo(
                                         0f,
                                         spring(
-                                            dampingRatio = Spring.DampingRatioLowBouncy,
-                                            stiffness = Spring.StiffnessMediumLow,
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMedium,
                                         ),
                                     )
                                 }
@@ -634,12 +637,12 @@ fun WhisperChatScreen(
                                 Box(
                                     modifier = Modifier
                                         .animateItem(
-                                            fadeInSpec = tween(durationMillis = 120),
+                                            fadeInSpec = tween(durationMillis = 100),
                                             placementSpec = spring(
                                                 dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow,
+                                                stiffness = Spring.StiffnessMedium,
                                             ),
-                                            fadeOutSpec = tween(durationMillis = 120),
+                                            fadeOutSpec = tween(durationMillis = 100),
                                         )
                                         .graphicsLayer {
                                             alpha = appearAlpha.value

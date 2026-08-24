@@ -416,7 +416,21 @@ class WhisperChatViewModel @Inject constructor(
                                         newMsg.isDeletedForEveryone -> newMsg.content
                                         else -> existing.content
                                     },
-                                    reactions = if (pendingReactions[newMsg.id].isNullOrEmpty()) newMsg.reactions else existing.reactions,
+                                    // V6-R6 FIX (reactions vanishing): Room entities carry
+                                    // NO reactions — getMessagesFlow maps bare rows. The old
+                                    // precedence took newMsg.reactions whenever no toggle was
+                                    // in flight, so EVERY Room re-emission (read flips, sends,
+                                    // any table touch) wiped visible reactions a few seconds
+                                    // after they appeared. In-memory state is now the source
+                                    // of truth unless a fresh payload explicitly carries data.
+                                    reactions = if (
+                                        newMsg.reactions.isNotEmpty() &&
+                                        pendingReactions[newMsg.id].isNullOrEmpty()
+                                    ) {
+                                        newMsg.reactions
+                                    } else {
+                                        existing.reactions
+                                    },
                                     replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
                                     replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
                                     // V2-FIX (reviewwhisper.md) M-3/V-2: take the fresh state.
