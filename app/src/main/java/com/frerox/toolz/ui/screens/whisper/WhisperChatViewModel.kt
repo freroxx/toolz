@@ -65,6 +65,9 @@ class WhisperChatViewModel @Inject constructor(
     private val imageDiskCache: WhisperImageDiskCache,
     // V2-FIX (reviewwhisper.md) V-15: handle is retained so the draft can survive process death.
     private val savedStateHandle: SavedStateHandle,
+    // V6-R3 FIX (#3): lets the chat self-heal after connectivity outages instead of
+    // requiring exit/re-entry to see new messages.
+    private val offlineManager: com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
 
     val otherUserId: String = checkNotNull(savedStateHandle["otherUserId"])
@@ -219,6 +222,16 @@ class WhisperChatViewModel @Inject constructor(
         viewModelScope.launch {
             repository.receiveKeyChanged.collect { changedUserId ->
                 if (changedUserId == otherUserId) loadKeyTrust()
+            }
+        }
+        // V6-R3 FIX (#3): silent catch-up the moment connectivity returns after an
+        // outage — visible history must never depend on the realtime socket alone.
+        var wasOnline = true
+        viewModelScope.launch {
+            offlineManager.offlineState.collect { state ->
+                val online = state == com.frerox.toolz.util.OfflineState.ONLINE
+                if (online && !wasOnline) loadMessages()
+                wasOnline = online
             }
         }
         restorePersistedUndoBuffer()

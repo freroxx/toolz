@@ -1832,7 +1832,139 @@ private fun ProfileTab(
             }
         }
 
-        // My encryption fingerprint card
+        // ── V6-R3 REDESIGN: clear top-to-bottom hierarchy ──
+        // 1 Account (fields + save together) → 2 Privacy & discovery →
+        // 3 Security → 4 Backup → 5 Danger zone. Same state and handlers as
+        // before; only grouping/order/containers changed.
+
+        // ═══ 1. ACCOUNT — display name, bio, save action in ONE card ═══
+        SectionHeader(stringResource(R.string.st_Whisper_Section_Account))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Profile_DisplayName)) },
+                    leadingIcon = { Icon(Icons.Rounded.Badge, null) },
+                    singleLine = true,
+                    shape = MediumExpressiveShape,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { if (it.length <= 160) bio = it },
+                    label = { Text(stringResource(R.string.st_Whisper_Profile_Bio)) },
+                    leadingIcon = { Icon(Icons.Rounded.Info, null) },
+                    minLines = 2,
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    shape = MediumExpressiveShape,
+                    supportingText = { Text("${bio.length}/160") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                // Save lives with the fields it saves (was stranded at page bottom).
+                val saveButtonAnim by animateFloatAsState(
+                    targetValue = if (hasUnsaved) 1f else 0.7f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                )
+                ToolzExpressiveButton(
+                    onClick = {
+                        haptic.success()
+                        doSave()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(54.dp).graphicsLayer { alpha = saveButtonAnim },
+                    enabled = hasUnsaved,
+                ) {
+                    Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (hasUnsaved) stringResource(R.string.st_Whisper_Profile_SaveChanges) else stringResource(R.string.st_Whisper_Profile_NoChanges),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // ═══ 2. PRIVACY & DISCOVERY ═══
+        SectionHeader(stringResource(R.string.st_Whisper_Section_PrivacyDiscovery))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Profile Visibility: Public vs Private
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.st_Whisper_ProfileVisibility), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    ToolzConnectedButtonGroup(
+                        selectedIndex = if (isPrivate) 1 else 0,
+                        options = listOf(stringResource(R.string.st_Whisper_Public), stringResource(R.string.st_Whisper_Private)),
+                        onOptionSelected = { isPrivate = it == 1 },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+
+                // Hide from Discover Toggle
+                ExpressiveCard(
+                    onClick = {
+                        if (!isHidden) {
+                            showDiscoveryWarningDialog = true
+                        } else {
+                            isHidden = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(
+                            if (isHidden) Icons.Rounded.VisibilityOff else Icons.Rounded.PersonSearch,
+                            null,
+                            tint = if (isHidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.st_Whisper_HideFromDiscover), fontWeight = FontWeight.Bold)
+                            // V2-FIX M-H2: reuse the identical existing copy from the
+                            // hide-from-discover confirm dialog instead of a hardcoded literal.
+                            Text(
+                                stringResource(R.string.st_Whisper_HideDiscoverConfirmDesc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        ExpressiveSwitch(
+                            checked = isHidden,
+                            onCheckedChange = {
+                                if (it) showDiscoveryWarningDialog = true
+                                else isHidden = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        // ═══ 3. SECURITY ═══
+        SectionHeader(stringResource(R.string.st_Whisper_Section_Security))
         val myFingerprint = viewModel.myFingerprint
         if (myFingerprint != null) {
             // V2-FIX L14: the inert ExpressiveCard(onClick = {}) wrapper is gone — a plain
@@ -1975,6 +2107,8 @@ private fun ProfileTab(
             }
         }
 
+        // ═══ 4. BACKUP (AUBUP) ═══
+        SectionHeader(stringResource(R.string.st_Whisper_Section_Backup))
         // AUBUP: Auth User Backup Program Card
         ExpressiveCard(
             onClick = { showCreateAccessFileDialog = true },
@@ -2031,124 +2165,8 @@ private fun ProfileTab(
             }
         }
 
-        // Profile Form Fields
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = displayName,
-                onValueChange = { displayName = it },
-                label = { Text(stringResource(R.string.st_Whisper_Profile_DisplayName)) },
-                leadingIcon = { Icon(Icons.Rounded.Badge, null) },
-                singleLine = true,
-                shape = MediumExpressiveShape,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = bio,
-                onValueChange = { if (it.length <= 160) bio = it },
-                label = { Text(stringResource(R.string.st_Whisper_Profile_Bio)) },
-                leadingIcon = { Icon(Icons.Rounded.Info, null) },
-                minLines = 2,
-                maxLines = 4,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                shape = MediumExpressiveShape,
-                supportingText = { Text("${bio.length}/160") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            SectionHeader(stringResource(R.string.st_Whisper_Section_PrivacyDiscovery))
-
-            // Profile Visibility: Public vs Private
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.st_Whisper_ProfileVisibility), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                ToolzConnectedButtonGroup(
-                    selectedIndex = if (isPrivate) 1 else 0,
-                    options = listOf(stringResource(R.string.st_Whisper_Public), stringResource(R.string.st_Whisper_Private)),
-                    onOptionSelected = { isPrivate = it == 1 },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    if (isPrivate) stringResource(R.string.st_Whisper_Profile_PrivateDesc) else stringResource(R.string.st_Whisper_Profile_PublicDesc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-
-            // Hide from Discover Toggle
-            ExpressiveCard(
-                onClick = {
-                    if (!isHidden) {
-                        showDiscoveryWarningDialog = true
-                    } else {
-                        isHidden = false
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Icon(
-                        if (isHidden) Icons.Rounded.VisibilityOff else Icons.Rounded.PersonSearch,
-                        null,
-                        tint = if (isHidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.st_Whisper_HideFromDiscover), fontWeight = FontWeight.Bold)
-                        // V2-FIX M-H2: reuse the identical existing copy from the
-                        // hide-from-discover confirm dialog instead of a hardcoded literal.
-                        Text(
-                            stringResource(R.string.st_Whisper_HideDiscoverConfirmDesc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    ExpressiveSwitch(
-                        checked = isHidden,
-                        onCheckedChange = {
-                            if (it) showDiscoveryWarningDialog = true
-                            else isHidden = false
-                        },
-                    )
-                }
-            }
-        }
-
-        // Save Button
-        val saveButtonAnim by animateFloatAsState(
-            targetValue = if (hasUnsaved) 1f else 0.7f,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
-        )
-        ToolzExpressiveButton(
-            onClick = {
-                haptic.success()
-                doSave()
-            },
-            modifier = Modifier.fillMaxWidth().height(54.dp).graphicsLayer { alpha = saveButtonAnim },
-            enabled = hasUnsaved,
-        ) {
-            Icon(Icons.Rounded.Save, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (hasUnsaved) stringResource(R.string.st_Whisper_Profile_SaveChanges) else stringResource(R.string.st_Whisper_Profile_NoChanges),
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-        // Delete Account
-        ToolzOutlinedExpressiveButton(
-            onClick = { haptic.click(); showDeleteAccountDialog = true },
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-        ) {
-            Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
-        }
+        // ═══ 5. DANGER ZONE — logout (common) first, deletion last ═══
+        SectionHeader(stringResource(R.string.st_Whisper_Section_DangerZone))
 
         // Logout — plain tap opens the confirmation dialog; the old hidden "hold 3s"
         // gesture is gone because it silently reset onboarding without signing out.
@@ -2160,6 +2178,17 @@ private fun ProfileTab(
             Icon(Icons.AutoMirrored.Rounded.Logout, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.st_Whisper_Profile_LogOut), fontWeight = FontWeight.Bold)
+        }
+
+        // Delete Account
+        ToolzOutlinedExpressiveButton(
+            onClick = { haptic.click(); showDeleteAccountDialog = true },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) {
+            Icon(Icons.Rounded.DeleteForever, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.st_Whisper_DeleteAccount), fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.height(20.dp))

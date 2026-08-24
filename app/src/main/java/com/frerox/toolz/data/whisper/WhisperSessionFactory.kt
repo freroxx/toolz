@@ -138,7 +138,16 @@ class WhisperSessionFactory @Inject constructor(
         val ekAPub = Base64.decode(header.ekPubB64, Base64.NO_WRAP)
         val spkPriv = prekeyManager.privateKeyForKid(header.spkKid)
             ?: error("SPK private no longer held")
+        // V6-R3 FIX: a missing OPK private used to fall back SILENTLY to 3-DH while
+        // the initiator had sealed 4-DH — both sides then derived DIFFERENT session
+        // keys (session ids diverge) and every subsequent frame locked forever with
+        // no diagnostic trail. A consumed/lost OPK must hard-fail instead; callers
+        // recover via the envelope fallback + re-handshake heal loop.
         val opkPriv = header.opkKid?.takeIf { it.isNotBlank() }?.let { prekeyManager.privateKeyForKid(it) }
+        if (header.opkKid != null && header.opkKid.isNotBlank() && opkPriv == null) {
+            ProtocolDiagnostics.increment("x3dh.opkMissing")
+            error("OPK private for kid ${header.opkKid.take(6)}… no longer held")
+        }
         val ikMe = prekeyManager.identityPrivateKey()
 
         val sk = if (opkPriv != null) {

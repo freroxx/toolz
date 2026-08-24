@@ -101,6 +101,8 @@ class WhisperRepository @Inject constructor(
         val SUPPORTED_IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/webp")
         const val MIN_IMAGE_EXPIRY_SECONDS = 60L
         const val MAX_IMAGE_EXPIRY_SECONDS = 15_552_000L
+        // V6-R3: bounded resubscribe attempts per channel per process.
+        const val MAX_RESUBSCRIBE_ATTEMPTS = 6
     }
     private val db get() = supabase.postgrest
     private val store get() = supabase.storage
@@ -750,6 +752,41 @@ class WhisperRepository @Inject constructor(
         }
         // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
         runCatchingCE { realtime.removeChannel(channel) }
+    }
+
+    /**
+     * V6-R3 FIX (field report "realtime dead until chat re-entry"): hosted realtime
+     * silently drops channels on network switches, socket idle, or device sleep —
+     * Postgres flows then never emit again while collectors stay attached. The
+     * client keeps the SAME channel object usable, so watching [RealtimeChannel.status]
+     * and re-subscribing that instance resumes delivery without rebuilding any
+     * collector. Bounded retries; the returned job must be cancelled before
+     * [removeCachedChannel] during teardown (otherwise it would resurrect the channel).
+     */
+    private fun watchChannelHealth(
+        scope: kotlinx.coroutines.CoroutineScope,
+        name: String,
+        channel: io.github.jan.supabase.realtime.RealtimeChannel,
+    ): kotlinx.coroutines.Job = scope.launch {
+        var wasSubscribed = false
+        var attempts = 0
+        channel.status.collect { st ->
+            when {
+                st == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED -> {
+                    wasSubscribed = true
+                    attempts = 0
+                }
+                st == io.github.jan.supabase.realtime.RealtimeChannel.Status.UNSUBSCRIBED &&
+                    wasSubscribed && attempts < MAX_RESUBSCRIBE_ATTEMPTS -> {
+                    attempts++
+                    ProtocolDiagnostics.increment("rt.resubscribe")
+                    android.util.Log.w("WhisperRepo", "realtime channel $name dropped — resubscribing ($attempts)")
+                    kotlinx.coroutines.delay(500L * attempts)
+                    runCatchingCE { channel.subscribe(blockUntilSubscribed = false) }
+                        .onFailure { ProtocolDiagnostics.increment("rt.resubscribeFail") }
+                }
+            }
+        }
     }
 
     /** Broadcast and Postgres changes describe the same write; emit it only once to consumers. */
@@ -1413,55 +1450,70 @@ class WhisperRepository @Inject constructor(
             }
         }.filterNotNull().distinct()
 
-        val boundPairs: List<Triple<String, String, String>> = buildList {
-            if (!peerId.isNullOrBlank() && peerId != myIdNow) {
-                add(Triple(peerId, myIdNow, peerId))
-            }
-            add(Triple("", myIdNow, ""))
-            peerCandidates.forEach { pub ->
-                add(Triple(myIdNow, "", pub)) // sent-by-me variants keyed per candidate
-            }
-        }.distinct()
-
         val envelopeEntries = runCatching {
             WhisperEnvelope.decode(candidateCipher.decodeToString())
                 ?: decodedPng?.let { WhisperEnvelope.decode(rawBytes.decodeToString()) }
         }.getOrNull()
 
-        val decrypted = if (envelopeEntries != null) {
-            val ownKid = WhisperEnvelope.ownKid(crypto)
-            envelopeEntries.firstNotNullOfOrNull { (kid, ivB64, ctB64) ->
-                val bytes = runCatching {
-                    android.util.Base64.decode(ctB64, android.util.Base64.NO_WRAP)
-                }.getOrNull() ?: return@firstNotNullOfOrNull null
-                val pubs = when {
-                    kid == ownKid || peerId.isNullOrBlank() || peerId == myIdNow -> peerCandidates
-                    else -> peerCandidates.filter { WhisperEnvelope.keyId(it) == kid }.ifEmpty { peerCandidates }
+        val ownKid = WhisperEnvelope.ownKid(crypto)
+
+        // V6-R3 FIX (field report "image sending damaged"): after a partner rotates,
+        // every LOCAL view of their key can be stale simultaneously. The whole matrix
+        // is therefore one retryable attempt; on total failure we force ONE fresh
+        // profile fetch and retry before surfacing the honest failure.
+        fun attempt(candidates: List<String>): ByteArray? {
+            val boundPairs: List<Triple<String, String, String>> = buildList {
+                if (!peerId.isNullOrBlank() && peerId != myIdNow) {
+                    add(Triple(peerId, myIdNow, peerId))
                 }
-                pubs.firstNotNullOfOrNull { pub ->
+                add(Triple("", myIdNow, ""))
+                candidates.forEach { pub -> add(Triple(myIdNow, "", pub)) } // sent-by-me variants
+            }.distinct()
+            return if (envelopeEntries != null) {
+                envelopeEntries.firstNotNullOfOrNull { (kid, ivB64, ctB64) ->
+                    val bytes = runCatching {
+                        android.util.Base64.decode(ctB64, android.util.Base64.NO_WRAP)
+                    }.getOrNull() ?: return@firstNotNullOfOrNull null
+                    val pubs = when {
+                        kid == ownKid || peerId.isNullOrBlank() || peerId == myIdNow -> candidates
+                        else -> candidates.filter { WhisperEnvelope.keyId(it) == kid }.ifEmpty { candidates }
+                    }
+                    pubs.firstNotNullOfOrNull { pub ->
+                        boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
+                            tryDecrypt(bytes, ivB64, sender.ifEmpty { peerId ?: "" }, receiver.ifEmpty { myIdNow }, pub)
+                        } ?: runCatching {
+                            // direct direction attempt with this pub
+                            crypto.decryptAttachment(bytes, ivB64, pub, peerId ?: myIdNow, myIdNow, messageCreatedAtEpochMs)
+                        }.getOrNull()
+                    }
+                }
+            } else {
+                candidates.firstNotNullOfOrNull { pub ->
                     boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                        tryDecrypt(bytes, ivB64, sender.ifEmpty { peerId ?: "" }, receiver.ifEmpty { myIdNow }, pub)
-                    } ?: runCatching {
-                        // direct direction attempt with this pub
-                        crypto.decryptAttachment(bytes, ivB64, pub, peerId ?: myIdNow, myIdNow, messageCreatedAtEpochMs)
-                    }.getOrNull()
-                }
-            }
-        } else {
-            val legacy = peerCandidates.firstNotNullOfOrNull { pub ->
-                boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                    tryDecrypt(candidateCipher, null, sender, receiver, pub)
-                }
-            } ?: decodedPng?.let {
-                peerCandidates.firstNotNullOfOrNull { pub ->
-                    boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
-                        tryDecrypt(rawBytes, null, sender, receiver, pub)
+                        tryDecrypt(candidateCipher, null, sender, receiver, pub)
+                    }
+                } ?: decodedPng?.let {
+                    candidates.firstNotNullOfOrNull { pub ->
+                        boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
+                            tryDecrypt(rawBytes, null, sender, receiver, pub)
+                        }
                     }
                 }
             }
-            legacy
         }
-        decrypted ?: error("Unable to decrypt this image on this device.")
+
+        var decrypted = attempt(peerCandidates)
+        if (decrypted == null && !peerId.isNullOrBlank() && peerId != myIdNow) {
+            val fresh = getProfile(peerId, forceRefresh = true).getOrNull()?.publicKey
+            if (fresh != null && fresh !in peerCandidates) {
+                ProtocolDiagnostics.log("imageHeal: retrying with freshly fetched partner key")
+                decrypted = attempt(peerCandidates + fresh)
+            }
+        }
+        decrypted ?: run {
+            ProtocolDiagnostics.increment("image.decryptFail")
+            error("Unable to decrypt this image on this device.")
+        }
     }
 
 
@@ -1912,8 +1964,11 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName] = channel
         }
+        // V6-R3: auto-heal dropped realtime channels (messages + reactions).
+        val healthJob = watchChannelHealth(this, channelName, channel)
 
         awaitClose {
+            healthJob.cancel()
             pMsgJob.cancel()
             pReactionJob.cancel()
             // H-1 FIX: appScope, not ProducerScope — the flow scope is already cancelled
@@ -1995,8 +2050,11 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName] = channel
         }
+        // V6-R3: auto-heal dropped realtime channels (inbox lane).
+        val healthJob = watchChannelHealth(this, channelName, channel)
 
         awaitClose {
+            healthJob.cancel()
             dbJob.cancel()
             // H-1 FIX: see subscribeToChat — cleanup must survive collection cancellation.
             appScope.launch {
@@ -2519,7 +2577,10 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[channelName] = channel
         }
+        // V6-R3: auto-heal dropped realtime channels (friend updates).
+        val healthJob = watchChannelHealth(this, channelName, channel)
         awaitClose {
+            healthJob.cancel()
             pJob.cancel()
             // H-1 FIX: see subscribeToChat — cleanup must survive collection cancellation.
             appScope.launch {
@@ -2712,6 +2773,10 @@ class WhisperRepository @Inject constructor(
         // pairwise attachment cipher (bound AAD), so eavesdroppers on the public
         // channel see random bytes and outsiders cannot forge valid events.
         runCatching {
+            // V6-R3: cached read (no RPC when fresh) keeps the candidate keys from
+            // going fully stale across the partner's rotation — sealing typing pings
+            // to a long-expired key made receivers skip them by kid-match alone.
+            getProfile(targetUserId).getOrNull()
             // V5: seal the typing ping for EVERY known recipient key so key drift can
             // never silently kill typing again.
             val candidates = recipientKeyCandidates(targetUserId)
@@ -2740,6 +2805,9 @@ class WhisperRepository @Inject constructor(
         val name = "typing_" + conversationKey(myId, otherUserId)
         val channel = getOrJoinBroadcastChannel(name)
         val broadcasts = channel.broadcastFlow("typing")
+        // V6-R3: broadcast channels die with the socket just like postgres lanes —
+        // heal them identically or typing indicators silently vanish.
+        val healthJob = watchChannelHealth(this, name, channel)
         val job = launch { broadcasts.collect { rb ->
             try {
                 val outer = (rb.payload as? BroadcastPayload.Json)?.value?.jsonObject ?: return@collect
@@ -2750,19 +2818,40 @@ class WhisperRepository @Inject constructor(
                 // of the pairwise secret can produce ciphertext that authenticates.
                 val ownKid = WhisperEnvelope.ownKid(crypto) ?: return@collect
                 val entry = entries.firstOrNull { it.first == ownKid } ?: return@collect
-                val plain = crypto.decryptAttachment(
-                    cipherBytes = android.util.Base64.decode(entry.third, android.util.Base64.NO_WRAP),
-                    ivBase64 = entry.second,
-                    senderPublicKeyBase64 = peerKeys.value[otherUserId] ?: peerKeyFor(otherUserId),
-                    senderId = otherUserId,
-                    receiverId = myId,
-                    messageCreatedAtEpochMs = System.currentTimeMillis(),
-                ) ?: return@collect
+                fun openWith(pub: String?) = pub?.let {
+                    crypto.decryptAttachment(
+                        cipherBytes = android.util.Base64.decode(entry.third, android.util.Base64.NO_WRAP),
+                        ivBase64 = entry.second,
+                        senderPublicKeyBase64 = it,
+                        senderId = otherUserId,
+                        receiverId = myId,
+                        messageCreatedAtEpochMs = System.currentTimeMillis(),
+                    )
+                }
+                // V6-R3 FIX (field report "typing indicators vanished"): the sender may
+                // have sealed to a NEWER key than any local view holds after their
+                // rotation. Try every local candidate, then force ONE fresh profile
+                // fetch and retry before giving up.
+                val candidates = buildList {
+                    add(peerKeys.value[otherUserId])
+                    add(peerKeyFor(otherUserId))
+                }.filterNotNull().distinct()
+                var plain = candidates.firstNotNullOfOrNull(::openWith)
+                if (plain == null) {
+                    val fresh = getProfile(otherUserId, forceRefresh = true).getOrNull()?.publicKey
+                    if (fresh != null && fresh !in candidates) {
+                        plain = openWith(fresh)
+                    }
+                }
+                plain ?: return@collect
                 val isTyping = Json.parseToJsonElement(plain.decodeToString()).jsonObject["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
                 trySend(isTyping)
             } catch (_: Exception) { }
         } }
-        awaitClose { job.cancel(); appScope.launch { removeCachedChannel(name, channel) } }
+        awaitClose {
+            healthJob.cancel()
+            job.cancel(); appScope.launch { removeCachedChannel(name, channel) }
+        }
     }
 
     suspend fun sendPresence(targetUserId: String, isOnline: Boolean) {
@@ -2806,8 +2895,11 @@ class WhisperRepository @Inject constructor(
         channelMutex.withLock {
             broadcastChannelCache[name] = channel
         }
+        // V6-R3: auto-heal dropped realtime channels (presence).
+        val presenceHealthJob = watchChannelHealth(this, name, channel)
 
         awaitClose {
+            presenceHealthJob.cancel()
             dbJob.cancel()
             appScope.launch { removeCachedChannel(name, channel) } // H-1 FIX
         }

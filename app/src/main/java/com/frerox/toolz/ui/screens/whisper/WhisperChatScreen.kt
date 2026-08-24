@@ -114,6 +114,9 @@ import kotlin.time.Duration.Companion.milliseconds
 /**
  * Individual conversation screen with Material 3 Expressive UI.
  */
+/** V6-R3 UX: bubbles younger than this pop in on first composition (see itemsIndexed). */
+private const val NEW_BUBBLE_WINDOW_MS = 15_000L
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun WhisperChatScreen(
@@ -591,11 +594,52 @@ fun WhisperChatScreen(
                             itemsIndexed(reversedMessages, key = { _, m -> m.id }) { index, message ->
                                 val isMine = message.isSentByMe(viewModel.myUserId)
                                 val isPending = message.isPending || message.id.startsWith("pending_")
-                                
+
                                 val showDateSeparator = index == reversedMessages.lastIndex ||
                                     reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
 
-                                Box(modifier = Modifier.animateItem()) {
+                                // V6-R3 UX: fresh bubbles pop in (fade + spring scale);
+                                // historical rows render statically so scrolling never
+                                // replays the effect. Heuristic = row younger than 15s.
+                                val isNewBubble = remember(message.id) {
+                                    runCatching {
+                                        java.time.OffsetDateTime.parse(message.createdAt).toInstant().toEpochMilli()
+                                    }.getOrDefault(0L) > System.currentTimeMillis() - NEW_BUBBLE_WINDOW_MS
+                                }
+                                val appearScale = remember(message.id) {
+                                    androidx.compose.animation.core.Animatable(if (isNewBubble) 0.88f else 1f)
+                                }
+                                val appearAlpha = remember(message.id) {
+                                    androidx.compose.animation.core.Animatable(if (isNewBubble) 0f else 1f)
+                                }
+                                LaunchedEffect(message.id, isNewBubble) {
+                                    if (!isNewBubble) return@LaunchedEffect
+                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 150)) }
+                                    appearScale.animateTo(
+                                        1f,
+                                        spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMediumLow,
+                                        ),
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .animateItem()
+                                        .graphicsLayer {
+                                            alpha = appearAlpha.value
+                                            scaleX = appearScale.value
+                                            scaleY = appearScale.value
+                                            // Grow from the sender's edge: my bubbles from the
+                                            // bottom-right, theirs from bottom-left.
+                                            transformOrigin = if (isMine) {
+                                                androidx.compose.ui.graphics.TransformOrigin(1f, 1f)
+                                            } else {
+                                                androidx.compose.ui.graphics.TransformOrigin(0f, 1f)
+                                            }
+                                        }
+                                ) {
                                     MessageBubble(
                                         message = message,
                                         isMine = isMine,

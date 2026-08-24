@@ -51,17 +51,47 @@ class WhisperPrekeyManager @Inject constructor(
     /** Local record of unpublished/consumed state so we top up idempotently. */
     private var lastPublishedAtMs: Long = 0L
 
-    // Wrapped private halves, keyed by kid. Keystore-AES protected at rest.
+    // V6-R3 FIX (field report "must rotate keys on both devices after restart"):
+    // this map used to be RAM-ONLY — every process death lost every SPK/OPK private
+    // half, so peers holding an earlier bundle could never complete handshakes (and a
+    // missing OPK silently downgraded the responder to 3-DH, deriving a DIFFERENT
+    // session key than the initiator's 4-DH: permanent lock, zero errors). Private
+    // halves are now Keystore-wrapped AND persisted here, restored on demand.
     private val privateKeysWrapped = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Insertion order of persisted OPK kids so the local pool stays bounded. */
+    @Volatile private var opkOrder: List<String> = emptyList()
+
+    private fun persistPrivate(kid: String, kind: String, wrapped: String) {
+        privateKeysWrapped[kid] = wrapped
+        prefs.edit().putString(KEY_PRIV_PREFIX + kid, wrapped).apply()
+        if (kind == "OPK") {
+            synchronized(opkOrder) {
+                opkOrder = opkOrder + kid
+                while (opkOrder.size > OPK_PERSIST_CAP) {
+                    val oldest = opkOrder.first()
+                    opkOrder = opkOrder.drop(1)
+                    prefs.edit().remove(KEY_PRIV_PREFIX + oldest).apply()
+                    privateKeysWrapped.remove(oldest)
+                }
+                prefs.edit().putString(KEY_OPK_ORDER, opkOrder.joinToString(",")).apply()
+            }
+        }
+    }
 
     /**
      * PHASE 3 bridge: the private half for a prekey this device published. Returns
      * null for unknown/consumed kids — callers treat that as "cannot complete".
+     * L1 memory map first, persisted wrapped value second (survives process death).
      */
-    fun privateKeyForKid(kid: String): ByteArray? =
-        privateKeysWrapped[kid]?.let { crypto.unwrapWithKeystoreAes(it) }
+    fun privateKeyForKid(kid: String): ByteArray? {
+        privateKeysWrapped[kid]?.let { return crypto.unwrapWithKeystoreAes(it) }
+        val stored = prefs.getString(KEY_PRIV_PREFIX + kid, null) ?: return null
+        privateKeysWrapped[kid] = stored // promote to L1
+        return crypto.unwrapWithKeystoreAes(stored)
+    }
 
-    /** Current Signed PreKey kid, if one was published this session. */
+    /** Current Signed PreKey kid, if one was published (persisted across restarts). */
     var currentSpkKid: String? = null
         private set
 
@@ -73,6 +103,14 @@ class WhisperPrekeyManager @Inject constructor(
      */
     suspend fun ensurePublished(currentUserId: String): Result<Unit> = runCatching {
         if (currentUserId.isBlank()) return Result.success(Unit)
+
+        // V6-R3: restore publication state from disk so a restart neither republishes
+        // a redundant SPK nor forgets how fresh the current one is.
+        if (currentSpkKid == null) {
+            currentSpkKid = prefs.getString(KEY_CURRENT_SPK, null)
+            lastPublishedAtMs = prefs.getLong(KEY_SPK_PUBLISHED_AT, 0L)
+            opkOrder = prefs.getString(KEY_OPK_ORDER, null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+        }
 
         // -- 1. Identity binding -------------------------------------------------
         val ikPriv = getOrCreateIdentitySeed()
@@ -99,8 +137,8 @@ class WhisperPrekeyManager @Inject constructor(
                 .toByteArray()
             val signature = crypto.signProtocol(signPayload)
                 ?: error("Prekey signing failed — refusing to publish unsigned bundle")
-            privateKeysWrapped[kid] = crypto.wrapWithKeystoreAes(spkPriv)
-                ?: error("Could not protect SPK private half")
+            persistPrivate(kid, "SPK", crypto.wrapWithKeystoreAes(spkPriv)
+                ?: error("Could not protect SPK private half"))
             supabase.postgrest.from("whisper_prekeys").upsert(
                 PrekeyRow(
                     account = currentUserId, kid = kid, kind = "SPK",
@@ -110,6 +148,10 @@ class WhisperPrekeyManager @Inject constructor(
             )
             currentSpkKid = kid
             lastPublishedAtMs = System.currentTimeMillis()
+            prefs.edit()
+                .putString(KEY_CURRENT_SPK, kid)
+                .putLong(KEY_SPK_PUBLISHED_AT, lastPublishedAtMs)
+                .apply()
             ProtocolDiagnostics.log("prekeys: SPK published ($kid)")
         }
 
@@ -120,8 +162,8 @@ class WhisperPrekeyManager @Inject constructor(
                 val priv = SessionCrypto.generatePrivateKey()
                 val pub = SessionCrypto.publicFromPrivate(priv)
                 val kid = kidOf(pub)
-                privateKeysWrapped[kid] = crypto.wrapWithKeystoreAes(priv)
-                    ?: error("Could not protect OPK private half")
+                persistPrivate(kid, "OPK", crypto.wrapWithKeystoreAes(priv)
+                    ?: error("Could not protect OPK private half"))
                 supabase.postgrest.from("whisper_prekeys").insert(
                     PrekeyRow(
                         account = currentUserId, kid = kid, kind = "OPK",
@@ -200,5 +242,16 @@ class WhisperPrekeyManager @Inject constructor(
         private const val KEY_IK_SEED = "identity_seed_wrapped"
         private const val SPK_ROTATE_MS = 7L * 24 * 60 * 60 * 1000
         private const val OPK_TARGET = 50
+
+        // V6-R3 persistence keys (private halves stored keystore-wrapped, never plain).
+        private const val KEY_PRIV_PREFIX = "priv:"
+        private const val KEY_CURRENT_SPK = "current_spk_kid"
+        private const val KEY_SPK_PUBLISHED_AT = "spk_published_at_ms"
+        private const val KEY_OPK_ORDER = "opk_order"
+        private const val OPK_PERSIST_CAP = 120
+    }
+
+    private val prefs by lazy {
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 }
