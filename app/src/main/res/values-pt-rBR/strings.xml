@@ -247,6 +247,10 @@
     <string name="st_Whisper_SelectClearRange">Escolha até quando limpar</string>
     <string name="st_Whisper_ProfileVisibility">Visibilidade do perfil</string>
     <string name="st_Whisper_Section_PrivacyDiscovery">Privacidade &amp; Descoberta</string>
+    <string name="st_Whisper_Section_Account">Conta</string>
+    <string name="st_Whisper_Section_Security">Segurança</string>
+    <string name="st_Whisper_Section_Backup">Backup</string>
+    <string name="st_Whisper_Section_DangerZone">Zona de perigo</string>
     <string name="st_Whisper_DeleteAccount">Excluir conta</string>
     <string name="st_Whisper_HideDiscoverConfirmTitle">Ocultar do Descobrir?</string>
     <string name="st_Whisper_HideDiscoverConfirmDesc">Você não aparecerá em recomendações nem pesquisas. As pessoas só poderão encontrar você se você adicioná-las primeiro.</string>

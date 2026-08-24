@@ -247,6 +247,10 @@
     <string name="st_Whisper_SelectClearRange">Choisissez jusqu\'où effacer</string>
     <string name="st_Whisper_ProfileVisibility">Visibilité du profil</string>
     <string name="st_Whisper_Section_PrivacyDiscovery">Confidentialité &amp; Découverte</string>
+    <string name="st_Whisper_Section_Account">Compte</string>
+    <string name="st_Whisper_Section_Security">Sécurité</string>
+    <string name="st_Whisper_Section_Backup">Sauvegarde</string>
+    <string name="st_Whisper_Section_DangerZone">Zone de danger</string>
     <string name="st_Whisper_DeleteAccount">Supprimer le compte</string>
     <string name="st_Whisper_HideDiscoverConfirmTitle">Se masquer de Découvrir ?</string>
     <string name="st_Whisper_HideDiscoverConfirmDesc">Vous n\'apparaîtrez plus dans les recommandations ni les recherches. On ne peut vous trouver que si vous ajoutez d\'abord les personnes.</string>

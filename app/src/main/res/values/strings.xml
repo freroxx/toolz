@@ -248,6 +248,10 @@
     <string name="st_Whisper_SelectClearRange">Select how far back to clear</string>
     <string name="st_Whisper_ProfileVisibility">Profile Visibility</string>
     <string name="st_Whisper_Section_PrivacyDiscovery">Privacy &amp; Discovery</string>
+    <string name="st_Whisper_Section_Account">Account</string>
+    <string name="st_Whisper_Section_Security">Security</string>
+    <string name="st_Whisper_Section_Backup">Backup</string>
+    <string name="st_Whisper_Section_DangerZone">Danger zone</string>
     <string name="st_Whisper_DeleteAccount">Delete Account</string>
     <string name="st_Whisper_HideDiscoverConfirmTitle">Hide from Discover?</string>
     <string name="st_Whisper_HideDiscoverConfirmDesc">You won\'t appear in recommendations or search. People can only find you if you add them first.</string>
