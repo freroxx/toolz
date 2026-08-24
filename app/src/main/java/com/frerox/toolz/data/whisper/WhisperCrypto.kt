@@ -245,10 +245,23 @@ class WhisperCrypto @Inject constructor(
     fun sweepOrphanedStagedAliases() {
         runCatching {
             val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            val orphans = keyStore.aliases().toList().filter { it.startsWith(STAGED_ALIAS_PREFIX) }
+            // V6-R6 CRITICAL FIX: the ACTIVE alias is frequently itself a staged alias
+            // (both activeAlias() fallback-generation and rotation commits live under
+            // the staged prefix). The old unconditional sweep DELETED THE ACTIVE KEY on
+            // every process start — identity churn, unreadable history, the works.
+            // The active alias is now explicitly protected; only truly orphaned
+            // staged entries (interrupted rotations never committed) are removed.
+            val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            val protectedActive = prefs.getString(PREF_ACTIVE_ALIAS, null)
+            val orphans = keyStore.aliases().toList().filter {
+                it.startsWith(STAGED_ALIAS_PREFIX) && it != protectedActive
+            }
             orphans.forEach {
                 keyStore.deleteEntry(it)
                 android.util.Log.w(TAG_CRYPTO, "Swept orphaned staged key alias: $it")
+            }
+            if (protectedActive != null && orphans.isNotEmpty()) {
+                ProtocolDiagnostics.log("keypair.sweep: removed ${orphans.size} orphan(s), active alias protected")
             }
         }
     }
@@ -257,6 +270,22 @@ class WhisperCrypto @Inject constructor(
         sweepOrphanedStagedAliases()
         ensureSigningKeyExists()
         try {
+            // V6-R6 REPAIR: older builds' sweeps may have already deleted the active
+            // alias, leaving PREF_ACTIVE_ALIAS dangling (private key null forever).
+            // Clear the dangling pointer so activeAlias() falls back to the legacy key
+            // or generates a fresh — now sweep-protected — identity.
+            runCatching {
+                val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                val prefAlias = prefs.getString(PREF_ACTIVE_ALIAS, null)
+                if (prefAlias != null) {
+                    val ks = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                    if (!ks.containsAlias(prefAlias)) {
+                        ProtocolDiagnostics.increment("keypair.danglingActivePref")
+                        android.util.Log.e(TAG_CRYPTO, "Active alias $prefAlias missing from keystore — resetting pointer")
+                        prefs.edit().remove(PREF_ACTIVE_ALIAS).apply()
+                    }
+                }
+            }
             // V5 canary: prove the active key can actually round-trip before any chat
             // relies on it. OEM keystore corruption otherwise surfaced only as the
             // "[Encrypted message]" bug weeks later.
@@ -630,6 +659,33 @@ class WhisperCrypto @Inject constructor(
      * Destroys the local key pair and generates a fresh one (account deletion).
      * Removes the active pair, any staged-but-uncommitted pair, and the pointer.
      */
+    /**
+     * V6-R6: send-time identity triage. Returns true when a repair was performed
+     * (dangling active pointer cleared and a usable identity restored); callers must
+     * then republish so the server row matches the (possibly new) public key.
+     */
+    fun repairActiveIdentityIfBroken(): Boolean {
+        val hasPrivate = getPrivateKey() != null
+        if (hasPrivate) return false
+        android.util.Log.e(TAG_CRYPTO, "Active identity unusable — attempting repair")
+        ProtocolDiagnostics.increment("keypair.repairAttempted")
+        return try {
+            synchronized(rotationLock) {
+                context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(PREF_ACTIVE_ALIAS).apply()
+            }
+            ensureKeyPairExists()
+            val repaired = getPrivateKey() != null
+            if (repaired) {
+                ProtocolDiagnostics.increment("keypair.repaired")
+                android.util.Log.w(TAG_CRYPTO, "Identity repaired — caller MUST republish the new public key")
+            }
+            repaired
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun resetKeyPair() {
         try {
             synchronized(rotationLock) {

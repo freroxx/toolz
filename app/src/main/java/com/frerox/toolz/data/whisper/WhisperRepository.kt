@@ -1263,13 +1263,19 @@ class WhisperRepository @Inject constructor(
         replyToId: String? = null
     ): Result<WhisperMessage> = runCatching {
         val currentId = myId
-        if (currentId.isBlank()) error("User not authenticated")
-        
+        // V6-R6: every send-failure exit names itself in diagnostics — field exports
+        // previously showed only "IllegalStateException" with zero attribution.
+        fun sendFail(code: String, detail: String): Nothing {
+            ProtocolDiagnostics.increment("send.fail.$code")
+            ProtocolDiagnostics.log("send.fail[$code]: $detail")
+            error(detail)
+        }
+        if (currentId.isBlank()) sendFail("noauth", "User not authenticated")
         if (isUserBlockedByMe(receiverId)) {
-            error("You have blocked this user. Unblock to send messages.")
+            sendFail("blocked_by_me", "You have blocked this user. Unblock to send messages.")
         }
         if (isUserBlockedByOther(receiverId)) {
-            error("You have been blocked by this user.")
+            sendFail("blocked_by_other", "You have been blocked by this user.")
         }
         require(content.isNotBlank() && content.length <= MAX_MESSAGE_CHARS) { "Message must be between 1 and $MAX_MESSAGE_CHARS characters." }
         val receiverProfile = getProfile(receiverId, forceRefresh = true).getOrNull()
@@ -1294,6 +1300,13 @@ class WhisperRepository @Inject constructor(
         // V5: encrypt to EVERY recipient key we know (fresh + pinned). Whichever copy
         // matches a key the recipient controls opens the message — key drift can no
         // longer produce unreadable text.
+        // V6-R6 (#2): identity triage BEFORE any encryption — a dangling active alias
+        // (historic sweep bug) made getPrivateKey() null and failed every seal. Repair
+        // inline, then republish so the server row matches the restored identity.
+        if (crypto.repairActiveIdentityIfBroken()) {
+            ProtocolDiagnostics.log("send: identity repaired — republishing public key")
+            appScope.launch { runCatching { republishLocalKeyIfStale() } }
+        }
         // V6 negotiation: the format actually sent is chosen per-peer below — v3
         // ratchet frames when a session exists, the V5 envelope ladder otherwise.
         val negotiatedVersion = negotiatedVersionFor(receiverId)
@@ -1312,12 +1325,18 @@ class WhisperRepository @Inject constructor(
         if (encryptedPair == null) {
             val candidates = recipientKeyCandidates(receiverId).toMutableMap()
             receiverPubKey?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
-            if (candidates.isEmpty()) error("Secure delivery is unavailable because this user has no valid encryption key.")
+            if (candidates.isEmpty()) sendFail(
+                "no_key",
+                "Secure delivery unavailable: no encryption key for this user (server row blank or unreadable).",
+            )
             val envelope = WhisperEnvelope.encode(
                 candidates.mapNotNull { (kid, pub) ->
                     crypto.encryptMessage(content, pub, currentId, receiverId)?.let { Triple(kid, it.second, it.first) }
                 }
-            ) ?: error("Secure delivery failed: could not encrypt for any known key.")
+            ) ?: sendFail(
+                "encrypt_failed",
+                "Secure delivery failed: could not encrypt for any known key.",
+            )
             encryptedPair = envelope to IV_ENVELOPE
         }
         // Client-generated UUID makes the insert idempotent: if the server accepted the row

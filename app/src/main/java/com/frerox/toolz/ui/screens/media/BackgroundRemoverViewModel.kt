@@ -246,8 +246,9 @@ class BackgroundRemoverViewModel @Inject constructor(
      * Stream-first decoder: works with every ContentProvider (photo picker, share sheet,
      * cloud-backed gallery apps) — unlike decodeFileDescriptor which fails on several
      * providers/HEIC encoders. Falls back to the descriptor path, then fixes EXIF rotation.
+     * maxDim is capped for the 256 MB heap: 3400px ≈ 35 MB/array worst case.
      */
-    private suspend fun loadBitmapRobust(uri: Uri, maxDim: Int = 4096): Bitmap? = withContext(Dispatchers.IO) {
+    private suspend fun loadBitmapRobust(uri: Uri, maxDim: Int = 3400): Bitmap? = withContext(Dispatchers.IO) {
         try {
             // Pass 1 — bounds
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -375,18 +376,47 @@ class BackgroundRemoverViewModel @Inject constructor(
                     modelId = model.id,
                 )
 
-                val resultBitmap = BackgroundRemoverEngine.removeBackground(
-                    source = bitmap,
-                    maskArray = combinedMask,
-                    maskW = modelW,
-                    maskH = modelH,
-                )
+                val resultBitmap = runMatting(bitmap, combinedMask, modelW, modelH)
                 _uiState.update { it.copy(isProcessing = false, resultBitmap = resultBitmap) }
+            }
+        } catch (e: OutOfMemoryError) {
+            Log.e("BgRemoverVM", "processImage OOM", e)
+            _uiState.update {
+                it.copy(isProcessing = false, error = "Photo is too large for this device's memory — try a smaller one.")
             }
         } catch (e: Exception) {
             if (e !is CancellationException) {
                 Log.e("BgRemoverVM", "processImage failed", e)
                 _uiState.update { it.copy(isProcessing = false, error = "Processing error: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    /**
+     * Runs the matting engine with an OOM safety net: on memory pressure the photo is
+     * downscaled once (≤2048px) and matting is retried before giving up.
+     */
+    private suspend fun runMatting(
+        source: Bitmap,
+        mask: FloatArray,
+        maskW: Int,
+        maskH: Int,
+    ): Bitmap {
+        return try {
+            BackgroundRemoverEngine.removeBackground(source, mask, maskW, maskH)
+        } catch (oom: OutOfMemoryError) {
+            Log.w("BgRemoverVM", "OOM at ${source.width}×${source.height} — retrying at ≤2048px", oom)
+            val scale = 2048f / maxOf(source.width, source.height)
+            val scaled = Bitmap.createScaledBitmap(
+                source,
+                (source.width * scale).toInt().coerceAtLeast(1),
+                (source.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+            try {
+                BackgroundRemoverEngine.removeBackground(scaled, mask, maskW, maskH)
+            } finally {
+                if (scaled != source) scaled.recycle()
             }
         }
     }

@@ -92,6 +92,16 @@ object WhisperErrorMapper {
 
         val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)
 
+        // V6-R6: repository guards throw plain IllegalStateException("User not
+        // authenticated") outside any RestException path — without this branch the
+        // session-expired sentinel never fired and every send died as "request failed"
+        // while the UI looked logged-in.
+        if (msg.contains("User not authenticated", ignoreCase = true) ||
+            msg.contains("not authenticated", ignoreCase = true)
+        ) {
+            return UiText.DynamicString(SESSION_EXPIRED_SENTINEL)
+        }
+
         // L-5 FIX (reviewwhisper.md): STRUCTURED checks (status codes, error codes) now run
         // BEFORE broad substring matching — the old order misrouted any server message
         // merely containing "blocked"/"connect"/"network" into unrelated buckets.
