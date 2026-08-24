@@ -211,13 +211,14 @@ class WhisperViewModel @Inject constructor(
                 try {
                     if (ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                         repository.updateLastSeen()
-                        // V6-R6: automatic 30-day identity rotation REMOVED. Unlike Signal,
-                        // this app's identity keypair IS the history-decryption key — every
-                        // rotation permanently bricked all prior messages (both directions)
-                        // and forced the rotate+verify dance in the field. Forward secrecy
-                        // now comes from the Double Ratchet's per-message keys, which makes
-                        // identity rotation pure liability. Manual rotate remains available
-                        // as an explicit "reset encryption" action (see rotate dialog).
+                        // V6-R6: automatic 30-day identity rotation REMOVED here — the
+                        // identity keypair is the history-decryption key; rotating it
+                        // bricked all prior messages and forced the rotate+verify dance.
+                        // FS comes from the Double Ratchet's per-message keys.
+                        // V6-R6 (#2): heartbeat convergence — retries republish every
+                        // 5 min if the startup attempt failed. Idempotent when in sync.
+                        runCatching { repository.republishLocalKeyIfStale() }
+                            .onFailure { WhisperErrorMapper.log(it, "heartbeatRepublish") }
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e

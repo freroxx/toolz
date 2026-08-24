@@ -56,6 +56,8 @@ class WhisperCrypto @Inject constructor(
         private const val STAGED_ALIAS_PREFIX = "whisper_e2ee_ec_key_staged_"
         private const val STATE_PREFS = "whisper_crypto_state"
         private const val PREF_ACTIVE_ALIAS = "active_alias"
+        // V6-R6: last-seen active public key (b64) for the unexpected-change detector.
+        private const val PREF_LAST_PUB = "last_seen_pub_b64"
         private const val AES_GCM_TAG_LEN = 128
         private const val IV_LEN = 12
         private const val MAX_MESSAGE_CHARS = 8_192
@@ -258,11 +260,51 @@ class WhisperCrypto @Inject constructor(
             // V5 canary: prove the active key can actually round-trip before any chat
             // relies on it. OEM keystore corruption otherwise surfaced only as the
             // "[Encrypted message]" bug weeks later.
-            if (activeAliasPrefSet() && !selfTestRoundTrip()) {
-                android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED — regenerating identity")
-                resetKeyPair()
+            //
+            // V6-R6 CRITICAL FIX: a canary failure NO LONGER regenerates the identity.
+            // This block used to call resetKeyPair() on ANY failure — including
+            // transient keystore states right after boot — silently producing a brand
+            // NEW identity while the server still published the old public key. Every
+            // contact then sealed to a dead key ("rotate+verify dance" in the field),
+            // and all prior history became permanently unreadable. Identity is now
+            // NEVER destroyed implicitly: failures are retried, then surfaced through
+            // diagnostics; E2EE may be degraded until the TEE recovers, but the key
+            // material — and therefore the conversation history — survives.
+            if (activeAliasPrefSet()) {
+                var ok = false
+                for (attempt in 1..3) {
+                    if (selfTestRoundTrip()) { ok = true; break }
+                    android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED (attempt $attempt/3)")
+                    ProtocolDiagnostics.increment("keypair.canaryFailed")
+                    Thread.sleep(150L * attempt)
+                }
+                if (!ok) {
+                    // Degraded-but-stable: keep the identity. Never implicit reset.
+                    android.util.Log.e(TAG_CRYPTO, "Keystore self-test failed 3× — keeping existing identity (NO implicit reset)")
+                    ProtocolDiagnostics.increment("keypair.degradedNoReset")
+                }
             }
             activeAlias()
+
+            // V6-R6: unexpected-identity-change detector. The canary no longer resets
+            // implicitly (see above), so any change of the ACTIVE public key between
+            // process starts is now noteworthy by definition — log it loudly so the
+            // diagnostics export shows exactly when an identity churned.
+            runCatching {
+                val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+                val current = getPublicKeyBase64()
+                val lastSeen = prefs.getString(PREF_LAST_PUB, null)
+                if (current != null) {
+                    if (lastSeen != null && lastSeen != current) {
+                        ProtocolDiagnostics.increment("keypair.changedUnexpectedly")
+                        android.util.Log.e(
+                            TAG_CRYPTO,
+                            "Identity public key CHANGED since last start without explicit rotation!",
+                        )
+                    }
+                    prefs.edit().putString(PREF_LAST_PUB, current).apply()
+                }
+            }
         } catch (e: Exception) {
             // V2-FIX W8: never swallow keystore bootstrap failures silently — degraded
             // keystore state (E2EE unavailable until fixed) must be diagnosable from logs.
