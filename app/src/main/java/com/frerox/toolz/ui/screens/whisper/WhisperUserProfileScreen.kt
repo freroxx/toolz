@@ -378,12 +378,11 @@ fun WhisperUserProfileScreen(
                                                 stringResource(R.string.st_Whisper_Profile_KeyVerifiedDesc)
                                             keyTrust?.status == KeyTrustStatus.CHANGED ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyChangedDesc)
+                                            // V6-R2 (review): unreachable ROTATED_MANUAL arm removed —
+                                            // classifyKeyChange only returns MATCH/ROTATED_AUTO/CHANGED.
                                             keyTrust?.status == KeyTrustStatus.ROTATED_AUTO ->
                                                 keyTrust.rotateMessage?.asString(context)
                                                     ?: stringResource(R.string.st_Whisper_Profile_KeyRotatedAutoFallback)
-                                            keyTrust?.status == KeyTrustStatus.ROTATED_MANUAL ->
-                                                keyTrust.rotateMessage?.asString(context)
-                                                    ?: stringResource(R.string.st_Whisper_Profile_KeyRotatedManualFallback, profile.effectiveName)
                                             else ->
                                                 stringResource(R.string.st_Whisper_Profile_KeyFingerprintDesc, profile.effectiveName)
                                         },
@@ -408,7 +407,7 @@ fun WhisperUserProfileScreen(
                                     }
 
                                     when {
-                                        keyTrust?.status == KeyTrustStatus.CHANGED || keyTrust?.status == KeyTrustStatus.ROTATED_AUTO || keyTrust?.status == KeyTrustStatus.ROTATED_MANUAL -> {
+                                        keyTrust?.status == KeyTrustStatus.CHANGED || keyTrust?.status == KeyTrustStatus.ROTATED_AUTO -> {
                                             val isWarning = keyTrust?.status == KeyTrustStatus.CHANGED
                                             Row(
                                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -553,9 +552,11 @@ fun WhisperUserProfileScreen(
  * Fingerprint of a base64 public key — delegates to WhisperCrypto.computeFingerprint,
  * the single source of truth (this file previously carried a duplicated hash
  * implementation that could silently drift from the crypto module's algorithm).
+ * V6-R2 (review): returns null on failure instead of leaking an English "UNVERIFIED"
+ * literal into fingerprint Text slots — callers fall back to localized strings.
  */
-internal fun whisperFingerprint(base64Key: String): String =
-    WhisperCrypto.computeFingerprint(base64Key) ?: "UNVERIFIED"
+internal fun whisperFingerprint(base64Key: String?): String? =
+    base64Key?.let { WhisperCrypto.computeFingerprint(it) }
 
 /** Compute a SHA-256 fingerprint from a base64 public key — P1-17 delegates to single source. */
-private fun computeFingerprint(base64PublicKey: String): String = whisperFingerprint(base64PublicKey)
+private fun computeFingerprint(base64PublicKey: String?): String? = whisperFingerprint(base64PublicKey)

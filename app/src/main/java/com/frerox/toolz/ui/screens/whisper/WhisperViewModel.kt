@@ -32,6 +32,9 @@ import javax.inject.Inject
 
 @HiltViewModel
 class WhisperViewModel @Inject constructor(
+    // V6-R2 (review): app context lets notification/error fallbacks localize instead of
+    // leaking hardcoded English ("Someone", "Profile not loaded", …).
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val repository: WhisperRepository,
     private val authManager: WhisperAuthManager,
     private val notificationManager: WhisperNotificationManager,
@@ -41,6 +44,7 @@ class WhisperViewModel @Inject constructor(
     private val crypto: WhisperCrypto,
     private val outgoingQueue: WhisperOutgoingQueue,
     private val aubupManager: WhisperAubupManager,
+    private val prekeyManager: com.frerox.toolz.data.whisper.WhisperPrekeyManager,
     private val keyRotationStore: WhisperKeyRotationStore,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
@@ -121,7 +125,9 @@ class WhisperViewModel @Inject constructor(
             isAuthenticated.collect { auth ->
                 if (auth == true) {
                     // Hydrate local tombstones from server so reinstall / new device never resurrects deletes.
-                    launch { runCatching { repository.pullRemoteTombstones() } }
+                    launch { runCatching { repository.pullRemoteTombstones() }
+                // PHASE 2 (roadmap §2.3): keep our signed prekey bundle published.
+                viewModelScope.launch { prekeyManager.ensurePublished(authManager.currentUserId ?: return@launch) } }
                     loadAll()
                     subscribeToMessages()
                     subscribeToFriends()
@@ -623,7 +629,8 @@ class WhisperViewModel @Inject constructor(
         onError: (String) -> Unit,
     ) {
         val current = _uiState.value.currentProfile ?: run {
-            onError("Profile not loaded")
+            // V6-R2 (review): was hardcoded English "Profile not loaded".
+            onError(appContext.getString(R.string.st_Whisper_Error_ProfileNotLoaded))
             return
         }
         viewModelScope.launch {
@@ -637,7 +644,8 @@ class WhisperViewModel @Inject constructor(
             ).onSuccess { file ->
                 onSuccess(file)
             }.onFailure { err ->
-                onError(err.message ?: "Failed to create Access File")
+                // V6-R2 (review): raw throwable text leaked to users — map centrally.
+                onError(WhisperErrorMapper.map(err).asString(appContext))
             }
         }
     }
@@ -774,7 +782,9 @@ class WhisperViewModel @Inject constructor(
                         // repository.getProfile, which is backed by its 5-minute profileCache —
                         // no extra per-notification RPC beyond the cache TTL.
                         val senderProfile = repository.getProfile(msg.senderId).getOrNull()
-                        val senderName = senderProfile?.effectiveName ?: "Someone"
+                        val senderName = senderProfile?.effectiveName
+                            // V6-R2 (review): was hardcoded English "Someone".
+                            ?: appContext.getString(R.string.st_Whisper_SomeoneDefault)
                         notificationManager.showMessageNotification(
                             senderId = msg.senderId,
                             senderName = senderName,
@@ -808,7 +818,9 @@ class WhisperViewModel @Inject constructor(
                         // V2-FIX L-?: same cached path as message notifications —
                         // repository.getProfile serves from its 5-minute profileCache.
                         val senderProfile = repository.getProfile(friendship.userA).getOrNull()
-                        val senderName = senderProfile?.effectiveName ?: "Someone"
+                        val senderName = senderProfile?.effectiveName
+                            // V6-R2 (review): was hardcoded English "Someone".
+                            ?: appContext.getString(R.string.st_Whisper_SomeoneDefault)
                         notificationManager.showFriendRequestNotification(friendship.userA, senderName)
                     }
                 }

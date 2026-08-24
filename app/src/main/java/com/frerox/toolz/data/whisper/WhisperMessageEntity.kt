@@ -37,7 +37,11 @@ data class WhisperMessageEntity(
     // V2-FIX (reviewwhisper.md) H-10: numeric sort key derived from createdAt so Room can
     // order chronologically even when ISO strings compare inconsistently. defaultValue
     // matches MIGRATION_47_48's "ADD COLUMN ... DEFAULT 0" (Room validates both sides).
-    @ColumnInfo(defaultValue = "0") val sortEpoch: Long = 0
+    @ColumnInfo(defaultValue = "0") val sortEpoch: Long = 0,
+
+    // PHASE 1 (roadmap §1.2): wire protocol version (0 = legacy pair, 2 = envelope).
+    @ColumnInfo(defaultValue = "0")
+    val protocolVersion: Int = 0,
 ) {
     fun toModel(): WhisperMessage = WhisperMessage(
         id = id,
@@ -51,7 +55,8 @@ data class WhisperMessageEntity(
         replyToContent = replyToContent,
         replyToSenderName = replyToSenderName,
         // Cached pending rows render as a neutral placeholder instead of a real bubble.
-        isPending = content == "[message pending sync]"
+        isPending = content == "[message pending sync]",
+        protocolVersion = protocolVersion
     )
 
     companion object {
@@ -93,5 +98,9 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     // V2-FIX (reviewwhisper.md) H-10: every entity construction site goes through this
     // mapper (server rows, pending ghosts, delivered outbox rows), so deriving the
     // monotonic sort key here covers all of them.
-    sortEpoch = WhisperMessageEntity.parseSortEpoch(createdAt)
+    sortEpoch = WhisperMessageEntity.parseSortEpoch(createdAt),
+    // PHASE 1 (roadmap §1.2): wire protocol version of the stored ciphertext,
+    // inferred from its shape — 2 = v5 multi-key envelope, 0 = legacy v1 pair.
+    // Single inference point covers every construction site, same as sortEpoch.
+    protocolVersion = if (WhisperEnvelope.isEnvelope(content)) 2 else 0
 )

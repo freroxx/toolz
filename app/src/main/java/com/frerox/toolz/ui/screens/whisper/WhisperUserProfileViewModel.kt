@@ -65,6 +65,14 @@ class WhisperUserProfileViewModel @Inject constructor(
 
     init {
         loadData()
+        // V6-R2 (review): consume the repository's key-change signal for THIS profile so
+        // an auto-accepted rotation refreshes the trust card live (the flow previously
+        // had zero collectors anywhere in the app).
+        viewModelScope.launch {
+            repository.receiveKeyChanged.collect { changedUserId ->
+                if (changedUserId == targetUserId) loadData()
+            }
+        }
     }
 
     private fun handleError(err: Throwable, context: String) {

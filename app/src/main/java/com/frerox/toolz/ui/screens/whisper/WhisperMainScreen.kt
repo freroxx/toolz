@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.*
@@ -82,6 +83,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.*
 import com.frerox.toolz.ui.components.*
@@ -223,6 +225,7 @@ fun WhisperMainScreen(
             viewModel.clearInfo()
         }
     }
+
 
     val tabs = listOf(
         Triple(stringResource(R.string.st_Whisper_Tab_Chats), Icons.AutoMirrored.Rounded.Chat, Icons.AutoMirrored.Rounded.Chat),
@@ -1097,8 +1100,13 @@ private fun ConversationCard(
                             )
                             Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outlineVariant))
                         }
+                        // V6-R2 (review): lock sentinels from the repository render as
+                        // localized placeholders instead of raw English sentinels.
+                        val previewText = conversation.lastMessage.content
                         Text(
-                            conversation.lastMessage.content,
+                            if (com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(previewText)) {
+                                stringResource(R.string.st_Whisper_Locked_Short)
+                            } else previewText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
@@ -1560,6 +1568,8 @@ private fun ProfileTab(
     var showRotateKeyDialog by remember { mutableStateOf(false) }
     // V3-FIX: QR verification entry point — show my own verification QR for in-person scan.
     var showVerifyQrDialog by remember { mutableStateOf(false) }
+    // PHASE 1 (roadmap §1.3): debug-only protocol diagnostics viewer.
+    var showProtocolDiagnostics by remember { mutableStateOf(false) }
     var isRotatingKey by remember { mutableStateOf(false) }
 
     // Resolved in composition scope: stringResource is composable-only and cannot be
@@ -1605,15 +1615,23 @@ private fun ProfileTab(
     }
 
     // Save trigger from UnsavedChangesDialog — routed through doSave()
+    // V6-R2 (review): HorizontalPager re-runs these effects with stale non-zero
+    // counters on every tab re-entry, silently re-saving (network write + toasts).
+    // Same one-shot guard as pickPhotoTrigger below: rememberSaveable watermark so
+    // neither recomposition nor process recreation replays an already-handled value.
+    var lastHandledSaveTrigger by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(saveTrigger) {
-        if (saveTrigger > 0) {
+        if (saveTrigger > lastHandledSaveTrigger) {
+            lastHandledSaveTrigger = saveTrigger
             doSave()
         }
     }
 
     // Discard trigger from UnsavedChangesDialog
+    var lastHandledDiscardTrigger by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(discardTrigger) {
-        if (discardTrigger > 0) {
+        if (discardTrigger > lastHandledDiscardTrigger) {
+            lastHandledDiscardTrigger = discardTrigger
             displayName = initialDisplayName
             bio = initialBio
             isPrivate = initialIsPrivate
@@ -1650,7 +1668,16 @@ private fun ProfileTab(
                         // leaving the screen mid-read actually cancels instead of surfacing
                         // a bogus "could not read image" toast.
                         if (err is kotlinx.coroutines.CancellationException) throw err
-                        toastState.show(context.getString(R.string.st_Whisper_Error_ReadImage), WhisperToastType.ERROR)
+                        // V6-R2 (review): oversized avatars hit readBounded's require("Avatar
+                        // file is too large.") and previously showed the generic read-error.
+                        val tooLarge = err.message?.contains("too large", ignoreCase = true) == true
+                        toastState.show(
+                            context.getString(
+                                if (tooLarge) R.string.st_Whisper_Error_ImageTooLarge
+                                else R.string.st_Whisper_Error_ReadImage,
+                            ),
+                            WhisperToastType.ERROR,
+                        )
                     }
             }
         }
@@ -1788,7 +1815,15 @@ private fun ProfileTab(
                         tint = if (profile.publicKey != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "E2EE (P-256)",
+                        // V6-R2 (review): was a hardcoded English "E2EE (P-256)" literal.
+                        // Now localized and architecture-aware: forward secrecy is the
+                        // headline guarantee since the Double Ratchet went live.
+                        when {
+                            profile.publicKey != null && com.frerox.toolz.data.whisper.WhisperProtocolConfig.ratchetEnabled ->
+                                stringResource(R.string.st_Whisper_Badge_Fs)
+                            profile.publicKey != null -> stringResource(R.string.st_Whisper_Profile_E2EEBadge)
+                            else -> stringResource(R.string.st_Whisper_Profile_StandardAuth)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = if (profile.publicKey != null) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1860,7 +1895,7 @@ private fun ProfileTab(
                             }
                         }
                     }
-                    // V3-FIX: QR path replaces eyeballing the 8 hex groups — partner scans this.
+                    // V6-R2 (review): QR path replaces eyeballing the 8 hex groups — partner scans this.
                     ToolzTonalExpressiveButton(
                         onClick = { haptic.click(); showVerifyQrDialog = true },
                         modifier = Modifier.fillMaxWidth()
@@ -1868,6 +1903,62 @@ private fun ProfileTab(
                         Icon(Icons.Rounded.QrCode2, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.st_Whisper_QrShowButton), fontWeight = FontWeight.SemiBold)
+                    }
+                    // V6-R2: non-debug encryption status — states the live guarantee
+                    // (per-message forward secrecy) instead of leaving users to infer it
+                    // from a protocol badge. Static copy; no session plumbing needed.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Rounded.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column {
+                            Text(
+                                stringResource(R.string.st_Whisper_Fs_Title),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                stringResource(R.string.st_Whisper_Fs_Desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // PHASE 1 (roadmap §1.3): debug builds expose the protocol event
+                    // ring buffer for field diagnosis — never compiled into release UX.
+                    if (BuildConfig.DEBUG) {
+                        WhisperOptionsListItem(
+                            leadingIcon = Icons.Rounded.BugReport,
+                            label = stringResource(R.string.st_Whisper_Diag_Title),
+                            onClick = { showProtocolDiagnostics = true },
+                        )
+                        if (showProtocolDiagnostics) {
+                            WhisperDiagnosticsDialog(
+                                lines = com.frerox.toolz.data.whisper.ProtocolDiagnostics.snapshot(),
+                                counters = com.frerox.toolz.data.whisper.ProtocolDiagnostics.counters.toMap(),
+                                onDismiss = { showProtocolDiagnostics = false },
+                                onCopy = {
+                                    haptic.click()
+                                    clipboardManager.setText(
+                                        androidx.compose.ui.text.AnnotatedString(
+                                            buildString {
+                                                com.frerox.toolz.data.whisper.ProtocolDiagnostics.counters.forEach { (k, v) -> appendLine("$k: $v") }
+                                                appendLine()
+                                                com.frerox.toolz.data.whisper.ProtocolDiagnostics.snapshot().forEach { appendLine(it) }
+                                            },
+                                        ),
+                                    )
+                                    toastState.show(context.getString(R.string.st_Whisper_Diag_Copied), WhisperToastType.SUCCESS)
+                                },
+                            )
+                        }
                     }
                     ToolzOutlinedExpressiveButton(
                         onClick = {

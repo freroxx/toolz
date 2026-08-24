@@ -14,5 +14,6 @@ Toolz does not require accounts. Toolz does not sell data.
 - DNS probes: DoH JSON to the provider’s `dohUrl` (e.g. `https://cloudflare-dns.com/dns-query`, `https://dns.google/resolve`, `https://dns.quad9.net/dns-query`, `https://dns.adguard-dns.com/dns-query`, etc. — see `DnsProviderLibrary.kt:29`) + TCP :53 fallback + optional DoT :853 TLS handshake (DNS → Benchmark)
 - Traceroute: local `ping -t TTL` only; optional online ASN/name enrichment via `https://ipinfo.io/<ip>/json` **only if** user enables ASN toggle (off by default)
 - Whisper messaging (if used): Supabase `*.supabase.co` + storage for encrypted images
+- Whisper encryption: end-to-end (X3DH + Double Ratchet); every text message carries per-message forward secrecy, so compromised long-term keys cannot decrypt past traffic. Only ciphertext is stored on servers and on device.
 
 All network features degrade gracefully without Shizuku (deep-link to `Settings.ACTION_WIFI_SETTINGS` / `Settings.ACTION_PRIVATE_DNS_SETTINGS`).

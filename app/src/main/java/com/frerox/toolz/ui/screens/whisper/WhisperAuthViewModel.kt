@@ -11,6 +11,7 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
+import com.frerox.toolz.data.whisper.WhisperErrorMapper
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -313,8 +314,8 @@ class WhisperAuthViewModel @Inject constructor(
                 // V2-FIX A-M3: wrap in UiText; reuse the existing generic error string
                 // when the throwable carries no message.
                 _aubupState.value = AubupRecoveryState.Error(
-                    err.message?.let(UiText::DynamicString)
-                        ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                    // V6-R2 (review): raw throwable text leaked to users — map centrally.
+                    WhisperErrorMapper.map(err)
                 )
             }
             _submitting.value = false
@@ -336,8 +337,8 @@ class WhisperAuthViewModel @Inject constructor(
                 .onFailure { err ->
                     // V2-FIX A-M3: UiText payload (see restoreFromVault).
                     _aubupState.value = AubupRecoveryState.Error(
-                        err.message?.let(UiText::DynamicString)
-                            ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                        // V6-R2 (review): raw throwable text leaked to users — map centrally.
+                        WhisperErrorMapper.map(err)
                     )
                     _submitting.value = false
                 }
@@ -354,8 +355,8 @@ class WhisperAuthViewModel @Inject constructor(
                 .onFailure { err ->
                     // V2-FIX A-M3: UiText payload (see restoreFromVault).
                     _aubupState.value = AubupRecoveryState.Error(
-                        err.message?.let(UiText::DynamicString)
-                            ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                        // V6-R2 (review): raw throwable text leaked to users — map centrally.
+                        WhisperErrorMapper.map(err)
                     )
                     _submitting.value = false
                 }
@@ -386,9 +387,9 @@ class WhisperAuthViewModel @Inject constructor(
             )
         }.onFailure { err ->
             // V2-FIX A-M3: UiText payload (see restoreFromVault).
+            // V6-R2 (review): raw throwable text leaked to users — map centrally.
             _aubupState.value = AubupRecoveryState.Error(
-                err.message?.let(UiText::DynamicString)
-                    ?: UiText.StringResource(R.string.st_Whisper_Error_Generic)
+                WhisperErrorMapper.map(err)
             )
         }
         _submitting.value = false
@@ -568,16 +569,9 @@ class WhisperAuthViewModel @Inject constructor(
         if (_authState.value is WhisperAuthState.Notice) _authState.value = WhisperAuthState.Idle
     }
 
-    private fun formatError(throwable: Throwable): UiText {
-        val msg = throwable.message ?: return UiText.StringResource(R.string.st_Whisper_Error_Generic)
-        return when {
-            msg.contains("Token must be", ignoreCase = true) || msg.contains("doesn't look right", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_InvalidToken)
-            authManager.isInvalidCredentials(throwable) -> UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
-            msg.contains("User already registered", ignoreCase = true) -> UiText.StringResource(R.string.st_Whisper_Error_UsernameExists)
-            msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true) -> 
-                UiText.StringResource(R.string.st_Whisper_Error_Network)
-            else -> UiText.DynamicString(msg)
-        }
-    }
+    private fun formatError(throwable: Throwable): UiText =
+        // V6-R2 (review): the local keyword list had drifted from WhisperErrorMapper and
+        // its DynamicString(msg) fallback leaked raw English exception text to users.
+        // The central mapper covers every case above, logs technically, never leaks.
+        WhisperErrorMapper.map(throwable)
 }

@@ -212,6 +212,15 @@ class WhisperChatViewModel @Inject constructor(
         }
         // V2-FIX (reviewwhisper.md) V-15: restore the draft after process death.
         _draftText.value = savedStateHandle.get<String>(KEY_DRAFT).orEmpty()
+        // V6-R2 (review): the repository's receiveKeyChanged signal had ZERO collectors —
+        // the "passive key-change banner" it was built for never existed. Collect it here
+        // so an auto-accepted fresh rotation while the chat is open re-renders the trust
+        // banner immediately instead of waiting for the next chat open.
+        viewModelScope.launch {
+            repository.receiveKeyChanged.collect { changedUserId ->
+                if (changedUserId == otherUserId) loadKeyTrust()
+            }
+        }
         restorePersistedUndoBuffer()
         loadInitialData()
         subscribeToChat()

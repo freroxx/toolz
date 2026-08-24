@@ -88,6 +88,11 @@ class WhisperRepository @Inject constructor(
     // V3-FIX (task F): wired so clearAllLocalData also wipes the encrypted image disk
     // cache — sign-out must not leave another account's cached images readable.
     private val imageDiskCache: WhisperImageDiskCache,
+    // V6 (planwhisper.md §3.2): Double Ratchet live transport — persistent session
+    // state, X3DH factory and SPK private halves for responder bootstrap.
+    private val sessionStore: com.frerox.toolz.data.whisper.session.WhisperSessionStore,
+    private val sessionFactory: WhisperSessionFactory,
+    private val prekeyManager: WhisperPrekeyManager,
 ) {
     private companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -163,20 +168,500 @@ class WhisperRepository @Inject constructor(
     private fun peerKeyFor(userId: String): String? =
         keyTrustStore.knownKey(userId) ?: peerKeys.value[userId]
 
-    /** Decrypts a cached ciphertext message for display, falling back to a neutral marker. */
-    private fun WhisperMessage.decryptContent(peerKey: String?): WhisperMessage {
-        if (isDeletedForEveryone || contentIv == null) return this
-        val key = peerKey ?: return copy(content = "[Encrypted message]")
-        // H-7 FIX (reviewwhisper.md): memoized — getMessagesFlow re-decrypts up to 500
-        // cached rows on EVERY Room emission; each miss costs an ECDH+HKDF+GCM round
-        // through AndroidKeyStore. The memo bounds that to one derive per unique row.
-        // V3-FIX: createdAt is passed through so the legacy no-AAD fallback stays scoped
-        // to pre-cutoff rows only (undated rows parse to 0L = treated as legacy).
-        val decrypted = decryptMemoized(
-            content, contentIv, key, senderId, receiverId,
-            WhisperMessageEntity.parseSortEpoch(createdAt),
+    // ===================== V5 SELF-HEALING ENVELOPES =====================
+    // Root cause eliminated: the v1 format encrypted to exactly ONE recipient key, so
+    // any drift between published and held keys produced permanently unreadable text
+    // ("[Encrypted message]"). v5 wraps every message/image/typing event in a
+    // kid-tagged multi-key envelope: the sender encrypts to EVERY recipient key it
+    // knows about (TOFU-pinned + fresher server-published), and whichever copy matches
+    // a key the recipient actually controls opens the message. Key drift degrades to a
+    // few minutes of dual-ciphertext instead of permanent loss.
+
+    private val IV_ENVELOPE = "env2"
+
+    // V6 (planwhisper.md §3.2): sentinel for v3 Double Ratchet rows in content_iv.
+    private val IV_V3 = com.frerox.toolz.data.whisper.session.WhisperV3Codec.IV_MARK
+
+    // PHASE 1 (roadmap §1.2): protocol version negotiation scaffold.
+    // V6: raised to 3 while the ratchet flag is on; envelope-only fleets keep v2.
+    private val OUR_PROTOCOL_VERSION: Int
+        get() = if (WhisperProtocolConfig.ratchetEnabled)
+            WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
+        else WhisperProtocolConfig.LIVE_PROTOCOL_VERSION
+    // Per-peer floor = LOWEST version that peer has ever sent us. Rule: never send a
+    // version below the recorded floor (the peer proved it can't parse those).
+    // Session-scoped by design for now; persists with the session store in Phase 3.
+    private val peerProtocolFloors = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private fun recordPeerProtocolFloor(userId: String, theirVersion: Int) {
+        if (theirVersion <= 0) return
+        peerProtocolFloors.merge(userId, theirVersion) { oldV, newV -> minOf(oldV, newV) }
+    }
+
+    /** Version we must address `userId` with. Never above what this build can speak. */
+    private fun negotiatedVersionFor(userId: String): Int =
+        maxOf(OUR_PROTOCOL_VERSION, peerProtocolFloors[userId] ?: 0)
+            .coerceAtMost(
+                if (WhisperProtocolConfig.ratchetEnabled)
+                    WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
+                else WhisperProtocolConfig.LIVE_PROTOCOL_VERSION,
+            )
+
+    // ───────────────────────── V6 DOUBLE RATCHET (v3 wire) ─────────────────────────
+
+    /** One establish attempt per peer per window — a dead bundle must not retry per send. */
+    private val ESTABLISH_COOLDOWN_MS = 60_000L
+    /** Slack when dating rows vs session creation (device clock skew tolerance). */
+    private val CLOCK_SKEW_SLACK_MS = 5 * 60_000L
+    private val establishAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Send rule (planwhisper.md §3.5): speak v3 only to peers that already hold an
+     * established ratchet session here, or to unproven peers while the establish
+     * cooldown is clear (fresh conversations bootstrap this way). Peers recorded at
+     * floor 2 (envelope-only) are never re-attempted within the cooldown.
+     */
+    private fun shouldUseV3(peerId: String): Boolean {
+        if (!WhisperProtocolConfig.ratchetEnabled) return false
+        if (sessionStore.peek(peerId) != null) return true
+        val floor = peerProtocolFloors[peerId]
+        if (floor != null && floor < WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION) return false
+        val last = establishAttemptAtMs[peerId] ?: 0L
+        return System.currentTimeMillis() - last > ESTABLISH_COOLDOWN_MS
+    }
+
+    /** Associated data binds every ratchet frame to its routing direction. */
+    private fun adBytes(senderId: String, receiverId: String): ByteArray =
+        "$senderId|$receiverId".toByteArray(Charsets.UTF_8)
+
+    /**
+     * Outgoing ratchet seal. Returns (v3-frame-json, "v3") or null on ANY failure —
+     * callers fall back to the proven envelope path. NEVER blocks a message.
+     */
+    private suspend fun sealWithRatchet(
+        senderId: String,
+        receiverId: String,
+        plaintext: String,
+    ): Pair<String, String>? = try {
+        sessionStore.mutexFor(receiverId).withLock {
+            val live = sessionStore.load(receiverId) ?: establishOutboundLocked(receiverId)
+            val ratchet = live?.ratchet ?: return@withLock null
+            val sealed = ratchet.encrypt(plaintext.toByteArray(Charsets.UTF_8), adBytes(senderId, receiverId))
+            // The handshake header rides exactly ONE frame: once sealed into this
+            // ciphertext it must never attach again (a duplicate would force the peer
+            // through a second X3DH and orphan both ratchets).
+            val x3dh = live.pendingHeader
+            live.pendingHeader = null
+            live.dirty = true
+            sessionStore.save(receiverId, live)
+            ProtocolDiagnostics.increment("v3.sealed")
+            com.frerox.toolz.data.whisper.session.WhisperV3Codec.encode(
+                live.sessionId, sealed.header, sealed.ciphertextPacked, x3dh,
+            ) to IV_V3
+        }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ProtocolDiagnostics.increment("v3.sealFail")
+        android.util.Log.w("WhisperRepo", "v3 seal failed — falling back to envelope", e)
+        null
+    }
+
+    /**
+     * X3DH initiate → Double Ratchet initiator state, persisted with its pending
+     * handshake header. Caller MUST hold [sessionStore.mutexFor]. Null on any failure.
+     */
+    private suspend fun establishOutboundLocked(peerId: String): com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live? {
+        establishAttemptAtMs[peerId] = System.currentTimeMillis()
+        val initiated = sessionFactory.initiateSession(peerId).getOrNull() ?: run {
+            ProtocolDiagnostics.increment("v3.establishFail")
+            return null
+        }
+        val skWrapped = crypto.wrapWithKeystoreAes(initiated.sessionKey) ?: run {
+            ProtocolDiagnostics.increment("v3.establishFail")
+            return null
+        }
+        val ratchet = runCatching {
+            com.frerox.toolz.data.whisper.session.WhisperRatchet.initiator(
+                initiated.sessionKey, initiated.remoteRatchetPubB64,
+            )
+        }.getOrNull() ?: run {
+            ProtocolDiagnostics.increment("v3.establishFail")
+            return null
+        }
+        val live = com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live(
+            sessionId = sessionFactory.sessionIdFor(initiated.sessionKey),
+            x3dhKeyWrapped = skWrapped,
+            peerIkB64 = initiated.remoteIdentityIkB64,
+            createdAtMs = System.currentTimeMillis(),
+            pendingHeader = initiated.header,
+            ratchet = ratchet,
         )
-        return copy(content = decrypted ?: "[Encrypted message]")
+        sessionStore.save(peerId, live)
+        ProtocolDiagnostics.log("v3: established outbound session ${live.sessionId}")
+        return live
+    }
+
+    /**
+     * V5.2 OUT-OF-THE-BOX guarantee: whenever this device detects that incoming mail
+     * was sealed to a key it does not hold, it republishes its CURRENT public key
+     * immediately. The sender's very next message then opens cleanly — no rotation,
+     * no verification popups. Idempotent; no-ops when already in sync.
+     */
+    suspend fun republishLocalKeyIfStale(): Boolean {
+        val currentId = myId
+        if (currentId.isBlank()) return false
+        val localPub = crypto.getPublicKeyBase64() ?: return false
+        val remote = runCatchingCE {
+            db.from("profiles").select { filter { eq("id", currentId) } }
+                .decodeSingleOrNull<WhisperProfile>()
+        }.getOrNull() ?: return false
+        val serverKey = remote.publicKey
+        if (serverKey == localPub) return false // already in sync
+        if (serverKey != null && crypto.hasStagedAliases()) return false // mid-rotation
+        val body = buildJsonObject {
+            put("public_key", localPub)
+            put("updated_at", java.time.Instant.now().toString())
+        }
+        runCatching { updateProfileRowWithFreshness(currentId, body) }.onFailure {
+            android.util.Log.e("WhisperRepo", "republish failed", it)
+            return false
+        }
+        profileCache.remove(currentId); profileCacheTs.remove(currentId)
+        ProtocolDiagnostics.increment("key.republished")
+        ProtocolDiagnostics.log("keyHeal: republished current key on stale detection")
+        return true
+    }
+
+    /**
+     * V5.1 RELIABILITY: profile updates that publish a NEW public key must also move
+     * `updated_at`, otherwise every contact classifies the change as CHANGED instead
+     * of ROTATED_AUTO and the manual verify dance returns. Some hosted schemas gate
+     * that column behind a trigger — so we attempt the bump and transparently retry
+     * without it if PostgREST rejects the field.
+     */
+    private suspend fun updateProfileRowWithFreshness(
+        currentId: String,
+        body: kotlinx.serialization.json.JsonObject,
+    ) {
+        runCatching {
+            db.from("profiles").update(body) { filter { eq("id", currentId) } }
+        }.getOrElse { failed ->
+            val msg = failed.message.orEmpty()
+            val restStatus = (failed as? io.github.jan.supabase.exceptions.RestException)?.statusCode
+            val stampRejected = restStatus == 400 || msg.contains("updated_at", ignoreCase = true)
+            val stripped = kotlinx.serialization.json.JsonObject(
+                body.toMap() - "updated_at",
+            )
+            if (!stampRejected || stripped == body) throw failed
+            android.util.Log.w("WhisperRepo", "updated_at bump rejected; retried without stamp")
+            db.from("profiles").update(stripped) { filter { eq("id", currentId) } }
+        }
+    }
+
+    private fun oldKeyPlaceholder(): String =
+        WhisperTombstone.LOCKED_OLDER_KEY
+
+    /**
+     * Every recipient public key this device would plausibly need to encrypt for,
+     * keyed by kid (short hash) and capped: [trusted pinned] + [freshly seen server].
+     */
+    private fun recipientKeyCandidates(userId: String): LinkedHashMap<String, String> {
+        val candidates = LinkedHashMap<String, String>()
+        peerKeys.value[userId]?.let { candidates[WhisperEnvelope.keyId(it)] = it }
+        peerKeyFor(userId)?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
+        return LinkedHashMap(candidates.entries.take(3).associateBy({ it.key }) { it.value })
+    }
+
+    /**
+     * V5.1 RELIABILITY: when a decrypt succeeds against the FRESH server key while a
+     * different older key was pinned, adopt the fresh key automatically whenever the
+     * server classifies the rotation as recent. This is what removes the manual
+     * rotate-and-verify dance: peers converge on the new key transparently, and the
+     * UI shows only the passive "rotated automatically" notice.
+     */
+    private suspend fun adoptFreshKeyIfFresh(userId: String, freshPublicKey: String?) {
+        if (freshPublicKey.isNullOrBlank()) return
+        val trusted = peerKeyFor(userId)
+        if (trusted == freshPublicKey) return
+        val profile = profileCache[userId]
+        if (!isFreshServerRotation(profile ?: run {
+            // adopt path may be called right after a forced fetch that refreshed cache
+            profileCacheTs[userId]?.let { cachedProfile(userId) } ?: profileCache[userId]
+        })) {
+            ProtocolDiagnostics.log("keyAdopt: skipped (not fresh) for ${userId.take(6)}…")
+            return
+        }
+        runCatchingCE {
+            keyTrustStore.rememberKey(userId, freshPublicKey)
+        }
+        cachePeerKey(userId, freshPublicKey)
+        ProtocolDiagnostics.increment("key.autoAdopted")
+        ProtocolDiagnostics.log("keyAdopt: adopted fresh key for ${userId.take(6)}…")
+    }
+
+    /**
+     * Single decryption entry point for every stored form:
+     *  - v3 ratchet frames (iv == "v3" sentinel) -> per-peer Double Ratchet;
+     *  - legacy v1 rows (real per-row iv) -> memoized direct decrypt;
+     *  - v5 envelopes (iv == sentinel) -> try each entry against the kids this device
+     *    can open (its own current key, or the partner key used when I sent it).
+     * Returns null when nothing opens the content (caller renders the locked marker).
+     */
+    private suspend fun decryptUnified(
+        rawContent: String,
+        ivMark: String?,
+        partnerId: String,
+        msgSenderId: String,
+        msgReceiverId: String,
+        createdAtEpochMs: Long,
+        extraFreshPeerKey: String? = null,
+    ): String? {
+        // V6 (planwhisper.md §3.4): v3 Double Ratchet frames open first; the entire
+        // legacy ladder below stays intact for peers without a session.
+        if (ivMark == IV_V3 || com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(rawContent)) {
+            return openV3Frame(rawContent, partnerId, msgSenderId, msgReceiverId)
+        }
+        // V5.2 — THE decisive fix for the field-reported "[Encrypted with an older
+        // key]" bug: candidate PEER keys are tried exhaustively per envelope entry.
+        // The previous version selected the right ciphertext copy but then derived the
+        // shared secret with the (possibly stale) pinned key only, discarding the very
+        // fresh key the retry had just fetched.
+        val isEnvelope = ivMark == IV_ENVELOPE || WhisperEnvelope.isEnvelope(rawContent)
+
+        if (!isEnvelope) {
+            var result = peerKeyFor(partnerId)?.let {
+                decryptMemoized(rawContent, ivMark, it, msgSenderId, msgReceiverId, createdAtEpochMs)
+            }
+            if (result == null && extraFreshPeerKey != null && extraFreshPeerKey != peerKeyFor(partnerId)) {
+                result = decryptMemoized(rawContent, ivMark, extraFreshPeerKey, msgSenderId, msgReceiverId, createdAtEpochMs)
+            }
+            return maybeHealFromPlaintext(result, msgSenderId, partnerId, createdAtEpochMs)
+        }
+
+        val entries = WhisperEnvelope.decode(rawContent)
+        if (entries == null) {
+            ProtocolDiagnostics.increment("envelope.decodeFail")
+            return null
+        }
+
+        // Every partner public key we might need to derive with, most-likely-first.
+        val peerCandidates = buildList {
+            add(peerKeyFor(partnerId))
+            add(extraFreshPeerKey)
+            add(peerKeys.value[partnerId])
+        }.filterNotNull().distinct()
+
+        val myKid = WhisperEnvelope.ownKid(crypto)
+        val sentByMe = msgSenderId == myId
+
+        var ladderResult: String? = null
+        loop@ for ((kid, ivB64, ctB64) in entries) {
+            val peerPubs: List<String> = when {
+                // Copy encrypted to MY key (incoming): derive with partner's key(s).
+                !sentByMe -> peerCandidates
+                // Copy encrypted to the PARTNER key named by kid (my sent rows):
+                // use exactly that key — recover it from candidates by kid match.
+                else -> peerCandidates.filter { WhisperEnvelope.keyId(it) == kid }
+            }
+            for (pub in peerPubs) {
+                val plain = decryptMemoized(ctB64, ivB64, pub, msgSenderId, msgReceiverId, createdAtEpochMs)
+                if (plain != null) { ladderResult = plain; break@loop }
+            }
+        }
+
+        if (ladderResult == null) {
+            ProtocolDiagnostics.increment("envelope.locked")
+            ProtocolDiagnostics.log(
+                "envelope locked: entries=${entries.map { it.first }} peers=${peerCandidates.map { WhisperEnvelope.keyId(it) }} own=$myKid sentByMe=$sentByMe",
+            )
+        }
+        return maybeHealFromPlaintext(ladderResult, msgSenderId, partnerId, createdAtEpochMs)
+    }
+
+    /**
+     * V6-R2 self-heal gate (review fix): heal decisions need the OPENED plaintext,
+     * because image attachments ride the SAME envelope shape as text — tearing down
+     * on wire shape alone made every received image nuke an otherwise-healthy ratchet
+     * session. Only a successfully opened TEXT payload from the partner proves their
+     * current (non-v3) capability; locked rows and images must never heal.
+     */
+    private suspend fun maybeHealFromPlaintext(
+        opened: String?,
+        msgSenderId: String,
+        partnerId: String,
+        createdAtEpochMs: Long,
+    ): String? {
+        if (opened != null && msgSenderId != myId &&
+            !opened.startsWith(WhisperImageAttachment.MESSAGE_PREFIX)
+        ) {
+            maybeTeardownStaleSession(partnerId, createdAtEpochMs)
+        }
+        return opened
+    }
+
+    /**
+     * V6 (planwhisper.md §3.4): opens an incoming v3 Double Ratchet frame.
+     *
+     * Handshake handling — the `x3dh` key rides only on a session's FIRST frame:
+     *  - no stored session, or acceptance gate passes (identity changed / lower-sid
+     *    tie-break) → respondToHeader + responder ratchet bootstrap;
+     *  - same-session replay → skipped (re-running X3DH would reset advanced chains);
+     *  - rejected racing handshake → frame renders locked once; the deterministic
+     *    tie-break guarantees both sides converge on ONE session.
+     */
+    private suspend fun openV3Frame(
+        rawContent: String,
+        partnerId: String,
+        msgSenderId: String,
+        msgReceiverId: String,
+    ): String? {
+        val codec = com.frerox.toolz.data.whisper.session.WhisperV3Codec
+        val frame = codec.parse(rawContent) ?: run {
+            ProtocolDiagnostics.increment("v3.parseFail")
+            return null
+        }
+        return sessionStore.mutexFor(partnerId).withLock {
+            // 1. Optional first-frame handshake.
+            val wire = frame.x3dh
+            if (wire != null) {
+                val existing = sessionStore.load(partnerId)
+                when {
+                    // Idempotent redelivery of a handshake we already bootstrapped:
+                    // re-running X3DH here would reset the advanced ratchet chains.
+                    existing != null && existing.sessionId == frame.sessionId && existing.ratchet != null ->
+                        ProtocolDiagnostics.increment("v3.handshakeReplay")
+                    // Racing initiator lost the deterministic tie-break (or a stale
+                    // post-reinstall header): one locked frame, then convergence.
+                    existing != null && !existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId) -> {
+                        ProtocolDiagnostics.increment("v3.handshakeRejected")
+                        return@withLock null
+                    }
+                    else -> {
+                        val hdr = codec.toFactoryHeader(wire)
+                        if (!sessionFactory.respondToHeader(partnerId, hdr)) {
+                            // SPK/OPK privates no longer held (rotation raced us).
+                            ProtocolDiagnostics.increment("v3.respondFail")
+                            return@withLock null
+                        }
+                        val sk = sessionFactory.sessionKeyFor(partnerId)
+                        val spkPriv = prekeyManager.privateKeyForKid(hdr.spkKid)
+                        if (sk == null || spkPriv == null) {
+                            ProtocolDiagnostics.increment("v3.respondFail")
+                            return@withLock null
+                        }
+                        val skWrapped = crypto.wrapWithKeystoreAes(sk) ?: run {
+                            // Refusing to persist unprotected key material is fatal
+                            // to THIS handshake only — envelope fallback still works.
+                            ProtocolDiagnostics.increment("v3.respondFail")
+                            return@withLock null
+                        }
+                        // Bob bootstrap: his SPK private IS his first ratchet key; the
+                        // public half is derived back from it so both sides agree.
+                        sessionStore.save(
+                            partnerId,
+                            com.frerox.toolz.data.whisper.session.WhisperSessionStore.Live(
+                                sessionId = frame.sessionId,
+                                x3dhKeyWrapped = skWrapped,
+                                peerIkB64 = wire.ikPubB64,
+                                createdAtMs = System.currentTimeMillis(),
+                                pendingHeader = null,
+                                ratchet = com.frerox.toolz.data.whisper.session.WhisperRatchet.responder(
+                                    sk, spkPriv,
+                                    java.util.Base64.getEncoder().encodeToString(
+                                        com.frerox.toolz.crypto.SessionCrypto.publicFromPrivate(spkPriv),
+                                    ),
+                                ),
+                            ),
+                        )
+                        ProtocolDiagnostics.log("v3: accepted peer session ${frame.sessionId}")
+                    }
+                }
+            }
+
+            // 2. Locate ratchet state for THIS session id.
+            val live = sessionStore.load(partnerId)
+            val ratchet = live?.ratchet
+            if (live == null || ratchet == null || live.sessionId != frame.sessionId) {
+                ProtocolDiagnostics.increment("v3.noSession")
+                return@withLock null
+            }
+
+            // 3. Decrypt and persist the advanced state immediately — process death
+            // between decrypt and save would otherwise replay-consume message keys.
+            val plain = try {
+                ratchet.decrypt(
+                    com.frerox.toolz.data.whisper.session.WhisperRatchet.Header(frame.dhPub(), frame.pn, frame.n),
+                    frame.ciphertextPacked(),
+                    adBytes(msgSenderId, msgReceiverId),
+                )
+            } catch (e: com.frerox.toolz.data.whisper.session.WhisperRatchetLostMessage) {
+                ProtocolDiagnostics.increment("v3.locked")
+                android.util.Log.w("WhisperRepo", "v3 frame locked (${e.message})")
+                return@withLock null
+            }
+            recordPeerProtocolFloor(partnerId, WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION)
+            live.dirty = true
+            sessionStore.save(partnerId, live)
+            ProtocolDiagnostics.increment("v3.opened")
+            plain.decodeToString()
+        }
+    }
+
+    /**
+     * V6 self-heal (planwhisper.md §4.3): fresh non-v3 TEXT traffic from a peer we
+     * hold a session with means THEY lost it (reinstall / lost handshake frame).
+     * Drop ours so the next outbound re-initiates. Callers gate on opened plaintext
+     * ([maybeHealFromPlaintext]) so images and locked rows never trigger this;
+     * freshness is judged against the session's creation time with clock-skew slack
+     * so cached history never tears down state either.
+     */
+    private suspend fun maybeTeardownStaleSession(peerId: String, rowEpochMs: Long) {
+        val live = sessionStore.peek(peerId) ?: return
+        val now = System.currentTimeMillis()
+        if (rowEpochMs + CLOCK_SKEW_SLACK_MS < live.createdAtMs) return // pre-session row
+        if (rowEpochMs - CLOCK_SKEW_SLACK_MS > now) return             // future-dated row
+        sessionStore.delete(peerId)
+        establishAttemptAtMs.remove(peerId)
+        ProtocolDiagnostics.increment("v3.peerReset")
+        ProtocolDiagnostics.log("v3: non-v3 traffic from ${peerId.take(6)}… — dropping session for re-handshake")
+    }
+
+
+    /** Decrypts a cached ciphertext message for display, falling back to a neutral marker. */
+    private suspend fun WhisperMessage.decryptContent(peerKey: String?, extraFresh: String? = null): WhisperMessage {
+        // Server rows carry no version column; infer from the wire shape.
+        val inferredVersion = when {
+            protocolVersion > 0 -> protocolVersion
+            com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(content) ->
+                WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
+            WhisperEnvelope.isEnvelope(content) -> WhisperEnvelope.VERSION
+            else -> 0
+        }
+        // V6: only INCOMING rows prove a partner's capability — our own sent frames
+        // must never raise the recorded floor for them.
+        if (inferredVersion > 0 && senderId != myId) {
+            recordPeerProtocolFloor(
+                if (senderId == myId) receiverId else senderId,
+                inferredVersion,
+            )
+        }
+        if (isDeletedForEveryone) return this
+        if (contentIv == null && !WhisperEnvelope.isEnvelope(content)) return this
+        val partnerId = if (senderId == myId) receiverId else senderId
+        val decrypted = runCatchingCE {
+            decryptUnified(
+                rawContent = content,
+                ivMark = contentIv,
+                partnerId = partnerId,
+                msgSenderId = senderId,
+                msgReceiverId = receiverId,
+                createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(createdAt),
+                extraFreshPeerKey = extraFresh ?: peerKey,
+            )
+        }.getOrNull()
+        if (decrypted == null) ProtocolDiagnostics.increment("decrypt.locked")
+        return copy(content = decrypted ?: oldKeyPlaceholder())
     }
 
     /**
@@ -399,8 +884,18 @@ class WhisperRepository @Inject constructor(
                 !existing.publicKey.isNullOrBlank() &&
                 existing.publicKey != pubKey &&
                 !crypto.hasStagedAliases()
-            if (reinstallDivergence) {
-                android.util.Log.w("WhisperRepo", "Reinstall detected: republishing local public key for ${currentId.take(8)}…")
+            ProtocolDiagnostics.log(
+                "keyHeal: divergence=$reinstallDivergence hasStaged=${crypto.hasStagedAliases()}"
+            )
+            if (reinstallDivergence || (!existing.publicKey.isNullOrBlank() && pubKey != null)) {
+                // V4-FIX diagnostics: field reports said the heal "did nothing". Log the
+                // full decision inputs so any silent blocker is visible in logcat.
+                android.util.Log.w(
+                    "WhisperRepo",
+                    "KeyHeal check: serverKey=${existing.publicKey?.take(12)}… localKey=${pubKey?.take(12)}… " +
+                        "equal=${existing.publicKey == pubKey} hasStaged=${crypto.hasStagedAliases()} " +
+                        "-> divergence=$reinstallDivergence"
+                )
             }
 
             if (needsKey || reinstallDivergence || cleanUsername != null || needsDisplayName) {
@@ -410,8 +905,13 @@ class WhisperRepository @Inject constructor(
                     if (needsKey || reinstallDivergence) put("public_key", pubKey!!)
                     cleanUsername?.let { put("username", it) }
                     if (needsDisplayName) put("display_name", metaDisplayName!!)
+                    // V5.1: republishing a key MUST look fresh to contacts, or they
+                    // classify CHANGED and the manual verify dance returns.
+                    if (needsKey || reinstallDivergence) {
+                        put("updated_at", java.time.Instant.now().toString())
+                    }
                 }
-                db.from("profiles").update(body) { filter { eq("id", currentId) } }
+                updateProfileRowWithFreshness(currentId, body)
                 existing.copy(
                     publicKey = if (needsKey || reinstallDivergence) pubKey else existing.publicKey,
                     username = cleanUsername ?: existing.username,
@@ -496,11 +996,15 @@ class WhisperRepository @Inject constructor(
                         db.from("profiles").select { filter { eq("id", currentId) } }
                             .decodeSingleOrNull<WhisperProfile>()?.publicKey
                     }
-                    if (serverKeyResult.isSuccess && serverKeyResult.getOrNull().isNullOrBlank()) put("public_key", pubKey)
+                    if (serverKeyResult.isSuccess && serverKeyResult.getOrNull().isNullOrBlank()) {
+                        put("public_key", pubKey)
+                        // V5.1: a first publish is also a key event — keep it fresh.
+                        put("updated_at", java.time.Instant.now().toString())
+                    }
                 }
             }
         }
-        db.from("profiles").update(body) { filter { eq("id", currentId) } }
+        updateProfileRowWithFreshness(currentId, body)
         profileCache.remove(currentId); profileCacheTs.remove(currentId)
     }
 
@@ -605,6 +1109,8 @@ class WhisperRepository @Inject constructor(
         if (currentId.isBlank()) return Result.success(emptyList())
         
         val partnerProfile = getProfile(otherUserId, forceRefresh = true).getOrNull()
+        // V5.1: converge on the peer's current key before touching cached rows.
+        partnerProfile?.publicKey?.let { adoptFreshKeyIfFresh(otherUserId, it) }
 
         // If I blocked this user, do not load their incoming messages
         val isBlocked = isUserBlockedByMe(otherUserId)
@@ -638,7 +1144,7 @@ class WhisperRepository @Inject constructor(
         // Decrypt with the trusted key only (never a changed fresh server key), falling
         // back to a neutral marker instead of leaking raw ciphertext.
         val decryptedMessages = visibleRaw
-            .map { msg -> msg.decryptContent(peerKeyFor(otherUserId)) }
+            .map { msg -> msg.decryptContent(peerKeyFor(otherUserId), partnerProfile?.publicKey) }
 
         // Fetch reactions for all messages
         val messageIds = decryptedMessages.map { it.id }.filter { it.isNotBlank() }
@@ -718,8 +1224,35 @@ class WhisperRepository @Inject constructor(
                 error("Safety number changed for this contact. Review and accept the new key before sending.")
             }
         }
-        val encryptedPair = receiverPubKey?.let { key -> crypto.encryptMessage(content, key, currentId, receiverId) }
-            ?: error("Secure delivery is unavailable because this user has no valid encryption key.")
+        // V5: encrypt to EVERY recipient key we know (fresh + pinned). Whichever copy
+        // matches a key the recipient controls opens the message — key drift can no
+        // longer produce unreadable text.
+        // V6 negotiation: the format actually sent is chosen per-peer below — v3
+        // ratchet frames when a session exists, the V5 envelope ladder otherwise.
+        val negotiatedVersion = negotiatedVersionFor(receiverId)
+        check(negotiatedVersion <= OUR_PROTOCOL_VERSION) {
+            "Peer requires wire version $negotiatedVersion which this client cannot speak yet."
+        }
+        // V6 (planwhisper.md §3.2): Double Ratchet first; ANY failure falls through to
+        // the proven V5 envelope — a handshake problem can never block a message.
+        var encryptedPair: Pair<String, String>? = null
+        if (shouldUseV3(receiverId)) {
+            ProtocolDiagnostics.log("send: negotiated v3 to ${receiverId.take(6)}…")
+            encryptedPair = sealWithRatchet(currentId, receiverId, content)
+        } else {
+            ProtocolDiagnostics.log("send: negotiated v$negotiatedVersion to ${receiverId.take(6)}… (envelope)")
+        }
+        if (encryptedPair == null) {
+            val candidates = recipientKeyCandidates(receiverId).toMutableMap()
+            receiverPubKey?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
+            if (candidates.isEmpty()) error("Secure delivery is unavailable because this user has no valid encryption key.")
+            val envelope = WhisperEnvelope.encode(
+                candidates.mapNotNull { (kid, pub) ->
+                    crypto.encryptMessage(content, pub, currentId, receiverId)?.let { Triple(kid, it.second, it.first) }
+                }
+            ) ?: error("Secure delivery failed: could not encrypt for any known key.")
+            encryptedPair = envelope to IV_ENVELOPE
+        }
         // Client-generated UUID makes the insert idempotent: if the server accepted the row
         // but the response was lost, retries and the outbox flush hit the same primary key
         // and are recognized as already-delivered instead of duplicating the message.
@@ -805,10 +1338,19 @@ class WhisperRepository @Inject constructor(
         if (isUserBlockedByOther(receiverId)) {
             error("You have been blocked by this user.")
         }
-        val receiverKey = getProfile(receiverId, forceRefresh = true).getOrNull()?.publicKey
+        getProfile(receiverId, forceRefresh = true).getOrNull()?.publicKey
             ?: error("Secure image delivery is unavailable because this user has no encryption key.")
-        val (cipherBytes, iv) = crypto.encryptAttachment(imageBytes, receiverKey, myIdNow, receiverId)
-            ?: error("This image is too large or could not be encrypted.")
+        // V5: kid-tagged envelope over the attachment cipher bytes; the PNG transport is
+        // unaware — it just carries the envelope JSON instead of a single ciphertext.
+        val imgCandidates = recipientKeyCandidates(receiverId).toMutableMap()
+        if (imgCandidates.isEmpty()) error("Secure image delivery is unavailable because this user has no encryption key.")
+        val imgEntries = imgCandidates.mapNotNull { (kid, pub) ->
+            crypto.encryptAttachment(imageBytes, pub, myIdNow, receiverId)?.let {
+                Triple(kid, it.second, android.util.Base64.encodeToString(it.first, android.util.Base64.NO_WRAP))
+            }
+        }.ifEmpty { error("This image is too large or could not be encrypted.") }
+        val cipherBytes = WhisperEnvelope.encode(imgEntries)!!.toByteArray(Charsets.UTF_8)
+        val iv = IV_ENVELOPE
         
         val (uploadUrl, attachmentId) = encryptedImageHost.upload(
             cipherBytes = cipherBytes,
@@ -858,20 +1400,67 @@ class WhisperRepository @Inject constructor(
         // constant-AAD fallback for legacy rows created before direction binding.
         val myIdNow = myId
         // V3-FIX: forward the message timestamp so the fallback stays pre-cutoff-only.
-        fun tryDecrypt(bytes: ByteArray, sender: String, receiver: String) =
-            crypto.decryptAttachment(bytes, attachment.iv, peerPublicKey, sender, receiver, messageCreatedAtEpochMs)
+        fun tryDecrypt(bytes: ByteArray, iv: String?, sender: String, receiver: String, pub: String) =
+            crypto.decryptAttachment(bytes, iv ?: attachment.iv, pub, sender, receiver, messageCreatedAtEpochMs)
 
-        val boundPairs: List<Pair<String, String>> = when {
-            peerId.isNullOrBlank() || peerId == myIdNow -> listOf("" to myIdNow, myIdNow to "")
-            else -> listOf(peerId to myIdNow, myIdNow to peerId)
-        }
-        val decrypted = boundPairs.firstNotNullOfOrNull { (sender, receiver) ->
-            tryDecrypt(candidateCipher, sender, receiver)
-        } ?: if (decodedPng != null) {
-            boundPairs.firstNotNullOfOrNull { (sender, receiver) ->
-                tryDecrypt(rawBytes, sender, receiver)
+        // V5.2: try EVERY plausible partner public key, not just the one handed in —
+        // stale pins must never decide whether an image opens.
+        val peerCandidates = buildList {
+            add(peerPublicKey)
+            peerId?.takeIf { it != myIdNow }?.let {
+                add(peerKeys.value[it])
+                add(peerKeyFor(it))
             }
-        } else null
+        }.filterNotNull().distinct()
+
+        val boundPairs: List<Triple<String, String, String>> = buildList {
+            if (!peerId.isNullOrBlank() && peerId != myIdNow) {
+                add(Triple(peerId, myIdNow, peerId))
+            }
+            add(Triple("", myIdNow, ""))
+            peerCandidates.forEach { pub ->
+                add(Triple(myIdNow, "", pub)) // sent-by-me variants keyed per candidate
+            }
+        }.distinct()
+
+        val envelopeEntries = runCatching {
+            WhisperEnvelope.decode(candidateCipher.decodeToString())
+                ?: decodedPng?.let { WhisperEnvelope.decode(rawBytes.decodeToString()) }
+        }.getOrNull()
+
+        val decrypted = if (envelopeEntries != null) {
+            val ownKid = WhisperEnvelope.ownKid(crypto)
+            envelopeEntries.firstNotNullOfOrNull { (kid, ivB64, ctB64) ->
+                val bytes = runCatching {
+                    android.util.Base64.decode(ctB64, android.util.Base64.NO_WRAP)
+                }.getOrNull() ?: return@firstNotNullOfOrNull null
+                val pubs = when {
+                    kid == ownKid || peerId.isNullOrBlank() || peerId == myIdNow -> peerCandidates
+                    else -> peerCandidates.filter { WhisperEnvelope.keyId(it) == kid }.ifEmpty { peerCandidates }
+                }
+                pubs.firstNotNullOfOrNull { pub ->
+                    boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
+                        tryDecrypt(bytes, ivB64, sender.ifEmpty { peerId ?: "" }, receiver.ifEmpty { myIdNow }, pub)
+                    } ?: runCatching {
+                        // direct direction attempt with this pub
+                        crypto.decryptAttachment(bytes, ivB64, pub, peerId ?: myIdNow, myIdNow, messageCreatedAtEpochMs)
+                    }.getOrNull()
+                }
+            }
+        } else {
+            val legacy = peerCandidates.firstNotNullOfOrNull { pub ->
+                boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
+                    tryDecrypt(candidateCipher, null, sender, receiver, pub)
+                }
+            } ?: decodedPng?.let {
+                peerCandidates.firstNotNullOfOrNull { pub ->
+                    boundPairs.firstNotNullOfOrNull { (sender, receiver, _) ->
+                        tryDecrypt(rawBytes, null, sender, receiver, pub)
+                    }
+                }
+            }
+            legacy
+        }
         decrypted ?: error("Unable to decrypt this image on this device.")
     }
 
@@ -1126,20 +1715,56 @@ class WhisperRepository @Inject constructor(
      * as a neutral placeholder instead of chasing profiles or leaking raw ciphertext.
      */
     private suspend fun decryptRealtimeMessage(msg: WhisperMessage, peerId: String): String {
+        // Server rows carry no version column; infer from wire shape.
+        val wireVersion = when {
+            com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(msg.content) ->
+                WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
+            WhisperEnvelope.isEnvelope(msg.content) -> WhisperEnvelope.VERSION
+            else -> 0
+        }
+        // V6: only the partner's own frames prove their capability.
+        if (wireVersion > 0 && msg.senderId != myId) recordPeerProtocolFloor(peerId, wireVersion)
         if (msg.isDeletedForEveryone) return msg.content
-        val contentIv = msg.contentIv ?: return msg.content
+        if (msg.contentIv == null && !WhisperEnvelope.isEnvelope(msg.content)) return msg.content
         // V3-FIX: date the row once — scopes the legacy fallback to pre-cutoff messages.
         val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(msg.createdAt)
-        val trustedKey = peerKeyFor(peerId)
-        trustedKey?.let { key ->
-            crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId, createdAtEpochMs)?.let { return it }
-        }
-        if (trustedKey == null) {
-            getProfile(peerId).getOrNull()?.publicKey?.let { key ->
-                crypto.decryptMessage(msg.content, contentIv, key, msg.senderId, msg.receiverId, createdAtEpochMs)?.let { return it }
+        // V5.1: never give up on the first (possibly stale) pin — retry against a
+        // freshly fetched key and ADOPT it when it opens the message. This is the
+        // anti-"rotate on both devices" fix for the live path.
+        val trusted = peerKeyFor(peerId)
+        val direct = decryptUnified(
+            rawContent = msg.content,
+            ivMark = msg.contentIv,
+            partnerId = peerId,
+            msgSenderId = msg.senderId,
+            msgReceiverId = msg.receiverId,
+            createdAtEpochMs = createdAtEpochMs,
+        )
+        if (direct != null) return direct
+
+        val fresh = getProfile(peerId, forceRefresh = true).getOrNull()?.publicKey
+        if (fresh != null && fresh != trusted) {
+            val retried = decryptUnified(
+                rawContent = msg.content,
+                ivMark = msg.contentIv,
+                partnerId = peerId,
+                msgSenderId = msg.senderId,
+                msgReceiverId = msg.receiverId,
+                createdAtEpochMs = createdAtEpochMs,
+                extraFreshPeerKey = fresh,
+            )
+            if (retried != null) {
+                adoptFreshKeyIfFresh(peerId, fresh)
+                return retried
             }
         }
-        return "[Encrypted message]"
+        // V5.2 out-of-the-box: incoming mail we cannot open means OUR published key is
+        // stale — republish now so the partner's NEXT message opens without any manual
+        // step. (The current message may stay locked; that ciphertext predates the fix.)
+        runCatching {
+            if (msg.senderId != myId) republishLocalKeyIfStale()
+        }
+        return oldKeyPlaceholder()
     }
 
     /**
@@ -1607,13 +2232,14 @@ class WhisperRepository @Inject constructor(
                     // M-2 FIX: routed through the memoized decrypt — the double direction
                     // attempt used to cost two full ECDH derives per conversation row.
                     // V3-FIX: lastCreatedAt scopes the legacy fallback to pre-cutoff rows.
-                    val previewKey = peerKeyFor(row.partnerId) ?: profile.publicKey
+                    // V6-R2: previewKey removed — decryptUnified resolves keys internally;
+                    // the variable was dead and its TOFU comment misleading.
                     val createdAtEpochMs = WhisperMessageEntity.parseSortEpoch(row.lastCreatedAt)
-                    decryptMemoized(row.lastContent, row.lastContentIv, previewKey, row.partnerId, myId, createdAtEpochMs)
-                        ?: decryptMemoized(row.lastContent, row.lastContentIv, previewKey, myId, row.partnerId, createdAtEpochMs)
-                        ?: "🔒 Encrypted message"
+                    decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, row.partnerId, myId, createdAtEpochMs)
+                        ?: decryptUnified(row.lastContent, row.lastContentIv, row.partnerId, myId, row.partnerId, createdAtEpochMs)
+                        ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else if (row.lastContentIv != null) {
-                    "🔒 Encrypted message"
+                    WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 // V2-FIX (reviewwhisper.md) L-24: renamed — "fake" implied mock/test data.
@@ -1669,21 +2295,20 @@ class WhisperRepository @Inject constructor(
                 val profile = profilesById[partnerId] ?: continue
                 val lastMsg = visibleMsgs.first()
                 // TOFU-consistent preview decryption (see RPC path above).
-                val previewKey = peerKeyFor(partnerId) ?: profile.publicKey
                 val decryptedContent = if (lastMsg.isDeletedForEveryone) {
                     WhisperTombstone.DISPLAY_TEXT
-                } else if (lastMsg.contentIv != null && previewKey != null) {
+                } else if (lastMsg.contentIv != null && (peerKeyFor(partnerId) ?: profile.publicKey) != null) {
                     // V2-FIX (reviewwhisper.md) L-22: route the fallback preview decryption
                     // through decryptMemoized like the RPC path — every hub rebuild used to
                     // pay a full ECDH derive per conversation for the same cached ciphertext.
                     // Actual direction first, then the reversed fallback for legacy rows.
                     // V3-FIX: createdAt scopes the legacy fallback to pre-cutoff rows.
                     val previewEpochMs = WhisperMessageEntity.parseSortEpoch(lastMsg.createdAt)
-                    decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
-                        ?: decryptMemoized(lastMsg.content, lastMsg.contentIv, previewKey, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
-                        ?: "🔒 Encrypted message"
+                    decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.senderId, lastMsg.receiverId, previewEpochMs)
+                        ?: decryptUnified(lastMsg.content, lastMsg.contentIv, partnerId, lastMsg.receiverId, lastMsg.senderId, previewEpochMs)
+                        ?: WhisperTombstone.LOCKED_PLACEHOLDER
                 } else if (lastMsg.contentIv != null) {
-                    "🔒 Encrypted message"
+                    WhisperTombstone.LOCKED_PLACEHOLDER
                 } else WhisperTombstone.LEGACY_ENCRYPTED
 
                 val unread = visibleMsgs.count { it.receiverId == myId && !it.isRead }
@@ -2087,25 +2712,25 @@ class WhisperRepository @Inject constructor(
         // pairwise attachment cipher (bound AAD), so eavesdroppers on the public
         // channel see random bytes and outsiders cannot forge valid events.
         runCatching {
-            val peerPub = peerKeyFor(targetUserId) ?: return
+            // V5: seal the typing ping for EVERY known recipient key so key drift can
+            // never silently kill typing again.
+            val candidates = recipientKeyCandidates(targetUserId)
+            if (candidates.isEmpty()) return
             val plain = buildJsonObject {
-                put("sender_id", myId)
                 put("is_typing", isTyping)
                 put("ts", java.time.Instant.now().toEpochMilli())
             }.toString().toByteArray()
-            val (cipherBytes, ivB64) = crypto.encryptAttachment(
-                bytes = plain,
-                recipientPublicKeyBase64 = peerPub,
-                senderId = myId,
-                receiverId = targetUserId,
-            ) ?: return
+            val entries = candidates.mapNotNull { (kid, pub) ->
+                crypto.encryptAttachment(plain, pub, myId, targetUserId)?.let {
+                    Triple(kid, it.second, android.util.Base64.encodeToString(it.first, android.util.Base64.NO_WRAP))
+                }
+            }
+            if (entries.isEmpty()) return
             val channel = getOrJoinBroadcastChannel("typing_" + conversationKey(myId, targetUserId))
             channel.broadcast(
                 event = "typing",
                 payload = BroadcastPayload.Json(buildJsonObject {
-                    put("sender_id", myId)
-                    put("iv", ivB64)
-                    put("ct", android.util.Base64.encodeToString(cipherBytes, android.util.Base64.NO_WRAP))
+                    put("env", WhisperEnvelope.encode(entries)!!)
                 }),
             )
         }
@@ -2117,18 +2742,18 @@ class WhisperRepository @Inject constructor(
         val broadcasts = channel.broadcastFlow("typing")
         val job = launch { broadcasts.collect { rb ->
             try {
-                val json = (rb.payload as? BroadcastPayload.Json)?.value?.jsonObject ?: return@collect
-                val senderId = json["sender_id"]?.jsonPrimitive?.content
-                val iv = json["iv"]?.jsonPrimitive?.content
-                val ctB64 = json["ct"]?.jsonPrimitive?.content
-                if (senderId != otherUserId || iv.isNullOrBlank() || ctB64.isNullOrBlank()) return@collect
+                val outer = (rb.payload as? BroadcastPayload.Json)?.value?.jsonObject ?: return@collect
+                val env = outer["env"]?.jsonPrimitive?.content ?: return@collect
+                val entries = WhisperEnvelope.decode(env) ?: return@collect
                 if (isUserBlockedByMe(otherUserId)) return@collect
-                // Strict post-cutoff decryption: only a sender holding the shared key
-                // can produce ciphertext that authenticates under our direction AAD.
+                // Open with whichever of OUR keys the sender sealed for; only a holder
+                // of the pairwise secret can produce ciphertext that authenticates.
+                val ownKid = WhisperEnvelope.ownKid(crypto) ?: return@collect
+                val entry = entries.firstOrNull { it.first == ownKid } ?: return@collect
                 val plain = crypto.decryptAttachment(
-                    cipherBytes = android.util.Base64.decode(ctB64, android.util.Base64.NO_WRAP),
-                    ivBase64 = iv,
-                    senderPublicKeyBase64 = peerKeyFor(otherUserId),
+                    cipherBytes = android.util.Base64.decode(entry.third, android.util.Base64.NO_WRAP),
+                    ivBase64 = entry.second,
+                    senderPublicKeyBase64 = peerKeys.value[otherUserId] ?: peerKeyFor(otherUserId),
                     senderId = otherUserId,
                     receiverId = myId,
                     messageCreatedAtEpochMs = System.currentTimeMillis(),
@@ -2360,6 +2985,9 @@ class WhisperRepository @Inject constructor(
         imageDiskCache.clearAll()
         messageDao.clearAll()
         deletedStore.clearAll()
+        // V6 (planwhisper.md §3.1): ratchet sessions die with the account — a later
+        // sign-in must never inherit another identity's chains.
+        sessionStore.deleteAll()
         outgoingQueue.clearAll()
         keyTrustStore.clearAll()
         hiddenChatsStore.clearAll()

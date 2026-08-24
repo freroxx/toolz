@@ -5,6 +5,8 @@
 
 package com.frerox.toolz.di
 
+import com.frerox.toolz.data.whisper.session.KeystoreSessionSecretProtector
+import com.frerox.toolz.data.whisper.session.WhisperSessionSecretProtector
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -36,4 +38,12 @@ object AppModule {
     @ApplicationScope
     fun provideApplicationScope(): CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // V6 (planwhisper.md §3.1): ratchet session persistence binds through a protector
+    // seam so JVM tests can substitute an in-memory wrapper (no Keystore on CI).
+    @Provides
+    @Singleton
+    fun provideWhisperSessionSecretProtector(
+        impl: KeystoreSessionSecretProtector,
+    ): WhisperSessionSecretProtector = impl
 }

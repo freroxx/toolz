@@ -183,6 +183,21 @@ object WhisperTombstone {
     /** Placeholder shown for rows with null content_iv (legacy/plaintext guard, M-3). */
     const val LEGACY_ENCRYPTED = "[Legacy encrypted message]"
 
+    // V5: honest placeholder when an envelope targets a key this device no longer holds.
+    const val LOCKED_OLDER_KEY = "[Encrypted with an older key]"
+
+    /** V6-R2: sentinel the hub writes for previews it could not open (localized at render). */
+    const val LOCKED_PLACEHOLDER = "🔒 Encrypted message"
+
+    /**
+     * V6-R2: true for every "cannot show content" sentinel — UI renders these as
+     * honest localized placeholders, never as ordinary message text.
+     */
+    fun isLockedMarker(content: String): Boolean =
+        content == LEGACY_ENCRYPTED ||
+            content == LOCKED_OLDER_KEY ||
+            content == LOCKED_PLACEHOLDER
+
     fun isTombstone(content: String): Boolean =
         content == CONTENT_LEGACY ||
         content == DISPLAY_TEXT ||
@@ -239,6 +254,8 @@ data class WhisperMessage(
     @kotlinx.serialization.Transient val replyToSenderName: String? = null,
     @kotlinx.serialization.Transient val reactions: List<WhisperReactionSummary> = emptyList(),
     @kotlinx.serialization.Transient val isPending: Boolean = false,
+    // V6: wire protocol version (0 legacy pair, 2 envelope, 3 Double Ratchet frame).
+    val protocolVersion: Int = 0,
 ) {
     fun isSentByMe(myUserId: String) = senderId == myUserId
 

@@ -1,5 +1,10 @@
 package com.frerox.toolz.ui.screens.whisper
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -236,5 +241,57 @@ internal fun decodeBoundedBitmap(bytes: ByteArray, maxWidth: Int, maxHeight: Int
     return android.graphics.BitmapFactory.decodeByteArray(
         bytes, 0, bytes.size,
         android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    )
+}
+
+
+/**
+ * PHASE 1 (roadmap §1.3): debug-only protocol diagnostics viewer.
+ * Renders [com.frerox.toolz.data.whisper.ProtocolDiagnostics] state: the event ring
+ * buffer plus counters. Copy hands the full snapshot to the clipboard for bug reports.
+ */
+@Composable
+fun WhisperDiagnosticsDialog(
+    lines: List<String>,
+    counters: Map<String, Long>,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.st_Whisper_Diag_Title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                if (counters.isNotEmpty()) {
+                    counters.entries.sortedByDescending { it.value }.forEach { (k, v) ->
+                        Text("$k: $v", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                if (lines.isEmpty()) {
+                    Text(
+                        stringResource(R.string.st_Whisper_Diag_Empty),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    LazyColumn(Modifier.height(320.dp)) {
+                        items(lines.size) { i ->
+                            Text(
+                                lines[lines.size - 1 - i],
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onCopy) { Text(stringResource(R.string.st_Whisper_Diag_Copy)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.st_Whisper_Close)) }
+        },
     )
 }

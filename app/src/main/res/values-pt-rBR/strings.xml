@@ -193,7 +193,7 @@
     <string name="st_Whisper_Profile_KeyVerifiedTitle">Criptografia Verificada</string>
     <string name="st_Whisper_Profile_KeyUnverifiedTitle">Impressão Digital de Segurança E2EE</string>
     <string name="st_Whisper_Profile_KeyVerifiedDesc">Você verificou esta chave comparando as impressões digitais. Esta conversa está protegida contra falsificação de identidade.</string>
-    <string name="st_Whisper_Profile_KeyChangedDesc">Esta chave mudou desde a última conversa. Compare a impressão digital abaixo antes de confiar nela novamente.</string>
+    <string name="st_Whisper_Profile_KeyChangedDesc">O código de segurança mudou inesperadamente. Rotações programadas nunca avisam — compare a impressão digital abaixo antes de confiar nesta chave novamente.</string>
     <string name="st_Whisper_Profile_KeyFingerprintDesc">Compare esta impressão digital com a de %s para verificar se sua sessão criptografada de ponta a ponta está segura.</string>
     <string name="st_Whisper_Profile_AcceptNewKey">Aceitar nova chave</string>
     <string name="st_Whisper_Profile_NotVerifiedNote">Ainda não verificado — compare as impressões digitais pessoalmente para confirmar esta chave.</string>
@@ -203,7 +203,7 @@
     <string name="st_Whisper_Chat_FriendGateBlocked">Você está bloqueado ou não pode enviar mensagens a este usuário.</string>
     <string name="st_Whisper_Chat_BlockedByOther">Você foi bloqueado por este usuário.</string>
     <string name="st_Whisper_Chat_BlockedByMe">Você bloqueou este usuário.</string>
-    <string name="st_Whisper_Chat_KeyChanged">A chave de criptografia mudou — verifique antes de confiar nesta conversa.</string>
+    <string name="st_Whisper_Chat_KeyChanged">O código de segurança de %1$s mudou inesperadamente — revise antes de compartilhar algo sensível</string>
     <string name="st_Whisper_Chat_ClearedMessages">%d mensagens apagadas</string>
     <string name="st_Whisper_Chat_InputBlocked">Você foi bloqueado</string>
     <string name="st_Whisper_Chat_InputUnblock">Desbloqueie o usuário para enviar</string>
@@ -232,6 +232,11 @@
     <string name="st_Whisper_Public">Público</string>
     <string name="st_Whisper_Fingerprint_Title">Minha impressão digital de criptografia</string>
     <string name="st_Whisper_Fingerprint_Desc">Compartilhe com seus amigos para que possam verificar sua identidade. A impressão digital é gerada a partir da chave deste dispositivo e nunca sai dele.</string>
+        <string name="st_Whisper_Badge_Fs">E2EE · Sigilo perfeito</string>
+    <string name="st_Whisper_Fs_Title">Sigilo perfeito ativo</string>
+    <string name="st_Whisper_Fs_Desc">Cada mensagem é selada com sua própria chave de uso único, destruída logo após o uso — nem mesmo uma chave de identidade comprometida pode decifrar suas mensagens anteriores.</string>
+    <string name="st_Whisper_Locked_Message">Esta mensagem não pode mais ser decifrada neste aparelho</string>
+    <string name="st_Whisper_Locked_Short">🔒 Mensagem criptografada</string>
     <string name="st_Whisper_HideFromDiscover">Ocultar do Descobrir</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Não foi possível verificar esta chave.</string>
     <string name="st_Whisper_Error_KeyAcceptFailed">Não foi possível aceitar esta chave.</string>
@@ -284,10 +289,11 @@
     <string name="st_Whisper_BlockConfirmTitle">Bloquear %s?</string>
     <string name="st_Whisper_BlockConfirmDesc">Eles não poderão enviar mensagens para você.</string>
     <string name="st_Whisper_KeyChanged_Title">Chave de criptografia alterada</string>
-    <string name="st_Whisper_KeyChanged_Desc">A chave de criptografia de %s é diferente da que vocês usaram da última vez. Compare a impressão digital abaixo com a mostrada no dispositivo dele antes de continuar.</string>
+    <string name="st_Whisper_KeyChanged_Desc">O código de segurança de %1$s mudou de forma inesperada. As rotações programadas acontecem automaticamente e nunca pedem confirmação — este aviso só aparece quando a mudança não era esperada. Se %1$s reinstalou o Whisper recentemente ou trocou de aparelho, é seguro aceitar. Caso contrário, compare as impressões digitais pessoalmente antes de confiar na nova chave.</string>
     <string name="st_Whisper_PartnerFingerprint">Impressão digital de %s</string>
     <string name="st_Whisper_YourFingerprint">Sua impressão digital</string>
-    <string name="st_Whisper_KeyChanged_Warning">Só continue se a impressão digital for igual à mostrada no dispositivo dele. Se não for, a pessoa pode estar sendo falsificada.</string>
+    <string name="st_Whisper_KeyChanged_Warning">Ficou em dúvida? Pergunte à pessoa por outro canal se ela trocou de aparelho. Na dúvida, escaneie o QR de verificação pessoalmente em vez de aceitar.</string>
+        <string name="st_Whisper_KeyChanged_FsNote">Suas mensagens anteriores continuam protegidas de qualquer forma — cada uma foi selada com uma chave que já não existe.</string>
     <string name="st_Whisper_Verify">Verificar</string>
     <!-- V3-FIX: verificação por código QR -->
     <string name="st_Whisper_QrShowButton">Mostrar QR de verificação</string>
@@ -355,6 +361,7 @@
     <string name="st_Whisper_Error_RequestFailed">A solicitação não pôde ser concluída. Tente novamente.</string>
     <string name="st_Whisper_Error_ServerBusy">O servidor está temporariamente ocupado. Tentando novamente...</string>
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Não foi possível descriptografar esta mensagem.</string>
+        <string name="st_Whisper_Error_KeyChanged">O número de segurança deste contato mudou. Verifique antes de enviar.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
     <string name="st_Whisper_Beta_Warning_Desc">Whisper é uma ferramenta criptografada experimental. Você está participando de um programa de acesso antecipado e pode encontrar bugs ou problemas de desempenho. Por favor, compartilhe seu feedback para nos ajudar a melhorar!</string>
@@ -365,7 +372,7 @@
     <string name="st_Whisper_Onboarding_Title2">Encontre sua gente</string>
     <string name="st_Whisper_Onboarding_Desc2">Conecte-se sem o ruído. Descubra amigos através de círculos muduos sem compartilhar seus contatos ou número de telefone.</string>
     <string name="st_Whisper_Onboarding_Title3">Seguro</string>
-    <string name="st_Whisper_Onboarding_Desc3">Criptografia inquebrável. Suas mensagens são trancadas com chaves P-256 que nunca saem do seu celular.</string>
+    <string name="st_Whisper_Onboarding_Desc3">Suas mensagens são protegidas com criptografia de ponta a ponta e sigilo perfeito: cada mensagem recebe sua própria chave de uso único, criada no seu aparelho e destruída assim que usada. Nem mesmo uma chave de identidade roubada pode revelar suas conversas anteriores.</string>
     <string name="st_Whisper_Onboarding_Title4">Seja dono da sua identidade</string>
     <string name="st_Whisper_Onboarding_Desc4">Sem senhas, sem vazamentos. Você é sua própria chave. Com a autenticação por Token, você recebe tokens gerados localmente, o que significa que não temos nada a perder e você não tem nada com que se preocupar.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Comece sua Jornada</string>
@@ -377,7 +384,11 @@
     <string name="st_Whisper_Onboarding_Kicker3">O WHISPER É SEGURO</string>
     <string name="st_Whisper_Onboarding_Kicker4">O WHISPER É SEU</string>
     <string name="st_Whisper_Onboarding_PageOf">Página %1$d de %2$d</string>
-    <string name="st_Whisper_Notif_NewMessage">Nova mensagem do Whisper</string>
+        <string name="st_Whisper_Diag_Title">Diagnóstico do protocolo</string>
+    <string name="st_Whisper_Diag_Empty">Nenhum evento de protocolo registrado ainda.</string>
+    <string name="st_Whisper_Diag_Copy">Copiar</string>
+        <string name="st_Whisper_Diag_Copied">Diagnósticos copiados</string>
+<string name="st_Whisper_Notif_NewMessage">Nova mensagem do Whisper</string>
 
     <string name="st_Whisper_Notif_OpenToRead">Abra o Whisper para ler</string>
 
@@ -2959,8 +2970,7 @@
 
     <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
     <string name="st_Whisper_KeyRotate_AutoMonthly">A chave de criptografia foi renovada automaticamente — isso acontece a cada %1$d dias para sua segurança.</string>
-    <string name="st_Whisper_KeyRotate_Manual">%1$s renovou manualmente a chave de criptografia — verifique o novo número de segurança se quiser.</string>
-    <string name="st_Whisper_Fingerprint_RotateButton">Renovar chave de criptografia</string>
+        <string name="st_Whisper_Fingerprint_RotateButton">Renovar chave de criptografia</string>
     <string name="st_Whisper_RotateKey_Title">Renovar chave de criptografia</string>
     <string name="st_Whisper_RotateKey_Desc">Renovar sua chave P-256 gera um novo par de chaves. Seus amigos serão convidados a reverificar sua nova impressão digital. O histórico de mensagens neste dispositivo é preservado e todas as mensagens futuras usarão a nova chave.</string>
     <string name="st_Whisper_RotateKey_Action">Renovar chave</string>
@@ -2983,12 +2993,15 @@
     <string name="st_Whisper_ConnectionLost">Conexão ao vivo perdida</string>
     <string name="st_Whisper_Reconnect">Reconectar</string>
     <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Chave renovada automaticamente conforme o cronograma — verificar é opcional.</string>
-    <string name="st_Whisper_Profile_KeyRotatedManualFallback">%1$s renovou a chave manualmente — verifique o novo número de segurança.</string>
-    <string name="st_Whisper_VerifyOptional">Verificar (opcional)</string>
+        <string name="st_Whisper_VerifyOptional">Verificar (opcional)</string>
     <string name="st_Whisper_AcceptShort">Aceitar</string>
     <string name="st_Whisper_Aubup_Continue">Continuar para o Whisper</string>
     <string name="st_Whisper_Aubup_AccountLabel">Conta:</string>
     <string name="st_Whisper_CredentialCopied">Credencial copiada</string>
+        <string name="st_Whisper_AuthType_Token">Token</string>
+    <string name="st_Whisper_AuthType_Password">Senha</string>
+    <string name="st_Whisper_SomeoneDefault">Alguém</string>
+    <string name="st_Whisper_Error_ProfileNotLoaded">Perfil ainda não carregado. Tente novamente.</string>
     <string name="cd_Whisper_CopyCredential">Copiar credencial</string>
 
     <!-- Bypass verification diagnostics -->

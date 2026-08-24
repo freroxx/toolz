@@ -1047,7 +1047,15 @@ private fun TokenRegisterForm(
                 Text(stringResource(R.string.st_Whisper_Auth_GenerateMyToken), fontWeight = FontWeight.Bold)
             }
         } else {
-            ExpressiveCard(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+            // V6-R2 (review): inert ExpressiveCard(onClick = {}) — the exact dead
+            // press-feedback anti-pattern already removed twice elsewhere (V2-FIX L14).
+            // A plain Surface keeps the look without pretending to be clickable.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 2.dp,
+            ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1715,7 +1723,15 @@ fun WhisperCredentialRevealedDialog(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "${restored.authType}: ${restored.credential.take(16)}...",
+                                // V6-R2 (review): raw "TOKEN"/"PASSWORD" enum words leaked
+                                // untranslated — render localized auth-type labels instead.
+                                text = stringResource(
+                                    if (restored.authType.equals("TOKEN", ignoreCase = true)) {
+                                        R.string.st_Whisper_AuthType_Token
+                                    } else {
+                                        R.string.st_Whisper_AuthType_Password
+                                    },
+                                ) + ": ${restored.credential.take(16)}...",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.weight(1f)

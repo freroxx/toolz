@@ -513,7 +513,8 @@ fun WhisperChatScreen(
                     }
                 }
 
-                // Key trust banners — polished 7-day: auto/manual are info, CHANGED remains warning.
+                // Key trust banners — V6-R2 (review): the unreachable ROTATED_MANUAL arm
+                // is gone; classifyKeyChange can only return MATCH / ROTATED_AUTO / CHANGED.
                 when (uiState.keyTrust?.status) {
                     KeyTrustStatus.CHANGED -> {
                         Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
@@ -542,23 +543,6 @@ fun WhisperChatScreen(
                                         ?: stringResource(R.string.st_Whisper_KeyRotate_AutoMonthly, 30),
                                     modifier = Modifier.weight(1f),
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
-                                    Text(stringResource(R.string.st_Whisper_Review), fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                    KeyTrustStatus.ROTATED_MANUAL -> {
-                        Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-                            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Key, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                                Text(
-                                    uiState.keyTrust?.rotateMessage?.asString(context)
-                                        ?: stringResource(R.string.st_Whisper_KeyRotate_Manual, uiState.otherUser?.effectiveName ?: stringResource(R.string.st_Whisper_UserDefault)),
-                                    modifier = Modifier.weight(1f),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     style = MaterialTheme.typography.bodySmall
                                 )
                                 ToolzTonalExpressiveButton(onClick = { haptic.click(); showKeyVerifyDialog = true }) {
@@ -1173,12 +1157,14 @@ private fun DeleteMessageSheet(
 
             // Message Preview (Subtle tinted bubble).
             // Ciphertext envelopes are never shown raw: images preview as a label.
-            val previewText = if (message.isDeletedForEveryone) {
-                stringResource(R.string.st_Whisper_MessageDeleted)
-            } else if (WhisperImageAttachment.fromMessageContent(message.content) != null) {
-                "📷 " + stringResource(R.string.st_Whisper_Image)
-            } else {
-                message.content.take(100)
+            // V6-R2 (review): lock sentinels preview as the localized placeholder too.
+            val previewText = when {
+                message.isDeletedForEveryone -> stringResource(R.string.st_Whisper_MessageDeleted)
+                WhisperImageAttachment.fromMessageContent(message.content) != null ->
+                    "📷 " + stringResource(R.string.st_Whisper_Image)
+                com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(message.content) ->
+                    stringResource(R.string.st_Whisper_Locked_Short)
+                else -> message.content.take(100)
             }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
@@ -1448,6 +1434,14 @@ private fun KeyVerifyDialog(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
+                // V6-R2 (review): state the forward-secrecy reassurance explicitly — a key
+                // change never endangers already-delivered mail because those message keys
+                // were destroyed after use.
+                Text(
+                    stringResource(R.string.st_Whisper_KeyChanged_FsNote),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = {
@@ -1643,10 +1637,15 @@ private fun MessageBubble(
                                     // (locale-independent, model-based) instead of a display-string sentinel.
                                     val isImage = message.replyToContent?.startsWith(WhisperImageAttachment.MESSAGE_PREFIX) == true
                                     val isDeletedQuote = message.replyToContent?.startsWith("[deleted_by_sender") == true || message.replyToContent == stringResource(R.string.st_Whisper_MessageDeleted)
+                                    // V6-R2 (review): lock sentinels quoted as replies showed raw English.
+                                    val isLockedQuote = message.replyToContent?.let {
+                                        com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(it)
+                                    } == true
                                     Text(
                                         when {
                                             isImage -> "📷 " + stringResource(R.string.st_Whisper_Image)
                                             isDeletedQuote -> stringResource(R.string.st_Whisper_MessageDeleted)
+                                            isLockedQuote -> stringResource(R.string.st_Whisper_Locked_Short)
                                             else -> message.replyToContent ?: ""
                                         },
                                         style = MaterialTheme.typography.bodySmall,
@@ -1736,7 +1735,28 @@ private fun MessageBubble(
                                     }
                                 }
                             }
-                        } else {
+                                        } else if (com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(message.content)) {
+                                            // V6-R2 (review): lock sentinels used to fall through to
+                                            // the markdown body and render as ordinary quoted/searchable
+                                            // text. Render them as the honest localized placeholder.
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Lock,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = bubbleContentColor.copy(alpha = 0.7f)
+                                                )
+                                                Text(
+                                                    stringResource(R.string.st_Whisper_Locked_Message),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontStyle = FontStyle.Italic,
+                                                    color = bubbleContentColor.copy(alpha = 0.7f)
+                                                )
+                                            }
+                                        } else {
                         val parsedContent = remember(message.content) { message.content.parseMarkdown() }
                         Text(
                             text = parsedContent,

@@ -48,6 +48,11 @@ class WhisperCrypto @Inject constructor(
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         /** Alias used by builds before staged rotation existed — adopted as active on first run. */
         private const val LEGACY_KEY_ALIAS = "whisper_e2ee_ec_key"
+        private const val TAG_CRYPTO = "WhisperCrypto"
+        // PHASE 1 (roadmap §1.1): hardware-bound P-256 SIGNING identity for the upcoming
+        // prekey protocol — signs X25519 prekeys so a malicious server cannot substitute
+        // them. SEPARATE alias from the ECDH agreement key: one key, one purpose.
+        private const val PROTOCOL_SIGN_ALIAS = "whisper_protocol_sign_key"
         private const val STAGED_ALIAS_PREFIX = "whisper_e2ee_ec_key_staged_"
         private const val STATE_PREFS = "whisper_crypto_state"
         private const val PREF_ACTIVE_ALIAS = "active_alias"
@@ -176,8 +181,87 @@ class WhisperCrypto @Inject constructor(
         kpg.generateKeyPair()
     }
 
+    private fun activeAliasPrefSet(): Boolean = runCatching {
+        context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .getString(PREF_ACTIVE_ALIAS, null) != null
+    }.getOrDefault(false)
+
+    private fun selfTestRoundTrip(): Boolean = runCatching {
+        val pub = getPublicKeyBase64() ?: return false
+        val myId = "selftest"
+        val (ct, iv) = encryptMessage("ping", pub, myId, myId) ?: return false
+        decryptMessage(ct, iv, pub, myId, myId) == "ping"
+    }.getOrDefault(false)
+
+    // ---------------- PHASE 1: keystore-wrapped secret storage (roadmap §1.1) ----
+
+    private val WRAP_ALIAS = "whisper_protocol_wrap_key"
+
+    /** Encrypts arbitrary bytes under a dedicated Keystore AES-GCM key; returns b64(iv‖ct). */
+    fun wrapWithKeystoreAes(plain: ByteArray): String? = runCatching {
+        val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        if (!keyStore.containsAlias(WRAP_ALIAS)) {
+            val generator = javax.crypto.KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER,
+            )
+            generator.init(
+                android.security.keystore.KeyGenParameterSpec.Builder(
+                    WRAP_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build(),
+            )
+            generator.generateKey()
+        }
+        val secret = keyStore.getKey(WRAP_ALIAS, null) as javax.crypto.SecretKey
+        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secret, javax.crypto.spec.GCMParameterSpec(128, iv))
+        val ct = cipher.doFinal(plain)
+        Base64.encodeToString(iv + ct, Base64.NO_WRAP)
+    }.getOrNull()
+
+    /** Inverse of [wrapWithKeystoreAes]; null on tamper or missing key. */
+    fun unwrapWithKeystoreAes(wrappedB64: String): ByteArray? = runCatching {
+        val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        val secret = keyStore.getKey(WRAP_ALIAS, null) as javax.crypto.SecretKey
+        val packed = Base64.decode(wrappedB64, Base64.NO_WRAP)
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secret, javax.crypto.spec.GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+        cipher.doFinal(packed.copyOfRange(12, packed.size))
+    }.getOrNull()
+
+    /**
+     * V4-FIX follow-up: the stage->publish->commit rotation lifecycle never survives
+     * process death, so any staged alias found at startup is orphaned garbage from an
+     * interrupted attempt. Sweeping it keeps [hasStagedAliases] truthful — otherwise a
+     * single crash mid-rotation permanently disables the reinstall key-republish.
+     */
+    fun sweepOrphanedStagedAliases() {
+        runCatching {
+            val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            val orphans = keyStore.aliases().toList().filter { it.startsWith(STAGED_ALIAS_PREFIX) }
+            orphans.forEach {
+                keyStore.deleteEntry(it)
+                android.util.Log.w(TAG_CRYPTO, "Swept orphaned staged key alias: $it")
+            }
+        }
+    }
+
     private fun ensureKeyPairExists() {
+        sweepOrphanedStagedAliases()
+        ensureSigningKeyExists()
         try {
+            // V5 canary: prove the active key can actually round-trip before any chat
+            // relies on it. OEM keystore corruption otherwise surfaced only as the
+            // "[Encrypted message]" bug weeks later.
+            if (activeAliasPrefSet() && !selfTestRoundTrip()) {
+                android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED — regenerating identity")
+                resetKeyPair()
+            }
             activeAlias()
         } catch (e: Exception) {
             // V2-FIX W8: never swallow keystore bootstrap failures silently — degraded
@@ -441,6 +525,64 @@ class WhisperCrypto @Inject constructor(
 
     fun isCurrentPublicKey(publicKeyBase64: String?): Boolean =
         !publicKeyBase64.isNullOrBlank() && publicKeyBase64 == getPublicKeyBase64()
+
+    // ---------------- PHASE 1: protocol signing identity (roadmap §1.1) ----------------
+
+    /** Lazily creates the P-256 signing subkey. Idempotent, keystore-backed. */
+    fun ensureSigningKeyExists() {
+        runCatching {
+            val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            if (!keyStore.containsAlias(PROTOCOL_SIGN_ALIAS)) {
+                val generator = java.security.KeyPairGenerator.getInstance(
+                    KeyProperties.KEY_ALGORITHM_EC, KEYSTORE_PROVIDER,
+                )
+                generator.initialize(
+                    android.security.keystore.KeyGenParameterSpec.Builder(
+                        PROTOCOL_SIGN_ALIAS,
+                        KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
+                    )
+                        .setDigests(KeyProperties.DIGEST_SHA256)
+                        .setAlgorithmParameterSpec(
+                            java.security.spec.ECGenParameterSpec("secp256r1"),
+                        )
+                        .build(),
+                )
+                generator.generateKeyPair()
+            }
+        }.onFailure {
+            android.util.Log.e(TAG_CRYPTO, "Protocol signing key generation failed", it)
+        }
+    }
+
+    /**
+     * PHASE 2 consumers sign prekey bundles here. Returns base64(ECDSA-P256-SHA256),
+     * or null when the signing key is unavailable (fail-closed upstream).
+     */
+    fun signProtocol(payload: ByteArray): String? = runCatching {
+        val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        val entry = keyStore.getEntry(PROTOCOL_SIGN_ALIAS, null) as? java.security.KeyStore.PrivateKeyEntry
+            ?: return@runCatching null
+        val signature = java.security.Signature.getInstance("SHA256withECDSA")
+        signature.initSign(entry.privateKey)
+        signature.update(payload)
+        Base64.encodeToString(signature.sign(), Base64.NO_WRAP)
+    }.getOrNull()
+
+    /** Verifies a [signProtocol] signature against any published public key (X509 b64). */
+    fun verifyProtocol(payload: ByteArray, signatureBase64: String, signerPublicX509Base64: String): Boolean = runCatching {
+        val pub = parsePublicKey(signerPublicX509Base64) ?: return false
+        val signature = java.security.Signature.getInstance("SHA256withECDSA")
+        signature.initVerify(pub)
+        signature.update(payload)
+        signature.verify(Base64.decode(signatureBase64, Base64.NO_WRAP))
+    }.getOrDefault(false)
+
+    /** X509 base64 of the protocol signing public key — published alongside prekeys. */
+    fun protocolSigningPublicKeyBase64(): String? = runCatching {
+        val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+        val cert = keyStore.getCertificate(PROTOCOL_SIGN_ALIAS)?.publicKey ?: return@runCatching null
+        Base64.encodeToString(cert.encoded, Base64.NO_WRAP)
+    }.getOrNull()
 
     /**
      * Destroys the local key pair and generates a fresh one (account deletion).

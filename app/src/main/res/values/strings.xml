@@ -194,7 +194,7 @@
     <string name="st_Whisper_Profile_KeyVerifiedTitle">Encryption Verified</string>
     <string name="st_Whisper_Profile_KeyUnverifiedTitle">E2EE Security Fingerprint</string>
     <string name="st_Whisper_Profile_KeyVerifiedDesc">You verified this key by comparing fingerprints. This conversation is protected from impersonation.</string>
-    <string name="st_Whisper_Profile_KeyChangedDesc">Safety number changed. This usually means they reinstalled. Compare the fingerprint below before trusting it again.</string>
+    <string name="st_Whisper_Profile_KeyChangedDesc">Security code changed unexpectedly. Scheduled rotations never warn — compare the fingerprint below before trusting this key again.</string>
     <string name="st_Whisper_Profile_KeyFingerprintDesc">Compare this key fingerprint with %s to verify your end-to-end encrypted session is secure.</string>
     <string name="st_Whisper_Profile_AcceptNewKey">Accept new key</string>
     <string name="st_Whisper_Profile_NotVerifiedNote">Not verified yet — compare fingerprints in person to confirm this key.</string>
@@ -204,7 +204,7 @@
     <string name="st_Whisper_Chat_FriendGateBlocked">You are blocked or cannot message this user.</string>
     <string name="st_Whisper_Chat_BlockedByOther">You have been blocked by this user.</string>
     <string name="st_Whisper_Chat_BlockedByMe">You have blocked this user.</string>
-    <string name="st_Whisper_Chat_KeyChanged">Safety number changed — %s may have reinstalled Whisper</string>
+    <string name="st_Whisper_Chat_KeyChanged">%1$s&#8217;s security code changed unexpectedly — review before sharing anything sensitive</string>
     <string name="st_Whisper_Chat_ClearedMessages">Cleared %d messages</string>
     <string name="st_Whisper_Chat_InputBlocked">You have been blocked</string>
     <string name="st_Whisper_Chat_InputUnblock">Unblock user to send</string>
@@ -233,6 +233,11 @@
     <string name="st_Whisper_Public">Public</string>
     <string name="st_Whisper_Fingerprint_Title">My Encryption Fingerprint</string>
     <string name="st_Whisper_Fingerprint_Desc">Share this with friends so they can verify your identity. The fingerprint is generated from the key on this device and never leaves it.</string>
+        <string name="st_Whisper_Badge_Fs">E2EE · Forward secrecy</string>
+    <string name="st_Whisper_Fs_Title">Forward secrecy active</string>
+    <string name="st_Whisper_Fs_Desc">Every message is sealed with its own one-time key that is destroyed right after use — even a compromised identity key cannot decrypt your past messages.</string>
+    <string name="st_Whisper_Locked_Message">This message can no longer be decrypted on this device</string>
+    <string name="st_Whisper_Locked_Short">🔒 Encrypted message</string>
     <string name="st_Whisper_HideFromDiscover">Hide from Discover</string>
     <string name="st_Whisper_Error_KeyVerifyFailed">Unable to verify this key.</string>
     <string name="st_Whisper_Error_KeyAcceptFailed">Unable to accept this key.</string>
@@ -285,10 +290,11 @@
     <string name="st_Whisper_BlockConfirmTitle">Block %s?</string>
     <string name="st_Whisper_BlockConfirmDesc">They won\'t be able to message you.</string>
     <string name="st_Whisper_KeyChanged_Title">Safety number changed</string>
-    <string name="st_Whisper_KeyChanged_Desc">%s\'s safety number changed. This usually happens when they reinstall the app or switch devices. If you expected this, you can accept the new key. Otherwise, compare fingerprints in person.</string>
+    <string name="st_Whisper_KeyChanged_Desc">%1$s&#8217;s security code changed in an unexpected way. Scheduled key rotations happen automatically and never ask — this warning only appears when the change was not expected. If %1$s recently reinstalled Whisper or switched devices, it is safe to accept. Otherwise, compare fingerprints in person before trusting the new key.</string>
     <string name="st_Whisper_PartnerFingerprint">%s\'s fingerprint</string>
     <string name="st_Whisper_YourFingerprint">Your fingerprint</string>
-    <string name="st_Whisper_KeyChanged_Warning">Tip: Ask if they recently reinstalled. If the fingerprint on their device matches, it\'s safe to accept.</string>
+    <string name="st_Whisper_KeyChanged_Warning">Not sure? Ask the person through another channel whether they switched devices. When in doubt, scan the verification QR in person instead of accepting.</string>
+        <string name="st_Whisper_KeyChanged_FsNote">Your past messages stay protected either way — each was sealed with a key that no longer exists.</string>
     <string name="st_Whisper_Verify">Verify</string>
     <!-- V3-FIX: QR fingerprint verification -->
     <string name="st_Whisper_QrShowButton">Show verification QR</string>
@@ -356,6 +362,7 @@
     <string name="st_Whisper_Error_RequestFailed">Request could not be completed. Please try again.</string>
     <string name="st_Whisper_Error_ServerBusy">Server is temporarily busy. Retrying...</string>
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Could not decrypt this message.</string>
+        <string name="st_Whisper_Error_KeyChanged">Safety number changed for this contact. Review it before sending.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
     <string name="st_Whisper_Beta_Warning_Desc">Whisper is an experimental encrypted tool using static ECDH key agreement. If your device private key is ever compromised, past messages could be decrypted. Rotate your encryption key periodically in Profile settings. Please share your feedback to help us improve!</string>
@@ -366,7 +373,7 @@
     <string name="st_Whisper_Onboarding_Title2">Intuitive Discovery</string>
     <string name="st_Whisper_Onboarding_Desc2">Grow your network organically through "Mutual Connection" mapping. Whisper identifies potential friends through shared circles, allowing you to connect with your community without ever touching your contact list or exposing your personal metadata.</string>
     <string name="st_Whisper_Onboarding_Title3">Unbreakable Shield</string>
-    <string name="st_Whisper_Onboarding_Desc3">Every syllable is guarded by industrial-grade P-256 Elliptic Curve cryptography. Your encryption keys are generated locally and never transmitted, your conversations are mathematically impossible for anyone else to intercept.</string>
+    <string name="st_Whisper_Onboarding_Desc3">Messages are sealed with end-to-end encryption and forward secrecy: every message gets its own one-time key, created on your device and destroyed the moment it is used. Even a stolen identity key cannot reveal your past conversations.</string>
     <string name="st_Whisper_Onboarding_Title4">You Own Your Identity</string>
     <string name="st_Whisper_Onboarding_Desc4">Break free from the e-mail era. Whisper uses locally hashed, one-way security tokens. No email, no trackers. In Whisper, you aren\'t the product—you are the architect of your own digital identity.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Begin Your Journey</string>
@@ -378,7 +385,11 @@
     <string name="st_Whisper_Onboarding_Kicker4">WHISPER IS ALL YOURS</string>
     <string name="st_Whisper_Onboarding_PageOf">Page %1$d of %2$d</string>
     <!-- Whisper notification channels -->
-    <string name="st_Whisper_Notif_NewMessage">New Whisper message</string>
+        <string name="st_Whisper_Diag_Title">Protocol diagnostics</string>
+    <string name="st_Whisper_Diag_Empty">No protocol events recorded yet.</string>
+    <string name="st_Whisper_Diag_Copy">Copy</string>
+        <string name="st_Whisper_Diag_Copied">Diagnostics copied</string>
+<string name="st_Whisper_Notif_NewMessage">New Whisper message</string>
 
     <string name="st_Whisper_Notif_OpenToRead">Open Whisper to read it</string>
 
@@ -3096,8 +3107,7 @@
 
     <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
     <string name="st_Whisper_KeyRotate_AutoMonthly">Encryption key was rotated automatically — this happens every %1$d days to keep you safe.</string>
-    <string name="st_Whisper_KeyRotate_Manual">%1$s manually rotated their encryption key — verify the new safety number if you want.</string>
-    <string name="st_Whisper_Fingerprint_RotateButton">Rotate Encryption Key</string>
+        <string name="st_Whisper_Fingerprint_RotateButton">Rotate Encryption Key</string>
     <string name="st_Whisper_RotateKey_Title">Rotate Encryption Key</string>
     <string name="st_Whisper_RotateKey_Desc">Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.</string>
     <string name="st_Whisper_RotateKey_Action">Rotate Key</string>
@@ -3120,12 +3130,15 @@
     <string name="st_Whisper_ConnectionLost">Live connection lost</string>
     <string name="st_Whisper_Reconnect">Reconnect</string>
     <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Key rotated automatically on schedule — verifying is optional.</string>
-    <string name="st_Whisper_Profile_KeyRotatedManualFallback">%1$s rotated their key manually — verify the new safety number.</string>
-    <string name="st_Whisper_VerifyOptional">Verify (optional)</string>
+        <string name="st_Whisper_VerifyOptional">Verify (optional)</string>
     <string name="st_Whisper_AcceptShort">Accept</string>
     <string name="st_Whisper_Aubup_Continue">Continue to Whisper</string>
     <string name="st_Whisper_Aubup_AccountLabel">Account:</string>
     <string name="st_Whisper_CredentialCopied">Credential copied</string>
+        <string name="st_Whisper_AuthType_Token">Token</string>
+    <string name="st_Whisper_AuthType_Password">Password</string>
+    <string name="st_Whisper_SomeoneDefault">Someone</string>
+    <string name="st_Whisper_Error_ProfileNotLoaded">Profile not loaded yet. Try again.</string>
     <string name="cd_Whisper_CopyCredential">Copy credential</string>
 
     <!-- Bypass verification diagnostics -->

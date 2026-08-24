@@ -158,6 +158,11 @@ object WhisperErrorMapper {
             msg.contains("duplicate key", ignoreCase = true) || msg.contains("23505") ->
                 UiText.StringResource(R.string.st_Whisper_Error_AlreadyConnected)
 
+            // V6-R2 (review): sendMessage's key-change guard used to fall through to the
+            // generic RequestFailed text — surface the actual reason instead.
+            msg.contains("Safety number changed", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_KeyChanged)
+
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_DecryptionFailed)

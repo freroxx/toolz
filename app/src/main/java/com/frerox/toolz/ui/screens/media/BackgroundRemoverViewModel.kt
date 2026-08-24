@@ -5,32 +5,32 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.ui.screens.media
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.media.BackgroundModel
+import com.frerox.toolz.data.media.MaskDecoder
+import com.frerox.toolz.data.media.ModelDownloadManager
 import com.frerox.toolz.util.BackgroundRemoverEngine
 import com.frerox.toolz.util.ImageUtils
+import com.google.android.gms.tflite.client.TfLiteInitializationOptions
+import com.google.android.gms.tflite.java.TfLite
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import okhttp3.OkHttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,15 +41,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import com.google.android.gms.tflite.client.TfLiteInitializationOptions
-import org.tensorflow.lite.gpu.GpuDelegateFactory
-import com.google.android.gms.tflite.java.TfLite
 import org.tensorflow.lite.InterpreterApi
 import org.tensorflow.lite.InterpreterApi.Options.TfLiteRuntime
-import kotlinx.coroutines.tasks.await
+import org.tensorflow.lite.gpu.GpuDelegateFactory
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -59,13 +55,20 @@ import java.nio.channels.FileChannel
 import javax.inject.Inject
 
 /**
- * ViewModel for Background Remover with Model Hub support using direct TensorFlow Lite inference.
+ * ViewModel for Background Remover — Revamp 2026.
+ *
+ * - Delegates downloads to [ModelDownloadManager] (atomic, verified)
+ * - Uses [MaskDecoder] for clean mask parsing
+ * - Hardened interpreter init (GPU → CPU fallback with logs)
+ * - Exposes verified model set for Hub UI
  */
 @HiltViewModel
 class BackgroundRemoverViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
 ) : ViewModel() {
+
+    private val downloadManager = ModelDownloadManager(context, okHttpClient)
 
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
     val uiState: StateFlow<BackgroundRemoverUiState> = _uiState.asStateFlow()
@@ -75,52 +78,60 @@ class BackgroundRemoverViewModel @Inject constructor(
     private var activeJob: Job? = null
 
     init {
-        // Automatically select the first model if downloaded
-        val firstModel = BackgroundModel.SELFIE_PORTRAIT
-        val modelFile = File(context.filesDir, "models/${firstModel.fileName}")
-        if (modelFile.exists() && modelFile.length() > 1024) {
-            selectModel(firstModel)
+        // Prefer any already-verified model, else default; select & warm interpreter
+        val verified = downloadManager.allDownloadedIds()
+        val chosen = when {
+            verified.isEmpty() -> BackgroundModel.default()
+            verified.contains(BackgroundModel.SELFIE_PORTRAIT.id) -> BackgroundModel.SELFIE_PORTRAIT
+            else -> BackgroundModel.fromId(verified.first()) ?: BackgroundModel.default()
+        }
+        val isDl = downloadManager.isVerified(chosen)
+        _uiState.update {
+            it.copy(
+                selectedModel = chosen,
+                isModelDownloaded = isDl,
+                downloadedIds = verified,
+            )
+        }
+        if (isDl) {
+            viewModelScope.launch(Dispatchers.IO) { ensureInterpreterReady() }
         }
     }
 
     fun selectModel(model: BackgroundModel) {
-        val modelFile = File(context.filesDir, "models/${model.fileName}")
-        val isDownloaded = modelFile.exists() && modelFile.length() > 1024
-        
+        val isDownloaded = downloadManager.isVerified(model)
         tfliteInterpreter?.close()
         tfliteInterpreter = null
 
-        _uiState.update { 
+        _uiState.update {
             it.copy(
                 selectedModel = model,
                 isModelDownloaded = isDownloaded,
-                error = null
+                error = null,
+                downloadProgress = if (isDownloaded) 1f else 0f,
             )
         }
-        
         if (isDownloaded) {
-            viewModelScope.launch(Dispatchers.IO) {
-                ensureInterpreterReady()
-            }
+            viewModelScope.launch(Dispatchers.IO) { ensureInterpreterReady() }
         }
     }
 
     fun deleteModel(model: BackgroundModel) {
-        val modelFile = File(context.filesDir, "models/${model.fileName}")
-        if (modelFile.exists()) {
-            modelFile.delete()
-        }
-        
+        downloadManager.delete(model)
         if (_uiState.value.selectedModel == model) {
             tfliteInterpreter?.close()
             tfliteInterpreter = null
-            
-            _uiState.update { 
+            val remaining = downloadManager.allDownloadedIds()
+            _uiState.update {
                 it.copy(
                     isModelDownloaded = false,
-                    resultBitmap = null
+                    resultBitmap = null,
+                    downloadedIds = remaining,
+                    downloadProgress = 0f,
                 )
             }
+        } else {
+            _uiState.update { it.copy(downloadedIds = downloadManager.allDownloadedIds()) }
         }
     }
 
@@ -128,69 +139,52 @@ class BackgroundRemoverViewModel @Inject constructor(
         activeJob?.cancel()
         activeJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                _uiState.update { it.copy(isProcessing = true, downloadProgress = 0.01f) }
-                
-                val modelDir = File(context.filesDir, "models")
-                if (!modelDir.exists()) modelDir.mkdirs()
-                
-                val modelFile = File(modelDir, model.fileName)
-                val request = Request.Builder().url(model.downloadUrl).build()
-                
-                okHttpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        val errorDetail = when(response.code) {
-                            404 -> "Model not found on server (404)."
-                            503 -> "Server unavailable. Try again later."
-                            else -> "Network Error: ${response.code}"
-                        }
-                        throw Exception(errorDetail)
-                    }
-                    val body = response.body
-                    val totalSize = body.contentLength()
-                    
-                    FileOutputStream(modelFile).use { output ->
-                        val input = body.byteStream()
-                        val buffer = ByteArray(16384)
-                        var bytesRead: Int
-                        var totalRead = 0L
-                        
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            totalRead += bytesRead
-                            if (totalSize > 0) {
-                                val progress = totalRead.toFloat() / totalSize
-                                _uiState.update { it.copy(downloadProgress = progress) }
-                            }
-                        }
-                    }
+                _uiState.update { it.copy(isProcessing = true, downloadProgress = 0.01f, error = null) }
+                val result = downloadManager.download(model) { p ->
+                    _uiState.update { it.copy(downloadProgress = p) }
                 }
-                
-                _uiState.update { it.copy(isProcessing = false, selectedModel = model, isModelDownloaded = true, downloadProgress = 1f) }
+                if (result.isFailure) {
+                    val msg = result.exceptionOrNull()?.message ?: "Download failed"
+                    _uiState.update { it.copy(isProcessing = false, error = msg) }
+                    return@launch
+                }
+                val verified = downloadManager.allDownloadedIds()
+                _uiState.update {
+                    it.copy(
+                        isProcessing = false,
+                        selectedModel = model,
+                        isModelDownloaded = true,
+                        downloadedIds = verified,
+                        downloadProgress = 1f,
+                    )
+                }
                 ensureInterpreterReady()
-
-                // If an image was already loaded, run background removal automatically after model download
-                _uiState.value.originalBitmap?.let { bitmap ->
-                    processImage(bitmap)
-                }
+                // Auto-run if an image is already loaded
+                _uiState.value.originalBitmap?.let { bmp -> processImage(bmp) }
             } catch (ce: CancellationException) {
-                // Ignore
+                _uiState.update { it.copy(isProcessing = false) }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("BgRemoverVM", "downloadModel failed", e)
                 _uiState.update { it.copy(isProcessing = false, error = "Download failed: ${e.localizedMessage}") }
             }
         }
     }
 
+    fun cancelDownload() {
+        activeJob?.cancel()
+        _uiState.update { it.copy(isProcessing = false) }
+    }
+
     private suspend fun ensureInterpreterReady(): Boolean = initMutex.withLock {
         if (tfliteInterpreter != null) return@withLock true
-        
         val currentModel = _uiState.value.selectedModel ?: return@withLock false
-        val modelFile = File(context.filesDir, "models/${currentModel.fileName}")
+        if (!downloadManager.isVerified(currentModel)) return@withLock false
+        val modelFile = downloadManager.modelFile(currentModel)
         if (!modelFile.exists()) return@withLock false
 
         return@withLock withContext(Dispatchers.IO) {
             try {
-                // Initialize TfLite in Play Services with GPU support
+                Log.d("BgRemoverVM", "Init TFLite GPU for ${currentModel.id}")
                 val initOptions = TfLiteInitializationOptions.builder()
                     .setEnableGpuDelegateSupport(true)
                     .build()
@@ -200,11 +194,15 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val options = InterpreterApi.Options().apply {
                     setRuntime(TfLiteRuntime.FROM_SYSTEM_ONLY)
                     setNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
-                    addDelegateFactory(GpuDelegateFactory())
+                    try { addDelegateFactory(GpuDelegateFactory()) } catch (t: Throwable) {
+                        Log.w("BgRemoverVM", "GpuDelegateFactory not available", t)
+                    }
                 }
                 tfliteInterpreter = InterpreterApi.create(modelBuffer, options)
+                Log.d("BgRemoverVM", "GPU interpreter ready for ${currentModel.id}")
                 return@withContext true
             } catch (e: Throwable) {
+                Log.w("BgRemoverVM", "GPU init failed, fallback CPU", e)
                 try {
                     val modelBuffer = loadModelFile(modelFile)
                     val cpuOptions = InterpreterApi.Options().apply {
@@ -212,9 +210,10 @@ class BackgroundRemoverViewModel @Inject constructor(
                         setNumThreads(4)
                     }
                     tfliteInterpreter = InterpreterApi.create(modelBuffer, cpuOptions)
+                    Log.d("BgRemoverVM", "CPU interpreter ready for ${currentModel.id}")
                     return@withContext true
                 } catch (e2: Throwable) {
-                    e2.printStackTrace()
+                    Log.e("BgRemoverVM", "CPU init failed", e2)
                     _uiState.update { it.copy(isProcessing = false, error = "AI Engine Init Failed: ${e2.localizedMessage}") }
                     false
                 }
@@ -238,27 +237,38 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val bitmap = withContext(Dispatchers.IO) {
                     ImageUtils.loadOptimizedBitmap(context, uri)
                 } ?: run {
-                    _uiState.update { it.copy(isProcessing = false, error = "Could not load image.") }
+                    _uiState.update { it.copy(isProcessing = false, error = "Could not load image. Try a different photo.") }
                     return@launch
                 }
-
                 _uiState.update { it.copy(originalBitmap = bitmap) }
-                
                 if (_uiState.value.isModelDownloaded) {
                     processImage(bitmap)
                 } else {
-                    _uiState.update { it.copy(isProcessing = false) }
+                    _uiState.update { it.copy(isProcessing = false, error = "Download a model from the hub to get started") }
                 }
             } catch (e: Exception) {
                 if (e !is CancellationException) {
+                    Log.e("BgRemoverVM", "onImageSelected", e)
                     _uiState.update { it.copy(isProcessing = false, error = "Selection error: ${e.localizedMessage}") }
                 }
             }
         }
     }
 
+    /** For camera captures or share intents where we already have a bitmap */
+    fun onBitmapSelected(bitmap: Bitmap) {
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch {
+            _uiState.update { it.copy(isProcessing = true, originalBitmap = bitmap, resultBitmap = null, error = null) }
+            if (_uiState.value.isModelDownloaded) processImage(bitmap) else _uiState.update { it.copy(isProcessing = false) }
+        }
+    }
+
     private suspend fun processImage(bitmap: Bitmap) {
-        if (!ensureInterpreterReady()) return
+        if (!ensureInterpreterReady()) {
+            _uiState.update { it.copy(isProcessing = false, error = "AI engine not ready — try re-downloading the model") }
+            return
+        }
         val interpreter = tfliteInterpreter ?: run {
             _uiState.update { it.copy(isProcessing = false, error = "AI Engine uninitialized.") }
             return
@@ -269,145 +279,65 @@ class BackgroundRemoverViewModel @Inject constructor(
             withContext(Dispatchers.Default) {
                 val inputTensor = interpreter.getInputTensor(0)
                 val inputShape = inputTensor.shape()
-                val modelH = if (inputShape.size >= 3) inputShape[1] else 256
-                val modelW = if (inputShape.size >= 3) inputShape[2] else 256
+                val modelH = if (inputShape.size >= 3) inputShape[1] else model.resolution
+                val modelW = if (inputShape.size >= 3) inputShape[2] else model.resolution
 
                 val outputTensor = interpreter.getOutputTensor(0)
                 val outputShape = outputTensor.shape()
 
-                // Preprocess bitmap to model input buffer
+                Log.d("BgRemoverVM", "Inference ${model.id} input=${inputShape.contentToString()} output=${outputShape.contentToString()} dtype=${inputTensor.dataType()}")
+
                 val scaledBitmap = Bitmap.createScaledBitmap(bitmap, modelW, modelH, true)
                 val inputPixels = IntArray(modelW * modelH)
                 scaledBitmap.getPixels(inputPixels, 0, modelW, 0, 0, modelW, modelH)
-                if (scaledBitmap != bitmap) {
-                    scaledBitmap.recycle()
-                }
+                if (scaledBitmap != bitmap) scaledBitmap.recycle()
 
                 val isFloatInput = inputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
                 val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * (if (isFloatInput) 4 else 1))
                 inputBuffer.order(ByteOrder.nativeOrder())
-                
                 for (pixel in inputPixels) {
-                    val r = ((pixel shr 16) and 0xFF)
-                    val g = ((pixel shr 8) and 0xFF)
-                    val b = (pixel and 0xFF)
-                    
+                    val r = (pixel shr 16) and 0xFF
+                    val g = (pixel shr 8) and 0xFF
+                    val b = pixel and 0xFF
                     if (isFloatInput) {
                         inputBuffer.putFloat(r / 255.0f)
                         inputBuffer.putFloat(g / 255.0f)
                         inputBuffer.putFloat(b / 255.0f)
                     } else {
-                        inputBuffer.put(r.toByte())
-                        inputBuffer.put(g.toByte())
-                        inputBuffer.put(b.toByte())
+                        inputBuffer.put(r.toByte()); inputBuffer.put(g.toByte()); inputBuffer.put(b.toByte())
                     }
                 }
                 inputBuffer.rewind()
 
-                // Prepare output buffer
-                val totalOutputElements = outputShape.reduce { acc, i -> acc * i }
+                val totalOutputElements = outputShape.fold(1) { acc, i -> acc * i }
                 val isFloatOutput = outputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
                 val outputBuffer = ByteBuffer.allocateDirect(totalOutputElements * (if (isFloatOutput) 4 else 1))
                 outputBuffer.order(ByteOrder.nativeOrder())
 
-                // Run inference
                 interpreter.run(inputBuffer, outputBuffer)
                 outputBuffer.rewind()
 
-                // Parse confidence mask
-                val combinedMask = FloatArray(modelW * modelH)
-                var numChannels = 1
-                var isNHWC = true
+                val combinedMask = MaskDecoder.decode(
+                    outputBuffer = outputBuffer,
+                    isFloatOutput = isFloatOutput,
+                    outputShape = outputShape,
+                    modelW = modelW,
+                    modelH = modelH,
+                    modelId = model.id,
+                )
 
-                if (outputShape.size == 4) {
-                    if (outputShape[3] in 1..32) {
-                        numChannels = outputShape[3]
-                        isNHWC = true
-                    } else {
-                        numChannels = outputShape[1]
-                        isNHWC = false
-                    }
-                }
-
-                if (isFloatOutput) {
-                    val fb = outputBuffer.asFloatBuffer()
-                    
-                    if (numChannels == 1) {
-                        for (i in 0 until (modelW * modelH)) {
-                            val v = fb.get(i)
-                            // If value is already in 0..1 range (MediaPipe models), use directly; otherwise apply sigmoid for raw logits
-                            combinedMask[i] = if (v in 0f..1f) v else (1.0f / (1.0f + kotlin.math.exp(-v.toDouble()))).toFloat()
-                        }
-                    } else if (model.id == "selfie_multiclass") {
-                        // 6-channel anatomical selfie matte: channels 1..5 are subject components (hair, skin, clothes, accessories)
-                        for (i in 0 until (modelW * modelH)) {
-                            var fgProb = 0f
-                            var sumExp = 0f
-                            val channelVals = FloatArray(numChannels)
-                            for (c in 0 until numChannels) {
-                                val offset = if (isNHWC) i * numChannels + c else c * (modelW * modelH) + i
-                                channelVals[c] = fb.get(offset)
-                            }
-                            val maxLogit = channelVals.maxOrNull() ?: 0f
-                            for (c in 0 until numChannels) {
-                                val exp = kotlin.math.exp((channelVals[c] - maxLogit).toDouble()).toFloat()
-                                sumExp += exp
-                                if (c > 0) fgProb += exp
-                            }
-                            combinedMask[i] = (fgProb / (sumExp + 1e-6f)).coerceIn(0f, 1f)
-                        }
-                    } else if (model.id == "deeplabv3_objects") {
-                        // 21-channel DeepLabV3: channel 0 is background, channels 1..20 are objects
-                        for (i in 0 until (modelW * modelH)) {
-                            var bgExp = 0f
-                            var sumExp = 0f
-                            val channelVals = FloatArray(numChannels)
-                            for (c in 0 until numChannels) {
-                                val offset = if (isNHWC) i * numChannels + c else c * (modelW * modelH) + i
-                                channelVals[c] = fb.get(offset)
-                            }
-                            val maxLogit = channelVals.maxOrNull() ?: 0f
-                            for (c in 0 until numChannels) {
-                                val exp = kotlin.math.exp((channelVals[c] - maxLogit).toDouble()).toFloat()
-                                sumExp += exp
-                                if (c == 0) bgExp = exp
-                            }
-                            val bgProb = bgExp / (sumExp + 1e-6f)
-                            combinedMask[i] = (1f - bgProb).coerceIn(0f, 1f)
-                        }
-                    } else {
-                        // Standard multi-channel softmax / 2-channel foreground
-                        for (i in 0 until (modelW * modelH)) {
-                            val fgIdx = numChannels - 1
-                            val offset = if (isNHWC) i * numChannels + fgIdx else fgIdx * (modelW * modelH) + i
-                            val v = fb.get(offset)
-                            combinedMask[i] = if (v in 0f..1f) v else (1.0f / (1.0f + kotlin.math.exp(-v.toDouble()))).toFloat()
-                        }
-                    }
-                } else {
-                    // UINT8 Quantized
-                    for (i in 0 until (modelW * modelH)) {
-                        val offset = if (numChannels > 1) {
-                            if (isNHWC) i * numChannels + (numChannels - 1) else (numChannels - 1) * (modelW * modelH) + i
-                        } else i
-                        combinedMask[i] = (outputBuffer.get(offset).toInt() and 0xFF) / 255.0f
-                    }
-                }
-
-                // Post-process with sub-pixel refinement
                 val resultBitmap = BackgroundRemoverEngine.removeBackground(
                     source = bitmap,
                     maskArray = combinedMask,
                     maskW = modelW,
-                    maskH = modelH
+                    maskH = modelH,
                 )
-
                 _uiState.update { it.copy(isProcessing = false, resultBitmap = resultBitmap) }
             }
         } catch (e: Exception) {
             if (e !is CancellationException) {
-                e.printStackTrace()
-                _uiState.update { it.copy(isProcessing = false, error = "Processing Error: ${e.localizedMessage}") }
+                Log.e("BgRemoverVM", "processImage failed", e)
+                _uiState.update { it.copy(isProcessing = false, error = "Processing error: ${e.localizedMessage}") }
             }
         }
     }
@@ -415,16 +345,49 @@ class BackgroundRemoverViewModel @Inject constructor(
     fun saveResult(bitmap: Bitmap) {
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true) }
-            val success = withContext(Dispatchers.IO) { saveImageToGallery(bitmap) }
+            val success = withContext(Dispatchers.IO) { saveImageToGallery(bitmap, compressWhiteBg = false) }
             _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
+            if (success) {
+                // auto-reset saveSuccess after 2.5s so UI can show snackbar again
+                kotlinx.coroutines.delay(2500)
+                _uiState.update { it.copy(saveSuccess = false) }
+            }
         }
     }
 
-    private fun saveImageToGallery(bitmap: Bitmap): Boolean {
+    /** Save with optional white background composite */
+    fun saveResultWithBackground(bitmap: Bitmap, background: PreviewBackground) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isProcessing = true) }
+            val success = withContext(Dispatchers.IO) {
+                val toSave = when (background) {
+                    is PreviewBackground.White -> compositeOnColor(bitmap, 0xFFFFFFFF.toInt())
+                    is PreviewBackground.Color -> compositeOnColor(bitmap, background.color)
+                    is PreviewBackground.Transparent -> bitmap
+                    is PreviewBackground.Blur -> bitmap // blur preview only — save transparent
+                    is PreviewBackground.CustomImage -> bitmap
+                }
+                saveImageToGallery(toSave, compressWhiteBg = background !is PreviewBackground.Transparent)
+            }
+            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
+            if (success) { kotlinx.coroutines.delay(2500); _uiState.update { it.copy(saveSuccess = false) } }
+        }
+    }
+
+    private fun compositeOnColor(fg: Bitmap, color: Int): Bitmap {
+        val out = Bitmap.createBitmap(fg.width, fg.height, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        c.drawColor(color)
+        c.drawBitmap(fg, 0f, 0f, null)
+        return out
+    }
+
+    private fun saveImageToGallery(bitmap: Bitmap, compressWhiteBg: Boolean): Boolean {
         val filename = "TOOLZ_BG_${System.currentTimeMillis()}.png"
+        val mime = "image/png"
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Toolz")
             }
@@ -435,19 +398,48 @@ class BackgroundRemoverViewModel @Inject constructor(
             resolver.openOutputStream(uri)?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             true
         } catch (e: Exception) {
+            Log.e("BgRemoverVM", "save failed", e)
             resolver.delete(uri, null, null)
             false
         }
     }
 
-    fun clearResult() {
-        activeJob?.cancel()
-        _uiState.update { BackgroundRemoverUiState(selectedModel = it.selectedModel, isModelDownloaded = it.isModelDownloaded) }
+    fun getShareIntent(bitmap: Bitmap): Intent? {
+        return try {
+            val cache = File(context.cacheDir, "share")
+            cache.mkdirs()
+            val f = File(cache, "toolz_bg_${System.currentTimeMillis()}.png")
+            FileOutputStream(f).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val uri = FileProvider.getUriForFile(context, "com.frerox.toolz.fileprovider", f)
+            Intent(Intent.ACTION_SEND).apply {
+                type = "image/png"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } catch (e: Exception) {
+            Log.e("BgRemoverVM", "share intent failed", e)
+            null
+        }
     }
 
-    fun dismissError() {
-        _uiState.update { it.copy(error = null) }
+    fun setPreviewBackground(bg: PreviewBackground) {
+        _uiState.update { it.copy(previewBackground = bg) }
     }
+
+    fun clearResult() {
+        activeJob?.cancel()
+        _uiState.update {
+            BackgroundRemoverUiState(
+                selectedModel = it.selectedModel,
+                isModelDownloaded = it.isModelDownloaded,
+                downloadedIds = it.downloadedIds,
+            )
+        }
+    }
+
+    fun dismissError() { _uiState.update { it.copy(error = null) } }
+
+    fun dismissSaveSuccess() { _uiState.update { it.copy(saveSuccess = false) } }
 
     override fun onCleared() {
         super.onCleared()
@@ -457,13 +449,23 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 }
 
+sealed interface PreviewBackground {
+    data object Transparent : PreviewBackground
+    data object White : PreviewBackground
+    data class Color(val color: Int) : PreviewBackground
+    data object Blur : PreviewBackground
+    data class CustomImage(val bitmap: Bitmap) : PreviewBackground
+}
+
 data class BackgroundRemoverUiState(
     val selectedModel: BackgroundModel? = null,
     val isModelDownloaded: Boolean = false,
+    val downloadedIds: Set<String> = emptySet(),
     val downloadProgress: Float = 0f,
     val originalBitmap: Bitmap? = null,
     val resultBitmap: Bitmap? = null,
     val isProcessing: Boolean = false,
     val saveSuccess: Boolean = false,
     val error: String? = null,
+    val previewBackground: PreviewBackground = PreviewBackground.Transparent,
 )

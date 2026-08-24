@@ -104,7 +104,7 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
     // V3-FIX: 49 adds passwords.isToken (nullable Boolean, DEFAULT NULL) so Whisper
     // account type (anon token vs password) is stored metadata instead of a vault
     // name-substring heuristic. See MIGRATION_48_49 in DatabaseModule.
-    version = 49,
+    version = 50,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
