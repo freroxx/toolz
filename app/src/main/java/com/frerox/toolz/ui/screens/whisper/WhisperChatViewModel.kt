@@ -1292,6 +1292,10 @@ class WhisperChatViewModel @Inject constructor(
                                     }
                                     state.copy(messages = updated)
                                 }
+                                // V6-R7 (#cache): persist so re-entry renders instantly.
+                                viewModelScope.launch {
+                                    repository.cacheReactions(event.messageId, event.summaries)
+                                }
                             }
                         }
                         is WhisperChatEvent.ReactionEvent -> {
@@ -1340,6 +1344,11 @@ class WhisperChatViewModel @Inject constructor(
                                     }
                                     state.copy(messages = updated)
                                 }
+                            }
+                            // V6-R7 (#cache): persist so re-entry renders instantly.
+                            viewModelScope.launch {
+                                _uiState.value.messages.firstOrNull { it.id == event.messageId }
+                                    ?.let { repository.cacheReactions(it.id, it.reactions) }
                             }
                             // 2. Authoritative sync with DB (debounced: bursts of reactions
                             // only trigger one round-trip). Messages with in-flight pending

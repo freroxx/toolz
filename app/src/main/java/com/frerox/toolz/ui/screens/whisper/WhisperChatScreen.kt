@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -601,54 +602,53 @@ fun WhisperChatScreen(
                                 val showDateSeparator = index == reversedMessages.lastIndex ||
                                     reversedMessages[index + 1].createdAt.extractDate() != message.createdAt.extractDate()
 
-                                // V6-R6 (#animations): fresh bubbles RISE into place
-                                // (fade + upward slide) like mainstream messengers, while
-                                // Modifier.animateItem's placement spring smoothly pushes
-                                // every previous bubble upwards. History renders statically.
+                                // V6-R7 (#animations): LAYOUT-DRIVEN push. The fresh
+                                // bubble's real height GROWS via expandVertically, so the
+                                // space for it is created gradually and animateItem's
+                                // placement spring glides every previous message up in
+                                // perfect sync with that growth — previous messages move
+                                // FIRST (making room), the new content fades in behind
+                                // them. Overlap is structurally impossible because there
+                                // is no visual-only transform: everything is real layout.
+                                // History rows render expanded/statically.
                                 val isNewBubble = remember(message.id) {
                                     runCatching {
                                         java.time.OffsetDateTime.parse(message.createdAt).toInstant().toEpochMilli()
                                     }.getOrDefault(0L) > System.currentTimeMillis() - NEW_BUBBLE_WINDOW_MS
                                 }
-                                val density = LocalDensity.current
-                                val appearOffsetY = remember(message.id) {
-                                    androidx.compose.animation.core.Animatable(
-                                        if (isNewBubble) with(density) { 12.dp.toPx() } else 0f,
-                                    )
+                                // V6-R7 FIX: own messages that are server ECHOES of an
+                                // already-visible pending bubble must NOT re-run the
+                                // entrance (that was the appear→vanish→overlap bug).
+                                // Rule: only PENDING own bubbles and NEW INCOMING messages
+                                // animate the rise; every own non-pending row swaps in
+                                // silently at full height, so the echo is seamless.
+                                val suppressEntrance = isMine && !isPending
+                                var appearExpanded by remember(message.id) {
+                                    mutableStateOf(!isNewBubble || suppressEntrance)
                                 }
-                                val appearAlpha = remember(message.id) {
-                                    androidx.compose.animation.core.Animatable(if (isNewBubble) 0f else 1f)
+                                LaunchedEffect(message.id, isNewBubble, suppressEntrance) {
+                                    if (!isNewBubble || suppressEntrance) return@LaunchedEffect
+                                    appearExpanded = true
                                 }
-                                LaunchedEffect(message.id, isNewBubble) {
-                                    if (!isNewBubble) return@LaunchedEffect
-                                    // V6-R6: NO overshoot anywhere — zero-bounce springs on
-                                    // identical timing curves so the incoming bubble and the
-                                    // pushed-up stack move as one rigid, smooth column.
-                                    launch { appearAlpha.animateTo(1f, tween(durationMillis = 140)) }
-                                    appearOffsetY.animateTo(
-                                        0f,
-                                        spring(
+
+                                Box(
+                                    modifier = Modifier.animateItem(
+                                        placementSpec = spring(
                                             dampingRatio = Spring.DampingRatioNoBouncy,
                                             stiffness = Spring.StiffnessMedium,
                                         ),
                                     )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .animateItem(
-                                            fadeInSpec = tween(durationMillis = 100),
-                                            placementSpec = spring(
+                                ) {
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = appearExpanded,
+                                        enter = expandVertically(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioNoBouncy,
                                                 stiffness = Spring.StiffnessMedium,
                                             ),
-                                            fadeOutSpec = tween(durationMillis = 100),
-                                        )
-                                        .graphicsLayer {
-                                            alpha = appearAlpha.value
-                                            translationY = appearOffsetY.value
-                                        }
-                                ) {
+                                            expandFrom = Alignment.Bottom,
+                                        ) + fadeIn(tween(durationMillis = 160)),
+                                    ) {
                                     MessageBubble(
                                         message = message,
                                         isMine = isMine,
@@ -683,6 +683,7 @@ fun WhisperChatScreen(
                                         onReactionClick = { emoji -> haptic.click(); viewModel.toggleReaction(message, emoji) },
                                         onLongClick = { if (!message.isDeletedForEveryone && !isPending) { haptic.longClick(); selectedMessageForDelete = message } }
                                     )
+                                    }
                                 }
 
                                 if (showDateSeparator) {
@@ -2376,12 +2377,14 @@ private fun WhisperFullScreenImageViewer(
                 .background(Color.Black.copy(alpha = 0.92f))
         ) {
             // V6-R6 (#disappearing): top-center countdown pill for self-destructing images.
+            // zIndex lifts it ABOVE the image — as a first child it was drawn underneath.
             if (expiresAtEpochSeconds != null && remainingSeconds != null) {
                 Surface(
                     shape = RoundedCornerShape(50),
                     color = Color.Black.copy(alpha = 0.55f),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
+                        .zIndex(2f)
                         .padding(top = 18.dp)
                 ) {
                     Row(

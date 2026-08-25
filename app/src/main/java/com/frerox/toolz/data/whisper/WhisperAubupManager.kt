@@ -55,6 +55,27 @@ class WhisperAubupManager @Inject constructor(
         // V3-FIX (multi-account): stable filename prefix — kept identical to the old
         // scheme so previously-written access files still match the folder scanner.
         const val ACCESS_FILE_PREFIX = "whisper_access_"
+
+        /**
+         * V6-R7 (#auto-detect): the Downloads scan reads PUBLIC storage via the File
+         * API — on API ≥30 that requires "All files access" (MANAGE_EXTERNAL_STORAGE
+         * granted in Settings); on ≤29 the runtime READ/WRITE pair is enough.
+         */
+        fun hasFileAccessForScan(context: android.content.Context): Boolean =
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.os.Environment.isExternalStorageManager()
+            } else {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+
+        /** Settings deep-link for the All-files-access toggle (API ≥30). */
+        fun allFilesAccessIntent(context: android.content.Context): android.content.Intent =
+            android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.fromParts("package", context.packageName, null),
+            )
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -317,8 +338,22 @@ class WhisperAubupManager @Inject constructor(
                     files += listed.filter { it.isFile && it.name.lowercase().endsWith(".enc") }
                 }
             }
-            // Most-recent-first kept (spec b); dedupe applied after sorting.
-            files.sortedByDescending { it.lastModified() }.filterNot { file ->
+            // V6-R7 FIX (auto-detect): also sweep the PUBLIC Downloads ROOT — users
+            // frequently move access files out of /Toolz. File-API listing here works
+            // on ≤API29 or when legacy storage is granted; harmless otherwise.
+            @Suppress("DEPRECATION")
+            val downloadsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            downloadsRoot.listFiles()?.let { listed ->
+                files += listed.filter { file ->
+                    file.isFile && file.name.lowercase().endsWith(".enc") &&
+                        file.name.lowercase().contains("whisper")
+                }
+            }
+            // Most-recent-first kept (spec b); dedupe (path) applied after sorting.
+            val seen = mutableSetOf<String>()
+            files.sortedByDescending { it.lastModified() }
+                .filter { seen.add(it.canonicalFile.absolutePath) }
+                .filterNot { file ->
                 val stem = file.name.lowercase()
                     .removePrefix(ACCESS_FILE_PREFIX)
                     .removeSuffix(".enc")

@@ -184,16 +184,39 @@ class WhisperAuthViewModel @Inject constructor(
         viewModelScope.launch {
             _aubupState.value = AubupRecoveryState.Scanning
             delay(400) // Visual feedback for smooth scanning transition
-            val vaultAccounts = aubupManager.scanVaultForWhisperAccounts()
-            // V3-FIX (multi-account): vault rows passed in so already-stored accounts are
-            // conservatively deduped out of the .enc file list (filename-level only).
-            val accessFiles = aubupManager.scanToolzFolderForAccessFiles(vaultAccounts)
-            val result = AubupRecoveryState.ScanResult(
-                vaultAccounts = vaultAccounts,
-                accessFiles = accessFiles,
-            )
-            lastScanResult = result
-            _aubupState.value = result
+            _aubupState.value = performAubupScan()
+        }
+    }
+
+    /** V6-R7: silent variant for auth-screen auto-detection (no sheet state churn). */
+    private suspend fun performAubupScan(): AubupRecoveryState.ScanResult {
+        val vaultAccounts = aubupManager.scanVaultForWhisperAccounts()
+        // V3-FIX (multi-account): vault rows passed in so already-stored accounts are
+        // conservatively deduped out of the .enc file list (filename-level only).
+        val accessFiles = aubupManager.scanToolzFolderForAccessFiles(vaultAccounts)
+        val result = AubupRecoveryState.ScanResult(
+            vaultAccounts = vaultAccounts,
+            accessFiles = accessFiles,
+        )
+        lastScanResult = result
+        return result
+    }
+
+    // V6-R7 FIX (auto-detect): silent scan at auth-screen creation + a passive
+    // "backup found" signal so recovery surfaces WITHOUT the user hunting for it.
+    private val _autoDetectedAccessFiles =
+        kotlinx.coroutines.flow.MutableStateFlow<List<java.io.File>>(emptyList())
+    val autoDetectedAccessFiles: kotlinx.coroutines.flow.StateFlow<List<java.io.File>> =
+        _autoDetectedAccessFiles.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            runCatching {
+                val result = performAubupScan()
+                if (result.accessFiles.isNotEmpty()) {
+                    _autoDetectedAccessFiles.value = result.accessFiles
+                }
+            }
         }
     }
 

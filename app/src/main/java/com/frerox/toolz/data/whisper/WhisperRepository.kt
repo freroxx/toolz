@@ -94,6 +94,8 @@ class WhisperRepository @Inject constructor(
     private val sessionStore: com.frerox.toolz.data.whisper.session.WhisperSessionStore,
     private val sessionFactory: WhisperSessionFactory,
     private val prekeyManager: WhisperPrekeyManager,
+    // V6-R7 AVATARS: encrypted-avatar resolver (memory+disk cache) for wipe hooks.
+    private val avatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader,
 ) {
     private companion object {
         const val MAX_MESSAGE_CHARS = 8_192
@@ -102,6 +104,8 @@ class WhisperRepository @Inject constructor(
         val SUPPORTED_IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/webp")
         const val MIN_IMAGE_EXPIRY_SECONDS = 60L
         const val MAX_IMAGE_EXPIRY_SECONDS = 15_552_000L
+        // V6-R7 avatars: fixed square size for ImgBB-hosted encrypted avatars.
+        const val AVATAR_SIDE_PX = 256
         // V6-R3: bounded resubscribe attempts per channel per process.
         const val MAX_RESUBSCRIBE_ATTEMPTS = 6
         // V6-R6 (#3): cooldown so the watcher can never amplify a teardown war.
@@ -1123,21 +1127,63 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun uploadAvatar(imageBytes: ByteArray, mimeType: String): Result<String> = runCatching {
-        val ext = when (mimeType) {
-            "image/jpeg" -> "jpg"
-            "image/png" -> "png"
-            "image/webp" -> "webp"
-            else -> "jpg"
-        }
-        val path = "$myId/avatar.$ext"
-        store.from("whisper-avatars").upload(path, imageBytes) { upsert = true }
-        // L-16 FIX (reviewwhisper.md): persist the CLEAN public URL. The old `?t=` cache
-        // buster was stored server-side, defeating every OTHER viewer's image cache on
-        // each upload; busting is now done at render time from profile.updatedAt.
-        val publicUrl = store.from("whisper-avatars").publicUrl(path)
-        updateProfile(WhisperProfileUpdate(avatarUrl = publicUrl))
+        // V6-R7 AVATARS: Supabase storage → ImgBB (encrypted). Storage bloat was the
+        // driver; posture stays ciphertext-only on third-party hosts via the owner-key
+        // derived codec. mimeType param kept for call-site compatibility — output is
+        // always a ≤256px JPEG regardless of input format.
+        val ownPub = crypto.getPublicKeyBase64()
+            ?: error("Encryption unavailable: device identity key not ready.")
+        val jpeg = prepareAvatarBytes(imageBytes)
+            ?: error("Could not process this image as an avatar.")
+        val sealed = WhisperAvatarCodec.seal(jpeg, ownPub)
+        val wrapped = WhisperImageCipherTransport.encode(sealed)
+            ?: error("Could not package this avatar securely.")
+
+        val (url, attachmentId) = encryptedImageHost.upload(
+            cipherBytes = wrapped,
+            name = "avatar_${myId.take(8)}_${System.currentTimeMillis()}",
+            expirationSeconds = null,
+        ).getOrThrow()
+
+        // Deletion handle rides in a fragment (never sent to any server).
+        val finalUrl = attachmentId?.let { "$url#att=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: url
+
+        updateProfile(WhisperProfileUpdate(avatarUrl = finalUrl))
         profileCache.remove(myId); profileCacheTs.remove(myId)
-        publicUrl
+        finalUrl
+    }
+
+    /** Center-crop square + downscale to [AVATAR_SIDE_PX] JPEG for avatar uploads. */
+    private suspend fun prepareAvatarBytes(raw: ByteArray): ByteArray? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+                val side = AVATAR_SIDE_PX
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= side && bounds.outHeight / (sample * 2) >= side) sample *= 2
+                val decodeOpts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+                val src = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, decodeOpts)
+                    ?: return@runCatching null
+                val crop = centerCropSquare(src, side)
+                val out = java.io.ByteArrayOutputStream().also { it.buffered() }
+                crop.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                if (crop !== src) crop.recycle()
+                src.recycle()
+                out.toByteArray()
+            }.getOrNull()
+        }
+
+    private fun centerCropSquare(src: android.graphics.Bitmap, sidePx: Int): android.graphics.Bitmap {
+        val w = src.width; val h = src.height
+        val edge = minOf(w, h)
+        val x = (w - edge) / 2
+        val y = (h - edge) / 2
+        val cropped = android.graphics.Bitmap.createBitmap(src, x, y, edge, edge)
+        return if (edge > sidePx) {
+            android.graphics.Bitmap.createScaledBitmap(cropped, sidePx, sidePx, true)
+        } else cropped
     }
 
     suspend fun deleteAvatar(): Result<Unit> = runCatchingCE {
@@ -1148,6 +1194,18 @@ class WhisperRepository @Inject constructor(
         val current = db.from("profiles").select { filter { eq("id", myId) } }
             .decodeSingleOrNull<WhisperProfile>()
         current?.avatarUrl?.let { url ->
+            // V6-R7 AVATARS: ImgBB-hosted avatars (encrypted, fragment carries the
+            // deletion handle) route through the shared host client; legacy Supabase
+            // Storage URLs keep the original path-parsing flow.
+            if (url.contains("i.ibb.co")) {
+                val cleanUrl = url.substringBefore("#att=")
+                val attId = url.substringAfter("#att=", "").takeIf { it.isNotBlank() }
+                    ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+                val blobResult = runCatchingCE { encryptedImageHost.delete(cleanUrl, attId) }
+                blobResult.exceptionOrNull()?.let { e ->
+                    android.util.Log.w("WhisperRepo", "deleteAvatar: imgbb delete failed (orphan tolerated): ${e.message}")
+                }
+            } else {
             // Robust object-path extraction from the public URL:
             //   <origin>/storage/v1/object/public/whisper-avatars/<userId>/avatar.ext?...
             // Parse via URL segments instead of substringAfter so encoded chars,
@@ -1170,6 +1228,7 @@ class WhisperRepository @Inject constructor(
                     if (!objectMissing) throw e
                     android.util.Log.w("WhisperRepo", "deleteAvatar: blob already gone ($path); clearing reference anyway")
                 }
+            }
             }
         }
         db.from("profiles").update(mapOf("avatar_url" to null as String?)) {
@@ -1283,7 +1342,11 @@ class WhisperRepository @Inject constructor(
         
         // Cache fetched messages as ciphertext only (never the decrypted plaintext)
         if (visibleRaw.isNotEmpty()) {
-            messageDao.insertMessages(visibleRaw.map { it.toEntity() })
+            // V6-R7 (#cache): persist last-known reactions alongside the rows so the
+            // Room flow renders them instantly on re-entry.
+            messageDao.insertMessages(visibleRaw.map { msg ->
+                msg.copy(reactions = reactionsMap[msg.id] ?: msg.reactions).toEntity()
+            })
         }
 
         finalMessages.reversed()
@@ -1884,6 +1947,11 @@ class WhisperRepository @Inject constructor(
         invalidateConversationsCache()
     }
 
+    /** V6-R7 (#cache): persist last-known reactions for a cached row (instant re-entry). */
+    suspend fun cacheReactions(messageId: String, summaries: List<WhisperReactionSummary>) {
+        runCatchingCE { messageDao.updateReactionsJson(messageId, WhisperMessageEntity.encodeReactions(summaries)) }
+    }
+
     suspend fun markMessagesAsRead(senderId: String): Result<Unit> = runCatching {
         db.from("messages").update({ set("is_read", true) }) {
             filter { eq("sender_id", senderId); eq("receiver_id", myId); eq("is_read", false) }
@@ -2135,9 +2203,9 @@ class WhisperRepository @Inject constructor(
         var lastStatusSubscribed = false
         val pollJob = launch {
             while (isActive) {
-                // V6-R6: 4s cadence + 8s activity window — worst-case delivery gap for
-                // ANY lane failure drops from ~9s to ~4s.
-                kotlinx.coroutines.delay(4_000)
+                // V6-R7: 3s cadence + 5s activity window — worst-case delivery gap for
+                // ANY lane failure drops to ~3s while a healthy socket still costs zero.
+                kotlinx.coroutines.delay(3_000)
                 try {
                     val nowSubscribed =
                         channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
@@ -2147,7 +2215,7 @@ class WhisperRepository @Inject constructor(
                     val justRecovered = nowSubscribed && !lastStatusSubscribed
                     lastStatusSubscribed = nowSubscribed
                     if (!justRecovered &&
-                        System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 8_000
+                        System.currentTimeMillis() - lastRealtimeEventAtMs.get() < 5_000
                     ) {
                         continue
                     }
@@ -2306,8 +2374,55 @@ class WhisperRepository @Inject constructor(
         // V6-R3: auto-heal dropped realtime channels (inbox lane).
         val healthJob = watchChannelHealth(this, channelName, channel)
 
+        // ── V6-R7 NOTIFICATION SOLIDITY: inbox poll fallback ──
+        // Missed notifications were reported repeatedly. Same contract as the chat
+        // poller: while no realtime event has landed for >10s, REST-poll recent rows
+        // and emit anything NEW through this flow — the collector above applies its
+        // existing notification rules (mute/hidden/current-chat) unchanged.
+        var lastInboxStatusSubscribed = false
+        val inboxSeen = java.util.concurrent.ConcurrentHashMap<String, Boolean>() // id -> isRead
+        var inboxSeeded = false
+        val inboxPollJob = launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(8_000)
+                try {
+                    val nowSubscribed =
+                        channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
+                    val justRecovered = nowSubscribed && !lastInboxStatusSubscribed
+                    lastInboxStatusSubscribed = nowSubscribed
+                    if (!justRecovered && nowSubscribed && dbJob.isActive) {
+                        // Healthy realtime lane AND its collector alive → skip.
+                        // (dbJob cancel during teardown also stops us via isActive.)
+                        continue
+                    }
+                    if (!dbJob.isActive) continue
+                    ProtocolDiagnostics.increment("inbox.pollTick")
+                    val rows = runCatchingCE {
+                        db.from("messages").select {
+                            filter { or { eq("sender_id", userId); eq("receiver_id", userId) } }
+                            order("created_at", Order.DESCENDING)
+                            limit(20)
+                        }.decodeList<WhisperMessage>()
+                    }.getOrDefault(emptyList())
+                    for (msg in rows.reversed()) {
+                        if (msg.id.isBlank() || deletedStore.isMessageDeleted(msg.id)) continue
+                        val prev = inboxSeen.put(msg.id, msg.isRead)
+                        if (!inboxSeeded && prev == null) continue // silent seed
+                        if (prev != null && prev == msg.isRead) continue
+                        if (shouldEmitMessage(msg.id)) trySend(msg)
+                    }
+                    inboxSeeded = true
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    ProtocolDiagnostics.increment("inbox.pollError")
+                }
+            }
+        }
+
         awaitClose {
             healthJob.cancel()
+            inboxPollJob.cancel()
             dbJob.cancel()
             // H-1 FIX: see subscribeToChat — cleanup must survive collection cancellation.
             appScope.launch {
@@ -2986,15 +3101,41 @@ class WhisperRepository @Inject constructor(
             .map { it.otherUserId(myId) }
             .toSet()
 
-        db.rpc(
-            "whisper_discover_profiles",
-            buildJsonObject {
-                put("p_page", page)
-                put("p_page_size", pageSize.coerceIn(1, 30))
-            }
-        )
-            .decodeList<WhisperProfile>()
-            .filter { it.id !in myFriendIds }
+        val rpcResult = runCatchingCE {
+            db.rpc(
+                "whisper_discover_profiles",
+                buildJsonObject {
+                    put("p_page", page)
+                    put("p_page_size", pageSize.coerceIn(1, 30))
+                }
+            )
+                .decodeList<WhisperProfile>()
+                .filter { it.id !in myFriendIds }
+        }
+        // V6-R7: the RPC rate-limits (60 pages/hour, P0002) and can fail outright —
+        // when it does, Discover used to go permanently empty ("only Whisper Someone
+        // works"). Fall back to a direct directory query enforcing the SAME privacy
+        // contract client-side.
+        val rpcList = rpcResult.getOrElse {
+            ProtocolDiagnostics.increment("discover.rpcFallback")
+            if (page != 0) return Result.success(emptyList()) // pagination only via RPC
+            val blocked = runCatchingCE {
+                db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
+                    .decodeList<WhisperBlock>().map { it.blockedId }.toSet()
+            }.getOrDefault(emptySet())
+            db.from("profiles").select {
+                filter {
+                    neq("id", myId)
+                    eq("hide_from_discover", false)
+                    eq("is_private", false)
+                }
+                order("last_seen_at", Order.DESCENDING, nullsFirst = false)
+                limit(pageSize.toLong())
+            }.decodeList<WhisperProfile>()
+                .filter { it.id !in myFriendIds && it.id !in blocked && !it.isHiddenFromDiscover && !it.isPrivate }
+                .take(pageSize)
+        }
+        rpcList
     }
 
     // V2-FIX (reviewwhisper.md) R-M1: typing/presence BROADCAST emissions removed — they
@@ -3423,6 +3564,7 @@ class WhisperRepository @Inject constructor(
         recentlyEmittedMessageIds.clear()
         receiveKeyNotified.clear()
         synchronized(decryptMemo) { decryptMemo.clear() }
+        avatarLoader.clear() // V6-R7: account switch must not serve old avatars
         // H-2: channels are torn down asynchronously on the app scope — sign-out must
         // not block on network I/O, but the stale channels must not survive either.
         appScope.launch { removeAllCachedChannels() }
@@ -3460,6 +3602,23 @@ class WhisperRepository @Inject constructor(
         recentlyEmittedMessageIds.clear()
         receiveKeyNotified.clear()
         synchronized(decryptMemo) { decryptMemo.clear() }
+        avatarLoader.clear()
+        // V6-R7 AVATARS: best-effort removal of the ImgBB-hosted avatar before the
+        // identity is destroyed (after this, the URL fragment handle is all that
+        // remains and the blob would orphan until expiry).
+        runCatching {
+            val row = runCatchingCE {
+                db.from("profiles").select { filter { eq("id", myId) } }
+                    .decodeSingleOrNull<WhisperProfile>()
+            }.getOrNull()
+            val url = row?.avatarUrl
+            if (!url.isNullOrBlank() && url.contains("i.ibb.co")) {
+                encryptedImageHost.delete(
+                    url.substringBefore("#att="),
+                    url.substringAfter("#att=", "").takeIf { it.isNotBlank() },
+                )
+            }
+        }
         crypto.resetKeyPair()
     }
 }

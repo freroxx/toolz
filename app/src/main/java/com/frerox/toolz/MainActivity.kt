@@ -149,6 +149,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
         
         val LocalFlashlightRepository = staticCompositionLocalOf<FlashlightRepository?> { null }
+
+        // V6-R7 AVATARS: encrypted-avatar resolver for the shared WhisperAvatar composable.
+        val LocalWhisperAvatarLoader = staticCompositionLocalOf<com.frerox.toolz.data.whisper.WhisperAvatarLoader?> { null }
     }
     @Inject
     lateinit var settingsRepository: SettingsRepository
@@ -167,6 +170,9 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     @Inject
     lateinit var flashlightRepository: FlashlightRepository
+
+    @Inject
+    lateinit var whisperAvatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader
 
     private val currentIntentState = mutableStateOf<Intent?>(null)
     private val currentIntentVersion = mutableStateOf(0L)
@@ -272,7 +278,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
                 vibrationManager = vibrationManager
             ) {
                 CompositionLocalProvider(
-                    LocalFlashlightRepository provides flashlightRepository
+                    LocalFlashlightRepository provides flashlightRepository,
+                    LocalWhisperAvatarLoader provides whisperAvatarLoader
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                     Box(

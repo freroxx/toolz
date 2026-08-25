@@ -42,6 +42,11 @@ data class WhisperMessageEntity(
     // PHASE 1 (roadmap §1.2): wire protocol version (0 = legacy pair, 2 = envelope).
     @ColumnInfo(defaultValue = "0")
     val protocolVersion: Int = 0,
+
+    // V6-R7 (#cache): last-known reaction summaries (JSON) so reactions render
+    // INSTANTLY on chat re-entry instead of waiting for the REST enrichment pass.
+    @ColumnInfo(defaultValue = "")
+    val reactionsJson: String = "",
 ) {
     fun toModel(): WhisperMessage = WhisperMessage(
         id = id,
@@ -56,7 +61,8 @@ data class WhisperMessageEntity(
         replyToSenderName = replyToSenderName,
         // Cached pending rows render as a neutral placeholder instead of a real bubble.
         isPending = content == "[message pending sync]",
-        protocolVersion = protocolVersion
+        protocolVersion = protocolVersion,
+        reactions = decodeReactions(reactionsJson),
     )
 
     companion object {
@@ -65,6 +71,20 @@ data class WhisperMessageEntity(
          * UTC offset) into epoch millis for [sortEpoch]; falls back to 0L on blank input
          * or unparseable text instead of crashing the insert path.
          */
+        private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+        fun encodeReactions(reactions: List<WhisperReactionSummary>): String =
+            if (reactions.isEmpty()) "" else runCatching {
+                val ser = kotlinx.serialization.builtins.ListSerializer(WhisperReactionSummary.serializer())
+                json.encodeToString(ser, reactions)
+            }.getOrDefault("")
+
+        fun decodeReactions(jsonStr: String): List<WhisperReactionSummary> =
+            if (jsonStr.isBlank()) emptyList() else runCatching {
+                val ser = kotlinx.serialization.builtins.ListSerializer(WhisperReactionSummary.serializer())
+                json.decodeFromString(ser, jsonStr)
+            }.getOrDefault(emptyList())
+
         fun parseSortEpoch(iso: String?): Long {
             if (iso.isNullOrBlank()) return 0L
             return runCatching { Instant.parse(iso).toEpochMilli() }
@@ -102,5 +122,6 @@ fun WhisperMessage.toEntity(): WhisperMessageEntity = WhisperMessageEntity(
     // PHASE 1 (roadmap §1.2): wire protocol version of the stored ciphertext,
     // inferred from its shape — 2 = v5 multi-key envelope, 0 = legacy v1 pair.
     // Single inference point covers every construction site, same as sortEpoch.
-    protocolVersion = if (WhisperEnvelope.isEnvelope(content)) 2 else 0
+    protocolVersion = if (WhisperEnvelope.isEnvelope(content)) 2 else 0,
+    reactionsJson = WhisperMessageEntity.encodeReactions(reactions),
 )

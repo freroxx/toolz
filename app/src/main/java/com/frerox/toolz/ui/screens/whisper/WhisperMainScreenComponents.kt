@@ -9,6 +9,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,9 @@ import coil3.compose.AsyncImage
 import com.frerox.toolz.R
 import com.frerox.toolz.data.whisper.WhisperPresence
 import com.frerox.toolz.data.whisper.WhisperProfile
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.asImageBitmap
+import com.frerox.toolz.ui.LocalWhisperAvatarLoader
 import com.frerox.toolz.ui.components.bouncyClick
 
 /**
@@ -63,7 +67,13 @@ internal fun whisperPresenceLabel(presence: WhisperPresence): String = when (pre
 internal fun whisperAvatarModel(profile: WhisperProfile, bust: Boolean = false): String? {
     val url = profile.avatarUrl ?: return null
     if (!bust || profile.updatedAt.isBlank()) return url
-    return "$url?t=${profile.updatedAt.hashCode()}"
+    // V6-R7 AVATARS: ImgBB urls carry a "#att=..." deletion-handle fragment — the
+    // buster must be inserted BEFORE it or the handle lands inside a query value.
+    val clean = url.substringBefore("#att=")
+    val frag = url.substringAfter("#att=", "")
+    val sep = if (clean.contains("?")) "&" else "?"
+    val bustParam = "${sep}t=${profile.updatedAt.hashCode()}"
+    return if (frag.isEmpty()) clean + bustParam else "$clean$bustParam#att=$frag"
 }
 
 /**
@@ -114,12 +124,58 @@ fun WhisperAvatar(
                 else -> Modifier
             }
         )
-    if (!resolvedUrl.isNullOrBlank() && !isImageError) {
-        AsyncImage(model = resolvedUrl, contentDescription = profile.effectiveName, contentScale = ContentScale.Crop, onError = { isImageError = true }, modifier = baseModifier)
-    } else {
+
+    // ── V6-R7 AVATARS: encrypted branch ──
+    // V6-R7 FIX (noise avatars): detection is now "NOT legacy supabase storage" —
+    // ImgBB serves several CDN hosts, so hostname matching silently missed some
+    // avatars and Coil rendered the raw ciphertext PNG (colored static). Anything
+    // that is not a legacy storage URL goes through the decrypt pipeline.
+    val avatarLoader = com.frerox.toolz.ui.LocalWhisperAvatarLoader.current
+    val isEncryptedHost = resolvedUrl != null &&
+        !resolvedUrl.contains("supabase.co/storage") &&
+        avatarLoader != null
+    var decryptedBitmap by remember(resolvedUrl) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var decryptFailed by remember(resolvedUrl) { mutableStateOf(false) }
+    LaunchedEffect(resolvedUrl, profile.publicKey, avatarLoader) {
+        if (!isEncryptedHost || avatarLoader == null) return@LaunchedEffect
+        val pub = profile.publicKey
+        if (pub.isNullOrBlank()) { decryptFailed = true; return@LaunchedEffect }
+        // V6-R7 FIX: the loader already strips the PNG transport and returns the
+        // SEALED payload — the extra decode here used to null the open and, on some
+        // paths, feed ciphertext straight into BitmapFactory (the "static noise").
+        val sealed = avatarLoader.load(resolvedUrl.substringBefore("#att="), pub)
+        val opened = sealed?.let { wrapped ->
+            com.frerox.toolz.data.whisper.WhisperAvatarCodec.open(wrapped, pub)
+        }
+        decryptedBitmap = opened?.let {
+            android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)
+        }
+        if (decryptedBitmap == null) decryptFailed = true
+    }
+
+    @Composable
+    fun InitialsFallback() {
         Box(modifier = baseModifier.background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.secondaryContainer))), contentAlignment = Alignment.Center) {
             Text(profile.avatarInitial, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Black, fontSize = (size.value * 0.42f).sp)
         }
+    }
+
+    when {
+        isEncryptedHost -> {
+            val bmp = decryptedBitmap
+            when {
+                bmp != null -> Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = profile.effectiveName,
+                    contentScale = ContentScale.Crop,
+                    modifier = baseModifier
+                )
+                !decryptFailed -> InitialsFallback() // loading — initials until decoded
+                else -> InitialsFallback()
+            }
+        }
+        !resolvedUrl.isNullOrBlank() && !isImageError -> AsyncImage(model = resolvedUrl, contentDescription = profile.effectiveName, contentScale = ContentScale.Crop, onError = { isImageError = true }, modifier = baseModifier)
+        else -> InitialsFallback()
     }
 }
 

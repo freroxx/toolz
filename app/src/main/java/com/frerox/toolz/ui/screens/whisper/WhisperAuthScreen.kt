@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -142,6 +143,30 @@ fun WhisperAuthScreen(
     val aubupState by viewModel.aubupState.collectAsStateWithLifecycle()
     var showAubupRecoverySheet by remember { mutableStateOf(false) }
     var restoredCredentials by remember { mutableStateOf<AubupRecoveryState.Restored?>(null) }
+
+    // ── V6-R7 (#auto-detect): file-access permission state + auto-found banner ──
+    val hasFileAccess = remember {
+        mutableStateOf(com.frerox.toolz.data.whisper.WhisperAubupManager.hasFileAccessForScan(context))
+    }
+    val storagePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        hasFileAccess.value = com.frerox.toolz.data.whisper.WhisperAubupManager.hasFileAccessForScan(context)
+        if (hasFileAccess.value) viewModel.beginAubupFlow() // rescan now that storage is readable
+    }
+    val autoDetectedFiles by viewModel.autoDetectedAccessFiles.collectAsStateWithLifecycle()
+    // Re-evaluate on return from the Settings toggle (API ≥30 grant path).
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasFileAccess.value = com.frerox.toolz.data.whisper.WhisperAubupManager.hasFileAccessForScan(context)
+                if (hasFileAccess.value) viewModel.beginAubupFlow()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     // BUGFIX (P0-RestorePopup #37): The "Account restored successfully" dialog was
     // flashing for ~1 frame and disappearing. Root cause: restore paths set
@@ -261,10 +286,69 @@ fun WhisperAuthScreen(
                     modifier = Modifier.padding(paddingValues),
                 )
             }
+
+            // V6-R7 (#auto-detect): passive "backup found" banner — recovery surfaces
+            // WITHOUT the user hunting for the Lost-Account entry.
+            if (autoDetectedFiles.isNotEmpty() && !showAubupRecoverySheet && hasFileAccess.value) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .bouncyClick {
+                            haptic.click()
+                            showAubupRecoverySheet = true
+                            viewModel.beginAubupFlow()
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.FolderZip,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_AutoFound_Title),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Text(
+                                stringResource(R.string.st_Whisper_Aubup_AutoFound_Desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                }
+            }
         }
 
         if (showAubupRecoverySheet) {
             WhisperAubupRecoveryModalSheet(
+                hasFileAccess = hasFileAccess.value,
+                onRequestFileAccess = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        runCatching {
+                            context.startActivity(
+                                com.frerox.toolz.data.whisper.WhisperAubupManager.allFilesAccessIntent(context)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    } else {
+                        storagePermissionLauncher.launch(arrayOf(
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                        ))
+                    }
+                },
                 aubupState = aubupState,
                 toastState = toastState,
                 onDismiss = {
@@ -1200,6 +1284,8 @@ private fun String.maskedHex(): String {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun WhisperAubupRecoveryModalSheet(
+    hasFileAccess: Boolean,
+    onRequestFileAccess: () -> Unit,
     aubupState: AubupRecoveryState,
     toastState: WhisperToastState,
     onDismiss: () -> Unit,
@@ -1249,6 +1335,47 @@ fun WhisperAubupRecoveryModalSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // V6-R7 (#auto-detect): without file access the scan cannot see Downloads —
+            // show an explicit permission state with a one-tap grant instead of a
+            // silently-empty list.
+            if (!hasFileAccess) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            Icons.Rounded.FolderOff,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            stringResource(R.string.st_Whisper_Aubup_PermissionNeeded_Title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            stringResource(R.string.st_Whisper_Aubup_PermissionNeeded_Desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        ToolzExpressiveButton(
+                            onClick = onRequestFileAccess,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(stringResource(R.string.st_Whisper_Aubup_PermissionNeeded_Button), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
             // Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,

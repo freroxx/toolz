@@ -237,7 +237,12 @@
     <string name="st_Whisper_Fs_Title">Forward secrecy active</string>
     <string name="st_Whisper_Fs_Desc">Every message is sealed with its own one-time key that is destroyed right after use — even a compromised identity key cannot decrypt your past messages.</string>
     <string name="st_Whisper_Locked_Message">This message can no longer be decrypted on this device</string>
-    <string name="st_Whisper_MsgStatus_Title">Message status</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Title">File access needed</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Desc">Whisper needs All-files access to find your Access File in Downloads automatically. Grant it, then rescan.</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Button">Grant file access</string>
+    <string name="st_Whisper_Aubup_AutoFound_Title">Backup found</string>
+    <string name="st_Whisper_Aubup_AutoFound_Desc">Your Access File was detected on this device — tap to restore your account.</string>
+        <string name="st_Whisper_MsgStatus_Title">Message status</string>
     <string name="st_Whisper_MsgStatus_Pending">Pending</string>
     <string name="st_Whisper_MsgStatus_Sent">Delivered</string>
     <string name="st_Whisper_MsgStatus_Read">Read</string>
@@ -374,17 +379,17 @@
         <string name="st_Whisper_Error_KeyChanged">Safety number changed for this contact. Review it before sending.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
-    <string name="st_Whisper_Beta_Warning_Desc">Whisper is an experimental encrypted tool using static ECDH key agreement. If your device private key is ever compromised, past messages could be decrypted. Rotate your encryption key periodically in Profile settings. Please share your feedback to help us improve!</string>
+    <string name="st_Whisper_Beta_Warning_Desc">Whisper is in active development. Messages are end-to-end encrypted with per-message forward secrecy: each message uses a one-time key that is destroyed after use. Features may change while we polish the experience — feedback is welcome!</string>
     <string name="st_Whisper_Beta_Warning_Confirm">I Understand</string>
     <!-- Whisper: Onboarding -->
     <string name="st_Whisper_Onboarding_Title1">Chat Without Limits</string>
-    <string name="st_Whisper_Onboarding_Desc1">Experience a new era of messaging where your privacy isn\'t an option—it\'s the foundation. Whisper is a stealthy, secure communication layer designed for those who value absolute discretion and modern aesthetics.</string>
+    <string name="st_Whisper_Onboarding_Desc1">Whisper is messaging that keeps its promises: messages are encrypted end-to-end on your device, and you sign in with a random token instead of your email or phone number. You decide who can find you.</string>
     <string name="st_Whisper_Onboarding_Title2">Intuitive Discovery</string>
-    <string name="st_Whisper_Onboarding_Desc2">Grow your network organically through "Mutual Connection" mapping. Whisper identifies potential friends through shared circles, allowing you to connect with your community without ever touching your contact list or exposing your personal metadata.</string>
-    <string name="st_Whisper_Onboarding_Title3">Unbreakable Shield</string>
+    <string name="st_Whisper_Onboarding_Desc2">Find people by their Whisper name, or browse suggestions built from mutual friends — never from your contact list. Hiding from discovery is one switch, and it always works.</string>
+    <string name="st_Whisper_Onboarding_Title3">Locked, Then Forgotten</string>
     <string name="st_Whisper_Onboarding_Desc3">Messages are sealed with end-to-end encryption and forward secrecy: every message gets its own one-time key, created on your device and destroyed the moment it is used. Even a stolen identity key cannot reveal your past conversations.</string>
     <string name="st_Whisper_Onboarding_Title4">You Own Your Identity</string>
-    <string name="st_Whisper_Onboarding_Desc4">Break free from the e-mail era. Whisper uses locally hashed, one-way security tokens. No email, no trackers. In Whisper, you aren\'t the product—you are the architect of your own digital identity.</string>
+    <string name="st_Whisper_Onboarding_Desc4">Your account is a random token generated on this device — no email, no phone number, no password to leak. Save it once in your vault and you own your login forever.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Begin Your Journey</string>
     <string name="st_Whisper_Onboarding_Next">Continue</string>
     <string name="st_Whisper_OnboardingSkip">Skip</string>
@@ -3115,10 +3120,10 @@
     <string name="st_Whisper_VisibleInDiscover">Visible in Discover</string>
 
     <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
-    <string name="st_Whisper_KeyRotate_AutoMonthly">Encryption key was rotated automatically — this happens every %1$d days to keep you safe.</string>
+    <string name="st_Whisper_KeyRotate_AutoMonthly">%1$s updated their encryption key recently. Verifying is optional — new messages open automatically.</string>
         <string name="st_Whisper_Fingerprint_RotateButton">Rotate Encryption Key</string>
     <string name="st_Whisper_RotateKey_Title">Rotate Encryption Key</string>
-    <string name="st_Whisper_RotateKey_Desc">Rotating your P-256 key generates a fresh key pair. Friends will be prompted to re-verify your new key fingerprint. Past message history on this device is preserved, and all future messages will use the new key.</string>
+    <string name="st_Whisper_RotateKey_Desc">This generates a brand-new encryption key for your account. Contacts must accept the new key before they can read your next message, and any messages you received before rotating will no longer open on this device. Only rotate if you believe your current key is compromised.</string>
     <string name="st_Whisper_RotateKey_Action">Rotate Key</string>
     <string name="st_Whisper_RotateKey_Success">Encryption key rotated successfully</string>
     <string name="st_Whisper_Info_KeyRefreshed">Security key refreshed automatically.</string>
@@ -3138,7 +3143,7 @@
     <string name="st_Whisper_DeleteAccount_Desc_Password">This will permanently delete your account and all your messages. Enter your password to confirm.</string>
     <string name="st_Whisper_ConnectionLost">Live connection lost</string>
     <string name="st_Whisper_Reconnect">Reconnect</string>
-    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Key rotated automatically on schedule — verifying is optional.</string>
+    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Key updated recently — verifying is optional; new messages open automatically.</string>
         <string name="st_Whisper_VerifyOptional">Verify (optional)</string>
     <string name="st_Whisper_AcceptShort">Accept</string>
     <string name="st_Whisper_Aubup_Continue">Continue to Whisper</string>

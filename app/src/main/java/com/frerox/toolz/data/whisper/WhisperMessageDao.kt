@@ -47,6 +47,10 @@ interface WhisperMessageDao {
     @Query("UPDATE whisper_messages SET isRead = 1 WHERE senderId = :senderId AND receiverId = :myId")
     suspend fun markAsRead(senderId: String, myId: String)
 
+    /** V6-R7 (#cache): persist last-known reaction summaries for instant re-entry. */
+    @Query("UPDATE whisper_messages SET reactionsJson = :json WHERE id = :messageId")
+    suspend fun updateReactionsJson(messageId: String, json: String)
+
     @Query("DELETE FROM whisper_messages")
     suspend fun clearAll()
 }

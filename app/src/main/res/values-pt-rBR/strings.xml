@@ -236,7 +236,12 @@
     <string name="st_Whisper_Fs_Title">Sigilo perfeito ativo</string>
     <string name="st_Whisper_Fs_Desc">Cada mensagem é selada com sua própria chave de uso único, destruída logo após o uso — nem mesmo uma chave de identidade comprometida pode decifrar suas mensagens anteriores.</string>
     <string name="st_Whisper_Locked_Message">Esta mensagem não pode mais ser decifrada neste aparelho</string>
-    <string name="st_Whisper_MsgStatus_Title">Estado da mensagem</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Title">Acesso a arquivos necessário</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Desc">O Whisper precisa de acesso a todos os arquivos para encontrar seu arquivo de acesso nos Downloads automaticamente. Conceda e escaneie novamente.</string>
+    <string name="st_Whisper_Aubup_PermissionNeeded_Button">Conceder acesso</string>
+    <string name="st_Whisper_Aubup_AutoFound_Title">Backup encontrado</string>
+    <string name="st_Whisper_Aubup_AutoFound_Desc">Seu arquivo de acesso foi detectado neste aparelho — toque para restaurar sua conta.</string>
+        <string name="st_Whisper_MsgStatus_Title">Estado da mensagem</string>
     <string name="st_Whisper_MsgStatus_Pending">Pendente</string>
     <string name="st_Whisper_MsgStatus_Sent">Entregue</string>
     <string name="st_Whisper_MsgStatus_Read">Lida</string>
@@ -373,17 +378,17 @@
         <string name="st_Whisper_Error_KeyChanged">O número de segurança deste contato mudou. Verifique antes de enviar.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
-    <string name="st_Whisper_Beta_Warning_Desc">Whisper é uma ferramenta criptografada experimental. Você está participando de um programa de acesso antecipado e pode encontrar bugs ou problemas de desempenho. Por favor, compartilhe seu feedback para nos ajudar a melhorar!</string>
+    <string name="st_Whisper_Beta_Warning_Desc">O Whisper está em desenvolvimento ativo. As mensagens são criptografadas de ponta a ponta com sigilo perfeito: cada mensagem usa uma chave de uso único destruída após o uso. Recursos podem mudar enquanto aprimoramos a experiência — seu feedback é bem-vindo!</string>
     <string name="st_Whisper_Beta_Warning_Confirm">Eu Entendo</string>
     <!-- Whisper: Onboarding -->
     <string name="st_Whisper_Onboarding_Title1">Converse livremente</string>
-    <string name="st_Whisper_Onboarding_Desc1">Privacidade que simplesmente funciona. Sem rastreadores, sem coleta de dados, uma ferramenta focada em privacidade apenas para você e seus amigos.</string>
+    <string name="st_Whisper_Onboarding_Desc1">O Whisper é mensajeria que cumpre o que promete: as mensagens são criptografadas de ponta a ponta no seu aparelho e você entra com um token aleatório em vez do seu e-mail ou número. Você decide quem pode te encontrar.</string>
     <string name="st_Whisper_Onboarding_Title2">Encontre sua gente</string>
-    <string name="st_Whisper_Onboarding_Desc2">Conecte-se sem o ruído. Descubra amigos através de círculos muduos sem compartilhar seus contatos ou número de telefone.</string>
-    <string name="st_Whisper_Onboarding_Title3">Seguro</string>
+    <string name="st_Whisper_Onboarding_Desc2">Encontre pessoas pelo nome del Whisper ou navegue por sugestões baseadas em amigos em comum — nunca pela sua lista de contatos. Se ocultar do descobrimento é um botão, e sempre funciona.</string>
+    <string name="st_Whisper_Onboarding_Title3">Trancado, depois esquecido</string>
     <string name="st_Whisper_Onboarding_Desc3">Suas mensagens são protegidas com criptografia de ponta a ponta e sigilo perfeito: cada mensagem recebe sua própria chave de uso único, criada no seu aparelho e destruída assim que usada. Nem mesmo uma chave de identidade roubada pode revelar suas conversas anteriores.</string>
     <string name="st_Whisper_Onboarding_Title4">Seja dono da sua identidade</string>
-    <string name="st_Whisper_Onboarding_Desc4">Sem senhas, sem vazamentos. Você é sua própria chave. Com a autenticação por Token, você recebe tokens gerados localmente, o que significa que não temos nada a perder e você não tem nada com que se preocupar.</string>
+    <string name="st_Whisper_Onboarding_Desc4">Sua conta é um token aleatório gerado neste aparelho — sem e-mail, sem número, sem senha para vazar. Guarde-o uma vez no cofre e o acesso é seu para sempre.</string>
     <string name="st_Whisper_Onboarding_GetStarted">Comece sua Jornada</string>
     <string name="st_Whisper_Onboarding_Next">Continuar</string>
     <!-- Whisper: Auth - Registration -->
@@ -2978,10 +2983,10 @@
     <string name="st_Whisper_VisibleInDiscover">Visível no Descobrir</string>
 
     <!-- L-6 FIX: previously hardcoded UI strings (see reviewwhisper.md) -->
-    <string name="st_Whisper_KeyRotate_AutoMonthly">A chave de criptografia foi renovada automaticamente — isso acontece a cada %1$d dias para sua segurança.</string>
+    <string name="st_Whisper_KeyRotate_AutoMonthly">%1$s atualizou a chave de criptografia recentemente. Verificar é opcional — as novas mensagens abrem automaticamente.</string>
         <string name="st_Whisper_Fingerprint_RotateButton">Renovar chave de criptografia</string>
     <string name="st_Whisper_RotateKey_Title">Renovar chave de criptografia</string>
-    <string name="st_Whisper_RotateKey_Desc">Renovar sua chave P-256 gera um novo par de chaves. Seus amigos serão convidados a reverificar sua nova impressão digital. O histórico de mensagens neste dispositivo é preservado e todas as mensagens futuras usarão a nova chave.</string>
+    <string name="st_Whisper_RotateKey_Desc">Isso gera uma chave de criptografia totalmente nova para sua conta. Os contatos precisam aceitar a nova chave antes de lerem sua próxima mensagem, e todas as mensagens recebidas antes da rotação não abrirão mais neste aparelho. Só faça a rotação se acreditar que sua chave atual foi comprometida.</string>
     <string name="st_Whisper_RotateKey_Action">Renovar chave</string>
     <string name="st_Whisper_RotateKey_Success">Chave de criptografia renovada com sucesso</string>
     <string name="st_Whisper_Info_KeyRefreshed">Chave de segurança renovada automaticamente.</string>
@@ -3001,7 +3006,7 @@
     <string name="st_Whisper_DeleteAccount_Desc_Password">Isso excluirá permanentemente sua conta e todas as suas mensagens. Digite sua senha para confirmar.</string>
     <string name="st_Whisper_ConnectionLost">Conexão ao vivo perdida</string>
     <string name="st_Whisper_Reconnect">Reconectar</string>
-    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Chave renovada automaticamente conforme o cronograma — verificar é opcional.</string>
+    <string name="st_Whisper_Profile_KeyRotatedAutoFallback">Chave atualizada recentemente — verificar é opcional; as novas mensagens abrem automaticamente.</string>
         <string name="st_Whisper_VerifyOptional">Verificar (opcional)</string>
     <string name="st_Whisper_AcceptShort">Aceitar</string>
     <string name="st_Whisper_Aubup_Continue">Continuar para o Whisper</string>
