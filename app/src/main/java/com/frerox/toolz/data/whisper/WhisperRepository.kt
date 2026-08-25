@@ -1159,7 +1159,26 @@ class WhisperRepository @Inject constructor(
             avatarLoader.prime(cleanKey, sealed)
         }
 
-        updateProfile(WhisperProfileUpdate(avatarUrl = finalUrl)).getOrThrow()
+        // V6-R7d FIX (not-applied after reinstall/rotation): the sealing key is
+        // derived from the owner's public key. If the device's current key
+        // (ownPub) differs from the key stored in the profile row, sealing with
+        // ownPub but leaving the row's public_key stale makes the avatar
+        // undecryptable for everyone (including self on next fetch which uses the
+        // row's key). Publish the current key atomically with the avatar URL
+        // when they differ so viewers derive the same key that was used to seal.
+        val serverPub = runCatching {
+            db.from("profiles").select { filter { eq("id", myId) } }
+                .decodeSingleOrNull<WhisperProfile>()?.publicKey
+        }.getOrNull()
+        // Publish the current key whenever the row's key is missing or stale so
+        // the sealing key and the row's key stay in sync; otherwise keep the
+        // avatar-only update to avoid unnecessary key churn.
+        val avatarUpdate = if (serverPub.isNullOrBlank() || serverPub != ownPub) {
+            WhisperProfileUpdate(avatarUrl = finalUrl, publicKey = ownPub)
+        } else {
+            WhisperProfileUpdate(avatarUrl = finalUrl)
+        }
+        updateProfile(avatarUpdate).getOrThrow()
         profileCache.remove(myId); profileCacheTs.remove(myId)
         finalUrl
     }

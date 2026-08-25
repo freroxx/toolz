@@ -633,15 +633,19 @@ class WhisperViewModel @Inject constructor(
                 }
                 repository.uploadAvatar(optimizedBytes, mimeType)
                     .onSuccess { url ->
-                        // V6-R7c FIX (not-applied): optimistic reflect so the UI shows the
+                        // V6-R7c/d FIX (not-applied): optimistic reflect so the UI shows the
                         // new picture instantly even before the forced profile refetch lands.
-                        // Preserves updatedAt bust for cache, falls back to server fetch.
+                        // Also reflect the sealing key (ownPub) so the primed cache decrypts
+                        // with the same key that was used to seal; otherwise a stale row
+                        // key would make the just-primed avatar undecryptable (initials).
+                        val ownPub = crypto.getPublicKeyBase64()
                         _uiState.update { cur ->
                             val curProfile = cur.currentProfile
                             if (curProfile != null) {
                                 cur.copy(
                                     currentProfile = curProfile.copy(
                                         avatarUrl = url,
+                                        publicKey = if (!ownPub.isNullOrBlank() && curProfile.publicKey != ownPub) ownPub else curProfile.publicKey,
                                         updatedAt = java.time.Instant.now().toString()
                                     )
                                 )
