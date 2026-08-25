@@ -1151,7 +1151,15 @@ class WhisperRepository @Inject constructor(
         // Deletion handle rides in a fragment (never sent to any server).
         val finalUrl = attachmentId?.let { "$url#att=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: url
 
-        updateProfile(WhisperProfileUpdate(avatarUrl = finalUrl))
+        // V6-R7c FIX (not-applied): prime the avatar loader so the new picture renders
+        // instantly from cache without waiting for a network download/decrypt round-trip.
+        // Clean key is the bare ImgBB URL without fragment/bust query.
+        runCatching {
+            val cleanKey = finalUrl.substringBefore("#").substringBefore("?")
+            avatarLoader.prime(cleanKey, sealed)
+        }
+
+        updateProfile(WhisperProfileUpdate(avatarUrl = finalUrl)).getOrThrow()
         profileCache.remove(myId); profileCacheTs.remove(myId)
         finalUrl
     }

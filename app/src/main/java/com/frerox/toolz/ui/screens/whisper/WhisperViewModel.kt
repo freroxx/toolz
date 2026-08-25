@@ -633,9 +633,25 @@ class WhisperViewModel @Inject constructor(
                 }
                 repository.uploadAvatar(optimizedBytes, mimeType)
                     .onSuccess { url ->
-                        repository.getMyProfile(forceRefresh = true).onSuccess { p ->
-                            _uiState.update { it.copy(currentProfile = p) }
+                        // V6-R7c FIX (not-applied): optimistic reflect so the UI shows the
+                        // new picture instantly even before the forced profile refetch lands.
+                        // Preserves updatedAt bust for cache, falls back to server fetch.
+                        _uiState.update { cur ->
+                            val curProfile = cur.currentProfile
+                            if (curProfile != null) {
+                                cur.copy(
+                                    currentProfile = curProfile.copy(
+                                        avatarUrl = url,
+                                        updatedAt = java.time.Instant.now().toString()
+                                    )
+                                )
+                            } else cur
                         }
+                        repository.getMyProfile(forceRefresh = true)
+                            .onSuccess { p ->
+                                _uiState.update { it.copy(currentProfile = p) }
+                            }
+                            .onFailure { handleError(it, "getMyProfile") }
                     }
                     .onFailure { handleError(it, "uploadAvatar") }
             } finally {

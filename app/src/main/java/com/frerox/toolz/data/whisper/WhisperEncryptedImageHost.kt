@@ -150,20 +150,25 @@ class WhisperEncryptedImageHost @Inject constructor(
 
     suspend fun download(url: String): Result<ByteArray> = runCatching {
         require(url.startsWith("https://")) { "Invalid image URL." }
+        // V6-R7c FIX (not-applied): bust query (?t=) from whisperAvatarModel and
+        // fragment (#att=) from stored avatar_url must not affect the fetch —
+        // ImgBB may 404 on unknown query and fragments are never sent on the wire.
+        // Strip them before allowlist checks and before opening the connection.
+        val fetchUrl = url.substringBefore("#").substringBefore("?")
         // SSRF allowlist: only the image hosts this app actually uses may be fetched.
         // Anything else (metadata endpoints, internal addresses, redirect targets) is
         // rejected before a connection is even opened.
         // P1-14 FIX: Strict path validation for Supabase — only whisper-avatars objects.
-        val host = runCatching { URL(url).host }.getOrNull() ?: error("Invalid image URL.")
+        val host = runCatching { URL(fetchUrl).host }.getOrNull() ?: error("Invalid image URL.")
         val supabaseHost = runCatching { URL(BuildConfig.SUPABASE_URL).host }.getOrNull()
-        val urlPath = runCatching { URL(url).path }.getOrNull() ?: ""
+        val urlPath = runCatching { URL(fetchUrl).path }.getOrNull() ?: ""
         val allowedSupabase = supabaseHost != null && (host == supabaseHost || host.endsWith(".$supabaseHost")) &&
             urlPath.startsWith("/storage/v1/object/public/whisper-avatars/")
         if (host != "i.ibb.co" && host != "ibb.co" && !allowedSupabase) {
             error("Invalid image host.")
         }
         withContext(Dispatchers.IO) {
-              val connection = (URL(url).openConnection() as HttpURLConnection)
+              val connection = (URL(fetchUrl).openConnection() as HttpURLConnection)
             connection.instanceFollowRedirects = false
             try {
                 connection.connectTimeout = CONNECT_TIMEOUT_MS
@@ -174,7 +179,36 @@ class WhisperEncryptedImageHost @Inject constructor(
                     val redirectHost = runCatching { URL(location).host }.getOrNull() ?: error("Invalid redirect")
                     val redirectAllowed = supabaseHost != null && (redirectHost == supabaseHost || redirectHost.endsWith(".$supabaseHost"))
                     if (redirectHost != "i.ibb.co" && redirectHost != "ibb.co" && !redirectAllowed) error("Invalid image host.")
-                    error("Redirects not supported for images.")
+                    // V6-R7c FIX (not-applied): ImgBB occasionally 302s to its CDN edge.
+                    // Follow a single allowed redirect instead of hard-failing — the
+                    // previous `error("Redirects not supported")` made freshly uploaded
+                    // avatars appear as "not applied" (download → null → initials).
+                    val redirectClean = location.substringBefore("#").substringBefore("?")
+                    val redirConn = (URL(redirectClean).openConnection() as HttpURLConnection)
+                    try {
+                        redirConn.instanceFollowRedirects = false
+                        redirConn.connectTimeout = CONNECT_TIMEOUT_MS
+                        redirConn.readTimeout = READ_TIMEOUT_MS
+                        val redirCode = redirConn.responseCode
+                        if (redirCode == 403 || redirCode == 404) {
+                            throw DownloadExpiredException("Image is no longer available (HTTP $redirCode).")
+                        }
+                        if (redirCode !in 200..299) error("Image is no longer available.")
+                        if (redirConn.contentLength > DOWNLOAD_MAX_BYTES) error("Image is too large.")
+                        return@withContext redirConn.inputStream.use { input ->
+                            val buffer = java.io.ByteArrayOutputStream()
+                            val chunk = ByteArray(64 * 1024)
+                            while (buffer.size() <= DOWNLOAD_MAX_BYTES) {
+                                val n = input.read(chunk)
+                                if (n == -1) break
+                                buffer.write(chunk, 0, n)
+                            }
+                            if (buffer.size() > DOWNLOAD_MAX_BYTES) error("Image is too large.")
+                            buffer.toByteArray()
+                        }
+                    } finally {
+                        redirConn.disconnect()
+                    }
                 }
                 // V2-FIX L-?: 403/404 from the host means the blob expired or was deleted —
                 // surface a STRUCTURED signal (not a generic failure) so the UI can label it.

@@ -66,34 +66,46 @@ class WhisperAvatarLoader @Inject constructor(
             bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&
             bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()
 
+    private fun normalizeUrl(url: String): String =
+        url.substringBefore("#").substringBefore("?")
+
+    /** Prime the memory + disk cache after a local upload so the new avatar renders instantly without a network round-trip. */
+    suspend fun prime(urlNoFragment: String, sealed: ByteArray) {
+        val key = normalizeUrl(urlNoFragment)
+        diskPut(key, sealed)
+        lruMutex.withLock { lru[key] = sealed.copyOf() }
+    }
+
     suspend fun load(urlNoFragment: String, ownerPublicKeyBase64: String): ByteArray? {
-        lruMutex.withLock { lru[urlNoFragment] }?.let { return it.copyOf() }
-        diskGet(urlNoFragment)?.let { cached ->
+        val key = normalizeUrl(urlNoFragment)
+        lruMutex.withLock { lru[key] }?.let { return it.copyOf() }
+        diskGet(key)?.let { cached ->
             // V6-R7b FIX (double-wrap heal): stale disk entries from the window
             // where upload double-wrapped are raw PNG wrappers, not sealed bytes.
             // A sealed AES-GCM payload never starts with the PNG signature (2^-32
             // collision treated as a harmless refetch), so drop them and refetch.
             if (!isPng(cached)) {
-                lruMutex.withLock { lru[urlNoFragment] = cached }
+                lruMutex.withLock { lru[key] = cached }
                 return cached.copyOf()
             }
-            runCatching { diskFileFor(urlNoFragment).delete() }
+            runCatching { diskFileFor(key).delete() }
         }
         val deferred: Deferred<ByteArray?> = synchronized(inflight) {
-            inflight.getOrPut(urlNoFragment) {
-                appScope.async { fetchAndCache(urlNoFragment, ownerPublicKeyBase64) }
+            inflight.getOrPut(key) {
+                appScope.async { fetchAndCache(key, ownerPublicKeyBase64) }
             }
         }
         return try {
             deferred.await()
         } finally {
-            synchronized(inflight) { inflight.remove(urlNoFragment, deferred) }
+            synchronized(inflight) { inflight.remove(key, deferred) }
         }
     }
 
     private suspend fun fetchAndCache(url: String, ownerPubB64: String): ByteArray? {
         val genAtStart = generation
-        val raw = host.download(url).getOrNull() ?: return null
+        val normalized = normalizeUrl(url)
+        val raw = host.download(normalized).getOrNull() ?: return null
         // V6-R7 FIX: fail CLOSED — if the PNG transport unwrap fails we must not
         // cache/return the raw wrapper (it decoded as colored static downstream).
         var sealed = WhisperImageCipherTransport.decode(raw) ?: return null
@@ -105,8 +117,9 @@ class WhisperAvatarLoader @Inject constructor(
             sealed = WhisperImageCipherTransport.decode(sealed) ?: return null
         }
         if (genAtStart != generation) return null // cache was cleared mid-flight
-        diskPut(url, sealed)
-        lruMutex.withLock { lru[url] = sealed }
+        val cacheKey = normalizeUrl(url)
+        diskPut(cacheKey, sealed)
+        lruMutex.withLock { lru[cacheKey] = sealed }
         return sealed.copyOf()
     }
 
