@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -107,6 +108,7 @@ fun WhisperAvatar(
     profile: WhisperProfile,
     size: Dp,
     modifier: Modifier = Modifier,
+    shape: Shape = CircleShape,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     bustCache: Boolean = false,
@@ -115,7 +117,7 @@ fun WhisperAvatar(
     var isImageError by remember(resolvedUrl) { mutableStateOf(false) }
     val baseModifier = modifier
         .size(size)
-        .clip(CircleShape)
+        .clip(shape)
         .then(
             when {
                 onClick != null && onLongClick != null -> Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)

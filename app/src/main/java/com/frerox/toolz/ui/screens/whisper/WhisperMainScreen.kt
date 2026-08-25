@@ -2902,40 +2902,15 @@ private fun FullScreenAvatarDialog(
                     .padding(horizontal = 32.dp)
             ) {
                 // Avatar display
-                var isImageError by remember(profile.avatarUrl) { mutableStateOf(false) }
-                if (!profile.avatarUrl.isNullOrBlank() && !isImageError) {
-                    AsyncImage(
-                        model = profile.avatarUrl,
-                        contentDescription = profile.effectiveName,
-                        contentScale = ContentScale.Fit,
-                        onError = { isImageError = true },
-                        modifier = Modifier
-                            .size(240.dp)
-                            .clip(RoundedCornerShape(28.dp)),
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(240.dp)
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        MaterialTheme.colorScheme.secondaryContainer,
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            profile.avatarInitial,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 96.sp,
-                        )
-                    }
-                }
+                // V6-R7 FIX (noise avatars): ImgBB avatars are AES-GCM ciphertext packed
+                // into a PNG — rendering the raw URL here showed colored static. Route
+                // through the shared WhisperAvatar decrypt pipeline (loader + codec).
+                WhisperAvatar(
+                    profile = profile,
+                    size = 240.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    bustCache = true, // L-16: bust right after a self-upload/edit
+                )
 
                 // Name & username
                 Column(
