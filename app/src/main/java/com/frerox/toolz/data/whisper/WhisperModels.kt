@@ -458,6 +458,7 @@ sealed class WhisperAuthState {
 data class WhisperUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
+    val isUploadingAvatar: Boolean = false,
     val currentProfile: WhisperProfile? = null,
     val conversations: List<WhisperConversation> = emptyList(),
     val friends: List<WhisperProfile> = emptyList(),

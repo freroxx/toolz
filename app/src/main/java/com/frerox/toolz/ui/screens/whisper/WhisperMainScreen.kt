@@ -1708,13 +1708,29 @@ private fun ProfileTab(
     ) {
         // Hero Avatar Section
         Box(contentAlignment = Alignment.BottomEnd) {
-            WhisperAvatar(
-                profile = profile,
-                size = 104.dp,
-                onClick = onShowAvatarOptions,
-                onLongClick = { onViewAvatarFull(profile) },
-                bustCache = true, // L-16: bust right after a self-upload/edit
-            )
+            Box(contentAlignment = Alignment.Center) {
+                WhisperAvatar(
+                    profile = profile,
+                    size = 104.dp,
+                    onClick = onShowAvatarOptions,
+                    onLongClick = { onViewAvatarFull(profile) },
+                    bustCache = true, // L-16: bust right after a self-upload/edit
+                )
+                if (uiState.isUploadingAvatar) {
+                    // M3 Expressive contained loading overlays the avatar circle
+                    // while the encrypted upload (downscale → seal → host wrap)
+                    // is in flight.
+                    Box(
+                        modifier = Modifier
+                            .size(104.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.32f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ExpressiveContainedLoadingIndicator()
+                    }
+                }
+            }
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.primary,

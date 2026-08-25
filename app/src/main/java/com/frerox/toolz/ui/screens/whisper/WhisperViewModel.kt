@@ -625,17 +625,22 @@ class WhisperViewModel @Inject constructor(
 
     fun uploadAvatar(imageBytes: ByteArray, mimeType: String) {
         viewModelScope.launch {
-            // Compression is CPU-heavy; never run it on the main thread.
-            val optimizedBytes = withContext(Dispatchers.Default) {
-                com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
-            }
-            repository.uploadAvatar(optimizedBytes, mimeType)
-                .onSuccess { url ->
-                    repository.getMyProfile(forceRefresh = true).onSuccess { p ->
-                        _uiState.update { it.copy(currentProfile = p) }
-                    }
+            _uiState.update { it.copy(isUploadingAvatar = true) }
+            try {
+                // Compression is CPU-heavy; never run it on the main thread.
+                val optimizedBytes = withContext(Dispatchers.Default) {
+                    com.frerox.toolz.util.ImageUtils.downscaleAndCompress(imageBytes)
                 }
-                .onFailure { handleError(it, "uploadAvatar") }
+                repository.uploadAvatar(optimizedBytes, mimeType)
+                    .onSuccess { url ->
+                        repository.getMyProfile(forceRefresh = true).onSuccess { p ->
+                            _uiState.update { it.copy(currentProfile = p) }
+                        }
+                    }
+                    .onFailure { handleError(it, "uploadAvatar") }
+            } finally {
+                _uiState.update { it.copy(isUploadingAvatar = false) }
+            }
         }
     }
 

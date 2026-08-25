@@ -1136,11 +1136,14 @@ class WhisperRepository @Inject constructor(
         val jpeg = prepareAvatarBytes(imageBytes)
             ?: error("Could not process this image as an avatar.")
         val sealed = WhisperAvatarCodec.seal(jpeg, ownPub)
-        val wrapped = WhisperImageCipherTransport.encode(sealed)
-            ?: error("Could not package this avatar securely.")
 
+        // V6-R7b FIX (double-wrap): the host client already applies the WZ1/PNG
+        // transport wrap. Pre-wrapping here produced PNG(WZ1(PNG(WZ1(sealed))))
+        // on ImgBB; the loader unwraps only once and hands PNG bytes to the
+        // codec which then fails closed. Pass the sealed payload and let the
+        // host wrap exactly once (same layering as chat attachments).
         val (url, attachmentId) = encryptedImageHost.upload(
-            cipherBytes = wrapped,
+            cipherBytes = sealed,
             name = "avatar_${myId.take(8)}_${System.currentTimeMillis()}",
             expirationSeconds = null,
         ).getOrThrow()

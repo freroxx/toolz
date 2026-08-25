@@ -61,11 +61,23 @@ class WhisperAvatarLoader @Inject constructor(
         }
     }
 
+    private fun isPng(bytes: ByteArray): Boolean =
+        bytes.size >= 8 &&
+            bytes[0] == 0x89.toByte() && bytes[1] == 0x50.toByte() &&
+            bytes[2] == 0x4E.toByte() && bytes[3] == 0x47.toByte()
+
     suspend fun load(urlNoFragment: String, ownerPublicKeyBase64: String): ByteArray? {
         lruMutex.withLock { lru[urlNoFragment] }?.let { return it.copyOf() }
-        diskGet(urlNoFragment)?.let {
-            lruMutex.withLock { lru[urlNoFragment] = it }
-            return it.copyOf()
+        diskGet(urlNoFragment)?.let { cached ->
+            // V6-R7b FIX (double-wrap heal): stale disk entries from the window
+            // where upload double-wrapped are raw PNG wrappers, not sealed bytes.
+            // A sealed AES-GCM payload never starts with the PNG signature (2^-32
+            // collision treated as a harmless refetch), so drop them and refetch.
+            if (!isPng(cached)) {
+                lruMutex.withLock { lru[urlNoFragment] = cached }
+                return cached.copyOf()
+            }
+            runCatching { diskFileFor(urlNoFragment).delete() }
         }
         val deferred: Deferred<ByteArray?> = synchronized(inflight) {
             inflight.getOrPut(urlNoFragment) {
@@ -84,7 +96,14 @@ class WhisperAvatarLoader @Inject constructor(
         val raw = host.download(url).getOrNull() ?: return null
         // V6-R7 FIX: fail CLOSED — if the PNG transport unwrap fails we must not
         // cache/return the raw wrapper (it decoded as colored static downstream).
-        val sealed = WhisperImageCipherTransport.decode(raw) ?: return null
+        var sealed = WhisperImageCipherTransport.decode(raw) ?: return null
+        // V6-R7b FIX (double-wrap heal): legacy avatars uploaded while the repo
+        // pre-wrapped AND the host wrapped carry PNG(WZ1(PNG(WZ1(sealed)))).
+        // Sealed AES-GCM output never carries a PNG header — unwrap once more
+        // when we see it so already-hosted avatars self-heal without re-upload.
+        if (isPng(sealed)) {
+            sealed = WhisperImageCipherTransport.decode(sealed) ?: return null
+        }
         if (genAtStart != generation) return null // cache was cleared mid-flight
         diskPut(url, sealed)
         lruMutex.withLock { lru[url] = sealed }
