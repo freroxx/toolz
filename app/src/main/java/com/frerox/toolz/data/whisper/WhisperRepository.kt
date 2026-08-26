@@ -1786,13 +1786,20 @@ class WhisperRepository @Inject constructor(
     }
 
     suspend fun markMessagesAsRead(senderId: String): Result<Unit> = runCatching {
-        db.from("messages").update({ set("is_read", true) }) {
-            filter { eq("sender_id", senderId); eq("receiver_id", myId); eq("is_read", false) }
-        }
+        // FIX: optimistic local update first — prevents ghost unread if server is
+        // slow/fails (previously server-first left local stale and badge re-appeared).
         messageDao.markAsRead(senderId, myId)
-        // V6-R6 (#ghost-badges): the hub badge reads cached conversation previews —
-        // without invalidating, the unread circle lingered after everything was read.
         invalidateConversationsCache()
+        try {
+            db.from("messages").update({ set("is_read", true) }) {
+                filter { eq("sender_id", senderId); eq("receiver_id", myId); eq("is_read", false) }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            ProtocolDiagnostics.increment("markRead.serverFailed")
+            // Keep local as read; server will converge on next sync/heartbeat.
+            android.util.Log.w("WhisperRepo", "markAsRead server update failed, local kept as read", e)
+        }
     }
 
     /**
@@ -2229,8 +2236,9 @@ class WhisperRepository @Inject constructor(
         var lastInboxStatusSubscribed = false
         val inboxSeen = java.util.concurrent.ConcurrentHashMap<String, Boolean>() // id -> isRead
         var inboxSeeded = false
-        // P5: quiet backoff around the original 8s cadence.
-        val inboxBackoff = QuietBackoff(listOf(8_000L, 16_000L, 32_000L), tag = "inbox")
+        // FIX: faster fallback for notifications (was 8s, now 3s base) — delayed
+        // notifications were reported when FCM + realtime both missed.
+        val inboxBackoff = QuietBackoff(listOf(3_000L, 8_000L, 16_000L), tag = "inbox")
         val inboxPollJob = launch {
             while (isActive) {
                 kotlinx.coroutines.delay(inboxBackoff.delayMs())
@@ -2258,9 +2266,19 @@ class WhisperRepository @Inject constructor(
                         val prev = inboxSeen.put(msg.id, msg.isRead)
                         if (!inboxSeeded && prev == null) continue // silent seed
                         if (prev != null && prev == msg.isRead) continue
+                        val isNewMessage = prev == null
+                        val isReadFlip = prev != null && prev != msg.isRead
                         // P5: a read-flip or brand-new row is activity for the cadence.
                         inboxBackoff.onActivity()
-                        if (shouldEmitMessage(msg.id)) trySend(msg)
+                        // FIX: read flips must bypass dedupe (shouldEmit blocks within 30s)
+                        // so the UI can immediately clear badge/notification instead of
+                        // ghosting as unread for 30s.
+                        if (isReadFlip) {
+                            recentlyEmittedMessageIds[msg.id] = System.currentTimeMillis()
+                            trySend(msg)
+                        } else if (isNewMessage) {
+                            if (shouldEmitMessage(msg.id)) trySend(msg)
+                        }
                     }
                     inboxSeeded = true
                 } catch (e: kotlinx.coroutines.CancellationException) {

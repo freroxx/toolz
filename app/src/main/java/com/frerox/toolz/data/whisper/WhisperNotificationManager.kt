@@ -31,6 +31,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +45,7 @@ import javax.inject.Singleton
 class WhisperNotificationManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mutePrefs: WhisperMutePreferences,
+    private val hiddenChatsStore: WhisperHiddenChatsStore,
 ) {
     companion object {
         const val CHANNEL_ID = "whisper_messages"
@@ -81,6 +83,10 @@ class WhisperNotificationManager @Inject constructor(
     private var nextMessageId = FIRST_MESSAGE_NOTIF_ID
     @Volatile private var isInForeground = false
     @Volatile var currentChatId: String? = null
+    // Dedupe: same messageId from FCM + realtime must not double-notify within TTL.
+    private val recentlyNotifiedMessageIds = ConcurrentHashMap<String, Long>()
+    private val NOTIF_DEDUPE_TTL_MS = 30_000L
+    private val MAX_RECENT_NOTIF_IDS = 1_024
 
     init {
         createChannel()
@@ -135,17 +141,29 @@ class WhisperNotificationManager @Inject constructor(
 
     /**
      * Shows a message notification for [senderId].
-     * Suppressed if user is in that active chat or if user is muted.
+     * Suppressed if user is in that active chat, muted, hidden, read, or duplicate.
      */
     fun showMessageNotification(
         senderId: String,
         senderName: String,
+        messageId: String? = null,
+        isRead: Boolean = false,
     ) {
-        // Skip if muted
+        // Never notify for read messages (ghost after mark-as-read).
+        if (isRead) return
+        // Dedupe same messageId from FCM + realtime within TTL.
+        if (!messageId.isNullOrBlank() && !shouldNotifyForMessage(messageId)) return
+        // Skip if muted or hidden (hidden chats should not ping).
         if (mutePrefs.isMuted(senderId)) {
             // V2-FIX M-M?: sender names/ids never appear in release logs (privacy).
             if (com.frerox.toolz.BuildConfig.DEBUG) {
                 Log.d(TAG, "User $senderName ($senderId) is muted — skipping notification")
+            }
+            return
+        }
+        if (hiddenChatsStore.isHidden(senderId)) {
+            if (com.frerox.toolz.BuildConfig.DEBUG) {
+                Log.d(TAG, "Chat with $senderId is hidden — skipping notification")
             }
             return
         }
@@ -273,6 +291,24 @@ class WhisperNotificationManager @Inject constructor(
             // activeNotifications is best-effort (some OEM builds misbehave); worst case
             // the summary lingers until the next cancel pass.
         }
+    }
+
+    /** Dedupe same messageId from FCM + realtime within TTL. */
+    private fun shouldNotifyForMessage(messageId: String): Boolean {
+        if (messageId.isBlank()) return true
+        val now = System.currentTimeMillis()
+        val prev = recentlyNotifiedMessageIds.putIfAbsent(messageId, now)
+        if (recentlyNotifiedMessageIds.size > MAX_RECENT_NOTIF_IDS) {
+            recentlyNotifiedMessageIds.entries.removeIf { (_, ts) -> now - ts > NOTIF_DEDUPE_TTL_MS }
+            if (recentlyNotifiedMessageIds.size > MAX_RECENT_NOTIF_IDS) {
+                val byAge = recentlyNotifiedMessageIds.entries.sortedBy { it.value }
+                byAge.take(byAge.size / 3).forEach { recentlyNotifiedMessageIds.remove(it.key) }
+            }
+        }
+        if (prev == null) return true
+        if (now - prev <= NOTIF_DEDUPE_TTL_MS) return false
+        recentlyNotifiedMessageIds[messageId] = now
+        return true
     }
 
     /** Stable id for a friend-request notification inside [FRIEND_REQUEST_NOTIF_ID_BASE, +SPAN). */

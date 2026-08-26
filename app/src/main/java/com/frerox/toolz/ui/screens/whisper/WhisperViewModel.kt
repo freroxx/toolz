@@ -818,22 +818,22 @@ class WhisperViewModel @Inject constructor(
                         repository.invalidateConversationsCache()
                         scheduleConversationRefresh(forceRefresh = false)
                     }
-                    if (msg.senderId != myId && !msg.isDeletedForEveryone) {
-                        // Hidden and muted chats never notify.
-                        if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
-                        if (mutePrefs.isMuted(msg.senderId)) return@collect
-                        // V2-FIX L-?: notification-path profile lookups route through
-                        // repository.getProfile, which is backed by its 5-minute profileCache —
-                        // no extra per-notification RPC beyond the cache TTL.
-                        val senderProfile = repository.getProfile(msg.senderId).getOrNull()
-                        val senderName = senderProfile?.effectiveName
-                            // V6-R2 (review): was hardcoded English "Someone".
-                            ?: appContext.getString(R.string.st_Whisper_SomeoneDefault)
-                        notificationManager.showMessageNotification(
-                            senderId = msg.senderId,
-                            senderName = senderName,
-                        )
-                    }
+                    // FIX: never notify for read or deleted messages (ghost after mark-as-read).
+                    if (msg.isRead || msg.isDeletedForEveryone) return@collect
+                    if (msg.senderId == myId) return@collect
+                    // Hidden and muted chats never notify — check synchronously to avoid delay.
+                    if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
+                    if (mutePrefs.isMuted(msg.senderId)) return@collect
+                    // FIX: show immediately with generic title — profile lookup previously
+                    // blocked notification for cache misses (network) and caused delay.
+                    // The notification body is privacy-preserving (no content) so name is
+                    // not needed for delay; use senderId for dedupe.
+                    notificationManager.showMessageNotification(
+                        senderId = msg.senderId,
+                        senderName = msg.senderId,
+                        messageId = msg.id,
+                        isRead = msg.isRead,
+                    )
                 }
         }
     }

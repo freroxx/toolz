@@ -124,29 +124,30 @@ serve(async (request) => {
     return json({ error: "FCM authentication failed" }, 503);
   }
 
-  // Single attempt per token; data-only payload carries NO content (privacy).
-  let sent = 0;
-  let pruned = 0;
-  for (const token of tokens) {
-    try {
-      const fcmRes = await fetch(
-        `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: {
-              token,
-              data: { whisper_new_message: "true", senderId },
-              android: { priority: "HIGH", collapse_key: senderId },
-            },
-          }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
+   // Single attempt per token; data-only payload carries NO content (privacy).
+   // FIX: include messageId for client-side dedupe and collapse handling.
+   let sent = 0;
+   let pruned = 0;
+   for (const token of tokens) {
+     try {
+       const fcmRes = await fetch(
+         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/messages:send`,
+         {
+           method: "POST",
+           headers: {
+             Authorization: `Bearer ${accessToken}`,
+             "Content-Type": "application/json",
+           },
+           body: JSON.stringify({
+             message: {
+               token,
+               data: { whisper_new_message: "true", senderId, messageId },
+               android: { priority: "HIGH", collapse_key: senderId },
+             },
+           }),
+           signal: AbortSignal.timeout(10_000),
+         },
+       );
       if (fcmRes.ok) {
         sent++;
         continue;

@@ -51,11 +51,19 @@ class WhisperPushService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val senderId = message.data["senderId"].orEmpty()
+        val messageId = message.data["messageId"].orEmpty()
         if (!message.data["whisper_new_message"].toBoolean() || senderId.isEmpty()) return
 
         // Generic, content-free notification — identical body to the in-app realtime
         // path so lock-screen behavior never leaks text (VISIBILITY_PRIVATE).
-        notificationManager.showMessageNotification(senderId = senderId, senderName = senderId)
+        // FIX: include messageId for dedupe (FCM + realtime), and isRead=false
+        // (edge function only sends on INSERT). Manager handles hidden/muted/dedupe.
+        notificationManager.showMessageNotification(
+            senderId = senderId,
+            senderName = senderId,
+            messageId = messageId.ifBlank { null },
+            isRead = false,
+        )
     }
 
     override fun onDestroy() {
