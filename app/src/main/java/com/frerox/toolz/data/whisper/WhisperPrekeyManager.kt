@@ -51,6 +51,12 @@ class WhisperPrekeyManager @Inject constructor(
     /** Local record of unpublished/consumed state so we top up idempotently. */
     private var lastPublishedAtMs: Long = 0L
 
+    /** FIX-5: outcome of last ensurePublished attempt, for heartbeat retry. */
+    @Volatile var lastPublishOk: Boolean? = null
+        private set
+    @Volatile var lastPublishAttemptAtMs: Long = 0L
+        private set
+
     // V6-R3 FIX (field report "must rotate keys on both devices after restart"):
     // this map used to be RAM-ONLY — every process death lost every SPK/OPK private
     // half, so peers holding an earlier bundle could never complete handshakes (and a
@@ -175,8 +181,12 @@ class WhisperPrekeyManager @Inject constructor(
             }
             ProtocolDiagnostics.log("prekeys: topped OPK pool to $OPK_TARGET")
         }
+        lastPublishOk = true
+        lastPublishAttemptAtMs = System.currentTimeMillis()
         Unit
     }.onFailure {
+        lastPublishOk = false
+        lastPublishAttemptAtMs = System.currentTimeMillis()
         Log.e("WhisperPrekeys", "ensurePublished failed", it)
         ProtocolDiagnostics.increment("prekeys.publishFail")
     }

@@ -299,8 +299,17 @@ suspend fun WhisperRepository.getMyProfile(forceRefresh: Boolean = false): Resul
         } else {
             WhisperProfileUpdate(avatarUrl = finalUrl)
         }
-        updateProfile(avatarUpdate).getOrThrow()
+        val updateRes = updateProfile(avatarUpdate)
+        if (updateRes.isFailure) {
+            // FIX-6a: atomicity — don't leave an orphaned blob that only the uploader
+            // can see via prime. Best-effort delete, then surface failure.
+            runCatching { encryptedImageHost.delete(url, attachmentId) }
+            runCatching { avatarLoader.clear() }
+            ProtocolDiagnostics.increment("avatar.uploadUpdateFailed")
+            updateRes.getOrThrow()
+        }
         profileCache.remove(myId); profileCacheTs.remove(myId)
+        ProtocolDiagnostics.increment("avatar.uploadOk")
         finalUrl
     }
 

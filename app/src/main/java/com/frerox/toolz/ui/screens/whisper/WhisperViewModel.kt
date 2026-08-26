@@ -246,6 +246,9 @@ class WhisperViewModel @Inject constructor(
                         // 5 min if the startup attempt failed. Idempotent when in sync.
                         runCatching { repository.republishLocalKeyIfStale() }
                             .onFailure { WhisperErrorMapper.log(it, "heartbeatRepublish") }
+                        // FIX-5: prekey publish retry + self-verify (targets persistent publishFail).
+                        runCatching { repository.runPrekeyHealthCheck() }
+                            .onFailure { WhisperErrorMapper.log(it, "heartbeatPrekey") }
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e

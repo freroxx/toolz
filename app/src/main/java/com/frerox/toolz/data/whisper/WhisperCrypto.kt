@@ -446,6 +446,7 @@ class WhisperCrypto @Inject constructor(
             val keyFactory = KeyFactory.getInstance("EC")
             keyFactory.generatePublic(keySpec)
         } catch (e: Exception) {
+            ProtocolDiagnostics.increment("crypto.parseKeyFail")
             android.util.Log.e("WhisperCrypto", "parsePublicKey failed: ${e.message}")
             null
         }

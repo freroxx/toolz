@@ -5,6 +5,7 @@
 
 package com.frerox.toolz.data.whisper
 
+import com.frerox.toolz.data.whisper.ProtocolDiagnostics
 import com.frerox.toolz.di.ApplicationScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -105,10 +106,18 @@ class WhisperAvatarLoader @Inject constructor(
     private suspend fun fetchAndCache(url: String, ownerPubB64: String): ByteArray? {
         val genAtStart = generation
         val normalized = normalizeUrl(url)
-        val raw = host.download(normalized).getOrNull() ?: return null
+        val hostRes = host.download(normalized)
+        if (hostRes.isFailure) {
+            ProtocolDiagnostics.increment("avatar.hostFail")
+        }
+        val raw = hostRes.getOrNull() ?: return null
         // V6-R7 FIX: fail CLOSED — if the PNG transport unwrap fails we must not
         // cache/return the raw wrapper (it decoded as colored static downstream).
-        var sealed = WhisperImageCipherTransport.decode(raw) ?: return null
+        var sealed = WhisperImageCipherTransport.decode(raw)
+        if (sealed == null) {
+            ProtocolDiagnostics.increment("avatar.transportDecodeFail")
+            return null
+        }
         // V6-R7b FIX (double-wrap heal): legacy avatars uploaded while the repo
         // pre-wrapped AND the host wrapped carry PNG(WZ1(PNG(WZ1(sealed)))).
         // Sealed AES-GCM output never carries a PNG header — unwrap once more

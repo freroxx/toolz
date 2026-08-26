@@ -260,11 +260,16 @@ class WhisperRepository @Inject constructor(
     /**
      * Outgoing ratchet seal. Returns (v3-frame-json, "v3") or null on ANY failure —
      * callers fall back to the proven envelope path. NEVER blocks a message.
+     *
+     * FIX-2: when [insuranceEnvelope] is non-null (unproven session), the envelope
+     * copy rides alongside the ratchet ciphertext so the first message survives
+     * even if the responder's X3DH bundle was raced/stale.
      */
     private suspend fun sealWithRatchet(
         senderId: String,
         receiverId: String,
         plaintext: String,
+        insuranceEnvelope: String? = null,
     ): Pair<String, String>? = try {
         sessionStore.mutexFor(receiverId).withLock {
             val live = sessionStore.load(receiverId) ?: establishOutboundLocked(receiverId)
@@ -278,8 +283,9 @@ class WhisperRepository @Inject constructor(
             live.dirty = true
             sessionStore.save(receiverId, live)
             ProtocolDiagnostics.increment("v3.sealed")
+            if (insuranceEnvelope != null) ProtocolDiagnostics.increment("v3.insuranceAttached")
             com.frerox.toolz.data.whisper.session.WhisperV3Codec.encode(
-                live.sessionId, sealed.header, sealed.ciphertextPacked, x3dh,
+                live.sessionId, sealed.header, sealed.ciphertextPacked, x3dh, insuranceEnvelope,
             ) to IV_V3
         }
     } catch (e: kotlinx.coroutines.CancellationException) {
@@ -333,27 +339,100 @@ class WhisperRepository @Inject constructor(
      */
     suspend fun republishLocalKeyIfStale(): Boolean {
         val currentId = myId
-        if (currentId.isBlank()) return false
-        val localPub = crypto.getPublicKeyBase64() ?: return false
+        if (currentId.isBlank()) {
+            ProtocolDiagnostics.increment("heal.skip.noauth")
+            return false
+        }
+        val localPub = crypto.getPublicKeyBase64() ?: run {
+            ProtocolDiagnostics.increment("heal.skip.nokey")
+            return false
+        }
         val remote = runCatchingCE {
             db.from("profiles").select { filter { eq("id", currentId) } }
                 .decodeSingleOrNull<WhisperProfile>()
-        }.getOrNull() ?: return false
+        }.getOrNull()
+        if (remote == null) {
+            ProtocolDiagnostics.increment("heal.skip.selectFailed")
+            ProtocolDiagnostics.log("heal: select own profile failed (network/RLS)")
+            return false
+        }
         val serverKey = remote.publicKey
-        if (serverKey == localPub) return false // already in sync
-        if (serverKey != null && crypto.hasStagedAliases()) return false // mid-rotation
+        if (serverKey == localPub) {
+            ProtocolDiagnostics.increment("heal.inSync")
+            return false // already in sync
+        }
+        if (serverKey != null && crypto.hasStagedAliases()) {
+            ProtocolDiagnostics.increment("heal.skip.stagedBlocked")
+            return false // mid-rotation
+        }
         val body = buildJsonObject {
             put("public_key", localPub)
             put("updated_at", java.time.Instant.now().toString())
         }
-        runCatching { updateProfileRowWithFreshness(currentId, body) }.onFailure {
-            android.util.Log.e("WhisperRepo", "republish failed", it)
+        val updateOk = runCatching { updateProfileRowWithFreshness(currentId, body) }.fold(
+            onSuccess = { true },
+            onFailure = {
+                ProtocolDiagnostics.increment("heal.updateFailed")
+                android.util.Log.e("WhisperRepo", "republish failed", it)
+                ProtocolDiagnostics.log("heal: update failed: ${it.message}")
+                false
+            },
+        )
+        if (!updateOk) return false
+        // Confirm the write landed — catches silent RLS/trigger drops.
+        val confirm = runCatchingCE {
+            db.from("profiles").select { filter { eq("id", currentId) } }
+                .decodeSingleOrNull<WhisperProfile>()?.publicKey
+        }.getOrNull()
+        if (confirm == localPub) {
+            ProtocolDiagnostics.increment("heal.confirmed")
+            ProtocolDiagnostics.log("heal: confirmed server now matches device")
+        } else {
+            ProtocolDiagnostics.increment("heal.confirmFailed")
+            ProtocolDiagnostics.log("heal: confirm mismatch after update server=${confirm?.let { WhisperEnvelope.keyId(it) } ?: "null"} local=${WhisperEnvelope.keyId(localPub)}")
             return false
         }
         profileCache.remove(currentId); profileCacheTs.remove(currentId)
         ProtocolDiagnostics.increment("key.republished")
         ProtocolDiagnostics.log("keyHeal: republished current key on stale detection")
         return true
+    }
+
+    // FIX-5: heartbeat-driven prekey resilience + self-verify (targets persistent publishFail).
+    private var lastPrekeySelfVerifyAtMs: Long = 0L
+
+    suspend fun runPrekeyHealthCheck() {
+        val uid = myId
+        if (uid.isBlank()) return
+        val now = System.currentTimeMillis()
+        val lastAttempt = prekeyManager.lastPublishAttemptAtMs
+        val lastOk = prekeyManager.lastPublishOk
+        // Retry if last publish failed, or never attempted, or stale >15min and pool likely low.
+        val shouldRetryPublish = lastOk == false ||
+            lastOk == null && lastAttempt == 0L ||
+            (now - lastAttempt > 15 * 60 * 1000L && lastOk == true)
+        if (shouldRetryPublish) {
+            val res = prekeyManager.ensurePublished(uid)
+            if (res.isFailure) {
+                ProtocolDiagnostics.increment("prekeys.healthRetryFailed")
+            } else {
+                ProtocolDiagnostics.increment("prekeys.healthRetryOk")
+            }
+        }
+        // Self-verify our own bundle (fetch + signature check) at most every 30min.
+        if (now - lastPrekeySelfVerifyAtMs > 30 * 60 * 1000L) {
+            lastPrekeySelfVerifyAtMs = now
+            val selfOk = try {
+                // Use suspend fetchAndVerifyBundle for our own id
+                sessionFactory.fetchAndVerifyBundle(uid).isSuccess
+            } catch (_: Exception) { false }
+            if (selfOk) {
+                ProtocolDiagnostics.increment("prekeys.selfVerifyOk")
+            } else {
+                ProtocolDiagnostics.increment("prekeys.selfVerifyFail")
+                ProtocolDiagnostics.log("prekeys: self-verify failed for own bundle")
+            }
+        }
     }
 
     /**
@@ -394,6 +473,37 @@ class WhisperRepository @Inject constructor(
         peerKeys.value[userId]?.let { candidates[WhisperEnvelope.keyId(it)] = it }
         peerKeyFor(userId)?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
         return LinkedHashMap(candidates.entries.take(3).associateBy({ it.key }) { it.value })
+    }
+
+    /**
+     * FIX-4 helper: builds a V5 envelope for [content] addressed to [receiverId],
+     * using every known candidate key plus an optional fresh server pub.
+     * Drops are counted so the next diagnostics export names whether the fresh key
+     * was unusable (parse failure) vs. simply stale.
+     */
+    private suspend fun buildEnvelopeString(
+        content: String,
+        receiverId: String,
+        receiverPubKey: String?,
+        senderId: String,
+    ): String? {
+        val candidates = recipientKeyCandidates(receiverId).toMutableMap()
+        receiverPubKey?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
+        if (candidates.isEmpty()) return null
+        var dropped = 0
+        val entries = candidates.mapNotNull { (kid, pub) ->
+            crypto.encryptMessage(content, pub, senderId, receiverId)?.let { Triple(kid, it.second, it.first) }
+                ?: run { dropped++; null }
+        }
+        if (dropped > 0) {
+            ProtocolDiagnostics.increment("send.encryptDropped")
+            ProtocolDiagnostics.logThrottled(
+                "sendEncryptDropped", "send.encryptDropped",
+                event = "send encrypt dropped $dropped/${candidates.size} kids=${candidates.keys} own=${WhisperEnvelope.ownKid(crypto)}",
+            )
+        }
+        if (entries.isEmpty()) return null
+        return WhisperEnvelope.encode(entries, crypto.getPublicKeyBase64())
     }
 
     /**
@@ -559,6 +669,25 @@ class WhisperRepository @Inject constructor(
             ProtocolDiagnostics.increment("v3.parseFail")
             return null
         }
+        // FIX-2 helper: try the insurance envelope copy when the ratchet path fails.
+        suspend fun tryInsurance(): String? {
+            val env = frame.insuranceEnvelope ?: return null
+            val opened = decryptUnified(
+                rawContent = env,
+                ivMark = IV_ENVELOPE,
+                partnerId = partnerId,
+                msgSenderId = msgSenderId,
+                msgReceiverId = msgReceiverId,
+                createdAtEpochMs = System.currentTimeMillis(),
+            )
+            if (opened != null) {
+                ProtocolDiagnostics.increment("v3.insuranceOpened")
+                ProtocolDiagnostics.log("v3: opened via insurance fallback for ${partnerId.take(6)}…")
+            } else {
+                ProtocolDiagnostics.increment("v3.insuranceFailed")
+            }
+            return opened
+        }
         return sessionStore.mutexFor(partnerId).withLock {
             // 1. Optional first-frame handshake.
             val wire = frame.x3dh
@@ -573,6 +702,7 @@ class WhisperRepository @Inject constructor(
                     // post-reinstall header): one locked frame, then convergence.
                     existing != null && !existing.canAcceptHandshake(wire.ikPubB64, frame.sessionId) -> {
                         ProtocolDiagnostics.increment("v3.handshakeRejected")
+                        tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                         return@withLock null
                     }
                     else -> {
@@ -580,18 +710,21 @@ class WhisperRepository @Inject constructor(
                         if (!sessionFactory.respondToHeader(partnerId, hdr)) {
                             // SPK/OPK privates no longer held (rotation raced us).
                             ProtocolDiagnostics.increment("v3.respondFail")
+                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                             return@withLock null
                         }
                         val sk = sessionFactory.sessionKeyFor(partnerId)
                         val spkPriv = prekeyManager.privateKeyForKid(hdr.spkKid)
                         if (sk == null || spkPriv == null) {
                             ProtocolDiagnostics.increment("v3.respondFail")
+                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                             return@withLock null
                         }
                         val skWrapped = crypto.wrapWithKeystoreAes(sk) ?: run {
                             // Refusing to persist unprotected key material is fatal
                             // to THIS handshake only — envelope fallback still works.
                             ProtocolDiagnostics.increment("v3.respondFail")
+                            tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                             return@withLock null
                         }
                         // Bob bootstrap: his SPK private IS his first ratchet key; the
@@ -622,6 +755,7 @@ class WhisperRepository @Inject constructor(
             val ratchet = live?.ratchet
             if (live == null || ratchet == null || live.sessionId != frame.sessionId) {
                 ProtocolDiagnostics.increment("v3.noSession")
+                tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                 return@withLock null
             }
 
@@ -636,9 +770,11 @@ class WhisperRepository @Inject constructor(
             } catch (e: com.frerox.toolz.data.whisper.session.WhisperRatchetLostMessage) {
                 ProtocolDiagnostics.increment("v3.locked")
                 android.util.Log.w("WhisperRepo", "v3 frame locked (${e.message})")
+                tryInsurance()?.let { return@withLock maybeHealFromPlaintext(it, msgSenderId, partnerId, System.currentTimeMillis()) }
                 return@withLock null
             }
             recordPeerProtocolFloor(partnerId, WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION)
+            live.sessionProven = true
             live.dirty = true
             sessionStore.save(partnerId, live)
             ProtocolDiagnostics.increment("v3.opened")
@@ -1105,31 +1241,33 @@ class WhisperRepository @Inject constructor(
         ProtocolDiagnostics.increment("send.negotiated.total")
         // V6 (planwhisper.md §3.2): Double Ratchet first; ANY failure falls through to
         // the proven V5 envelope — a handshake problem can never block a message.
+        // FIX-2: unverified sessions carry a handshake-insurance envelope copy.
         var encryptedPair: Pair<String, String>? = null
         if (shouldUseV3(receiverId)) {
-            ProtocolDiagnostics.log("send: negotiated v3 to ${receiverId.take(6)}…")
-            encryptedPair = sealWithRatchet(currentId, receiverId, content)
+            var insurance: String? = null
+            val peek = sessionStore.peek(receiverId)
+            val needsInsurance = peek == null || !peek.sessionProven
+            if (needsInsurance) {
+                insurance = buildEnvelopeString(content, receiverId, receiverPubKey, currentId)
+                if (insurance != null) {
+                    ProtocolDiagnostics.increment("v3.insuranceAttached")
+                } else {
+                    ProtocolDiagnostics.increment("v3.insuranceBuildFailed")
+                }
+            }
+            ProtocolDiagnostics.log("send: negotiated v3 to ${receiverId.take(6)}…${if (insurance != null) " (+insurance)" else ""}")
+            encryptedPair = sealWithRatchet(currentId, receiverId, content, insurance)
         } else {
             ProtocolDiagnostics.log("send: negotiated v$negotiatedVersion to ${receiverId.take(6)}… (envelope)")
         }
         if (encryptedPair == null) {
-            val candidates = recipientKeyCandidates(receiverId).toMutableMap()
-            receiverPubKey?.let { candidates.putIfAbsent(WhisperEnvelope.keyId(it), it) }
-            if (candidates.isEmpty()) sendFail(
-                "no_key",
-                "Secure delivery unavailable: no encryption key for this user (server row blank or unreadable).",
-            )
-            // V6-R7: ride our current public key IN-BAND so the receiver can open this
-            // message even if their cached/server view of us is stale or polluted.
-            val envelope = WhisperEnvelope.encode(
-                candidates.mapNotNull { (kid, pub) ->
-                    crypto.encryptMessage(content, pub, currentId, receiverId)?.let { Triple(kid, it.second, it.first) }
-                },
-                senderPublicKeyBase64 = crypto.getPublicKeyBase64(),
-            ) ?: sendFail(
-                "encrypt_failed",
-                "Secure delivery failed: could not encrypt for any known key.",
-            )
+            val hasAnyCandidate = recipientKeyCandidates(receiverId).isNotEmpty() || receiverPubKey != null
+            val envelope = buildEnvelopeString(content, receiverId, receiverPubKey, currentId)
+                ?: sendFail(
+                    if (!hasAnyCandidate) "no_key" else "encrypt_failed",
+                    if (!hasAnyCandidate) "Secure delivery unavailable: no encryption key for this user (server row blank or unreadable)."
+                    else "Secure delivery failed: could not encrypt for any known key.",
+                )
             encryptedPair = envelope to IV_ENVELOPE
         }
         // Client-generated UUID makes the insert idempotent: if the server accepted the row
@@ -1670,8 +1808,13 @@ class WhisperRepository @Inject constructor(
             WhisperEnvelope.isEnvelope(msg.content) -> WhisperEnvelope.VERSION
             else -> 0
         }
-        // V6: only the partner's own frames prove their capability.
-        if (wireVersion > 0 && msg.senderId != myId) recordPeerProtocolFloor(peerId, wireVersion)
+        // FIX-1: only a v3 frame proves the peer can parse v3. An envelope v2
+        // proves nothing about v3 capability — recording it as floor=2 permanently
+        // deadlocked ratchet-first (shouldUseV3 false forever after any history
+        // render). Live v3 frames still record, everything else is ignored.
+        if (wireVersion == WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION && msg.senderId != myId) {
+            recordPeerProtocolFloor(peerId, wireVersion)
+        }
         if (msg.isDeletedForEveryone) return msg.content
         if (msg.contentIv == null && !WhisperEnvelope.isEnvelope(msg.content)) return msg.content
         // V3-FIX: date the row once — scopes the legacy fallback to pre-cutoff messages.
