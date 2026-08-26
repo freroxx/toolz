@@ -119,8 +119,88 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var isShakeRegistered = false
 
     private var audioFocusEnabled = true
-    private var audioFocusDucking = true
+    private var audioFocusDucking = false
     private var isDucking = false
+    private var shouldResumeOnFocusGain = false
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        if (!audioFocusEnabled) return@OnAudioFocusChangeListener
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (isDucking) {
+                    player.volume = 1.0f
+                    isDucking = false
+                }
+                if (shouldResumeOnFocusGain) {
+                    shouldResumeOnFocusGain = false
+                    if (!player.isPlaying) player.play()
+                }
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                shouldResumeOnFocusGain = false
+                if (isDucking) {
+                    player.volume = 1.0f
+                    isDucking = false
+                }
+                if (player.isPlaying) player.pause()
+                abandonAudioFocus()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                shouldResumeOnFocusGain = player.isPlaying
+                if (player.isPlaying) player.pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                if (audioFocusDucking) {
+                    if (!isDucking && player.isPlaying) {
+                        player.volume = 0.2f
+                        isDucking = true
+                    }
+                } else {
+                    shouldResumeOnFocusGain = player.isPlaying
+                    if (player.isPlaying) player.pause()
+                }
+            }
+        }
+    }
+
+    private fun requestAudioFocus(): Boolean {
+        if (!audioFocusEnabled) return false
+        val am = audioManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+            val frameworkAttrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(frameworkAttrs)
+                .setWillPauseWhenDucked(!audioFocusDucking)
+                .setOnAudioFocusChangeListener(audioFocusListener)
+                .build()
+            am.requestAudioFocus(audioFocusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            am.requestAudioFocus(audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val am = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let {
+                am.abandonAudioFocusRequest(it)
+                audioFocusRequest = null
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            am.abandonAudioFocus(audioFocusListener)
+        }
+        if (isDucking) {
+            player.volume = 1.0f
+            isDucking = false
+        }
+    }
 
     private var cachedProcessedBitmap: Bitmap? = null
     private var lastTrackUri: String? = null
@@ -194,11 +274,23 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 startWidgetCorrectionLoop()
                 startStatePersistenceLoop()
                 observeShakeSetting()
+                if (audioFocusEnabled) {
+                    val granted = requestAudioFocus()
+                    // If focus not granted, pause playback to respect system
+                    if (!granted) {
+                        player.pause()
+                    }
+                }
             } else {
                 stopWidgetCorrectionLoop()
                 stopStatePersistenceLoop()
                 unregisterShakeListener()
                 savePlaybackState()
+                // Only abandon if not expecting auto-resume (transient/duck pause)
+                // and not currently ducking (still playing at low volume)
+                if (!shouldResumeOnFocusGain && !isDucking) {
+                    abandonAudioFocus()
+                }
             }
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -436,19 +528,44 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 settingsRepository.musicAudioFocus,
                 settingsRepository.musicAudioFocusDucking
             ) { enabled, ducking -> enabled to ducking }.collectLatest { (enabled, ducking) ->
+                val wasEnabled = audioFocusEnabled
                 audioFocusEnabled = enabled
                 audioFocusDucking = ducking
-                
+
                 val audioAttributes = AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .setUsage(C.USAGE_MEDIA)
                     .build()
-                
-                // If enabled, we let ExoPlayer handle it, but we'll also use a custom listener
-                // for the ducking behavior if needed, OR we just trust ExoPlayer's default
-                // which is to duck if usage is MEDIA.
-                // However, to satisfy "Smart", we'll implement the listener to respect the 'ducking' setting.
-                player.setAudioAttributes(audioAttributes, enabled)
+                // Disable ExoPlayer automatic handling; we manage focus manually
+                // so both Smart Focus and Allow Ducking toggles are fully respected.
+                player.setAudioAttributes(audioAttributes, false)
+
+                if (!enabled) {
+                    // Smart focus OFF: restore volume, clear resume flag, abandon focus,
+                    // and keep playing (music mixes with other apps).
+                    if (isDucking) {
+                        player.volume = 1.0f
+                        isDucking = false
+                    }
+                    shouldResumeOnFocusGain = false
+                    abandonAudioFocus()
+                } else {
+                    // Smart focus ON: if we were ducking and ducking is now disabled, pause instead
+                    if (isDucking && !ducking) {
+                        player.volume = 1.0f
+                        isDucking = false
+                        shouldResumeOnFocusGain = player.isPlaying
+                        if (player.isPlaying) player.pause()
+                    }
+                    // Re-request focus with updated willPauseWhenDucked if currently playing
+                    if (player.isPlaying) {
+                        requestAudioFocus()
+                    } else if (!wasEnabled) {
+                        // Just enabled while idle: ensure no stale volume
+                        player.volume = 1.0f
+                        isDucking = false
+                    }
+                }
             }
         }
     }
@@ -747,6 +864,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     override fun onDestroy() {
         runCatching { unregisterReceiver(headsetReceiver) }
         unregisterShakeListener()
+        abandonAudioFocus()
+        try { player.volume = 1.0f } catch (_: Exception) {}
         serviceScope.cancel()
         mediaSession?.run {
             release()

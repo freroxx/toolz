@@ -751,7 +751,7 @@ fun SettingsScreen(
                             }
 
                             if (matches(searchQuery, "audio", "focus", "pause", "smart", "ducking")) {
-                                val audioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = true)
+                                val audioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = false)
                                 SettingsToggleItem(
                                     title = stringResource(R.string.st_SettingsScreen_y9z1),
                                     subtitle = stringResource(R.string.st_SettingsScreen_a1b4),
