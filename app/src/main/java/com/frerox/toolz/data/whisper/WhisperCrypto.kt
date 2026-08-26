@@ -36,12 +36,18 @@ import javax.crypto.KeyAgreement
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class WhisperCrypto @Inject constructor(
     @ApplicationContext private val context: Context,
+    // P1 (startup ANR fix): the keystore health checks (canary retries with sleeps +
+    // identity-change detector) must never run on the thread that first injects this
+    // singleton (historically Main). They now run on the app scope; the alias
+    // bootstrap itself stays synchronous so first-use callers are unaffected.
+    @com.frerox.toolz.di.ApplicationScope private val healthCheckScope: kotlinx.coroutines.CoroutineScope,
 ) {
 
     companion object {
@@ -122,6 +128,30 @@ class WhisperCrypto @Inject constructor(
                 digest.joinToString("") { "%02X".format(it) }.chunked(4).take(8).joinToString("-")
             } catch (_: Exception) { null }
         }
+
+        /**
+         * P1: single source for the SPK signature payload ("SPK:<kid><pubB64>") so the
+         * signer ([WhisperPrekeyManager]) and every verifier ([WhisperSessionFactory],
+         * [WhisperPrekeyManager]) construct byte-identical material by construction.
+         */
+        fun spkSignedPayload(spkKid: String, spkPublicKeyBase64: String): ByteArray =
+            "SPK:$spkKid$spkPublicKeyBase64".toByteArray()
+
+        /**
+         * P7a RETIREMENT GATE for [LEGACY_AAD_FALLBACK_ENABLED]. The flag may ONLY be
+         * flipped to false in a dedicated release once BOTH hold:
+         *  1. `legacyFallbackRetireAllowed()` == true (cutoff + 90-day grace window,
+         *     i.e. no NEW rows can ever be legacy anymore and caches have aged), and
+         *  2. the `crypto.legacyAadFallback.*` diagnostics counters read ≈ 0 across
+         *     the fleet (no live user still depends on the pre-AAD path — flipping
+         *     earlier would permanently lock those rows).
+         * Until then the flag stays TRUE; post-cutoff ciphertext never takes the
+         * fallback regardless of the flag (see [legacyFallbackAllowed]).
+         */
+        const val LEGACY_FALLBACK_RETIRE_EARLIEST_EPOCH_MS: Long = 1_796_083_200_000L // 2026-12-01T00:00:00Z
+
+        fun legacyFallbackRetireAllowed(nowMs: Long = System.currentTimeMillis()): Boolean =
+            nowMs >= LEGACY_FALLBACK_RETIRE_EARLIEST_EPOCH_MS
     }
 
     /** A newly generated key pair waiting for the server publish to confirm it. */
@@ -131,6 +161,8 @@ class WhisperCrypto @Inject constructor(
 
     init {
         ensureKeyPairExists()
+        // P1: health checks off the critical path — see constructor note.
+        healthCheckScope.launch { runStartupHealthChecks() }
     }
 
     /**
@@ -286,58 +318,72 @@ class WhisperCrypto @Inject constructor(
                     }
                 }
             }
-            // V5 canary: prove the active key can actually round-trip before any chat
-            // relies on it. OEM keystore corruption otherwise surfaced only as the
-            // "[Encrypted message]" bug weeks later.
-            //
-            // V6-R6 CRITICAL FIX: a canary failure NO LONGER regenerates the identity.
-            // This block used to call resetKeyPair() on ANY failure — including
-            // transient keystore states right after boot — silently producing a brand
-            // NEW identity while the server still published the old public key. Every
-            // contact then sealed to a dead key ("rotate+verify dance" in the field),
-            // and all prior history became permanently unreadable. Identity is now
-            // NEVER destroyed implicitly: failures are retried, then surfaced through
-            // diagnostics; E2EE may be degraded until the TEE recovers, but the key
-            // material — and therefore the conversation history — survives.
-            if (activeAliasPrefSet()) {
-                var ok = false
-                for (attempt in 1..3) {
-                    if (selfTestRoundTrip()) { ok = true; break }
-                    android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED (attempt $attempt/3)")
-                    ProtocolDiagnostics.increment("keypair.canaryFailed")
-                    Thread.sleep(150L * attempt)
-                }
-                if (!ok) {
-                    // Degraded-but-stable: keep the identity. Never implicit reset.
-                    android.util.Log.e(TAG_CRYPTO, "Keystore self-test failed 3× — keeping existing identity (NO implicit reset)")
-                    ProtocolDiagnostics.increment("keypair.degradedNoReset")
-                }
-            }
+            // P1: the canary retry loop (Thread.sleep backoff) and the identity-change
+            // detector moved to [runStartupHealthChecks] on the app scope — they must
+            // never stall first injection. Alias bootstrap stays here so the very
+            // first getPublicKeyBase64()/encrypt caller still resolves synchronously.
             activeAlias()
-
-            // V6-R6: unexpected-identity-change detector. The canary no longer resets
-            // implicitly (see above), so any change of the ACTIVE public key between
-            // process starts is now noteworthy by definition — log it loudly so the
-            // diagnostics export shows exactly when an identity churned.
-            runCatching {
-                val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
-                val current = getPublicKeyBase64()
-                val lastSeen = prefs.getString(PREF_LAST_PUB, null)
-                if (current != null) {
-                    if (lastSeen != null && lastSeen != current) {
-                        ProtocolDiagnostics.increment("keypair.changedUnexpectedly")
-                        android.util.Log.e(
-                            TAG_CRYPTO,
-                            "Identity public key CHANGED since last start without explicit rotation!",
-                        )
-                    }
-                    prefs.edit().putString(PREF_LAST_PUB, current).apply()
-                }
-            }
         } catch (e: Exception) {
             // V2-FIX W8: never swallow keystore bootstrap failures silently — degraded
             // keystore state (E2EE unavailable until fixed) must be diagnosable from logs.
             android.util.Log.w("WhisperCrypto", "Key pair generation failed; E2EE degraded until keystore recovers", e)
+        }
+    }
+
+    /**
+     * P1 (startup ANR fix): keystore health checks that used to run inside
+     * [ensureKeyPairExists] on the injecting thread. Invoked once per process from
+     * init on the app scope; also safe to call manually (debug diagnostics).
+     *
+     *  - Canary: prove the active key can actually round-trip before chat relies on
+     *    it (V5); OEM keystore corruption otherwise surfaced only weeks later as the
+     *    "[Encrypted message]" bug.
+     *  - V6-R6 CRITICAL FIX preserved verbatim: a canary failure NEVER regenerates
+     *    the identity — failures are retried, then surfaced through diagnostics.
+     *  - V6-R6 detector: any change of the ACTIVE public key between process starts
+     *    is logged loudly (identity churn forensics in diagnostics exports).
+     */
+    fun runStartupHealthChecks() {
+        // P7a: surface retirement readiness in diagnostics exports — when this fires
+        // (and counters are ~0), the next release may flip LEGACY_AAD_FALLBACK_ENABLED.
+        if (LEGACY_AAD_FALLBACK_ENABLED && legacyFallbackRetireAllowed()) {
+            ProtocolDiagnostics.log("crypto: legacy-AAD fallback retire window OPEN — evaluate counters, then flip")
+        }
+
+        // V5 canary — see notes above for the no-implicit-reset contract.
+        if (activeAliasPrefSet()) {
+            var ok = false
+            for (attempt in 1..3) {
+                if (selfTestRoundTrip()) { ok = true; break }
+                android.util.Log.e(TAG_CRYPTO, "Keystore self-test FAILED (attempt $attempt/3)")
+                ProtocolDiagnostics.increment("keypair.canaryFailed")
+                Thread.sleep(150L * attempt)
+            }
+            if (!ok) {
+                // Degraded-but-stable: keep the identity. Never implicit reset.
+                android.util.Log.e(TAG_CRYPTO, "Keystore self-test failed 3× — keeping existing identity (NO implicit reset)")
+                ProtocolDiagnostics.increment("keypair.degradedNoReset")
+            }
+        }
+
+        // V6-R6: unexpected-identity-change detector. The canary no longer resets
+        // implicitly (see above), so any change of the ACTIVE public key between
+        // process starts is now noteworthy by definition — log it loudly so the
+        // diagnostics export shows exactly when an identity churned.
+        runCatching {
+            val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            val current = getPublicKeyBase64()
+            val lastSeen = prefs.getString(PREF_LAST_PUB, null)
+            if (current != null) {
+                if (lastSeen != null && lastSeen != current) {
+                    ProtocolDiagnostics.increment("keypair.changedUnexpectedly")
+                    android.util.Log.e(
+                        TAG_CRYPTO,
+                        "Identity public key CHANGED since last start without explicit rotation!",
+                    )
+                }
+                prefs.edit().putString(PREF_LAST_PUB, current).apply()
+            }
         }
     }
 
@@ -515,6 +561,9 @@ class WhisperCrypto @Inject constructor(
                 // Legacy rows predating AAD binding: decrypt without it. Gated by
                 // LEGACY_AAD_FALLBACK_ENABLED — see the H-3 note in the companion — and
                 // V3-FIX: additionally scoped to pre-cutoff rows only.
+                // P0 TELEMETRY: retirement gate for LEGACY_AAD_FALLBACK_ENABLED — the
+                // flip may only happen once this counter reads ~0 across the fleet.
+                ProtocolDiagnostics.increment("crypto.legacyAadFallback.message")
                 val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding")
                 legacyCipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
                 val legacyPlainBytes = legacyCipher.doFinal(cipherBytes)
@@ -578,6 +627,8 @@ class WhisperCrypto @Inject constructor(
             }.getOrNull()
             if (bound != null) return bound
             if (!LEGACY_AAD_FALLBACK_ENABLED || !legacyFallbackAllowed(messageCreatedAtEpochMs)) return null
+            // P0 TELEMETRY: see decryptMessage — retirement gate for the flag flip.
+            ProtocolDiagnostics.increment("crypto.legacyAadFallback.attachment")
             val legacy = Cipher.getInstance("AES/GCM/NoPadding")
             legacy.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec)
             legacy.updateAAD(ATTACHMENT_AAD)

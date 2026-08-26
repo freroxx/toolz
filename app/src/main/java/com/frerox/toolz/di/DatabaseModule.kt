@@ -101,6 +101,28 @@ object DatabaseModule {
         }
     }
 
+    // P3: whisper prefs→Room consolidation — ciphertext outbox + local tombstones.
+    // CREATE statements mirror Room's generated schema for the entities exactly
+    // (column order/types/nullability, PKs, indices) so the exported-schema hash
+    // validates. Purely additive: no existing table is touched.
+    private val MIGRATION_51_52 = object : Migration(51, 52) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `whisper_outbox` (`clientId` TEXT NOT NULL, " +
+                    "`senderId` TEXT NOT NULL, `receiverId` TEXT NOT NULL, `encryptedContent` TEXT NOT NULL, " +
+                    "`contentIv` TEXT NOT NULL, `replyToId` TEXT, `createdAt` TEXT NOT NULL, " +
+                    "`enqueuedAtMs` INTEGER NOT NULL, `attempts` INTEGER NOT NULL, PRIMARY KEY(`clientId`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_outbox_enqueuedAtMs` ON `whisper_outbox` (`enqueuedAtMs`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_outbox_receiverId` ON `whisper_outbox` (`receiverId`)")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `whisper_local_tombstones` (`messageId` TEXT NOT NULL, " +
+                    "`deletedAtMs` INTEGER NOT NULL, PRIMARY KEY(`messageId`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_local_tombstones_deletedAtMs` ON `whisper_local_tombstones` (`deletedAtMs`)")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("ALTER TABLE whisper_messages ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 0")
@@ -163,7 +185,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51)
+        .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -202,7 +224,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51)
+                    .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -300,6 +322,16 @@ object DatabaseModule {
     @Provides
     fun provideWhisperMessageDao(database: AppDatabase): WhisperMessageDao {
         return database.whisperMessageDao()
+    }
+
+    @Provides
+    fun provideWhisperOutboxDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperOutboxDao {
+        return database.whisperOutboxDao()
+    }
+
+    @Provides
+    fun provideWhisperLocalTombstoneDao(database: AppDatabase): com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao {
+        return database.whisperLocalTombstoneDao()
     }
 
     @Provides

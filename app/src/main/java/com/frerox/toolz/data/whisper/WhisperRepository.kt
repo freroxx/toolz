@@ -69,12 +69,12 @@ import java.util.concurrent.ConcurrentHashMap
 
 @Singleton
 class WhisperRepository @Inject constructor(
-    private val supabase: SupabaseClient,
+    internal val supabase: SupabaseClient,
     // V3-FIX (task F): app context lets the image decode path honor the device pixel
     // budget (maxPixelsForDevice) — previously this class had no Context injection.
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
-    private val crypto: WhisperCrypto,
-    private val encryptedImageHost: WhisperEncryptedImageHost,
+    internal val crypto: WhisperCrypto,
+    internal val encryptedImageHost: WhisperEncryptedImageHost,
     private val deletedStore: WhisperDeletedMessagesStore,
     private val outgoingQueue: WhisperOutgoingQueue,
     private val deliveryScheduler: WhisperDeliveryScheduler,
@@ -85,7 +85,7 @@ class WhisperRepository @Inject constructor(
     // H-1 FIX (reviewwhisper.md): channel teardown must run even though the flow's
     // ProducerScope is already cancelled when awaitClose fires — a plain `launch {}`
     // there never executes. This app-lifetime scope survives collection cancellation.
-    @ApplicationScope private val appScope: kotlinx.coroutines.CoroutineScope,
+    @ApplicationScope internal val appScope: kotlinx.coroutines.CoroutineScope,
     // V3-FIX (task F): wired so clearAllLocalData also wipes the encrypted image disk
     // cache — sign-out must not leave another account's cached images readable.
     private val imageDiskCache: WhisperImageDiskCache,
@@ -95,9 +95,9 @@ class WhisperRepository @Inject constructor(
     private val sessionFactory: WhisperSessionFactory,
     private val prekeyManager: WhisperPrekeyManager,
     // V6-R7 AVATARS: encrypted-avatar resolver (memory+disk cache) for wipe hooks.
-    private val avatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader,
+    internal val avatarLoader: com.frerox.toolz.data.whisper.WhisperAvatarLoader,
 ) {
-    private companion object {
+    internal companion object {
         const val MAX_MESSAGE_CHARS = 8_192
         const val EVENT_DEDUPE_TTL_MS = 30_000L
         const val MAX_RECENT_EVENT_IDS = 1_024
@@ -105,7 +105,7 @@ class WhisperRepository @Inject constructor(
         const val MIN_IMAGE_EXPIRY_SECONDS = 60L
         const val MAX_IMAGE_EXPIRY_SECONDS = 15_552_000L
         // V6-R7 avatars: fixed square size for ImgBB-hosted encrypted avatars.
-        const val AVATAR_SIDE_PX = 256
+        internal const val AVATAR_SIDE_PX = 256
         // V6-R3: bounded resubscribe attempts per channel per process.
         const val MAX_RESUBSCRIBE_ATTEMPTS = 6
         // V6-R6 (#3): cooldown so the watcher can never amplify a teardown war.
@@ -113,15 +113,15 @@ class WhisperRepository @Inject constructor(
         // V6-R5 (#4): a typing-signal row younger than this means "typing".
         const val TYPING_SIGNAL_FRESH_MS = 8_000L
     }
-    private val db get() = supabase.postgrest
-    private val store get() = supabase.storage
-    private val realtime get() = supabase.realtime
+    internal val db get() = supabase.postgrest
+    internal val store get() = supabase.storage
+    internal val realtime get() = supabase.realtime
     val myId get() = supabase.auth.currentUserOrNull()?.id ?: ""
 
     // V2-FIX (reviewwhisper.md) L-13: runCatching that never swallows coroutine
     // cancellation — plain runCatching around suspend calls converts a cancelled job
     // into Result.failure, so callers keep "working" a dead scope.
-    private inline fun <T> runCatchingCE(block: () -> T): Result<T> =
+    internal inline fun <T> runCatchingCE(block: () -> T): Result<T> =
         try {
             Result.success(block())
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -130,18 +130,18 @@ class WhisperRepository @Inject constructor(
             Result.failure(e)
         }
 
-    private val profileCache = ConcurrentHashMap<String, WhisperProfile>()
-    private val profileCacheTs = ConcurrentHashMap<String, Long>()
-    private val PROFILE_CACHE_TTL_MS = 5 * 60 * 1000L
+    internal val profileCache = ConcurrentHashMap<String, WhisperProfile>()
+    internal val profileCacheTs = ConcurrentHashMap<String, Long>()
+    internal val PROFILE_CACHE_TTL_MS = 5 * 60 * 1000L
 
     /** Cached only when fresh enough — a permanent cache made profile edits ghost until process death. */
-    private fun cachedProfile(userId: String): WhisperProfile? {
+    internal fun cachedProfile(userId: String): WhisperProfile? {
         val ts = profileCacheTs[userId] ?: return null
         if (System.currentTimeMillis() - ts > PROFILE_CACHE_TTL_MS) return null
         return profileCache[userId]
     }
 
-    private fun cacheProfile(userId: String, profile: WhisperProfile) {
+    internal fun cacheProfile(userId: String, profile: WhisperProfile) {
         profileCache[userId] = profile
         profileCacheTs[userId] = System.currentTimeMillis()
     }
@@ -160,7 +160,7 @@ class WhisperRepository @Inject constructor(
     /** Emits a partner userId when their fresh server key differs from the accepted trusted key. */
     val receiveKeyChanged: Flow<String> = _receiveKeyChanged
 
-    private fun cachePeerKey(userId: String, publicKey: String?) {
+    internal fun cachePeerKey(userId: String, publicKey: String?) {
         if (!publicKey.isNullOrBlank()) {
             peerKeys.update { it + (userId to publicKey) }
             // Signal a possible key change (MITM / reinstall) once per (user, key) pair so
@@ -173,7 +173,7 @@ class WhisperRepository @Inject constructor(
     }
 
     // Users this account has blocked, kept in memory for flow-level filtering of cached history.
-    private val blockedIds = MutableStateFlow<Set<String>>(emptySet())
+    internal val blockedIds = MutableStateFlow<Set<String>>(emptySet())
 
     /** Trusted key first (TOFU): the in-memory fresh server key is only a first-contact fallback. */
     private fun peerKeyFor(userId: String): String? =
@@ -199,29 +199,34 @@ class WhisperRepository @Inject constructor(
         get() = if (WhisperProtocolConfig.ratchetEnabled)
             WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
         else WhisperProtocolConfig.LIVE_PROTOCOL_VERSION
-    // Per-peer floor = LOWEST version that peer has ever sent us. Rule: never send a
-    // version below the recorded floor (the peer proved it can't parse those).
     // Session-scoped by design for now; persists with the session store in Phase 3.
     private val peerProtocolFloors = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    // P4a: pure decision core lives in [WireProtocol]; these members only adapt it to
+    // instance state (maps / session lookups / config). Behavior identical.
     private fun recordPeerProtocolFloor(userId: String, theirVersion: Int) {
         if (theirVersion <= 0) return
-        peerProtocolFloors.merge(userId, theirVersion) { oldV, newV -> minOf(oldV, newV) }
+        peerProtocolFloors[userId] = WireProtocol.mergePeerFloor(peerProtocolFloors[userId], theirVersion)
     }
 
     /** Version we must address `userId` with. Never above what this build can speak. */
     private fun negotiatedVersionFor(userId: String): Int =
-        maxOf(OUR_PROTOCOL_VERSION, peerProtocolFloors[userId] ?: 0)
-            .coerceAtMost(
-                if (WhisperProtocolConfig.ratchetEnabled)
-                    WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
-                else WhisperProtocolConfig.LIVE_PROTOCOL_VERSION,
-            )
+        WireProtocol.negotiatedVersion(
+            ourVersion = OUR_PROTOCOL_VERSION,
+            ourMaxSpeakable = if (WhisperProtocolConfig.ratchetEnabled)
+                WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
+            else WhisperProtocolConfig.LIVE_PROTOCOL_VERSION,
+            recordedPeerFloor = peerProtocolFloors[userId],
+        )
 
     // ───────────────────────── V6 DOUBLE RATCHET (v3 wire) ─────────────────────────
 
-    /** One establish attempt per peer per window — a dead bundle must not retry per send. */
-    private val ESTABLISH_COOLDOWN_MS = 60_000L
+    /**
+     * P7b: retry suppression after a failed v3 establish (was a 60s protocol-wide
+     * cooldown in the envelope-first era; now it only prevents hammering the bundle
+     * endpoint — delivery itself always has the envelope fallback).
+     */
+    private val V3_ESTABLISH_RETRY_SUPPRESSION_MS = WireProtocol.DEFAULT_V3_RETRY_SUPPRESSION_MS
     /** Slack when dating rows vs session creation (device clock skew tolerance). */
     private val CLOCK_SKEW_SLACK_MS = 5 * 60_000L
     private val establishAttemptAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -232,14 +237,21 @@ class WhisperRepository @Inject constructor(
      * cooldown is clear (fresh conversations bootstrap this way). Peers recorded at
      * floor 2 (envelope-only) are never re-attempted within the cooldown.
      */
-    private fun shouldUseV3(peerId: String): Boolean {
-        if (!WhisperProtocolConfig.ratchetEnabled) return false
-        if (sessionStore.peek(peerId) != null) return true
-        val floor = peerProtocolFloors[peerId]
-        if (floor != null && floor < WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION) return false
-        val last = establishAttemptAtMs[peerId] ?: 0L
-        return System.currentTimeMillis() - last > ESTABLISH_COOLDOWN_MS
-    }
+    /**
+     * P7b (user-approved): RATCHET-FIRST. Fresh contacts attempt X3DH + Double
+     * Ratchet on the very first send; only a FAILED establish (or a peer proven to
+     * be envelope-only) rides the V5 envelope ladder. The envelope fallback is and
+     * remains unconditional, so no message can ever be blocked by session problems.
+     */
+    private fun shouldUseV3(peerId: String): Boolean = WireProtocol.shouldUseV3(
+        ratchetEnabled = WhisperProtocolConfig.ratchetEnabled,
+        hasLiveSession = sessionStore.peek(peerId) != null,
+        recordedPeerFloor = peerProtocolFloors[peerId],
+        ratchetProtocolVersion = WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION,
+        lastEstablishAttemptAtMs = establishAttemptAtMs[peerId],
+        nowMs = System.currentTimeMillis(),
+        retrySuppressionMs = V3_ESTABLISH_RETRY_SUPPRESSION_MS,
+    )
 
     /** Associated data binds every ratchet frame to its routing direction. */
     private fun adBytes(senderId: String, receiverId: String): ByteArray =
@@ -351,7 +363,7 @@ class WhisperRepository @Inject constructor(
      * that column behind a trigger — so we attempt the bump and transparently retry
      * without it if PostgREST rejects the field.
      */
-    private suspend fun updateProfileRowWithFreshness(
+    internal suspend fun updateProfileRowWithFreshness(
         currentId: String,
         body: kotlinx.serialization.json.JsonObject,
     ) {
@@ -644,9 +656,14 @@ class WhisperRepository @Inject constructor(
      */
     private suspend fun maybeTeardownStaleSession(peerId: String, rowEpochMs: Long) {
         val live = sessionStore.peek(peerId) ?: return
-        val now = System.currentTimeMillis()
-        if (rowEpochMs + CLOCK_SKEW_SLACK_MS < live.createdAtMs) return // pre-session row
-        if (rowEpochMs - CLOCK_SKEW_SLACK_MS > now) return             // future-dated row
+        // P4a: pure freshness gate — see [WireProtocol.shouldTeardownStaleSession].
+        val stale = WireProtocol.shouldTeardownStaleSession(
+            rowEpochMs = rowEpochMs,
+            sessionCreatedAtMs = live.createdAtMs,
+            nowMs = System.currentTimeMillis(),
+            clockSkewSlackMs = CLOCK_SKEW_SLACK_MS,
+        )
+        if (!stale) return
         sessionStore.delete(peerId)
         establishAttemptAtMs.remove(peerId)
         ProtocolDiagnostics.increment("v3.peerReset")
@@ -729,13 +746,13 @@ class WhisperRepository @Inject constructor(
 
     // Persistent broadcast channels keyed by channel name — shared across send/react/delete
     // so we don't subscribe to a brand-new channel object for each outgoing event.
-    private val broadcastChannelCache = mutableMapOf<String, io.github.jan.supabase.realtime.RealtimeChannel>()
-    private val channelMutex = Mutex()
+    internal val broadcastChannelCache = mutableMapOf<String, io.github.jan.supabase.realtime.RealtimeChannel>()
+    internal val channelMutex = Mutex()
     // Serializes outbox flushes so concurrent worker lanes can never double-insert a row.
     private val flushMutex = Mutex()
     private val recentlyEmittedMessageIds = ConcurrentHashMap<String, Long>()
 
-    private suspend fun getOrJoinBroadcastChannel(name: String): io.github.jan.supabase.realtime.RealtimeChannel {
+    internal suspend fun getOrJoinBroadcastChannel(name: String): io.github.jan.supabase.realtime.RealtimeChannel {
         // Read the cache and channel status under the lock, but never hold the mutex across
         // subscribe(): subscribing may block, and holding it would stall every other channel op.
         val cached = channelMutex.withLock {
@@ -776,7 +793,7 @@ class WhisperRepository @Inject constructor(
         }
     }
 
-    private suspend fun removeCachedChannel(name: String, channel: io.github.jan.supabase.realtime.RealtimeChannel) {
+    internal suspend fun removeCachedChannel(name: String, channel: io.github.jan.supabase.realtime.RealtimeChannel) {
         channelMutex.withLock {
             if (broadcastChannelCache[name] === channel) broadcastChannelCache.remove(name)
         }
@@ -796,7 +813,7 @@ class WhisperRepository @Inject constructor(
      * collector. Bounded retries; the returned job must be cancelled before
      * [removeCachedChannel] during teardown (otherwise it would resurrect the channel).
      */
-    private fun watchChannelHealth(
+    internal fun watchChannelHealth(
         scope: kotlinx.coroutines.CoroutineScope,
         name: String,
         channel: io.github.jan.supabase.realtime.RealtimeChannel,
@@ -843,8 +860,27 @@ class WhisperRepository @Inject constructor(
         }
     }
 
+    /**
+     * P5 ADAPTIVE POLLING helper: quiet-period exponential backoff for the REST
+     * fallback lanes. Activity (anything that produced an emission or a state
+     * change) resets to step 0 so delivery SLAs under real traffic are identical;
+     * silence stretches the cadence to save battery/server load. Every stretch is
+     * counted in diagnostics so field regressions are provable.
+     */
+    private class QuietBackoff(private val stepsMs: List<Long>, private val tag: String) {
+        private var level = 0
+        fun delayMs(): Long = stepsMs[level]
+        fun onQuiet() {
+            if (level < stepsMs.size - 1) {
+                level++
+                ProtocolDiagnostics.increment("$tag.pollSlowTick")
+            }
+        }
+        fun onActivity() { level = 0 }
+    }
+
     /** Broadcast and Postgres changes describe the same write; emit it only once to consumers. */
-    private fun shouldEmitMessage(id: String): Boolean {
+    internal fun shouldEmitMessage(id: String): Boolean {
         if (id.isBlank()) return true
         val now = System.currentTimeMillis()
         val previous = recentlyEmittedMessageIds.putIfAbsent(id, now)
@@ -901,372 +937,7 @@ class WhisperRepository @Inject constructor(
     }
 
     // PROFILES
-    suspend fun getMyProfile(forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) error("User not authenticated")
-
-        if (!forceRefresh) {
-            cachedProfile(currentId)?.let { cached ->
-                if (cached.publicKey != null) return Result.success(cached)
-            }
-        }
-
-        val existing = db.from("profiles")
-            .select { filter { eq("id", currentId) } }
-            .decodeList<WhisperProfile>()
-            .firstOrNull()
-
-        val pubKey = crypto.getPublicKeyBase64()
-
-        val profile = if (existing == null) {
-            val user = supabase.auth.currentUserOrNull()
-            val metadata = user?.userMetadata
-            // V2-FIX (reviewwhisper.md) L-18: jsonPrimitive.contentOrNull instead of
-            // removeSurrounding("\"") — correctly handles JSON null, escapes and
-            // values that legitimately contain quote characters.
-            val metaUsername = metadata?.get("username")?.jsonPrimitive?.contentOrNull
-                ?.takeIf { it != "null" && it.isNotBlank() }
-            val metaDisplayName = metadata?.get("display_name")?.jsonPrimitive?.contentOrNull
-                ?.takeIf { it != "null" && it.isNotBlank() }
-            val initialUsername = metaUsername ?: "user_${currentId.take(8)}"
-            val insertData = WhisperProfileInsert(
-                id = currentId,
-                username = initialUsername,
-                displayName = metaDisplayName,
-                isPrivate = false,
-                publicKey = pubKey
-            )
-            db.from("profiles").insert(insertData) { defaultToNull = false }
-            WhisperProfile(id = currentId, username = initialUsername, displayName = metaDisplayName, isPrivate = false, publicKey = pubKey)
-        } else {
-            val user = supabase.auth.currentUserOrNull()
-            val metadata = user?.userMetadata
-            // V2-FIX (reviewwhisper.md) L-18: safe JSON access instead of quote stripping.
-            val metaDisplayName = metadata?.get("display_name")?.jsonPrimitive?.contentOrNull
-                ?.takeIf { it != "null" && it.isNotBlank() }
-
-            // Check if username is an ugly 64-char token string and normalize it.
-            // V2-FIX (reviewwhisper.md) L-17: only rename when the account looks untouched —
-            // require hex length >= 32 AND no display_name set, so a real personalized
-            // account can never lose its chosen username over a coincidental hex string.
-            val isUglyHexUsername = existing.username.length >= 32 &&
-                existing.username.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' } &&
-                existing.displayName.isNullOrBlank()
-
-            val cleanUsername = if (isUglyHexUsername) {
-                android.util.Log.i("WhisperRepo", "Self-healing raw-token username for ${currentId.take(8)}…: renaming to anon_${existing.username.take(6)}")
-                "anon_${existing.username.take(6)}"
-            } else null
-            
-            val needsDisplayName = existing.displayName.isNullOrBlank() && !metaDisplayName.isNullOrBlank()
-            // Self-heal only when the server has NO key (fresh row after reinstall/clear
-            // data). Reinstalling with a DIFFERENT key now flows through the key-change
-            // review flow instead of silently clobbering the server's key.
-            val needsKey = pubKey != null && existing.publicKey.isNullOrBlank()
-            // V4-FIX (field report): reinstall divergence — uninstalling wipes the
-            // AndroidKeyStore identity, but this profile row keeps the PREVIOUS
-            // install's public key. Every contact then encrypts to a key this device
-            // can no longer open ("[Encrypted message]" both directions) and the two
-            // fingerprints disagree. Whisper is single-device per account, so when no
-            // staged rotation is in flight we republish THIS device's key; contacts
-            // receive it as a fresh server update and auto-pin within the freshness
-            // window, restoring readability automatically.
-            val reinstallDivergence = pubKey != null &&
-                !existing.publicKey.isNullOrBlank() &&
-                existing.publicKey != pubKey &&
-                !crypto.hasStagedAliases()
-            ProtocolDiagnostics.log(
-                "keyHeal: divergence=$reinstallDivergence hasStaged=${crypto.hasStagedAliases()}"
-            )
-            if (reinstallDivergence || (!existing.publicKey.isNullOrBlank() && pubKey != null)) {
-                // V4-FIX diagnostics: field reports said the heal "did nothing". Log the
-                // full decision inputs so any silent blocker is visible in logcat.
-                android.util.Log.w(
-                    "WhisperRepo",
-                    "KeyHeal check: serverKey=${existing.publicKey?.take(12)}… localKey=${pubKey?.take(12)}… " +
-                        "equal=${existing.publicKey == pubKey} hasStaged=${crypto.hasStagedAliases()} " +
-                        "-> divergence=$reinstallDivergence"
-                )
-            }
-
-            if (needsKey || reinstallDivergence || cleanUsername != null || needsDisplayName) {
-                // Build the body without nulls: a null field would be serialized as
-                // "field": null and NULL the server column (e.g. username) on self-heal.
-                val body = buildJsonObject {
-                    if (needsKey || reinstallDivergence) put("public_key", pubKey!!)
-                    cleanUsername?.let { put("username", it) }
-                    if (needsDisplayName) put("display_name", metaDisplayName!!)
-                    // V5.1: republishing a key MUST look fresh to contacts, or they
-                    // classify CHANGED and the manual verify dance returns.
-                    if (needsKey || reinstallDivergence) {
-                        put("updated_at", java.time.Instant.now().toString())
-                    }
-                }
-                // V6-R6 (#4): a FAILED divergence-republish used to vanish inside the
-                // outer runCatching — server kept the stale key, every contact sealed
-                // to it, and the reinstall dance returned with zero diagnostic trail.
-                runCatching { updateProfileRowWithFreshness(currentId, body) }
-                    .onFailure { healError ->
-                        ProtocolDiagnostics.increment("heal.republishFailed")
-                        ProtocolDiagnostics.log("heal: divergence-republish FAILED: ${healError.message}")
-                        throw healError
-                    }
-                existing.copy(
-                    publicKey = if (needsKey || reinstallDivergence) pubKey else existing.publicKey,
-                    username = cleanUsername ?: existing.username,
-                    displayName = if (needsDisplayName) metaDisplayName else existing.displayName
-                )
-            } else existing
-        }
-        cacheProfile(currentId, profile)
-        profile
-    }
-
-    suspend fun getProfile(userId: String, forceRefresh: Boolean = false): Result<WhisperProfile> = runCatching {
-        if (!forceRefresh) {
-            cachedProfile(userId)?.let { cached ->
-                if (!cached.publicKey.isNullOrBlank() || userId == myId) {
-                    cachePeerKey(userId, cached.publicKey)
-                    return Result.success(cached)
-                }
-            }
-        }
-        val p = db.from("profiles")
-            .select { filter { eq("id", userId) } }
-            .decodeSingle<WhisperProfile>()
-        cacheProfile(userId, p)
-        cachePeerKey(userId, p.publicKey)
-        p
-    }
-
-    suspend fun searchProfiles(query: String): Result<List<WhisperProfile>> = runCatching {
-        val q = query.trim()
-        // Gate trivial queries: a single-char ilike '%x%' scan per debounce wastes DB
-        // cycles and produces noisy result churn while typing.
-        if (q.length < 2) return@runCatching emptyList()
-        // M-13 FIX (reviewwhisper.md): escape the backslash FIRST — a literal "\" in the
-        // query would otherwise neutralize the %/_ escapes that follow it.
-        val escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        db.from("profiles")
-            .select {
-                filter {
-                    or {
-                        ilike("username", "%$escaped%")
-                        ilike("display_name", "%$escaped%")
-                    }
-                    neq("id", myId)
-                    eq("hide_from_discover", false)
-                    eq("is_private", false)
-                }
-                limit(30)
-            }
-            .decodeList()
-    }
-
-    suspend fun checkUsernameAvailable(username: String): Result<Boolean> = runCatching {
-        val results = db.from("profiles")
-            .select { filter { eq("username", username.trim().lowercase()) } }
-            .decodeList<WhisperProfile>()
-        results.isEmpty()
-    }
-
-    suspend fun updateProfile(update: WhisperProfileUpdate): Result<Unit> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) error("User not authenticated")
-        val pubKey = crypto.getPublicKeyBase64()
-        // Build the body explicitly so unset fields (especially public_key) are OMITTED:
-        // supabase-kt serializes nulls by default, and "public_key": null would NULL the
-        // server's column. The local key is only pushed when explicitly requested or when
-        // the server row has none to begin with — never overwritten with a mismatch.
-        val body = buildJsonObject {
-            update.username?.let { put("username", it) }
-            // Empty strings must reach the server to clear a field; null means "don't touch".
-            if (update.displayName != null) put("display_name", update.displayName)
-            if (update.bio != null) put("bio", update.bio)
-            if (update.avatarUrl != null) put("avatar_url", update.avatarUrl)
-            update.isPrivate?.let { put("is_private", it) }
-            update.isHiddenFromDiscover?.let { put("hide_from_discover", it) }
-            update.lastSeenAt?.let { put("last_seen_at", it) }
-            when {
-                update.publicKey != null -> put("public_key", update.publicKey!!)
-                pubKey != null -> {
-                    // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-                    val serverKeyResult = runCatchingCE {
-                        db.from("profiles").select { filter { eq("id", currentId) } }
-                            .decodeSingleOrNull<WhisperProfile>()?.publicKey
-                    }
-                    if (serverKeyResult.isSuccess && serverKeyResult.getOrNull().isNullOrBlank()) {
-                        put("public_key", pubKey)
-                        // V5.1: a first publish is also a key event — keep it fresh.
-                        put("updated_at", java.time.Instant.now().toString())
-                    }
-                }
-            }
-        }
-        updateProfileRowWithFreshness(currentId, body)
-        profileCache.remove(currentId); profileCacheTs.remove(currentId)
-    }
-
-    suspend fun updateLastSeen(): Result<Unit> = updateLastSeenInternal(backdateMinutes = 0)
-
-    /**
-     * V6-R6: instant OFFLINE — backdates last_seen beyond the 120s presence window so
-     * partners see "offline / online Xm ago" the moment the app leaves foreground,
-     * without waiting for the window to age out. No schema change needed.
-     */
-    suspend fun goOfflineInstantly(): Result<Unit> = updateLastSeenInternal(backdateMinutes = 3)
-
-    private suspend fun updateLastSeenInternal(backdateMinutes: Long): Result<Unit> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) return@runCatching
-        val now = java.time.OffsetDateTime.now().minusMinutes(backdateMinutes).toString()
-        val body = buildJsonObject { put("last_seen_at", now) }
-        db.from("profiles").update(body) {
-            filter { eq("id", currentId) }
-        }
-    }
-
-    suspend fun uploadAvatar(imageBytes: ByteArray, mimeType: String): Result<String> = runCatching {
-        // V6-R7 AVATARS: Supabase storage → ImgBB (encrypted). Storage bloat was the
-        // driver; posture stays ciphertext-only on third-party hosts via the owner-key
-        // derived codec. mimeType param kept for call-site compatibility — output is
-        // always a ≤256px JPEG regardless of input format.
-        val ownPub = crypto.getPublicKeyBase64()
-            ?: error("Encryption unavailable: device identity key not ready.")
-        val jpeg = prepareAvatarBytes(imageBytes)
-            ?: error("Could not process this image as an avatar.")
-        val sealed = WhisperAvatarCodec.seal(jpeg, ownPub)
-
-        // V6-R7b FIX (double-wrap): the host client already applies the WZ1/PNG
-        // transport wrap. Pre-wrapping here produced PNG(WZ1(PNG(WZ1(sealed))))
-        // on ImgBB; the loader unwraps only once and hands PNG bytes to the
-        // codec which then fails closed. Pass the sealed payload and let the
-        // host wrap exactly once (same layering as chat attachments).
-        val (url, attachmentId) = encryptedImageHost.upload(
-            cipherBytes = sealed,
-            name = "avatar_${myId.take(8)}_${System.currentTimeMillis()}",
-            expirationSeconds = null,
-        ).getOrThrow()
-
-        // Deletion handle rides in a fragment (never sent to any server).
-        val finalUrl = attachmentId?.let { "$url#att=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: url
-
-        // V6-R7c FIX (not-applied): prime the avatar loader so the new picture renders
-        // instantly from cache without waiting for a network download/decrypt round-trip.
-        // Clean key is the bare ImgBB URL without fragment/bust query.
-        runCatching {
-            val cleanKey = finalUrl.substringBefore("#").substringBefore("?")
-            avatarLoader.prime(cleanKey, sealed)
-        }
-
-        // V6-R7d FIX (not-applied after reinstall/rotation): the sealing key is
-        // derived from the owner's public key. If the device's current key
-        // (ownPub) differs from the key stored in the profile row, sealing with
-        // ownPub but leaving the row's public_key stale makes the avatar
-        // undecryptable for everyone (including self on next fetch which uses the
-        // row's key). Publish the current key atomically with the avatar URL
-        // when they differ so viewers derive the same key that was used to seal.
-        val serverPub = runCatching {
-            db.from("profiles").select { filter { eq("id", myId) } }
-                .decodeSingleOrNull<WhisperProfile>()?.publicKey
-        }.getOrNull()
-        // Publish the current key whenever the row's key is missing or stale so
-        // the sealing key and the row's key stay in sync; otherwise keep the
-        // avatar-only update to avoid unnecessary key churn.
-        val avatarUpdate = if (serverPub.isNullOrBlank() || serverPub != ownPub) {
-            WhisperProfileUpdate(avatarUrl = finalUrl, publicKey = ownPub)
-        } else {
-            WhisperProfileUpdate(avatarUrl = finalUrl)
-        }
-        updateProfile(avatarUpdate).getOrThrow()
-        profileCache.remove(myId); profileCacheTs.remove(myId)
-        finalUrl
-    }
-
-    /** Center-crop square + downscale to [AVATAR_SIDE_PX] JPEG for avatar uploads. */
-    private suspend fun prepareAvatarBytes(raw: ByteArray): ByteArray? =
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            runCatching {
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
-                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
-                val side = AVATAR_SIDE_PX
-                var sample = 1
-                while (bounds.outWidth / (sample * 2) >= side && bounds.outHeight / (sample * 2) >= side) sample *= 2
-                val decodeOpts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-                val src = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size, decodeOpts)
-                    ?: return@runCatching null
-                val crop = centerCropSquare(src, side)
-                val out = java.io.ByteArrayOutputStream().also { it.buffered() }
-                crop.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
-                if (crop !== src) crop.recycle()
-                src.recycle()
-                out.toByteArray()
-            }.getOrNull()
-        }
-
-    private fun centerCropSquare(src: android.graphics.Bitmap, sidePx: Int): android.graphics.Bitmap {
-        val w = src.width; val h = src.height
-        val edge = minOf(w, h)
-        val x = (w - edge) / 2
-        val y = (h - edge) / 2
-        val cropped = android.graphics.Bitmap.createBitmap(src, x, y, edge, edge)
-        return if (edge > sidePx) {
-            android.graphics.Bitmap.createScaledBitmap(cropped, sidePx, sidePx, true)
-        } else cropped
-    }
-
-    suspend fun deleteAvatar(): Result<Unit> = runCatchingCE {
-        // V2-FIX (reviewwhisper.md) R-M7: honor the delete-before-null ordering rationale —
-        // only null avatar_url after the blob deletion succeeded OR failed because the
-        // object is already gone (404/400 treated as success). On a genuine network
-        // failure the reference is kept so a retry remains possible.
-        val current = db.from("profiles").select { filter { eq("id", myId) } }
-            .decodeSingleOrNull<WhisperProfile>()
-        current?.avatarUrl?.let { url ->
-            // V6-R7 AVATARS: ImgBB-hosted avatars (encrypted, fragment carries the
-            // deletion handle) route through the shared host client; legacy Supabase
-            // Storage URLs keep the original path-parsing flow.
-            if (url.contains("i.ibb.co")) {
-                val cleanUrl = url.substringBefore("#att=")
-                val attId = url.substringAfter("#att=", "").takeIf { it.isNotBlank() }
-                    ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
-                val blobResult = runCatchingCE { encryptedImageHost.delete(cleanUrl, attId) }
-                blobResult.exceptionOrNull()?.let { e ->
-                    android.util.Log.w("WhisperRepo", "deleteAvatar: imgbb delete failed (orphan tolerated): ${e.message}")
-                }
-            } else {
-            // Robust object-path extraction from the public URL:
-            //   <origin>/storage/v1/object/public/whisper-avatars/<userId>/avatar.ext?...
-            // Parse via URL segments instead of substringAfter so encoded chars,
-            // repeated substrings, or query strings can never corrupt the path.
-            val path = runCatching {
-                val parsed = java.net.URL(url)
-                val segments = parsed.path.split("/").filter { it.isNotBlank() }
-                val bucketIdx = segments.indexOf("whisper-avatars")
-                if (bucketIdx >= 0 && bucketIdx < segments.lastIndex) {
-                    segments.drop(bucketIdx + 1).joinToString("/") { java.net.URLDecoder.decode(it, "UTF-8") }
-                } else ""
-            }.getOrDefault("")
-            if (path.isNotBlank()) {
-                val blobResult = runCatchingCE { store.from("whisper-avatars").delete(path) }
-                blobResult.exceptionOrNull()?.let { e ->
-                    val restStatus = (e as? io.github.jan.supabase.exceptions.RestException)?.statusCode
-                    val msg = e.message.orEmpty().lowercase()
-                    val objectMissing = restStatus == 404 || restStatus == 400 ||
-                        msg.contains("404") || msg.contains("not found")
-                    if (!objectMissing) throw e
-                    android.util.Log.w("WhisperRepo", "deleteAvatar: blob already gone ($path); clearing reference anyway")
-                }
-            }
-            }
-        }
-        db.from("profiles").update(mapOf("avatar_url" to null as String?)) {
-            filter { eq("id", myId) }
-        }
-        profileCache.remove(myId); profileCacheTs.remove(myId)
-    }
-
+    // PROFILES
     // ─────────────────────────────────────────────────────────────
     // MESSAGES & REALTIME CHAT
     // ─────────────────────────────────────────────────────────────
@@ -1438,6 +1109,10 @@ class WhisperRepository @Inject constructor(
         check(negotiatedVersion <= OUR_PROTOCOL_VERSION) {
             "Peer requires wire version $negotiatedVersion which this client cannot speak yet."
         }
+        // P0 TELEMETRY: fleet wire-version distribution — the data the Phase-7b
+        // ratchet-first / v3-mandatory decisions are gated on.
+        ProtocolDiagnostics.increment("send.negotiated.v$negotiatedVersion")
+        ProtocolDiagnostics.increment("send.negotiated.total")
         // V6 (planwhisper.md §3.2): Double Ratchet first; ANY failure falls through to
         // the proven V5 envelope — a handshake problem can never block a message.
         var encryptedPair: Pair<String, String>? = null
@@ -2231,11 +1906,15 @@ class WhisperRepository @Inject constructor(
         val flowStartMs = System.currentTimeMillis()
         var seeded = false
         var lastStatusSubscribed = false
+        // P5: quiet backoff — 3s under activity (identical SLA to before), 6s/12s when
+        // consecutive passes find nothing new.
+        val pollBackoff = QuietBackoff(listOf(3_000L, 6_000L, 12_000L), tag = "chat")
         val pollJob = launch {
             while (isActive) {
                 // V6-R7: 3s cadence + 5s activity window — worst-case delivery gap for
                 // ANY lane failure drops to ~3s while a healthy socket still costs zero.
-                kotlinx.coroutines.delay(3_000)
+                // P5: idle stretches lengthen the cadence; any observed change resets it.
+                kotlinx.coroutines.delay(pollBackoff.delayMs())
                 try {
                     val nowSubscribed =
                         channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
@@ -2250,6 +1929,7 @@ class WhisperRepository @Inject constructor(
                         continue
                     }
                     ProtocolDiagnostics.increment("rt.pollTick")
+                    var sawChange = false
                     val rows = retryWithBackoff(times = 2, initialDelayMs = 200, maxDelayMs = 400) {
                         db.from("messages").select {
                             filter {
@@ -2274,6 +1954,7 @@ class WhisperRepository @Inject constructor(
                         val stateKey = msg.content to msg.isRead
                         val prev = seenState.put(msg.id, stateKey)
                         if (prev == stateKey && seeded) continue // unchanged, already emitted
+                        sawChange = true
                         if (!seeded && prev == null) {
                             // Seed pass: emit ONLY rows that arrived after the flow
                             // started; pre-existing history was already rendered.
@@ -2303,10 +1984,13 @@ class WhisperRepository @Inject constructor(
                                 "${s.emoji}:${s.userIds.sorted().joinToString(",")}"
                             }
                             if (reactionSig.put(mid, sig) != sig && summaries.isNotEmpty()) {
+                                sawChange = true
                                 trySend(WhisperChatEvent.ReactionSnapshotEvent(mid, summaries))
                             }
                         }
                     }
+                    // P5: feed the adaptive cadence.
+                    if (sawChange) pollBackoff.onActivity() else pollBackoff.onQuiet()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -2412,9 +2096,11 @@ class WhisperRepository @Inject constructor(
         var lastInboxStatusSubscribed = false
         val inboxSeen = java.util.concurrent.ConcurrentHashMap<String, Boolean>() // id -> isRead
         var inboxSeeded = false
+        // P5: quiet backoff around the original 8s cadence.
+        val inboxBackoff = QuietBackoff(listOf(8_000L, 16_000L, 32_000L), tag = "inbox")
         val inboxPollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(8_000)
+                kotlinx.coroutines.delay(inboxBackoff.delayMs())
                 try {
                     val nowSubscribed =
                         channel.status.value == io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
@@ -2439,6 +2125,8 @@ class WhisperRepository @Inject constructor(
                         val prev = inboxSeen.put(msg.id, msg.isRead)
                         if (!inboxSeeded && prev == null) continue // silent seed
                         if (prev != null && prev == msg.isRead) continue
+                        // P5: a read-flip or brand-new row is activity for the cadence.
+                        inboxBackoff.onActivity()
                         if (shouldEmitMessage(msg.id)) trySend(msg)
                     }
                     inboxSeeded = true
@@ -2611,7 +2299,7 @@ class WhisperRepository @Inject constructor(
      * N+1 fan of per-user requests. Keeps the same in-memory side effects as getProfile
      * (profile cache + peer key cache) so decryption behavior is unchanged.
      */
-    private suspend fun batchProfilesById(userIds: List<String>): Pair<Set<String>, Map<String, WhisperProfile>> {
+    internal suspend fun batchProfilesById(userIds: List<String>): Pair<Set<String>, Map<String, WhisperProfile>> {
         if (userIds.isEmpty()) return emptySet<String>() to emptyMap()
         val blockedPartnerIds = runCatching {
             db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
@@ -2757,416 +2445,6 @@ class WhisperRepository @Inject constructor(
         }
     }
 
-    // FRIENDS
-    suspend fun getFriendships(): Result<List<WhisperFriendship>> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) return Result.success(emptyList())
-        db.from("friends").select {
-            filter { or { eq("user_a", currentId); eq("user_b", currentId) } }
-        }.decodeList()
-    }
-
-    suspend fun getFriends(): Result<List<WhisperProfile>> = runCatching {
-        val friendships = getFriendships().getOrThrow().filter { it.status == "accepted" }
-        // Batch profile resolution into one query instead of N+1 per friendship.
-        val partnerIds = friendships.map { it.otherUserId(myId) }.distinct()
-        if (partnerIds.isEmpty()) return@runCatching emptyList()
-        val (_, profilesById) = batchProfilesById(partnerIds)
-        friendships.mapNotNull { profilesById[it.otherUserId(myId)] }
-    }
-
-    suspend fun getPendingIncoming(): Result<List<WhisperFriendship>> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) return Result.success(emptyList())
-        db.from("friends").select { filter { eq("user_b", currentId); eq("status", "pending") } }.decodeList()
-    }
-
-    suspend fun getPendingIncomingWithProfiles(): Result<List<WhisperFriendRequestItem>> = runCatching {
-        val pending = getPendingIncoming().getOrThrow()
-        // Batch profile resolution into one query instead of N+1 per request.
-        val senderIds = pending.map { it.userA }.distinct()
-        if (senderIds.isEmpty()) return@runCatching emptyList()
-        val (_, profilesById) = batchProfilesById(senderIds)
-        pending.map { f ->
-            WhisperFriendRequestItem(friendship = f, senderProfile = profilesById[f.userA])
-        }
-    }
-
-    suspend fun getPendingOutgoing(): Result<List<WhisperFriendship>> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) return Result.success(emptyList())
-        db.from("friends").select { filter { eq("user_a", currentId); eq("status", "pending") } }.decodeList()
-    }
-
-    suspend fun sendFriendRequest(targetUserId: String): Result<Unit> = runCatching {
-        if (targetUserId == myId) return@runCatching
-        if (isUserBlockedByMe(targetUserId)) error("You have blocked this user. Unblock to send a friend request.")
-        if (isUserBlockedByOther(targetUserId)) error("You can't send a friend request to a user who blocked you.")
-        val existingPair = getFriendshipStatus(targetUserId).getOrNull()
-        val (status, record) = existingPair ?: Pair(FriendStatus.NONE, null)
-
-        if (status == FriendStatus.ACCEPTED) return@runCatching
-        if (record != null) {
-            if (record.userA == targetUserId && record.userB == myId) {
-                acceptFriendRequest(record.id).getOrThrow()
-                return@runCatching
-            }
-            if (record.userA == myId && record.userB == targetUserId) return@runCatching
-        }
-        // V2-FIX (reviewwhisper.md) R-M1: the "friend_update"/"incoming_notification"
-        // broadcast emissions were removed — they were consumed nowhere (subscribe flows
-        // use authenticated Postgres Changes only) and leaked request metadata to anyone
-        // who could guess the channel name. DB state remains the single source of truth.
-        db.from("friends").insert(WhisperFriendshipInsert(userA = myId, userB = targetUserId))
-    }
-
-    suspend fun acceptFriendRequest(friendshipId: String): Result<Unit> = runCatching {
-        val existing = db.from("friends").select { filter { eq("id", friendshipId) } }
-            .decodeSingleOrNull<WhisperFriendship>() ?: error("This friend request no longer exists.")
-        // Only the recipient of a pending request may accept it.
-        if (existing.userB != myId) error("You can only accept friend requests sent to you.")
-        if (existing.status != "pending") return@runCatching
-
-        db.from("friends").update({ set("status", "accepted") }) { filter { eq("id", friendshipId) } }
-
-        // L-1 FIX: removed the dead `if (existing != null)` wrapper — existing is
-        // guaranteed non-null by the decodeSingleOrNull ?: error() above.
-        val uA = existing.userA
-        val uB = existing.userB
-        val otherId = if (uA == myId) uB else uA
-
-        // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-        runCatchingCE {
-            val friendsChannel = getOrJoinBroadcastChannel("whisper-friends-all-$otherId")
-            friendsChannel.broadcast(
-                event = "friend_update",
-                payload = BroadcastPayload.Json(
-                    buildJsonObject {
-                        put("id", friendshipId)
-                        put("user_a", uA)
-                        put("user_b", uB)
-                        put("status", "accepted")
-                    }
-                )
-            )
-        }
-
-        runCatching {
-            db.from("friends").delete {
-                filter {
-                    neq("id", friendshipId)
-                    or {
-                        and { eq("user_a", uA); eq("user_b", uB) }
-                        and { eq("user_a", uB); eq("user_b", uA) }
-                    }
-                }
-            }
-        }
-    }
-
-    suspend fun deleteFriendship(friendshipId: String): Result<Unit> = runCatching {
-        val existing = db.from("friends").select { filter { eq("id", friendshipId) } }
-            .decodeSingleOrNull<WhisperFriendship>() ?: error("This friendship no longer exists.")
-        if (existing.userA != myId && existing.userB != myId) {
-            error("This friendship is not yours to remove.")
-        }
-        db.from("friends").delete { filter { eq("id", friendshipId) } }
-        // L-1 FIX: dead null-check removed (same as acceptFriendRequest).
-        run {
-            val otherId = if (existing.userA == myId) existing.userB else existing.userA
-            // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-            runCatchingCE {
-                val friendsChannel = getOrJoinBroadcastChannel("whisper-friends-all-$otherId")
-                friendsChannel.broadcast(
-                    event = "friend_update",
-                    payload = BroadcastPayload.Json(
-                        buildJsonObject {
-                            put("id", friendshipId)
-                            put("user_a", existing.userA)
-                            put("user_b", existing.userB)
-                            put("status", "deleted")
-                        }
-                    )
-                )
-            }
-        }
-    }
-
-    suspend fun getFriendshipStatus(otherUserId: String): Result<Pair<FriendStatus, WhisperFriendship?>> = runCatching {
-        val currentId = myId
-        if (currentId.isBlank()) return Result.success(Pair(FriendStatus.NONE, null))
-        val records = db.from("friends").select {
-            filter {
-                or {
-                    and { eq("user_a", currentId); eq("user_b", otherUserId) }
-                    and { eq("user_a", otherUserId); eq("user_b", currentId) }
-                }
-            }
-        }.decodeList<WhisperFriendship>()
-
-        val accepted = records.firstOrNull { it.status == "accepted" }
-        if (accepted != null) return@runCatching Pair(FriendStatus.ACCEPTED, accepted)
-
-        val pending = records.firstOrNull { it.status == "pending" }
-        if (pending != null) return@runCatching Pair(FriendStatus.PENDING, pending)
-
-        Pair(records.firstOrNull()?.friendStatus() ?: FriendStatus.NONE, records.firstOrNull())
-    }
-
-    fun subscribeToFriendUpdates(): Flow<WhisperFriendship> = callbackFlow {
-        val currentId = myId
-        if (currentId.isBlank()) {
-            close()
-            return@callbackFlow
-        }
-        val channelName = "whisper-friends-all-$currentId"
-        channelMutex.withLock {
-            broadcastChannelCache[channelName]?.let {
-                // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-                ProtocolDiagnostics.log("rt.teardown[$channelName]: pre-subscribe-clean(friends)")
-                runCatchingCE { realtime.removeChannel(it) }
-                broadcastChannelCache.remove(channelName)
-            }
-        }
-        val channel = supabase.channel(channelName)
-
-        // H-8 FIX (reviewwhisper.md): realtime BROADCASTS on this channel are no longer
-        // consumed. Broadcasts cannot prove sender identity — any user who knows the
-        // channel name could fabricate friendship state (fake requests/acceptances) and
-        // spoof the UI until a Postgres event corrected it. Postgres Changes below ARE
-        // authenticated (RLS-filtered, publication-wired with REPLICA IDENTITY FULL)
-        // and are the single authoritative source for friendship updates.
-
-        // Postgres Change flow fallback
-        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") { table = "friends" }
-        val pJob = launch {
-            changes.collect { action ->
-                try {
-                    val record = when (action) {
-                        is PostgresAction.Insert -> action.decodeRecord<WhisperFriendship>()
-                        is PostgresAction.Update -> action.decodeRecord<WhisperFriendship>()
-                        else -> null
-                    }
-                    if (record != null && (record.userA == currentId || record.userB == currentId)) {
-                        trySend(record)
-                    }
-                } catch (_: Exception) { }
-            }
-        }
-        channel.subscribe()
-        channelMutex.withLock {
-            broadcastChannelCache[channelName] = channel
-        }
-        // V6-R3: auto-heal dropped realtime channels (friend updates).
-        val healthJob = watchChannelHealth(this, channelName, channel)
-        awaitClose {
-            healthJob.cancel()
-            pJob.cancel()
-            // H-1 FIX: see subscribeToChat — cleanup must survive collection cancellation.
-            appScope.launch {
-                removeCachedChannel(channelName, channel)
-            }
-        }
-    }
-
-
-    private val blockedByMeCache = Collections.synchronizedSet(mutableSetOf<String>())
-
-    // H-6 FIX (reviewwhisper.md): full blocker-set cache with TTL. Previously every
-    // incoming realtime message event for a NON-blocked sender triggered a
-    // whisper_blocks REST round-trip (negatives were never cached).
-    // V2-FIX (reviewwhisper.md) L-14: @Volatile — the timestamp is written from inside a
-    // mutex and read lock-free; without it readers could see a stale value indefinitely.
-    @Volatile private var blockedCacheLoadedAtMs = 0L
-    private val BLOCK_CACHE_TTL_MS = 5 * 60 * 1000L
-    // V2-FIX (reviewwhisper.md) L-14: single-flight guard so concurrent callers on a cold
-    // cache fire ONE network reload instead of N redundant ones.
-    private val blockCacheLoadMutex = Mutex()
-    // H-6: negative-result TTL for isUserBlockedByOther (the other party's blocks can
-    // only be probed per-pair under RLS, so a short-TTL memo is the best available).
-    private val blockedByOtherCheckedAtMs = ConcurrentHashMap<String, Long>()
-    private val BLOCKED_BY_OTHER_TTL_MS = 30_000L
-
-    /** Reloads the complete blocker set at most once per [BLOCK_CACHE_TTL_MS]. */
-    private suspend fun ensureBlockCachesFresh(force: Boolean = false) {
-        if (!force && System.currentTimeMillis() - blockedCacheLoadedAtMs < BLOCK_CACHE_TTL_MS) return
-        blockCacheLoadMutex.withLock {
-            // Re-check under the lock: another caller may have refreshed while we waited.
-            if (!force && System.currentTimeMillis() - blockedCacheLoadedAtMs < BLOCK_CACHE_TTL_MS) return
-            // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-            runCatchingCE {
-                db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
-                    .decodeList<WhisperBlock>().map { it.blockedId }.toSet()
-            }.onSuccess { currentlyBlocked ->
-                blockedIds.value = currentlyBlocked
-                blockedByMeCache.clear()
-                blockedByMeCache.addAll(currentlyBlocked)
-                blockedCacheLoadedAtMs = System.currentTimeMillis()
-            }
-        }
-    }
-
-    private suspend fun isUserBlockedByMe(userId: String): Boolean {
-        ensureBlockCachesFresh()
-        return blockedIds.value.contains(userId) || blockedByMeCache.contains(userId)
-    }
-
-    private suspend fun isUserBlockedByOther(userId: String): Boolean {
-        // H-6: short-TTL memo for the negative result — this check runs per send and
-        // per incoming event, and a "not blocked" answer stays valid briefly.
-        blockedByOtherCheckedAtMs[userId]?.let { checkedAt ->
-            if (System.currentTimeMillis() - checkedAt < BLOCKED_BY_OTHER_TTL_MS) return false
-        }
-        // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-        val isBlocked = runCatchingCE {
-            val blocks = db.from("whisper_blocks").select {
-                filter {
-                    eq("blocker_id", userId)
-                    eq("blocked_id", myId)
-                }
-            }.decodeList<WhisperBlock>()
-            blocks.isNotEmpty()
-        }.getOrDefault(false)
-        if (isBlocked) {
-            blockedByOtherCheckedAtMs.remove(userId)
-        } else {
-            blockedByOtherCheckedAtMs[userId] = System.currentTimeMillis()
-        }
-        return isBlocked
-    }
-
-    /** Re-reads the block table for this account so in-memory caches never drift from server truth. */
-    private suspend fun refreshBlockCachesFor(targetUserId: String) {
-        // H-6: force = bypass TTL, this is called right after an optimistic mutation.
-        // V2-FIX (reviewwhisper.md) L-13: CE-safe runCatching around suspend call.
-        runCatchingCE {
-            db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
-                .decodeList<WhisperBlock>().map { it.blockedId }.toSet()
-        }.onSuccess { currentlyBlocked ->
-            blockedIds.value = currentlyBlocked
-            blockedByMeCache.clear()
-            if (targetUserId in currentlyBlocked) blockedByMeCache.add(targetUserId) else blockedByMeCache.remove(targetUserId)
-            blockedCacheLoadedAtMs = System.currentTimeMillis()
-            blockedByOtherCheckedAtMs.remove(targetUserId)
-        }.onFailure {
-            // Keep existing cache on network failure; optimistic state already applied by caller.
-        }
-    }
-
-    suspend fun getBlockStatus(otherUserId: String): Pair<Boolean, Boolean> {
-        val byMe = isUserBlockedByMe(otherUserId)
-        val byOther = isUserBlockedByOther(otherUserId)
-        return Pair(byMe, byOther)
-    }
-
-    suspend fun blockUser(targetUserId: String): Result<Unit> = runCatching {
-        require(targetUserId.isNotBlank() && targetUserId != myId) { "Choose another user to block." }
-        db.from("whisper_blocks").insert(WhisperBlockInsert(blockerId = myId, blockedId = targetUserId))
-        blockedIds.update { it + targetUserId }
-        blockedByMeCache.add(targetUserId)
-        refreshBlockCachesFor(targetUserId)
-    }
-
-    suspend fun unblockUser(targetUserId: String): Result<Unit> = runCatching {
-        db.from("whisper_blocks").delete { filter { eq("blocker_id", myId); eq("blocked_id", targetUserId) } }
-        blockedIds.update { it - targetUserId }
-        blockedByMeCache.remove(targetUserId)
-        refreshBlockCachesFor(targetUserId)
-    }
-
-    suspend fun isBlockedByMe(otherUserId: String): Boolean = isUserBlockedByMe(otherUserId)
-    suspend fun isBlockedByOther(otherUserId: String): Boolean = isUserBlockedByOther(otherUserId)
-
-    suspend fun getFriendsOfFriends(): Result<List<WhisperProfile>> = runCatching {
-        val myFriendIds = getFriendships().getOrThrow()
-            .filter { it.status == "accepted" }
-            .map { it.otherUserId(myId) }
-            .toSet()
-
-        if (myFriendIds.isEmpty()) return Result.success(emptyList())
-
-        // Fetch accepted friendships involving our friends
-        val candidateFriendships = db.from("friends").select {
-            filter { 
-                eq("status", "accepted") 
-                or {
-                    isIn("user_a", myFriendIds.toList())
-                    isIn("user_b", myFriendIds.toList())
-                }
-            }
-            limit(1_000)
-        }.decodeList<WhisperFriendship>()
-
-        val fofIds = mutableSetOf<String>()
-        for (f in candidateFriendships) {
-            val a = f.userA
-            val b = f.userB
-            if (a in myFriendIds && b !in myFriendIds && b != myId) fofIds.add(b)
-            if (b in myFriendIds && a !in myFriendIds && a != myId) fofIds.add(a)
-        }
-
-        if (fofIds.isEmpty()) return Result.success(emptyList())
-
-        // Resolve profiles in ONE query instead of N+1 per-id getProfile calls.
-        val (blockedIds, profilesById) = batchProfilesById(fofIds.take(20))
-        val recommended = profilesById.values
-            .filter { !it.isPrivate && !it.isHiddenFromDiscover && it.id !in blockedIds }
-            .take(15)
-        recommended
-    }
-
-    /**
-     * Fetches paginated discoverable profiles via the [whisper_discover_profiles] RPC.
-     *
-     * The RPC enforces:
-     *   • 60 pages/hour per calling user (returns P0002 "rate_limited" on breach).
-     *   • Server-side filtering of private / hide_from_discover / own profile.
-     *   • Server-side exclusion of profiles that have blocked the caller.
-     *
-     * Friends are filtered out client-side to avoid a cross-join on the server.
-     */
-    suspend fun getDiscoverProfiles(page: Int, pageSize: Int = 20): Result<List<WhisperProfile>> = runCatching {
-        val myFriendIds = getFriendships().getOrThrow()
-            .filter { it.status == "accepted" }
-            .map { it.otherUserId(myId) }
-            .toSet()
-
-        val rpcResult = runCatchingCE {
-            db.rpc(
-                "whisper_discover_profiles",
-                buildJsonObject {
-                    put("p_page", page)
-                    put("p_page_size", pageSize.coerceIn(1, 30))
-                }
-            )
-                .decodeList<WhisperProfile>()
-                .filter { it.id !in myFriendIds }
-        }
-        // V6-R7: the RPC rate-limits (60 pages/hour, P0002) and can fail outright —
-        // when it does, Discover used to go permanently empty ("only Whisper Someone
-        // works"). Fall back to a direct directory query enforcing the SAME privacy
-        // contract client-side.
-        val rpcList = rpcResult.getOrElse {
-            ProtocolDiagnostics.increment("discover.rpcFallback")
-            if (page != 0) return Result.success(emptyList()) // pagination only via RPC
-            val blocked = runCatchingCE {
-                db.from("whisper_blocks").select { filter { eq("blocker_id", myId) } }
-                    .decodeList<WhisperBlock>().map { it.blockedId }.toSet()
-            }.getOrDefault(emptySet())
-            db.from("profiles").select {
-                filter {
-                    neq("id", myId)
-                    eq("hide_from_discover", false)
-                    eq("is_private", false)
-                }
-                order("last_seen_at", Order.DESCENDING, nullsFirst = false)
-                limit(pageSize.toLong())
-            }.decodeList<WhisperProfile>()
-                .filter { it.id !in myFriendIds && it.id !in blocked && !it.isHiddenFromDiscover && !it.isPrivate }
-                .take(pageSize)
-        }
-        rpcList
-    }
 
     // V2-FIX (reviewwhisper.md) R-M1: typing/presence BROADCAST emissions removed — they
     // were consumed nowhere meaningful and leaked interaction metadata (who types to whom,
@@ -3272,18 +2550,34 @@ class WhisperRepository @Inject constructor(
         // heal them identically or typing indicators silently vanish.
         val healthJob = watchChannelHealth(this, name, channel)
 
-        // V6-R5 (#4): PRIMARY typing lane — poll the DB signal every 3s. Deterministic
-        // and socket-independent; the broadcast collector below stays as a fast-path.
+        // V6-R5 (#4): PRIMARY typing lane — poll the DB signal. Deterministic and
+        // socket-independent; the broadcast collector below stays as a fast-path.
+        //
+        // P5 ADAPTIVE CADENCE: fast (1.5s) while the socket lane is healthy AND
+        // recently delivered something typing-related; otherwise a calm 10s heartbeat.
+        // Correctness is preserved by two facts: (a) senders ALSO broadcast instantly,
+        // so a healthy socket delivers the indicator via the fast path regardless of
+        // cadence, and (b) any state CHANGE (either lane) re-arms fast polling. The
+        // old fixed 1.5s REST write-read loop ran unconditionally per open chat —
+        // this removes ~97% of those calls during idle chats without weakening the
+        // V6-R5 reliability fix (DB remains the source of truth).
         var lastEmittedTyping: Boolean? = null
+        val lastTypingLaneEventAtMs = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        fun armFastTypingPolling() { lastTypingLaneEventAtMs.set(System.currentTimeMillis()) }
         fun emitTyping(value: Boolean) {
             if (value != lastEmittedTyping) {
                 lastEmittedTyping = value
+                armFastTypingPolling()
                 trySend(value)
             }
         }
         val dbPollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(1_500)
+                val laneHealthy = channel.status.value ==
+                    io.github.jan.supabase.realtime.RealtimeChannel.Status.SUBSCRIBED
+                val recentLaneEvent =
+                    System.currentTimeMillis() - lastTypingLaneEventAtMs.get() < 30_000
+                kotlinx.coroutines.delay(if (laneHealthy && recentLaneEvent) 1_500L else 10_000L)
                 try {
                     // V6-R6: null (no/stale row) must map to FALSE and be emitted —
                     // skipping null froze the indicator "on" whenever the sender's
@@ -3333,6 +2627,8 @@ class WhisperRepository @Inject constructor(
                     }
                 }
                 plain ?: return@collect
+                // P5: a live typing broadcast re-arms fast DB polling too.
+                armFastTypingPolling()
                 val isTyping = Json.parseToJsonElement(plain.decodeToString()).jsonObject["is_typing"]?.jsonPrimitive?.booleanOrNull ?: false
                 emitTyping(isTyping)
             } catch (_: Exception) { }
@@ -3397,9 +2693,13 @@ class WhisperRepository @Inject constructor(
         // the websocket lane is down (REST read of the partner's profile row).
         // V6-R6 (#presence): same activity-based rule as the chat poller — a socket
         // that CLAIMS healthy but delivers nothing can no longer freeze presence.
+        // P5: quiet backoff around the original 10s cadence; any CHANGED reading
+        // (online flag or timestamp) resets to fast cadence.
+        var lastPresenceReading: Pair<Boolean, String>? = null
+        val presenceBackoff = QuietBackoff(listOf(10_000L, 20_000L, 40_000L), tag = "presence")
         val presencePollJob = launch {
             while (isActive) {
-                kotlinx.coroutines.delay(10_000)
+                kotlinx.coroutines.delay(presenceBackoff.delayMs())
                 try {
                     if (System.currentTimeMillis() - lastPresenceEventAtMs.get() < 25_000) {
                         continue
@@ -3410,7 +2710,14 @@ class WhisperRepository @Inject constructor(
                     }.getOrNull() ?: continue
                     val lastSeen = profile.lastSeenAt ?: continue
                     val lastSeenTs = java.time.OffsetDateTime.parse(lastSeen).toInstant()
-                    trySend(Pair(java.time.Instant.now().minusSeconds(120).isBefore(lastSeenTs), lastSeen))
+                    val reading = Pair(java.time.Instant.now().minusSeconds(120).isBefore(lastSeenTs), lastSeen)
+                    if (reading != lastPresenceReading) {
+                        lastPresenceReading = reading
+                        presenceBackoff.onActivity()
+                    } else {
+                        presenceBackoff.onQuiet()
+                    }
+                    trySend(reading)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -3450,24 +2757,24 @@ class WhisperRepository @Inject constructor(
     ): KeyTrustStatus {
         val current = profile.publicKey.orEmpty()
         val known = keyTrustStore.knownKey(otherUserId)
-        if (known == null || known == current || current.isBlank()) return KeyTrustStatus.MATCH
 
         val serverUpdatedAgeMs = runCatching {
             java.time.OffsetDateTime.parse(profile.updatedAt).toInstant().toEpochMilli()
                 .let { System.currentTimeMillis() - it }
         }.getOrNull() ?: Long.MAX_VALUE
 
-        if (serverUpdatedAgeMs in 0..WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS) {
-            return KeyTrustStatus.ROTATED_AUTO
-        }
-
         val knownTs = keyTrustStore.knownKeyTimestamp(otherUserId)
         val knownAge = if (knownTs == 0L) Long.MAX_VALUE else System.currentTimeMillis() - knownTs
-        val expectedWindow = WhisperKeyRotationStore.ROTATE_INTERVAL_MS - 24L * 60 * 60 * 1000
-        if (knownAge >= expectedWindow) {
-            return KeyTrustStatus.ROTATED_AUTO
-        }
-        return KeyTrustStatus.CHANGED
+
+        // P4a: pure decision — see [WireProtocol.classifyKeyChange] for the rule.
+        return WireProtocol.classifyKeyChange(
+            knownKey = known,
+            currentKey = current,
+            serverRowUpdateAgeMs = serverUpdatedAgeMs,
+            knownKeyAgeMs = knownAge,
+            freshRotationWindowMs = WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS,
+            rotationIntervalMs = WhisperKeyRotationStore.ROTATE_INTERVAL_MS,
+        )
     }
 
     /**
@@ -3480,8 +2787,9 @@ class WhisperRepository @Inject constructor(
         val ageMs = runCatching {
             java.time.OffsetDateTime.parse(updatedAt).toInstant().toEpochMilli()
                 .let { System.currentTimeMillis() - it }
-        }.getOrNull() ?: return false
-        return ageMs in 0..WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS
+        }.getOrNull()
+        // P4a: pure decision — see [WireProtocol.isFreshServerRotation].
+        return WireProtocol.isFreshServerRotation(ageMs, WhisperKeyRotationStore.FRESH_ROTATION_WINDOW_MS)
     }
 
     /**

@@ -31,6 +31,8 @@ class DownloadExpiredException(message: String) : Exception(message)
 @Singleton
 class WhisperEncryptedImageHost @Inject constructor(
     private val supabase: SupabaseClient,
+    // P2: shared hardened transport for upload/delete edge calls.
+    private val edgeFunctions: EdgeFunctionClient,
 ) {
     private suspend fun getValidAccessToken(forceRefresh: Boolean = false): String {
         if (forceRefresh) {
@@ -50,30 +52,21 @@ class WhisperEncryptedImageHost @Inject constructor(
             put("name", name.take(80))
             expirationSeconds?.let { put("expiration", it) }
         }.toString()
-        val bodyBytes = body.toByteArray(Charsets.UTF_8)
 
-        // Helper to execute edge function call
-        suspend fun executeUpload(token: String): Pair<Int, String> = withContext(Dispatchers.IO) {
-            val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-upload").openConnection() as HttpURLConnection)
-            try {
-                connection.requestMethod = "POST"
-                connection.connectTimeout = CONNECT_TIMEOUT_MS
-                connection.readTimeout = READ_TIMEOUT_MS
-                connection.doOutput = true
-                connection.setFixedLengthStreamingMode(bodyBytes.size)
-                
-                connection.setRequestProperty("Authorization", "Bearer $token")
-                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                connection.setRequestProperty("Content-Type", "application/json")
-                
-                connection.outputStream.use { it.write(bodyBytes) }
-                
-                val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
-                val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                connection.responseCode to response
-            } finally {
-                connection.disconnect()
-            }
+        // P2: helper now delegates to the shared edge-function client. Same headers,
+        // same status handling, same error strings; timeouts preserved (15s/45s).
+        suspend fun executeUpload(token: String): Pair<Int, String> {
+            val response = edgeFunctions.execute(
+                EdgeFunctionClient.Request(
+                    function = "whisper-image-upload",
+                    jsonBody = body,
+                    authMode = EdgeFunctionClient.AuthMode.TOKEN,
+                    bearerToken = token,
+                    connectTimeoutMs = CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = READ_TIMEOUT_MS,
+                ),
+            )
+            return response.code to response.body
         }
 
         // Try with current token, if 401 refresh token and retry once
@@ -119,30 +112,21 @@ class WhisperEncryptedImageHost @Inject constructor(
         } else {
             // It's an ImgBB file. We need an Edge Function to delete it because the API key is secret.
             val token = supabase.auth.currentSessionOrNull()?.accessToken ?: return@runCatching
-            
-            withContext(Dispatchers.IO) {
-                val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-image-delete").openConnection() as HttpURLConnection)
-                try {
-                    val body = buildJsonObject { put("id", attachmentId) }.toString()
-                    val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                    connection.requestMethod = "POST"
-                    connection.connectTimeout = CONNECT_TIMEOUT_MS
-                    connection.readTimeout = READ_TIMEOUT_MS
-                    connection.doOutput = true
-                    connection.setRequestProperty("Authorization", "Bearer $token")
-                    connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                    connection.setRequestProperty("Content-Type", "application/json")
-                    connection.outputStream.use { it.write(bodyBytes) }
-                    
-                    if (connection.responseCode !in 200..299) {
-                        android.util.Log.w("WhisperEncryptedImageHost", "Remote deletion failed: HTTP ${connection.responseCode}")
-                        // Surface the failure to the caller: a silent success here would make
-                        // the app think the image was removed when the blob is still hosted.
-                        error("Remote deletion failed: HTTP ${connection.responseCode}")
-                    }
-                } finally {
-                    connection.disconnect()
-                }
+
+            // P2: transport moved to the shared edge-function client; failure surfacing
+            // preserved (a silent success here would leave the blob hosted).
+            val response = edgeFunctions.execute(
+                EdgeFunctionClient.Request(
+                    function = "whisper-image-delete",
+                    jsonBody = buildJsonObject { put("id", attachmentId) }.toString(),
+                    authMode = EdgeFunctionClient.AuthMode.USER,
+                    connectTimeoutMs = CONNECT_TIMEOUT_MS,
+                    readTimeoutMs = READ_TIMEOUT_MS,
+                ),
+            )
+            if (!response.is2xx) {
+                android.util.Log.w("WhisperEncryptedImageHost", "Remote deletion failed: HTTP ${response.code}")
+                error("Remote deletion failed: HTTP ${response.code}")
             }
         }
     }

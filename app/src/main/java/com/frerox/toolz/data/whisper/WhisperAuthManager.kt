@@ -29,6 +29,8 @@ import javax.inject.Singleton
 @Singleton
 class WhisperAuthManager @Inject constructor(
     private val supabase: SupabaseClient,
+    // P2: shared hardened transport for the delete-account edge function.
+    private val edgeFunctions: EdgeFunctionClient,
 ) {
     sealed interface EmailRegistrationResult {
         data object SignedIn : EmailRegistrationResult
@@ -78,45 +80,34 @@ class WhisperAuthManager @Inject constructor(
         // GoTrue user. The caller wipes local data after this returns.
         // P0-4 FIX: Also send X-Whisper-Password so the edge function can independently
         // verify re-auth. A stolen JWT alone can no longer delete the account.
-        val token = supabase.auth.currentSessionOrNull()?.accessToken ?: error("Sign in before deleting your account.")
-        withContext(Dispatchers.IO) {
-            val connection = (URL("${BuildConfig.SUPABASE_URL.trimEnd('/')}/functions/v1/whisper-delete-account").openConnection() as HttpURLConnection)
-            try {
-                connection.requestMethod = "POST"
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 30_000
-                connection.setRequestProperty("Authorization", "Bearer $token")
-                connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                connection.setRequestProperty("Content-Type", "application/json")
-                // V2-FIX W-A1: the password now travels in the JSON POST body field
-                // "whisperPassword" (preferred — avoids credentials in header logs/proxies).
-                // The X-Whisper-Password header is KEPT for backend compatibility during
-                // transition (the edge function reads it today; it will be updated to
-                // prefer the body separately).
-                connection.doOutput = true
-                val body = buildJsonObject {
+        supabase.auth.currentSessionOrNull()?.accessToken
+            ?: error("Sign in before deleting your account.")
+        // P2: transport moved to the shared EdgeFunctionClient; headers, body and the
+        // exact error string are preserved verbatim.
+        val response = edgeFunctions.execute(
+            EdgeFunctionClient.Request(
+                function = "whisper-delete-account",
+                jsonBody = buildJsonObject {
                     if (!isTokenUser && !password.isNullOrBlank()) {
                         put("whisperPassword", password)
                     }
-                }.toString()
-                // P0-4: forward password confirmation for server-side verification (omitted for anon token users)
-                if (!isTokenUser && !password.isNullOrBlank()) {
-                    connection.setRequestProperty("X-Whisper-Password", password)
-                }
-                // Also include a fresh confirmation nonce (timestamp) to prevent replay beyond 5 min
-                connection.setRequestProperty("X-Whisper-Confirm-Ts", System.currentTimeMillis().toString())
-                connection.setFixedLengthStreamingMode(body.toByteArray(Charsets.UTF_8).size)
-                connection.outputStream.use { out ->
-                    out.write(body.toByteArray(Charsets.UTF_8))
-                    out.flush()
-                }
-                if (connection.responseCode !in 200..299) {
-                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                    error(errorBody.take(200).ifBlank { "HTTP ${connection.responseCode}" })
-                }
-            } finally {
-                connection.disconnect()
-            }
+                }.toString(),
+                authMode = EdgeFunctionClient.AuthMode.USER,
+                extraHeaders = buildMap {
+                    // V2-FIX W-A1/P0-4: password rides the body AND the compat header
+                    // during the backend transition window.
+                    if (!isTokenUser && !password.isNullOrBlank()) {
+                        put("X-Whisper-Password", password)
+                    }
+                    // Fresh confirmation nonce (timestamp) to prevent replay beyond 5 min.
+                    put("X-Whisper-Confirm-Ts", System.currentTimeMillis().toString())
+                },
+                connectTimeoutMs = 10_000,
+                readTimeoutMs = 30_000,
+            ),
+        )
+        if (!response.is2xx) {
+            error(response.errorText().ifBlank { "HTTP ${response.code}" })
         }
 
         // M-5 FIX (reviewwhisper.md): ALL server-side data cleanup now happens INSIDE

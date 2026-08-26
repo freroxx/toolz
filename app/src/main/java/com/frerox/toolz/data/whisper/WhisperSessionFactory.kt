@@ -7,15 +7,13 @@ package com.frerox.toolz.data.whisper
 
 import android.util.Base64
 import android.util.Log
-import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.crypto.SessionCrypto
 import io.github.jan.supabase.SupabaseClient
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import java.net.HttpURLConnection
-import java.net.URL
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -38,6 +36,8 @@ class WhisperSessionFactory @Inject constructor(
     private val supabase: SupabaseClient,
     private val crypto: WhisperCrypto,
     private val prekeyManager: WhisperPrekeyManager,
+    // P2: shared hardened transport (replaces the hand-rolled connection here).
+    private val edgeFunctions: EdgeFunctionClient,
 ) {
     @Serializable
     data class X3dhHeader(
@@ -178,7 +178,7 @@ class WhisperSessionFactory @Inject constructor(
     /** PHASE 2 §2.4 verification half exposed for trust surfaces. */
     fun verifyBundleSignature(spkPublicKeyB64: String, spkKid: String, signatureB64: String, signerX509: String): Boolean =
         crypto.verifyProtocol(
-            payload = "SPK:$spkKid$spkPublicKeyB64".toByteArray(),
+            payload = WhisperCrypto.spkSignedPayload(spkKid, spkPublicKeyB64),
             signatureBase64 = signatureB64,
             signerPublicX509Base64 = signerX509,
         )
@@ -186,12 +186,12 @@ class WhisperSessionFactory @Inject constructor(
     // ------------------------------------------------------------------ network
 
     /**
-     * V6 (planwhisper.md §3.3): fetch the peer's prekey bundle and verify the SPK
-     * carries their hardware-signed seal. An invalid signature is a HARD error —
-     * callers must surface it as key-change UI, never silently proceed (that is the
-     * exact MITM window this protocol exists to close).
+     * P2: fetch the peer's prekey bundle and verify the SPK carries their
+     * hardware-signed seal. An invalid signature is a HARD error — callers must
+     * surface it as key-change UI, never silently proceed (that is the exact MITM
+     * window this protocol exists to close).
      */
-    fun fetchAndVerifyBundle(peerId: String): Result<VerifiedBundle> = runCatching {
+    suspend fun fetchAndVerifyBundle(peerId: String): Result<VerifiedBundle> = runCatching {
         val bundle = fetchBundle(peerId)
         val binding = requireNotNull(bundle.identity_binding) {
             "Peer has no identity binding (pre-Phase-2 client)"
@@ -240,24 +240,26 @@ class WhisperSessionFactory @Inject constructor(
     @Serializable
     internal data class OpkDto(val kid: String, @SerialName("public_key") val public_key: String)
 
-    @Synchronized
-    internal fun fetchBundle(peerId: String): BundleDto {
-        val conn = URL("${BuildConfig.SUPABASE_URL}/functions/v1/whisper-bundle-fetch")
-            .openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 15_000
-        conn.doOutput = true
-        conn.setRequestProperty("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
-        conn.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.outputStream.use { it.write("""{"account":"$peerId"}""".toByteArray()) }
-        val code = conn.responseCode
-        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader()?.readText().orEmpty()
-        conn.disconnect()
-        if (code !in 200..299) error("Bundle fetch failed ($code): ${body.take(160)}")
-        return json.decodeFromString(BundleDto.serializer(), body)
+    /** P2: transport moved to [EdgeFunctionClient]; behavior (URL, headers, error
+     *  strings, timeouts) preserved verbatim. Suspend now — both callers were already
+     *  suspend-context. The old @Synchronized serialization is preserved via a mutex
+     *  (@Synchronized is not applicable to suspend functions). */
+    private val fetchMutex = kotlinx.coroutines.sync.Mutex()
+
+    internal suspend fun fetchBundle(peerId: String): BundleDto = fetchMutex.withLock {
+        val response = edgeFunctions.execute(
+            EdgeFunctionClient.Request(
+                function = "whisper-bundle-fetch",
+                jsonBody = """{"account":"$peerId"}""",
+                authMode = EdgeFunctionClient.AuthMode.ANON,
+                connectTimeoutMs = 10_000,
+                readTimeoutMs = 15_000,
+            ),
+        )
+        if (!response.is2xx) {
+            error("Bundle fetch failed (${response.code}): ${response.body.take(160)}")
+        }
+        json.decodeFromString(BundleDto.serializer(), response.body)
     }
 
     // ------------------------------------------------------------------ internals

@@ -393,54 +393,26 @@ class WhisperChatViewModel @Inject constructor(
                     // server echo just appeared in Room (same sender + identical content),
                     // BEFORE merging — the update lambda below stays side-effect free.
                     // Kept OUTSIDE _uiState.update because that lambda may be re-executed.
-                    pendingMessagesById.entries.removeAll { (_, pendingMsg) ->
-                        newMessages.any { roomRow ->
-                            roomRow.senderId == pendingMsg.senderId &&
-                                !roomRow.isPending &&
-                                roomRow.content.trim() == pendingMsg.content.trim()
-                        }
-                    }
-                    _uiState.update { state ->
-                        // CRITICAL: Preserve transient metadata (decrypted content, reactions,
-                        // enriched reply data) that isn't persisted in the basic message entity.
-                        // A tombstone must never be reverted to stale plaintext, so deletions
-                        // always win over any cached content.
-                        val existingById = state.messages.associateBy { it.id }
-                        val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
-                        val merged = newMessages.map { newMsg ->
-                            val existing = existingById[newMsg.id]
-                            if (existing != null) {
-                                newMsg.copy(
-                                    content = when {
-                                        existing.isDeletedForEveryone -> existing.content
-                                        newMsg.isDeletedForEveryone -> newMsg.content
-                                        else -> existing.content
-                                    },
-                                    // V6-R6 FIX (reactions vanishing): Room entities carry
-                                    // NO reactions — getMessagesFlow maps bare rows. The old
-                                    // precedence took newMsg.reactions whenever no toggle was
-                                    // in flight, so EVERY Room re-emission (read flips, sends,
-                                    // any table touch) wiped visible reactions a few seconds
-                                    // after they appeared. In-memory state is now the source
-                                    // of truth unless a fresh payload explicitly carries data.
-                                    reactions = if (
-                                        newMsg.reactions.isNotEmpty() &&
-                                        pendingReactions[newMsg.id].isNullOrEmpty()
-                                    ) {
-                                        newMsg.reactions
-                                    } else {
-                                        existing.reactions
-                                    },
-                                    replyToContent = (newMsg.replyToContent ?: existing.replyToContent)?.normalizeReplySnippet(),
-                                    replyToSenderName = newMsg.replyToSenderName ?: existing.replyToSenderName,
-                                    // V2-FIX (reviewwhisper.md) M-3/V-2: take the fresh state.
-                                    // The old `existing.isPending || newMsg.isPending` OR-merge
-                                    // stuck rows in the pulsing "pending" style forever once a
-                                    // transient pending flag was ever observed.
-                                    isPending = newMsg.isPending
-                                )
-                            } else newMsg
-                        } + state.messages.filter { it.isDeletedForEveryone && it.id !in newIds }
+                     pendingMessagesById.entries.removeAll { (_, pendingMsg) ->
+                         newMessages.any { roomRow ->
+                             roomRow.senderId == pendingMsg.senderId &&
+                                 !roomRow.isPending &&
+                                 roomRow.content.trim() == pendingMsg.content.trim()
+                         }
+                     }
+                     _uiState.update { state ->
+                         // CRITICAL: Preserve transient metadata (decrypted content, reactions,
+                         // enriched reply data) that isn't persisted in the basic message entity.
+                         // A tombstone must never be reverted to stale plaintext, so deletions
+                         // always win over any cached content.
+                         // P4a: list math extracted to ChatMessageMerger (unit-tested);
+                         // behavior identical.
+                         val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
+                         val merged = ChatMessageMerger.mergeRoomEmission(
+                             existing = state.messages,
+                             newMessages = newMessages,
+                             isReactionToggleInFlight = { id -> !pendingReactions[id].isNullOrEmpty() },
+                         )
 
                         // V2-FIX (reviewwhisper.md) H-2/V-2: Room only emits persisted rows,
                         // so every Room re-emission used to silently drop in-flight optimistic
@@ -504,12 +476,13 @@ class WhisperChatViewModel @Inject constructor(
         }
     }
 
-    /** Reply snippets for image targets are normalized to the attachment prefix so the UI
-     *  can detect them model-robustly instead of matching display strings. */
-    private fun String?.normalizeReplySnippet(): String? = when (this) {
-        "Image", "📷 Image" -> WhisperImageAttachment.MESSAGE_PREFIX
-        else -> this
-    }
+    /**
+     * P2-7 FIX: Chronological order with pending pinned last.
+     * P4a: implementation extracted to [ChatMessageMerger.sorted] (unit-tested);
+     * this delegate keeps every existing call site untouched.
+     */
+    private fun sortedMessages(messages: List<WhisperMessage>): List<WhisperMessage> =
+        ChatMessageMerger.sorted(messages)
 
     // ── REPLY-TO MESSAGE ──
     fun setReplyTarget(message: WhisperMessage) {
@@ -1131,23 +1104,6 @@ class WhisperChatViewModel @Inject constructor(
             repository.sendTypingStatus(otherUserId, isTyping)
         }
     }
-
-    /**
-     * P2-7 FIX: Chronological order with pending pinned last.
-     * V2-FIX (reviewwhisper.md) M-4/V-7: the ONE shared ordering for every path (Room
-     * merge, send echo, realtime echo, image sends). Keys are parsed ONCE per message —
-     * decorating first avoids re-running Instant.parse on every comparison, and a safe
-     * parse (Instant.MIN fallback) replaces the old unguarded raw-string compare in the
-     * Room path / per-comparison parse here.
-     */
-    private fun sortedMessages(messages: List<WhisperMessage>): List<WhisperMessage> =
-        messages
-            .map { msg -> Triple(msg, msg.createdAt.parseIsoInstant(), if (msg.isPending) 1 else 0) }
-            .sortedWith(compareBy({ it.second }, { it.third }))
-            .map { it.first }
-
-    private fun String.parseIsoInstant(): java.time.Instant =
-        runCatching { Instant.parse(this) }.getOrDefault(java.time.Instant.MIN)
 
     private fun sendPresenceSignal(isOnline: Boolean) {
         viewModelScope.launch {

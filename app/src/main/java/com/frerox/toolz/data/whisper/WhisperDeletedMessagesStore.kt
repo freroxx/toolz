@@ -1,8 +1,14 @@
+/*
+ * Copyright (C) 2026 Toolz Contributors
+ * GPL-3.0 License
+ */
+
 package com.frerox.toolz.data.whisper
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.frerox.toolz.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,125 +18,150 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Persists IDs of messages deleted locally ("delete for me" / clear chat).
- * Local cache is capped at 5k for disk, but remote `whisper_deleted_tombstones`
- * is the source of truth so evicted IDs never resurrect after reinstall.
+ * P3: persists IDs of messages deleted locally ("delete for me" / clear chat) —
+ * now backed by the encrypted Room table `whisper_local_tombstones` instead of a
+ * SharedPreferences string-set that was rewritten wholesale on every change.
+ *
+ * PUBLIC API AND SEMANTICS ARE UNCHANGED:
+ *  - [deletedIds] StateFlow mirrors the persisted set for flow-level filtering;
+ *  - writes are serialized, capped to the NEWEST [MAX_TOMBSTONES] by delete time;
+ *  - the remote `whisper_deleted_tombstones` table stays the durable source of
+ *    truth so evicted IDs never resurrect after reinstall.
+ *
+ * Migration: the legacy `whisper_deleted_msgs` prefs file is seeded SYNCHRONOUSLY
+ * into the initial in-memory set (so the very first hub render already filters
+ * correctly), then flushed into Room once on the app scope and removed. The Room
+ * import is idempotent (REPLACE upserts).
  */
 @Singleton
 class WhisperDeletedMessagesStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @ApplicationContext context: Context,
+    @ApplicationScope private val appScope: CoroutineScope,
+    private val tombstoneDao: WhisperLocalTombstoneDao,
 ) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("whisper_deleted_msgs", Context.MODE_PRIVATE)
+    private val legacyPrefs: SharedPreferences = context.getSharedPreferences(LEGACY_PREFS_FILE, Context.MODE_PRIVATE)
     private val mutex = Mutex()
-    // P2: Previously uncancelled CoroutineScope(Dispatchers.IO) looked like a leak.
-    // For @Singleton the scope lifetime == app lifetime, so not a true leak. Mark with
-    // SupervisorJob for structured error handling and explicit app-scope.
-    private val ioScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
-    private val _deletedIds = MutableStateFlow<Set<String>>(loadDeletedIds())
+
+    private val _deletedIds = MutableStateFlow<Set<String>>(loadLegacyIds())
     val deletedIds: StateFlow<Set<String>> = _deletedIds.asStateFlow()
 
-    private fun loadDeletedIds(): Set<String> = capById(loadAll()).keys
-
-    private fun loadAll(): Map<String, Long> = prefs.getStringSet("deleted_message_ids", emptySet()).orEmpty()
-        .mapNotNull { entry ->
-            val split = entry.lastIndexOf('|')
-            val id = if (split > 0) entry.substring(0, split) else entry
-            val timestamp = if (split > 0) entry.substring(split + 1).toLongOrNull() else 0L
-            timestamp?.let { id to it }
-        }.toMap()
-
-    private fun capById(entries: Map<String, Long>): Map<String, Long> {
-        if (entries.size <= MAX_TOMBSTONES) return entries
-        val byAge = entries.entries.sortedBy { it.value }
-        return byAge.takeLast(MAX_TOMBSTONES).associate { it.key to it.value }
-    }
-
-    private suspend fun persist(ids: Set<String>) {
-        // M-18 FIX (reviewwhisper.md): the merge-read now runs off-main like the write.
-        val existing = withContext(Dispatchers.IO) { loadAll() }
-        val now = System.currentTimeMillis()
-        val merged = capById(existing + ids.associateWith { now })
-        // V2-FIX (reviewwhisper.md): commit() result is checked — a silent disk failure
-        // used to update only the in-memory state and lose tombstones on restart.
-        val ok = withContext(Dispatchers.IO) {
-            prefs.edit().putStringSet("deleted_message_ids", merged.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
-        }
-        if (!ok) Log.w(TAG, "persist commit failed (${ids.size} id(s) at risk)")
-        _deletedIds.value = merged.keys
+    init {
+        appScope.launch(Dispatchers.IO) { importLegacyIntoRoomAndReload() }
     }
 
     /** Non-suspend fire-and-forget for UI callers; repository should use suspend variant. */
     fun markMessageDeleted(messageId: String) {
         if (messageId.isBlank()) return
-        ioScope.launch { mutex.withLock { persist(setOf(messageId)) } }
+        appScope.launch { markMessagesDeletedSuspend(setOf(messageId)) }
     }
 
     fun markMessagesDeleted(messageIds: Collection<String>) {
-        if (messageIds.isEmpty()) return
         val clean = messageIds.filter { it.isNotBlank() }.toSet()
         if (clean.isEmpty()) return
-        ioScope.launch { mutex.withLock { persist(clean) } }
+        appScope.launch { markMessagesDeletedSuspend(clean) }
     }
 
     suspend fun markMessageDeletedSuspend(messageId: String) {
         if (messageId.isBlank()) return
-        mutex.withLock { persist(setOf(messageId)) }
+        markMessagesDeletedSuspend(setOf(messageId))
     }
 
     suspend fun markMessagesDeletedSuspend(messageIds: Collection<String>) {
-        if (messageIds.isEmpty()) return
         val clean = messageIds.filter { it.isNotBlank() }.toSet()
         if (clean.isEmpty()) return
-        mutex.withLock { persist(clean) }
+        mutex.withLock {
+            val now = System.currentTimeMillis()
+            runCatching { tombstoneDao.upsertAll(clean.map { WhisperLocalTombstoneEntity(it, now) }) }
+                .onFailure { Log.w(TAG, "tombstone upsert failed (${clean.size} id(s) at risk): ${it.message}") }
+            reloadWithCapLocked()
+        }
     }
 
     suspend fun unmarkMessagesDeleted(messageIds: Collection<String>) {
         if (messageIds.isEmpty()) return
         mutex.withLock {
-            // M-18 FIX: read off-main (see persist).
-            val existing = withContext(Dispatchers.IO) { loadAll() } - messageIds.toSet()
-            // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
-            val ok = withContext(Dispatchers.IO) {
-                prefs.edit().putStringSet("deleted_message_ids", existing.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
-            }
-            if (!ok) Log.w(TAG, "unmarkMessagesDeleted commit failed")
-            _deletedIds.value = existing.keys
+            runCatching { tombstoneDao.deleteAllByIds(messageIds.filter { it.isNotBlank() }) }
+                .onFailure { Log.w(TAG, "tombstone unmark failed: ${it.message}") }
+            reloadLocked()
         }
     }
 
     fun isMessageDeleted(messageId: String): Boolean = _deletedIds.value.contains(messageId)
 
-    /** Evicts the oldest tombstone IDs when store exceeds MAX_TOMBSTONES. */
+    /** Evicts the oldest tombstone IDs when the store exceeds MAX_TOMBSTONES. */
     suspend fun evictOldest(): Int = mutex.withLock {
-        // M-18 FIX: read off-main (see persist).
-        val raw = withContext(Dispatchers.IO) { loadAll() }
-        val capped = capById(raw)
-        val removed = raw.size - capped.size
-        if (removed > 0) {
-            // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
-            val ok = withContext(Dispatchers.IO) {
-                prefs.edit().putStringSet("deleted_message_ids", capped.map { (id, timestamp) -> "$id|$timestamp" }.toSet()).commit()
-            }
-            if (!ok) Log.w(TAG, "evictOldest commit failed")
-            _deletedIds.value = capped.keys
-        }
-        removed
+        val all = tombstoneDao.entriesOldestFirst()
+        if (all.size <= MAX_TOMBSTONES) return@withLock 0
+        val evicted = all.take(all.size - MAX_TOMBSTONES)
+        runCatching { tombstoneDao.deleteAllByIds(evicted.map { it.messageId }) }
+            .onFailure { Log.w(TAG, "evictOldest delete failed: ${it.message}") }
+        reloadLocked()
+        evicted.size
     }
 
     suspend fun clearAll() = mutex.withLock {
-        // V2-FIX (reviewwhisper.md): commit result checked, failure logged once.
-        val ok = withContext(Dispatchers.IO) { prefs.edit().remove("deleted_message_ids").commit() }
-        if (!ok) Log.w(TAG, "clearAll commit failed")
+        runCatching { tombstoneDao.clearAll() }
+        legacyPrefs.edit().remove(KEY_DELETED_IDS).commit()
         _deletedIds.value = emptySet()
     }
+
+    // ------------------------------------------------------------------ internals
+
+    private suspend fun reloadWithCapLocked() {
+        val all = tombstoneDao.entriesOldestFirst()
+        if (all.size > MAX_TOMBSTONES) {
+            val evicted = all.take(all.size - MAX_TOMBSTONES)
+            runCatching { tombstoneDao.deleteAllByIds(evicted.map { it.messageId }) }
+        }
+        reloadLocked()
+    }
+
+    private suspend fun reloadLocked() {
+        runCatching {
+            _deletedIds.value = tombstoneDao.entriesOldestFirst().mapTo(mutableSetOf()) { it.messageId }
+        }
+    }
+
+    private suspend fun importLegacyIntoRoomAndReload() {
+        mutex.withLock {
+            runCatching {
+                val legacy = loadLegacyEntries()
+                if (legacy.isNotEmpty()) {
+                    tombstoneDao.upsertAll(legacy.map { (id, ts) -> WhisperLocalTombstoneEntity(id, ts) })
+                    // Clear only after the copy landed (same ordering contract as the
+                    // KeyTrustStore ESP migration): a crash before this line re-imports
+                    // harmlessly on next launch.
+                    legacyPrefs.edit().remove(KEY_DELETED_IDS).commit()
+                    Log.i(TAG, "Migrated ${legacy.size} local tombstones into Room")
+                }
+                reloadLocked()
+            }.onFailure {
+                Log.w(TAG, "legacy tombstone import deferred (retry next launch): ${it.message}")
+            }
+        }
+    }
+
+    /** Legacy reader — entries are "messageId|epochMillis". */
+    private fun loadLegacyEntries(): List<Pair<String, Long>> =
+        legacyPrefs.getStringSet(KEY_DELETED_IDS, emptySet()).orEmpty().mapNotNull { entry ->
+            val split = entry.lastIndexOf('|')
+            val id = if (split > 0) entry.substring(0, split) else entry
+            val timestamp = if (split > 0) entry.substring(split + 1).toLongOrNull() else 0L
+            timestamp?.let { id to it }
+        }
+
+    private fun loadLegacyIds(): Set<String> = loadLegacyEntries().map { it.first }.toSet()
 
     private companion object {
         const val TAG = "WhisperDeletedMsgs"
         const val MAX_TOMBSTONES = 5_000
+
+        /** P3 legacy source — imported once into Room, then deleted. */
+        const val LEGACY_PREFS_FILE = "whisper_deleted_msgs"
+        const val KEY_DELETED_IDS = "deleted_message_ids"
     }
 }

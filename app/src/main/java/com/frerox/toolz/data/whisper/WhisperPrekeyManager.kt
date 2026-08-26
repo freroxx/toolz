@@ -133,8 +133,10 @@ class WhisperPrekeyManager @Inject constructor(
             val spkPriv = SessionCrypto.generatePrivateKey()
             val spkPub = SessionCrypto.publicFromPrivate(spkPriv)
             val kid = kidOf(spkPub)
-            val signPayload = "SPK:$kid${android.util.Base64.encodeToString(spkPub, android.util.Base64.NO_WRAP)}"
-                .toByteArray()
+            val spkPubB64 = android.util.Base64.encodeToString(spkPub, android.util.Base64.NO_WRAP)
+            // P1: payload built through the shared helper so signer and verifiers can
+            // never drift apart.
+            val signPayload = WhisperCrypto.spkSignedPayload(kid, spkPubB64)
             val signature = crypto.signProtocol(signPayload)
                 ?: error("Prekey signing failed — refusing to publish unsigned bundle")
             persistPrivate(kid, "SPK", crypto.wrapWithKeystoreAes(spkPriv)
@@ -142,7 +144,7 @@ class WhisperPrekeyManager @Inject constructor(
             supabase.postgrest.from("whisper_prekeys").upsert(
                 PrekeyRow(
                     account = currentUserId, kid = kid, kind = "SPK",
-                    publicKey = android.util.Base64.encodeToString(spkPub, android.util.Base64.NO_WRAP),
+                    publicKey = spkPubB64,
                     signature = signature,
                 ),
             )
@@ -182,6 +184,9 @@ class WhisperPrekeyManager @Inject constructor(
     /**
      * PHASE 2 §2.4 verification half: validate that a fetched bundle's SPK is signed
      * by the peer's published P-256 signer. Returns true only on a valid chain.
+     * P1: delegates payload construction to the shared helper (kept local because
+     * injecting WhisperSessionFactory here would create a construction cycle —
+     * the factory already depends on this manager for responder bootstrapping).
      */
     fun verifyBundleSignature(
         spkPublicKeyB64: String,
@@ -189,7 +194,7 @@ class WhisperPrekeyManager @Inject constructor(
         signatureB64: String,
         signerPublicX509Base64: String,
     ): Boolean = crypto.verifyProtocol(
-        payload = "SPK:$spkKid$spkPublicKeyB64".toByteArray(),
+        payload = WhisperCrypto.spkSignedPayload(spkKid, spkPublicKeyB64),
         signatureBase64 = signatureB64,
         signerPublicX509Base64 = signerPublicX509Base64,
     )

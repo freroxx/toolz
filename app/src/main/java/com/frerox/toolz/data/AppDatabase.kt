@@ -62,6 +62,10 @@ import com.frerox.toolz.data.search.SearchDao
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.whisper.WhisperMessageEntity
 import com.frerox.toolz.data.whisper.WhisperMessageDao
+import com.frerox.toolz.data.whisper.WhisperOutboxEntity
+import com.frerox.toolz.data.whisper.WhisperOutboxDao
+import com.frerox.toolz.data.whisper.WhisperLocalTombstoneEntity
+import com.frerox.toolz.data.whisper.WhisperLocalTombstoneDao
 import com.frerox.toolz.data.device.cache.DeviceSpecCacheEntity
 import com.frerox.toolz.data.device.cache.DeviceSpecsDao
 import com.frerox.toolz.data.device.cache.DeviceSpecConverters
@@ -97,6 +101,9 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
         DeviceSpecCacheEntity::class,
         CatalogSearchEntry::class,
         WhisperMessageEntity::class,
+        // P3: whisper prefs→Room consolidation (outbox + local tombstones).
+        WhisperOutboxEntity::class,
+        WhisperLocalTombstoneEntity::class,
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class
@@ -104,7 +111,8 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
     // V3-FIX: 49 adds passwords.isToken (nullable Boolean, DEFAULT NULL) so Whisper
     // account type (anon token vs password) is stored metadata instead of a vault
     // name-substring heuristic. See MIGRATION_48_49 in DatabaseModule.
-    version = 51,
+    // P3: 52 adds whisper_outbox + whisper_local_tombstones (see MIGRATION_51_52).
+    version = 52,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -131,6 +139,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun deviceSpecsDao(): DeviceSpecsDao
     abstract fun catalogSearchDao(): CatalogSearchDao
     abstract fun whisperMessageDao(): WhisperMessageDao
+    abstract fun whisperOutboxDao(): WhisperOutboxDao
+    abstract fun whisperLocalTombstoneDao(): WhisperLocalTombstoneDao
     abstract fun speedHistoryDao(): SpeedHistoryDao
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao
