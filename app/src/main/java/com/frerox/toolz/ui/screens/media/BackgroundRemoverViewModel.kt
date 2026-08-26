@@ -26,6 +26,7 @@ import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.data.media.MaskDecoder
 import com.frerox.toolz.data.media.ModelDownloadManager
 import com.frerox.toolz.util.BackgroundRemoverEngine
+import com.frerox.toolz.util.ConversionEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import okhttp3.OkHttpClient
@@ -61,6 +62,7 @@ import javax.inject.Inject
 class BackgroundRemoverViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
+    private val conversionEngine: ConversionEngine,
 ) : ViewModel() {
 
     private val downloadManager = ModelDownloadManager(context, okHttpClient)
