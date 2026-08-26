@@ -673,22 +673,12 @@ class WhisperRepository @Inject constructor(
 
     /** Decrypts a cached ciphertext message for display, falling back to a neutral marker. */
     private suspend fun WhisperMessage.decryptContent(peerKey: String?, extraFresh: String? = null): WhisperMessage {
-        // Server rows carry no version column; infer from the wire shape.
-        val inferredVersion = when {
-            protocolVersion > 0 -> protocolVersion
-            com.frerox.toolz.data.whisper.session.WhisperV3Codec.isV3(content) ->
-                WhisperProtocolConfig.RATCHET_PROTOCOL_VERSION
-            WhisperEnvelope.isEnvelope(content) -> WhisperEnvelope.VERSION
-            else -> 0
-        }
-        // V6: only INCOMING rows prove a partner's capability — our own sent frames
-        // must never raise the recorded floor for them.
-        if (inferredVersion > 0 && senderId != myId) {
-            recordPeerProtocolFloor(
-                if (senderId == myId) receiverId else senderId,
-                inferredVersion,
-            )
-        }
+        // FIX-1 (field bug "v3 never attempted between existing pairs"): this CACHED
+        // HISTORY path no longer records protocol floors. Rendering months-old v5
+        // envelopes used to pin the partner at floor=2 for the whole process, which
+        // made shouldUseV3() permanently false — the Double Ratchet silently died
+        // for any pair with history, forcing everything onto the envelope path.
+        // Live capability is proven exclusively by decryptRealtimeMessage.
         if (isDeletedForEveryone) return this
         if (contentIv == null && !WhisperEnvelope.isEnvelope(content)) return this
         val partnerId = if (senderId == myId) receiverId else senderId

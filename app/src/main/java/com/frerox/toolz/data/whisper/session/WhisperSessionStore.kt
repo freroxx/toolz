@@ -64,6 +64,12 @@ class WhisperSessionStore @Inject constructor(
         val pendingHeader: WhisperV3Codec.X3dhWire? = null,
         val peerIkB64: String? = null,
         val createdAtMs: Long,
+        /**
+         * FIX-2: true once a frame from THIS session was opened through the pure
+         * ratchet path (both sides proven). Unproven sessions keep carrying the
+         * handshake-insurance envelope copy on outbound frames.
+         */
+        val sessionProven: Boolean = false,
     ) {
     /**
      * V6 acceptance gate for an INCOMING x3dh header when a session already
@@ -101,6 +107,8 @@ class WhisperSessionStore @Inject constructor(
         val createdAtMs: Long,
         @Volatile var pendingHeader: WhisperSessionFactory.X3dhHeader?,
         val ratchet: WhisperRatchet?,
+        /** FIX-2 — see [StoredSession.sessionProven]. Volatile: set from decrypt lanes. */
+        @Volatile var sessionProven: Boolean = false,
     ) {
         /** Set whenever ratchet/header state mutated; cleared by [WhisperSessionStore.save]. */
         @Volatile var dirty: Boolean = true
@@ -249,6 +257,7 @@ internal fun serializeSession(
         pendingHeader = live.pendingHeader?.let { WhisperV3Codec.encodeX3dhWire(it) },
         peerIkB64 = live.peerIkB64,
         createdAtMs = live.createdAtMs,
+        sessionProven = live.sessionProven,
     )
 }
 
@@ -279,6 +288,7 @@ internal fun hydrateSession(
             createdAtMs = stored.createdAtMs,
             pendingHeader = stored.pendingHeader?.let { WhisperV3Codec.toFactoryHeader(it) },
             ratchet = ratchet,
+            sessionProven = stored.sessionProven,
         )
     } finally {
         sk.fill(0)

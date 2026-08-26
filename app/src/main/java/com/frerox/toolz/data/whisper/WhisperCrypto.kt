@@ -62,6 +62,9 @@ class WhisperCrypto @Inject constructor(
         private const val STAGED_ALIAS_PREFIX = "whisper_e2ee_ec_key_staged_"
         private const val STATE_PREFS = "whisper_crypto_state"
         private const val PREF_ACTIVE_ALIAS = "active_alias"
+        /** HOTFIX: committed rotations recorded so [hasStagedAliases] stays truthful
+         *  (committed keys keep the staged prefix forever — see its KDoc). */
+        private const val PREF_COMMITTED_STAGED_ALIASES = "committed_staged_aliases"
         // V6-R6: last-seen active public key (b64) for the unexpected-change detector.
         private const val PREF_LAST_PUB = "last_seen_pub_b64"
         private const val AES_GCM_TAG_LEN = 128
@@ -175,10 +178,33 @@ class WhisperCrypto @Inject constructor(
      * V4-FIX: true while a staged rotation exists but has not been committed/aborted.
      * Used by the repository to distinguish an interrupted rotation from a reinstall
      * so the reinstall key-republish never fights the rotation protocol.
+     *
+     * HOTFIX (field bug "both sides only see their own messages"): this check used to
+     * match ANY alias under the staged prefix — but a COMMITTED rotation keeps its
+     * staged-prefixed alias as the active identity forever. Result: after the very
+     * first successful rotation, [hasStagedAliases] returned true on every launch,
+     * which permanently disabled `republishLocalKeyIfStale()` and the
+     * getMyProfile divergence heal. The server then kept advertising an OLD public
+     * key while the device held a newer private one; every contact sealed to keys
+     * this device could not open ("envelope locked", keyDrift.sealedToUnknownOwnKid),
+     * and symmetrically for the peer — each side could only read its own sends.
+     *
+     * Correct semantics: a staged alias counts as IN-FLIGHT only when it is neither
+     * (a) the active-alias pointer nor (b) recorded in the committed set. Both checks
+     * are cheap and crash-safe:
+     *  - commit writes the pointer BEFORE recording, so any crash leaves either
+     *    "pointer==staged" (rotation done) or "pointer old" (genuinely in flight);
+     *  - startup sweep removes non-active orphans, so a stale uncommitted entry
+     *    cannot wedge this flag across reboots.
      */
     fun hasStagedAliases(): Boolean = runCatching {
+        val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+        val active = prefs.getString(PREF_ACTIVE_ALIAS, null)
+        val committed = prefs.getStringSet(PREF_COMMITTED_STAGED_ALIASES, emptySet()).orEmpty()
         val keyStore = java.security.KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        keyStore.aliases().toList().any { it.startsWith(STAGED_ALIAS_PREFIX) }
+        keyStore.aliases().toList().any {
+            it.startsWith(STAGED_ALIAS_PREFIX) && it != active && it !in committed
+        }
     }.getOrDefault(false)
 
     private fun activeAlias(): String {
@@ -799,6 +825,15 @@ class WhisperCrypto @Inject constructor(
                     return@synchronized
                 }
                 committed = true
+                // HOTFIX companion: record the committed alias so hasStagedAliases()
+                // keeps meaning "rotation IN FLIGHT" (the pointer check already covers
+                // the active one; the set covers a future rotation staging while this
+                // committed alias is still active). Best-effort: pointer truthiness
+                // alone is already sufficient for correctness.
+                prefs.edit().putStringSet(
+                    PREF_COMMITTED_STAGED_ALIASES,
+                    (prefs.getStringSet(PREF_COMMITTED_STAGED_ALIASES, emptySet()).orEmpty() + staged.alias),
+                ).apply()
                 // V2-FIX W7: delete the PREVIOUS key only AFTER the pointer persisted,
                 // and never let its failure fail the rotation. NOTE: history encrypted
                 // under the old key becomes undecryptable once destroyed if the local

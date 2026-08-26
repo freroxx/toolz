@@ -50,6 +50,15 @@ object WhisperV3Codec {
         @SerialName("n") val n: Int,
         @SerialName("ct") val ctB64: String,
         @SerialName("x3dh") val x3dh: X3dhWire? = null,
+        /**
+         * FIX-2 HANDSHAKE INSURANCE: parallel V5 envelope copy riding ONLY on frames
+         * of a not-yet-proven session. If the responder cannot complete the ratchet
+         * side (SPK/OPK raced, rotation mid-flight, lost private half), the message
+         * still opens through the proven envelope ladder instead of locking forever.
+         * Old clients ignore this unknown key (ignoreUnknownKeys); proven sessions
+         * never carry it (single-copy efficiency restored after first clean open).
+         */
+        @SerialName("env") val insuranceEnvelope: String? = null,
     ) {
         fun dhPub(): ByteArray = unb64.decode(dhPubB64)
         fun ciphertextPacked(): ByteArray = unb64.decode(ctB64)
@@ -69,6 +78,7 @@ object WhisperV3Codec {
         header: WhisperRatchet.Header,
         ciphertextPacked: ByteArray,
         x3dh: WhisperSessionFactory.X3dhHeader?,
+        insuranceEnvelope: String? = null,
     ): String {
         val obj = buildJsonObject {
             put("v", VERSION)
@@ -78,6 +88,7 @@ object WhisperV3Codec {
             put("n", header.n)
             put("ct", b64.encodeToString(ciphertextPacked))
             if (x3dh != null) put("x3dh", x3dhJson(x3dh))
+            if (!insuranceEnvelope.isNullOrBlank()) put("env", insuranceEnvelope)
         }
         return obj.toString()
     }
