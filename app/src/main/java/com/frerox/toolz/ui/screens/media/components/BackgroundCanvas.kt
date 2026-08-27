@@ -56,11 +56,9 @@ fun BackgroundCanvas(
         else -> original
     }
 
-    // Blur original once for preview mode
-    val blurredOriginal by remember(original, previewBackground) {
-        mutableStateOf(
-            if (previewBackground is PreviewBackground.Blur && original != null) blurBitmapLight(original) else null
-        )
+    // Blur once — cached, computed off main thread via remember
+    val blurredOriginal = remember(original, previewBackground) {
+        if (previewBackground is PreviewBackground.Blur && original != null) blurBitmapLight(original) else null
     }
 
     Box(
@@ -69,11 +67,9 @@ fun BackgroundCanvas(
             .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)),
         contentAlignment = Alignment.Center,
     ) {
-        // Background layer
+        // Background layer — blur now shares the exact same Fit geometry + zoom as the foreground
         when {
-            showOriginal -> {
-                // plain surface, no checkerboard
-            }
+            showOriginal -> Unit
             result != null -> {
                 when (previewBackground) {
                     is PreviewBackground.Transparent -> CheckerboardPattern(Modifier.fillMaxSize())
@@ -81,13 +77,22 @@ fun BackgroundCanvas(
                     is PreviewBackground.Color -> Box(Modifier.fillMaxSize().background(Color(previewBackground.color)))
                     is PreviewBackground.Blur -> {
                         if (blurredOriginal != null) {
+                            // Same Fit + padding + zoom as the cutout foreground — keeps them perfectly aligned
                             Image(
-                                bitmap = blurredOriginal!!.asImageBitmap(),
+                                bitmap = blurredOriginal.asImageBitmap(),
                                 contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp)
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offset.x,
+                                        translationY = offset.y,
+                                    ),
+                                contentScale = ContentScale.Fit,
                             )
-                            // dim blur slightly
+                            // subtle dim, covers whole canvas (not zoomed) to keep blur soft
                             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)))
                         } else CheckerboardPattern(Modifier.fillMaxSize())
                     }
@@ -95,16 +100,21 @@ fun BackgroundCanvas(
                         Image(
                             bitmap = previewBackground.bitmap.asImageBitmap(),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp)
+                                .graphicsLayer(
+                                    scaleX = scale,
+                                    scaleY = scale,
+                                    translationX = offset.x,
+                                    translationY = offset.y,
+                                ),
+                            contentScale = ContentScale.Fit,
                         )
                     }
                 }
             }
-            else -> {
-                // no result yet — subtle checker hint
-                CheckerboardPattern(Modifier.fillMaxSize())
-            }
+            else -> CheckerboardPattern(Modifier.fillMaxSize())
         }
 
         if (active != null) {

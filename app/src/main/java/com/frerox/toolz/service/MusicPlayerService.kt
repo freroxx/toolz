@@ -527,8 +527,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             combine(
                 settingsRepository.musicAudioFocus,
                 settingsRepository.musicAudioFocusDucking
-            ) { enabled, ducking -> enabled to ducking }.collectLatest { (enabled, ducking) ->
+            ) { enabled, ducking -> enabled to ducking }.collect { (enabled, ducking) ->
                 val wasEnabled = audioFocusEnabled
+                val oldDucking = audioFocusDucking
                 audioFocusEnabled = enabled
                 audioFocusDucking = ducking
 
@@ -550,20 +551,42 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     shouldResumeOnFocusGain = false
                     abandonAudioFocus()
                 } else {
-                    // Smart focus ON: if we were ducking and ducking is now disabled, pause instead
+                    // Smart focus ON
                     if (isDucking && !ducking) {
+                        // Was ducking (playing quietly), but ducking is now disabled
+                        // -> restore volume and pause instead, remembering to resume on gain
                         player.volume = 1.0f
                         isDucking = false
                         shouldResumeOnFocusGain = player.isPlaying
                         if (player.isPlaying) player.pause()
+                    } else if (!isDucking && ducking && shouldResumeOnFocusGain && !player.isPlaying) {
+                        // Was paused due to a previous CAN_DUCK that could not duck (paused),
+                        // and ducking is now enabled -> resume at duck volume immediately
+                        // if the transient focus is still held. We attempt to resume
+                        // ducking; if focus is still held by another app, the system
+                        // will keep us ducked via the listener, otherwise we play at full.
+                        player.volume = 0.2f
+                        isDucking = true
+                        shouldResumeOnFocusGain = false
+                        player.play()
                     }
-                    // Re-request focus with updated willPauseWhenDucked if currently playing
-                    if (player.isPlaying) {
+                    // Re-request focus with updated willPauseWhenDucked if currently
+                    // playing, ducking, or waiting to resume (so the pending request
+                    // reflects the new ducking preference for future transient losses).
+                    if (player.isPlaying || isDucking || shouldResumeOnFocusGain) {
                         requestAudioFocus()
-                    } else if (!wasEnabled) {
-                        // Just enabled while idle: ensure no stale volume
-                        player.volume = 1.0f
-                        isDucking = false
+                    } else if (!wasEnabled || oldDucking != ducking) {
+                        // Enabled while idle or ducking pref changed while idle:
+                        // ensure no stale duck volume.
+                        if (isDucking) {
+                            player.volume = 1.0f
+                            isDucking = false
+                        }
+                        // If we were idle and just enabled focus, make sure volume is clean
+                        if (!wasEnabled) {
+                            player.volume = 1.0f
+                            isDucking = false
+                        }
                     }
                 }
             }

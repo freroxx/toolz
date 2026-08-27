@@ -356,23 +356,14 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val isFloatInput = inputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
                 val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * (if (isFloatInput) 4 else 1))
                 inputBuffer.order(ByteOrder.nativeOrder())
-                // Per-model normalization: MODNet expects -1..1 (mean 0.5 / std 0.5), others expect 0..1
-                val isModNet = model.id == "modnet_hd"
                 for (pixel in inputPixels) {
                     val r = (pixel shr 16) and 0xFF
                     val g = (pixel shr 8) and 0xFF
                     val b = pixel and 0xFF
                     if (isFloatInput) {
-                        if (isModNet) {
-                            // (x/255 - 0.5) / 0.5 => x/127.5 - 1
-                            inputBuffer.putFloat(r / 127.5f - 1f)
-                            inputBuffer.putFloat(g / 127.5f - 1f)
-                            inputBuffer.putFloat(b / 127.5f - 1f)
-                        } else {
-                            inputBuffer.putFloat(r / 255.0f)
-                            inputBuffer.putFloat(g / 255.0f)
-                            inputBuffer.putFloat(b / 255.0f)
-                        }
+                        inputBuffer.putFloat(r / 255.0f)
+                        inputBuffer.putFloat(g / 255.0f)
+                        inputBuffer.putFloat(b / 255.0f)
                     } else {
                         inputBuffer.put(r.toByte()); inputBuffer.put(g.toByte()); inputBuffer.put(b.toByte())
                     }

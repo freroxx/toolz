@@ -620,8 +620,17 @@ class SettingsRepository @Inject constructor(
     val showQibla: Flow<Boolean> = dataStore.data.map { it[SHOW_QIBLA] ?: false }
 
     // Music Flows
-    val musicAudioFocus: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS] ?: true }
-    val musicAudioFocusDucking: Flow<Boolean> = dataStore.data.map { it[MUSIC_AUDIO_FOCUS_DUCKING] ?: false }
+    val musicAudioFocus: Flow<Boolean> = dataStore.data.map {
+        try { it[MUSIC_AUDIO_FOCUS] ?: true } catch (e: ClassCastException) {
+            // Migration: handle legacy string value if exists
+            (it[stringPreferencesKey("music_audio_focus")]?.toBooleanStrictOrNull()) ?: true
+        }
+    }
+    val musicAudioFocusDucking: Flow<Boolean> = dataStore.data.map {
+        try { it[MUSIC_AUDIO_FOCUS_DUCKING] ?: false } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("music_audio_focus_ducking")]?.toBooleanStrictOrNull()) ?: false
+        }
+    }
     val musicShakeToSkip: Flow<Boolean> = dataStore.data.map { it[MUSIC_SHAKE_TO_SKIP] ?: false }
     val musicShakeSensitivity: Flow<Float> = dataStore.data.map { it[MUSIC_SHAKE_SENSITIVITY] ?: 0.3f }
     val musicPlaybackSpeed: Flow<Float> = dataStore.data.map { it[MUSIC_PLAYBACK_SPEED] ?: 1.0f }

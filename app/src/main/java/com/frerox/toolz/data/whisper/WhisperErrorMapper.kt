@@ -114,6 +114,17 @@ object WhisperErrorMapper {
                 UiText.StringResource(R.string.st_Whisper_Error_NotFound)
             throwable is RestException && throwable.statusCode == 409 ->
                 UiText.StringResource(R.string.st_Whisper_Error_AlreadyUpToDate)
+            // P0 Fix: block enforcement is now server-enforced via
+            // whisper_check_block_before_message/friend triggers. Their
+            // "blocked by this user" phrase must map to Blocked even when
+            // PostgREST returns 4xx/5xx — so check it BEFORE the generic HTTP buckets.
+            msg.contains("You have blocked this user", ignoreCase = true) ||
+                msg.contains("You have been blocked by this user", ignoreCase = true) ||
+                msg.contains("blocked by this user", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_Blocked)
+            // Permission / NotPermitted must also outrank generic 4xx/5xx (42501/P0001)
+            msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
+                UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
             throwable is RestException && throwable.statusCode in 400..499 ->
                 UiText.StringResource(R.string.st_Whisper_Error_RequestFailed)
             throwable is RestException && throwable.statusCode in 500..599 ->
@@ -157,14 +168,6 @@ object WhisperErrorMapper {
                 msg.contains("Failed to connect", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_Offline)
 
-            // Permission / database errors — tightened phrases to avoid false positives
-            // (L-5: a bare "blocked" substring used to swallow unrelated errors).
-            msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
-                UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
-            msg.contains("You have blocked this user", ignoreCase = true) ||
-                msg.contains("You have been blocked by this user", ignoreCase = true) ||
-                msg.contains("blocked by this user", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_Blocked)
             msg.contains("duplicate key", ignoreCase = true) || msg.contains("23505") ->
                 UiText.StringResource(R.string.st_Whisper_Error_AlreadyConnected)
 

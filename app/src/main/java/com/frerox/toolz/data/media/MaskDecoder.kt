@@ -67,8 +67,8 @@ object MaskDecoder {
                         out[i] = if (v in 0f..1f) v else sigmoid(v)
                     }
                 }
-                modelId == "selfie_multiclass" -> {
-                    // 6 channels, background = 0, foreground = 1..5 sum
+                modelId == "selfie_multiclass" || modelId == "modnet_hd" -> {
+                    // 6 channels, background = 0, foreground = 1..5 sum (multiclass & new HD)
                     for (i in 0 until total) {
                         val chans = FloatArray(numChannels) { c ->
                             val off = if (isNHWC) i * numChannels + c else c * total + i

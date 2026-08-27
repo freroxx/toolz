@@ -1102,11 +1102,28 @@ private fun ConversationCard(
                         }
                         // V6-R2 (review): lock sentinels from the repository render as
                         // localized placeholders instead of raw English sentinels.
-                        val previewText = conversation.lastMessage.content
-                        Text(
-                            if (com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(previewText)) {
+                        // Fix: images showed raw `whisper:image:{"url":...` — map to localized "📷 Image".
+                        // Also handles not-yet-decrypted envelopes (v2/v3) that would otherwise
+                        // leak `{"v":2,...}` JSON into the subtitle.
+                        val rawPreview = conversation.lastMessage.content.trim()
+                        val previewText = when {
+                            rawPreview.isBlank() -> ""
+                            com.frerox.toolz.data.whisper.WhisperTombstone.isLockedMarker(rawPreview) ->
                                 stringResource(R.string.st_Whisper_Locked_Short)
-                            } else previewText,
+                            com.frerox.toolz.data.whisper.WhisperImageAttachment.fromMessageContent(rawPreview) != null ||
+                                rawPreview.startsWith(com.frerox.toolz.data.whisper.WhisperImageAttachment.MESSAGE_PREFIX) ->
+                                "📷 " + stringResource(R.string.st_Whisper_Image)
+                            // Not-yet-decrypted envelope/ratchet frames must never leak raw JSON.
+                            // This also fixes "only images" bug: text envelopes were showing
+                            // `{"v":2,...}` and being mistaken for missing preview.
+                            rawPreview.startsWith("{\"v\":") ||
+                                rawPreview.startsWith(WhisperEnvelope.PREFIX_V2) ||
+                                rawPreview.startsWith(com.frerox.toolz.data.whisper.session.WhisperV3Codec.PREFIX) ->
+                                stringResource(R.string.st_Whisper_Locked_Short)
+                            else -> rawPreview
+                        }
+                        Text(
+                            previewText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,

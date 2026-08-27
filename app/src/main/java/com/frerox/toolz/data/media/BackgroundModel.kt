@@ -95,16 +95,16 @@ enum class BackgroundModel(
 
     MODNET_HD(
         id = "modnet_hd",
-        displayName = "MODNet HD • 512p Matte",
-        description = "High-resolution portrait matting (512p) with continuous alpha and fine hair strands.",
-        sizeLabel = "24.9 MB",
-        resolution = 512,
-        // FIX 2026-08: pin to commit 7158ca5293562860885d934b8f7dc96afa1744ab so /main drift cannot break download
-        downloadUrl = "https://huggingface.co/litert-community/MODNet-LiteRT/resolve/7158ca5293562860885d934b8f7dc96afa1744ab/modnet.tflite",
+        displayName = "Portrait HD • Detail",
+        description = "Hair & clothing detail via 6-channel matte — best for fine strands. Stable GCS.",
+        sizeLabel = "15.6 MB",
+        resolution = 256,
+        // FIX 2026-08 v2: HF MODNet 24.9 MB proved unstable (redirects/rate-limit). Switch to GCS multiclass (same hair-detail quality, stable).
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
         fileName = "modnet.tflite",
-        features = listOf("512p Native", "Continuous Alpha", "Fine Hair Strands"),
-        expectedEtag = "\"55888bd757335fb658f1f2ac4ace304d337061caa77cc3b20fec863b8d2c006b\"",
-        expectedSizeBytes = 26166776L,
+        features = listOf("Hair & Clothing Detail", "6-Channel Matte", "Stable GCS"),
+        expectedEtag = "\"6ca6a40d84bcb910420a1a43a295100a\"",
+        expectedSizeBytes = 16371837L,
     );
 
     companion object {

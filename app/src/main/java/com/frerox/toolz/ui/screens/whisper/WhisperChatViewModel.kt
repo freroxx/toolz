@@ -34,6 +34,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -292,52 +294,52 @@ class WhisperChatViewModel @Inject constructor(
     private fun loadInitialData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-
-            // V2-FIX (reviewwhisper.md) M-8/V-11: the profile is fetched exactly ONCE here
-            // (forceRefresh) and reused for partnerPublicKey + otherUser. NOTE: the key-trust
-            // and message-sync paths below still force-refresh internally inside the
-            // repository — threading this already-fetched profile through them requires
-            // repository signature changes that are outside this task's edit scope.
-            // 1. Load other user's profile
-            repository.getProfile(otherUserId, forceRefresh = true)
-                .onSuccess { profile ->
-                    partnerPublicKey = profile.publicKey
-                    _uiState.update { it.copy(otherUser = profile) }
-                }
-                .onFailure { err ->
-                    handleError(err, "getProfile")
-                }
-
-            // 2. Load friendship status
-            repository.getFriendshipStatus(otherUserId)
-                .onSuccess { (status, friendship) ->
-                    _uiState.update {
-                        it.copy(
-                            friendStatus = status,
-                            iAmRequester = friendship?.iRequested(myUserId) ?: false,
-                            isFriendStatusLoaded = true,
-                        )
-                    }
-                }
-                .onFailure { err ->
-                    handleError(err, "getFriendshipStatus")
-                    _uiState.update { it.copy(isFriendStatusLoaded = true) }
-                }
-
-            // 3. Load block status
-            // V2-FIX (reviewwhisper.md) L-18: getBlockStatus returns a raw Pair and can
-            // throw; the old direct destructure crashed the whole initial-load coroutine.
-            runCatching { repository.getBlockStatus(otherUserId) }
-                .onSuccess { (blockedByMe, blockedByOther) ->
-                    _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
-                }
-                .onFailure { err -> handleError(err, "getBlockStatus") }
-
-            // 4. Load key trust status (fingerprints + key-change detection)
-            loadKeyTrust()
-
-            // 5. Load messages
+            // Entrance lag fix: messages are the only thing that blocks the list —
+            // start its Room collector + network sync immediately, before any
+            // metadata RPC. The three metadata fetches then run in parallel on IO
+            // so a slow profile/presence call never stalls the list.
             loadMessages()
+            kotlinx.coroutines.coroutineScope {
+                val profileDeferred = async(Dispatchers.IO) {
+                    repository.getProfile(otherUserId, forceRefresh = true)
+                }
+                val friendshipDeferred = async(Dispatchers.IO) {
+                    repository.getFriendshipStatus(otherUserId)
+                }
+                val blockDeferred = async(Dispatchers.IO) {
+                    runCatching { repository.getBlockStatus(otherUserId) }
+                }
+                profileDeferred.await()
+                    .onSuccess { profile ->
+                        partnerPublicKey = profile.publicKey
+                        _uiState.update { it.copy(otherUser = profile) }
+                    }
+                    .onFailure { err -> handleError(err, "getProfile") }
+
+                friendshipDeferred.await()
+                    .onSuccess { (status, friendship) ->
+                        _uiState.update {
+                            it.copy(
+                                friendStatus = status,
+                                iAmRequester = friendship?.iRequested(myUserId) ?: false,
+                                isFriendStatusLoaded = true,
+                            )
+                        }
+                    }
+                    .onFailure { err ->
+                        handleError(err, "getFriendshipStatus")
+                        _uiState.update { it.copy(isFriendStatusLoaded = true) }
+                    }
+
+                blockDeferred.await()
+                    .onSuccess { (blockedByMe, blockedByOther) ->
+                        _uiState.update { it.copy(isBlockedByMe = blockedByMe, isBlockedByOther = blockedByOther) }
+                    }
+                    .onFailure { err -> handleError(err, "getBlockStatus") }
+            }
+            // Key trust depends on having seen the profile at least once but is
+            // non-critical for first paint — load it after the parallel batch.
+            loadKeyTrust()
         }
     }
 
@@ -393,47 +395,42 @@ class WhisperChatViewModel @Inject constructor(
                     // server echo just appeared in Room (same sender + identical content),
                     // BEFORE merging — the update lambda below stays side-effect free.
                     // Kept OUTSIDE _uiState.update because that lambda may be re-executed.
-                     pendingMessagesById.entries.removeAll { (_, pendingMsg) ->
-                         newMessages.any { roomRow ->
-                             roomRow.senderId == pendingMsg.senderId &&
-                                 !roomRow.isPending &&
-                                 roomRow.content.trim() == pendingMsg.content.trim()
-                         }
-                     }
-                     _uiState.update { state ->
-                         // CRITICAL: Preserve transient metadata (decrypted content, reactions,
-                         // enriched reply data) that isn't persisted in the basic message entity.
-                         // A tombstone must never be reverted to stale plaintext, so deletions
-                         // always win over any cached content.
-                         // P4a: list math extracted to ChatMessageMerger (unit-tested);
-                         // behavior identical.
-                         val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
-                         val merged = ChatMessageMerger.mergeRoomEmission(
-                             existing = state.messages,
-                             newMessages = newMessages,
-                             isReactionToggleInFlight = { id -> !pendingReactions[id].isNullOrEmpty() },
-                         )
-
-                        // V2-FIX (reviewwhisper.md) H-2/V-2: Room only emits persisted rows,
-                        // so every Room re-emission used to silently drop in-flight optimistic
-                        // sends. Re-append pendings whose server id has NOT appeared yet; they
-                        // leave this list via the echo-retire above or the send resolving.
+                    pendingMessagesById.entries.removeAll { (_, pendingMsg) ->
+                        newMessages.any { roomRow ->
+                            roomRow.senderId == pendingMsg.senderId &&
+                                !roomRow.isPending &&
+                                roomRow.content.trim() == pendingMsg.content.trim()
+                        }
+                    }
+                    // Entrance lag fix: merging + sorting 500 rows off Main so the
+                    // collector never blocks composition; only the final copy runs on Main.
+                    val snapshot = _uiState.value
+                    val searchQuery = snapshot.searchQuery
+                    val existingMessages = snapshot.messages
+                    val reactionInFlightSnapshot = pendingReactions.filterValues { it.isNotEmpty() }.keys.toSet()
+                    val isReactionInFlight: (String) -> Boolean = { id -> id in reactionInFlightSnapshot }
+                    val pendingValues = pendingMessagesById.values.toList()
+                    val computed = withContext(Dispatchers.Default) {
+                        val newIds = newMessages.mapTo(mutableSetOf()) { it.id }
+                        val merged = ChatMessageMerger.mergeRoomEmission(
+                            existing = existingMessages,
+                            newMessages = newMessages,
+                            isReactionToggleInFlight = isReactionInFlight,
+                        )
                         val unresolvedPending =
-                            pendingMessagesById.values.filter { it.id !in newIds && !it.isDeletedForEveryone }
-
-                        // V2-FIX (reviewwhisper.md) M-4/V-7: single shared ordering (safe
-                        // createdAt parse, pending pinned last) instead of the raw-string
-                        // compareBy used here before — both paths sorted differently.
+                            pendingValues.filter { it.id !in newIds && !it.isDeletedForEveryone }
                         val sorted = sortedMessages(merged + unresolvedPending)
-
+                        val matching = if (searchQuery.isNotBlank()) {
+                            sorted.filter { !it.isDeletedForEveryone && it.content.contains(searchQuery, ignoreCase = true) }.map { it.id }.toSet()
+                        } else emptySet()
+                        sorted to matching
+                    }
+                    val (sorted, matchingIds) = computed
+                    _uiState.update { state ->
                         state.copy(
                             messages = sorted,
                             isLoading = false,
-                            // Keep the same filter as updateSearchQuery: deleted-for-everyone
-                            // tombstones must never count as search matches.
-                            matchingMessageIds = if (state.searchQuery.isNotBlank()) {
-                                sorted.filter { !it.isDeletedForEveryone && it.content.contains(state.searchQuery, ignoreCase = true) }.map { it.id }.toSet()
-                            } else emptySet()
+                            matchingMessageIds = matchingIds,
                         )
                     }
                     if (newMessages.any { it.senderId == otherUserId && !it.isRead }) {

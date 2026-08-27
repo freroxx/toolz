@@ -195,6 +195,7 @@ fun SettingsScreen(
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
     val musicShakeSensitivity by viewModel.musicShakeSensitivity.collectAsState(initial = 0.3f)
     val musicAudioFocus by viewModel.musicAudioFocus.collectAsState(initial = true)
+    val musicAudioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = false)
     val musicAiEnabled by viewModel.musicAiEnabled.collectAsState(initial = true)
     val musicKeepScreenOnLyrics by viewModel.musicKeepScreenOnLyrics.collectAsState(initial = true)
     val karaokeEnabled by viewModel.karaokeEnabled.collectAsState(initial = true)
@@ -750,8 +751,7 @@ fun SettingsScreen(
                                 )
                             }
 
-                            if (matches(searchQuery, "audio", "focus", "pause", "smart", "ducking")) {
-                                val audioFocusDucking by viewModel.musicAudioFocusDucking.collectAsState(initial = false)
+                            if (matches(searchQuery, "audio", "focus", "pause", "smart", "ducking", "allow", "duck", "volume", "lower")) {
                                 SettingsToggleItem(
                                     title = stringResource(R.string.st_SettingsScreen_y9z1),
                                     subtitle = stringResource(R.string.st_SettingsScreen_a1b4),
@@ -759,12 +759,16 @@ fun SettingsScreen(
                                     checked = musicAudioFocus,
                                     onCheckedChange = { viewModel.setMusicAudioFocus(it) }
                                 )
-                                if (musicAudioFocus) {
+                                AnimatedVisibility(
+                                    visible = musicAudioFocus,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
                                     SettingsToggleItem(
                                         title = stringResource(R.string.st_SettingsScreen_c3d6),
                                         subtitle = stringResource(R.string.st_SettingsScreen_e5f8),
                                         icon = Icons.AutoMirrored.Rounded.VolumeDown,
-                                        checked = audioFocusDucking,
+                                        checked = musicAudioFocusDucking,
                                         onCheckedChange = { viewModel.setMusicAudioFocusDucking(it) }
                                     )
                                 }

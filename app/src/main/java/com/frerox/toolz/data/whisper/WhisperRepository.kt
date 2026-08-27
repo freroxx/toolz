@@ -33,6 +33,7 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.upload
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -43,6 +44,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.awaitClose
@@ -1076,19 +1079,23 @@ class WhisperRepository @Inject constructor(
         if (currentId.isBlank()) return flowOf(emptyList())
         // Room stores only ciphertext. Decrypt at read time with the accepted peer key so
         // nothing plaintext ever lands on disk, while the UI still renders full history.
+        // Entrance lag fix: heavy ECDH decrypt runs off Main (Default) so churning 500
+        // messages never freezes composition; combine itself is also flowOn Default.
         return combine(
             messageDao.getMessages(currentId, otherUserId),
             peerKeys.map { it[otherUserId] },
             blockedIds
         ) { entities, inMemoryKey, blocked ->
-            val peerKey = keyTrustStore.knownKey(otherUserId) ?: inMemoryKey
-            entities
-                // Never resurrect delete-for-me tombstones from the Room cache.
-                .filterNot { deletedStore.isMessageDeleted(it.id) }
-                // Hidden/blocked partners keep only the user's own outgoing rows.
-                .filter { it.senderId == currentId || otherUserId !in blocked }
-                .map { it.toModel().decryptContent(peerKey) }
-        }
+            withContext(Dispatchers.Default) {
+                val peerKey = keyTrustStore.knownKey(otherUserId) ?: inMemoryKey
+                entities
+                    // Never resurrect delete-for-me tombstones from the Room cache.
+                    .filterNot { deletedStore.isMessageDeleted(it.id) }
+                    // Hidden/blocked partners keep only the user's own outgoing rows.
+                    .filter { it.senderId == currentId || otherUserId !in blocked }
+                    .map { it.toModel().decryptContent(peerKey) }
+            }
+        }.flowOn(Dispatchers.Default)
     }
 
     /** Key used to decrypt a partner's cached ciphertext (accepted key, never a changed one). */
@@ -1133,8 +1140,10 @@ class WhisperRepository @Inject constructor(
 
         // Decrypt with the trusted key only (never a changed fresh server key), falling
         // back to a neutral marker instead of leaking raw ciphertext.
-        val decryptedMessages = visibleRaw
-            .map { msg -> msg.decryptContent(peerKeyFor(otherUserId), partnerProfile?.publicKey) }
+        // Entrance lag fix: batch decrypt off Main (P-256 ECDH per row is heavy).
+        val decryptedMessages = withContext(Dispatchers.Default) {
+            visibleRaw.map { msg -> msg.decryptContent(peerKeyFor(otherUserId), partnerProfile?.publicKey) }
+        }
 
         // Fetch reactions for all messages
         val messageIds = decryptedMessages.map { it.id }.filter { it.isNotBlank() }
