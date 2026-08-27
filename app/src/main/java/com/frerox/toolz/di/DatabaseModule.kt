@@ -61,6 +61,32 @@ object DatabaseModule {
      * row by parsing its createdAt (Instant.parse, OffsetDateTime.parse fallback,
      * epoch 0 on failure) through a single prepared statement loop.
      */
+    // FIX v1.1.0->v1.1.1: version 44 (v1.1.0) to 52 (v1.1.1) jumped 8 versions
+    // but MIGRATION_44_45 was missing, causing "A migration from 44 to 52 was
+    // required but not found" and a crash loop at MusicPlayerService startup
+    // (the first Hilt injection that opens the DB). v1.1.0 had no destructive
+    // fallback disabled, so 44->52 never needed an explicit path. Reconstructed
+    // from git history: 44->45 ONLY added whisper_messages, so CREATE TABLE +
+    // indices copied verbatim from the exported 47 schema are exact.
+    private val MIGRATION_44_45 = object : Migration(44, 45) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `whisper_messages` (`id` TEXT NOT NULL, `senderId` TEXT NOT NULL, " +
+                    "`receiverId` TEXT NOT NULL, `content` TEXT NOT NULL, `contentIv` TEXT, " +
+                    "`replyToId` TEXT, `isRead` INTEGER NOT NULL, `createdAt` TEXT NOT NULL, " +
+                    "`replyToContent` TEXT, `replyToSenderName` TEXT, `isDeletedForEveryone` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_messages_senderId` ON `whisper_messages` (`senderId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_messages_receiverId` ON `whisper_messages` (`receiverId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_whisper_messages_createdAt` ON `whisper_messages` (`createdAt`)")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_whisper_messages_senderId_receiverId_createdAt` " +
+                    "ON `whisper_messages` (`senderId`, `receiverId`, `createdAt`)"
+            )
+        }
+    }
+
     // V3-FIX: 45->46 and 46->47 were shipped without migration objects (the old
     // destructive-upgrade era). Devices still on DB 45 (last public release) crashed
     // with "migration from 45 to 49 not found". Reconstructed purely from git
@@ -185,7 +211,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -212,8 +238,17 @@ object DatabaseModule {
             // (app/schemas) and every version bump MUST ship an explicit Migration.
             val isLegacyHashMismatch = e is IllegalStateException &&
                 e.message?.contains("Room cannot verify the data integrity") == true
+            // v1.1.0->v1.1.1 FIX: if a user hits a missing migration path (e.g. 44->52
+            // before this fix shipped), Room throws "A migration from X to Y was
+            // required but not found" on the main thread and crash-loops forever at
+            // MusicPlayerService.onCreate. Treat it as unrecoverable schema drift
+            // (same as hash mismatch) — delete and rebuild so the app can launch.
+            // Data loss is preferable to a permanent crash; the explicit migrations
+            // above make this path unreachable for current/future versions.
+            val isMissingMigration = e is IllegalStateException &&
+                e.message?.contains("A migration from") == true
 
-            if (isCorruptOrWrongKey || isLegacyHashMismatch) {
+            if (isCorruptOrWrongKey || isLegacyHashMismatch || isMissingMigration) {
                 android.util.Log.e(
                     "DatabaseModule",
                     "Unopenable database (${e.javaClass.simpleName}: ${e.message}). " +
@@ -224,7 +259,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
+                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
