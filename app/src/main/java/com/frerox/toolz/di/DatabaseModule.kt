@@ -151,7 +151,10 @@ object DatabaseModule {
 
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE whisper_messages ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 0")
+            // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
+            // NOT protocol_version. Previous build shipped snake_case and crashed with
+            // "Migration didn't properly handle: whisper_messages ... Expected protocolVersion Found protocol_version".
+            db.execSQL("ALTER TABLE whisper_messages ADD COLUMN protocolVersion INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -245,8 +248,12 @@ object DatabaseModule {
             // (same as hash mismatch) — delete and rebuild so the app can launch.
             // Data loss is preferable to a permanent crash; the explicit migrations
             // above make this path unreachable for current/future versions.
+            // Also handle "Migration didn't properly handle" (e.g. protocol_version vs
+            // protocolVersion typo in 49->50) which leaves the DB in a validated-failure
+            // state that otherwise crash-loops forever without recovery.
             val isMissingMigration = e is IllegalStateException &&
-                e.message?.contains("A migration from") == true
+                (e.message?.contains("A migration from") == true ||
+                    e.message?.contains("Migration didn't properly handle") == true)
 
             if (isCorruptOrWrongKey || isLegacyHashMismatch || isMissingMigration) {
                 android.util.Log.e(
