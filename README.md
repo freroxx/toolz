@@ -55,7 +55,7 @@ Toolz includes **45+ precision instruments** organized across 9 categories:
 - **Voice Recorder** — Studio-quality audio capture with pause/resume and searchable library
 - **File Converter** — FFmpeg-powered media transformation for video, audio, and image formats
 - **PDF Reader** — Native document viewer with text extraction and document summary support
-- **Background Remover** — AI-powered utility to automatically remove backgrounds from images locally
+- **Background Remover** — Offline AI-powered utility to automatically remove backgrounds from images (runs locally)
 - **File Cleaner** — Storage management utility to reclaim space and remove redundant cache
 - **Sound Meter** — Real-time decibel analysis for monitoring environmental noise levels
 
