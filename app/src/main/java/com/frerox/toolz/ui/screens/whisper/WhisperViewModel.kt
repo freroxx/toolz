@@ -112,6 +112,7 @@ class WhisperViewModel @Inject constructor(
     private var hiddenJob: Job? = null
     private var heartbeatJob: Job? = null
     private var droppedCollectorJob: Job? = null
+    private var convInvalidationJob: Job? = null
 
     // Ids already surfaced to the user after their outbox entry was permanently dropped.
     private val droppedNotifiedClientIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -148,6 +149,16 @@ class WhisperViewModel @Inject constructor(
                     subscribeToFriends()
                     startHeartbeat()
                     observeProcessLifecycleForPresence() // V6-R6: instant presence
+                    // Fix: badge stuck after read — hub cache was 30s and poll backoff
+                    // delayed read-flip. Repository now emits on every
+                    // invalidateConversationsCache() (mark-read, delete, send) so hub
+                    // reloads instantly without waiting for next message/poll.
+                    convInvalidationJob?.cancel()
+                    convInvalidationJob = viewModelScope.launch {
+                        repository.conversationsInvalidated.collect {
+                            loadConversationsInternal(forceRefresh = true)
+                        }
+                    }
                     // V2-FIX L-?: restart the dropped-entry collector — signOut cancels it.
                     startDroppedCollector()
                 } else if (auth == false) {
@@ -155,6 +166,7 @@ class WhisperViewModel @Inject constructor(
                     // session never keeps retrying against the network.
                     messagesJob?.cancel()
                     friendsJob?.cancel()
+                    convInvalidationJob?.cancel()
                     loadAllJob?.cancel()
                     stopHeartbeat()
                     // Clear account-scoped local state so next login doesn't see previous user's hidden chats/mutes.
@@ -880,6 +892,7 @@ class WhisperViewModel @Inject constructor(
         presenceLifecycleObserver = null
         messagesJob?.cancel()
         friendsJob?.cancel()
+        convInvalidationJob?.cancel()
         muteJob?.cancel()
         hiddenJob?.cancel()
         loadAllJob?.cancel()

@@ -1030,8 +1030,15 @@ class WhisperRepository @Inject constructor(
         return true
     }
 
+    // Fix: badge stuck after read — hub cached conversations for 30s and poll backoff
+    // delayed read-flip propagation. Emit an instant invalidation signal so the hub
+    // reloads immediately after any mark-read / delete / send path.
+    private val _conversationsInvalidated = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val conversationsInvalidated: Flow<Unit> = _conversationsInvalidated
+
     fun invalidateConversationsCache() {
         conversationsCache = null
+        _conversationsInvalidated.tryEmit(Unit)
     }
 
     /**

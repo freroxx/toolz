@@ -154,7 +154,6 @@ fun WhisperAuthScreen(
         hasFileAccess.value = com.frerox.toolz.data.whisper.WhisperAubupManager.hasFileAccessForScan(context)
         if (hasFileAccess.value) viewModel.beginAubupFlow() // rescan now that storage is readable
     }
-    val autoDetectedFiles by viewModel.autoDetectedAccessFiles.collectAsStateWithLifecycle()
     // Re-evaluate on return from the Settings toggle (API ≥30 grant path).
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
@@ -287,48 +286,6 @@ fun WhisperAuthScreen(
                 )
             }
 
-            // V6-R7 (#auto-detect): passive "backup found" banner — recovery surfaces
-            // WITHOUT the user hunting for the Lost-Account entry.
-            if (autoDetectedFiles.isNotEmpty() && !showAubupRecoverySheet && hasFileAccess.value) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                        .bouncyClick {
-                            haptic.click()
-                            showAubupRecoverySheet = true
-                            viewModel.beginAubupFlow()
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            Icons.Rounded.FolderZip,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.st_Whisper_Aubup_AutoFound_Title),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Text(
-                                stringResource(R.string.st_Whisper_Aubup_AutoFound_Desc),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                    }
-                }
-            }
         }
 
         if (showAubupRecoverySheet) {
