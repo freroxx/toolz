@@ -32,7 +32,7 @@ Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggli
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **45+ precision instruments** organized across 9 categories:
+Toolz includes **47+ precision instruments** organized across 9 categories:
 
 ### ⏱️ Time & Productivity
 - **Timer** — Precise countdown engine with background persistence and physics-based alarms
