@@ -161,12 +161,11 @@ class WhisperNotificationManager @Inject constructor(
             }
             return
         }
-        if (hiddenChatsStore.isHidden(senderId)) {
-            if (com.frerox.toolz.BuildConfig.DEBUG) {
-                Log.d(TAG, "Chat with $senderId is hidden — skipping notification")
-            }
-            return
-        }
+        // Fix: hidden (delete-chat / archive) must NOT suppress notifications —
+        // it caused asymmetric delivery: userA who had archived the chat never got
+        // pinged when userB replied, while userB (not archived) did. Archived chats
+        // still ping and the hub unhides on next loadConversationsInternal (toUnhide).
+        // Keep isHidden check out of the notification path.
 
         // Skip notification if the app is in foreground AND the user is already in that specific chat
         if (isInForeground && currentChatId == senderId) {

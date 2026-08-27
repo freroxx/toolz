@@ -47,6 +47,7 @@ class WhisperViewModel @Inject constructor(
     private val prekeyManager: com.frerox.toolz.data.whisper.WhisperPrekeyManager,
     private val keyRotationStore: WhisperKeyRotationStore,
     private val offlineManager: com.frerox.toolz.util.OfflineManager,
+    private val pushTokenStore: com.frerox.toolz.push.WhisperPushTokenStore,
 ) : ViewModel() {
     private var profileSearchJob: Job? = null
 
@@ -149,6 +150,10 @@ class WhisperViewModel @Inject constructor(
                     subscribeToFriends()
                     startHeartbeat()
                     observeProcessLifecycleForPresence() // V6-R6: instant presence
+                    // Fix: asymmetric FCM — token parked before login was only uploaded
+                    // on next cold start (MainActivity). If userA signed in without
+                    // restarting, B got pushes but A didn't. Flush the parked token now.
+                    viewModelScope.launch { runCatching { pushTokenStore.retryPendingIfAny() } }
                     // Fix: badge stuck after read — hub cache was 30s and poll backoff
                     // delayed read-flip. Repository now emits on every
                     // invalidateConversationsCache() (mark-read, delete, send) so hub
@@ -833,8 +838,9 @@ class WhisperViewModel @Inject constructor(
                     // FIX: never notify for read or deleted messages (ghost after mark-as-read).
                     if (msg.isRead || msg.isDeletedForEveryone) return@collect
                     if (msg.senderId == myId) return@collect
-                    // Hidden and muted chats never notify — check synchronously to avoid delay.
-                    if (hiddenChatsStore.isHidden(msg.senderId)) return@collect
+                    // Fix: hidden (archive) must NOT suppress pings — asymmetric bug:
+                    // userA archived B never got notified when B replied, while B did.
+                    // Muted stays suppressed (intentional), hidden does not.
                     if (mutePrefs.isMuted(msg.senderId)) return@collect
                     // FIX: show immediately with generic title — profile lookup previously
                     // blocked notification for cache misses (network) and caused delay.
