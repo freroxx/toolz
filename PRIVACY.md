@@ -6,8 +6,6 @@ Toolz does not require accounts. Toolz does not sell data.
 
 **Network Tweaks Tool** :
 
-**What stays on device:** Wi-Fi scans, tweak journal, speed history (Room, 90-day retention, user-clearable), clipboard history, notes, passwords (SQLCipher). Nothing leaves the phone unless you tap a network egress action below.
-
 **Network — only when you tap:**
 - Public IP: `https://api.ipify.org?format=json` fallback `https://ipapi.co/json/` (fetch on Overview → Public IP → Refresh)
 - Speed test mirrors: `https://speed.cloudflare.com/__down?bytes=…`, `https://proof.ovh.net/files/10Mb.dat`, `https://speed.hetzner.de/100MB.bin`, upload to `https://speed.cloudflare.com/__up` (Diagnostics → Speed Test → Run)
