@@ -54,13 +54,12 @@ class ModelDownloadManager(
         val file = modelFile(model)
         if (!file.exists()) return false
         if (file.length() < 1024) return false
-        // If we have expected size, require within 1% tolerance or exact
         if (model.expectedSizeBytes > 0) {
             val len = file.length()
-            // Accept exact or near — GCS consistent, HF can vary by 0
             if (len != model.expectedSizeBytes) {
-                // For MediaPipe tiny models exact match, for others allow 512 bytes slack
-                if (kotlin.math.abs(len - model.expectedSizeBytes) > 1024) return false
+                // Allow more slack for large HF models (re-compression can shift a few KB)
+                val slack = if (model.expectedSizeBytes > 5_000_000) 8192 else 2048
+                if (kotlin.math.abs(len - model.expectedSizeBytes) > slack) return false
             }
         }
         // Basic TFLite magic: first 4 bytes not HTML "<!DO" — check file header

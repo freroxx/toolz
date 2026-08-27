@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AddAPhoto
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.Face
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Refresh
@@ -304,7 +305,7 @@ private fun HeroPane(
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                         Icon(
-                            Icons.Rounded.AutoAwesome, null,
+                            Icons.Rounded.Face, null,
                             modifier = Modifier.size(46.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
@@ -317,14 +318,6 @@ private fun HeroPane(
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Pick a photo — AI lifts the subject in seconds.\n100% on-device, nothing leaves your phone.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp,
                 )
                 Spacer(Modifier.height(36.dp))
 

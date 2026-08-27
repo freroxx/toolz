@@ -73,13 +73,19 @@ class BackgroundRemoverViewModel @Inject constructor(
     private var tfliteInterpreter: Interpreter? = null
     private val initMutex = Mutex()
     private var activeJob: Job? = null
+    private val prefs = context.getSharedPreferences("bg_remover_prefs", Context.MODE_PRIVATE)
 
     init {
-        // Prefer any already-verified model, else default; select & warm interpreter
+        // Remember user choice: load saved model id, fallback to default/verified
         val verified = downloadManager.allDownloadedIds()
+        val savedId = prefs.getString("selected_model_id", null)
+        val savedModel = savedId?.let { BackgroundModel.fromId(it) }
         val chosen = when {
-            verified.isEmpty() -> BackgroundModel.default()
-            verified.contains(BackgroundModel.SELFIE_PORTRAIT.id) -> BackgroundModel.SELFIE_PORTRAIT
+            savedModel != null && verified.contains(savedModel.id) -> savedModel
+            savedModel != null && verified.isEmpty() -> savedModel // keep choice even if not yet downloaded
+            verified.isEmpty() -> savedModel ?: BackgroundModel.default()
+            verified.contains(BackgroundModel.SELFIE_PORTRAIT.id) && savedModel == null -> BackgroundModel.SELFIE_PORTRAIT
+            savedModel != null && downloadManager.isVerified(savedModel) -> savedModel
             else -> BackgroundModel.fromId(verified.first()) ?: BackgroundModel.default()
         }
         val isDl = downloadManager.isVerified(chosen)
@@ -96,6 +102,8 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     fun selectModel(model: BackgroundModel) {
+        // persist choice immediately
+        prefs.edit().putString("selected_model_id", model.id).apply()
         val isDownloaded = downloadManager.isVerified(model)
         tfliteInterpreter?.close()
         tfliteInterpreter = null
@@ -145,6 +153,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     _uiState.update { it.copy(isProcessing = false, error = msg) }
                     return@launch
                 }
+                prefs.edit().putString("selected_model_id", model.id).apply()
                 val verified = downloadManager.allDownloadedIds()
                 _uiState.update {
                     it.copy(
@@ -347,14 +356,23 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val isFloatInput = inputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
                 val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * (if (isFloatInput) 4 else 1))
                 inputBuffer.order(ByteOrder.nativeOrder())
+                // Per-model normalization: MODNet expects -1..1 (mean 0.5 / std 0.5), others expect 0..1
+                val isModNet = model.id == "modnet_hd"
                 for (pixel in inputPixels) {
                     val r = (pixel shr 16) and 0xFF
                     val g = (pixel shr 8) and 0xFF
                     val b = pixel and 0xFF
                     if (isFloatInput) {
-                        inputBuffer.putFloat(r / 255.0f)
-                        inputBuffer.putFloat(g / 255.0f)
-                        inputBuffer.putFloat(b / 255.0f)
+                        if (isModNet) {
+                            // (x/255 - 0.5) / 0.5 => x/127.5 - 1
+                            inputBuffer.putFloat(r / 127.5f - 1f)
+                            inputBuffer.putFloat(g / 127.5f - 1f)
+                            inputBuffer.putFloat(b / 127.5f - 1f)
+                        } else {
+                            inputBuffer.putFloat(r / 255.0f)
+                            inputBuffer.putFloat(g / 255.0f)
+                            inputBuffer.putFloat(b / 255.0f)
+                        }
                     } else {
                         inputBuffer.put(r.toByte()); inputBuffer.put(g.toByte()); inputBuffer.put(b.toByte())
                     }

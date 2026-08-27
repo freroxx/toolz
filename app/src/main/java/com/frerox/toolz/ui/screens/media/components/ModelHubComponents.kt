@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -53,7 +54,7 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.SquircleShape
 
 /**
- * AI model picker for the hub sheet. Pure state in, events out.
+ * AI model picker — clear M3 Expressive, minimal chrome.
  */
 @Composable
 fun ModelHubContent(
@@ -68,52 +69,44 @@ fun ModelHubContent(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
-
-        // Header
+        // Clean header — no extra spacers, expressive title
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         ) {
-            Box(Modifier.width(40.dp))
-            Spacer(Modifier.width(4.dp))
-            Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "AI models",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.weight(1f),
-            )
+            Surface(
+                shape = SquircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(Icons.Rounded.AutoAwesome, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "AI models",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    "Offline after download",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             IconButton(onClick = onProceed) {
                 Icon(Icons.Rounded.Close, "Close")
             }
         }
-        Text(
-            "Download once · runs fully offline",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
-        )
 
-        LazyColumn(
+        // Simple flat list — no sections, expressive cards with generous whitespace
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Grouped by task so users find the right engine instantly
-            item { SectionHeader("People & selfies") }
-            items(peopleModels) { model ->
-                ModelCard(
-                    model = model,
-                    isSelected = selectedModel == model,
-                    isDownloaded = downloadedIds.contains(model.id),
-                    isDownloading = downloadingId == model.id,
-                    onClick = { onModelSelect(model) },
-                    onDelete = { onDeleteClick(model) },
-                )
-            }
-            item { SectionHeader("Objects & products") }
-            items(objectModels) { model ->
+            for (model in allModels) {
                 ModelCard(
                     model = model,
                     isSelected = selectedModel == model,
@@ -125,7 +118,7 @@ fun ModelHubContent(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
         AnimatedVisibility(
             visible = selectedModel != null,
@@ -140,7 +133,7 @@ fun ModelHubContent(
                     if (isDownloading) {
                         LinearProgressIndicator(
                             progress = { downloadProgress.coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                         )
                         Text(
                             "${model.displayName} · ${(downloadProgress * 100).toInt()}%",
@@ -148,14 +141,14 @@ fun ModelHubContent(
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         )
                     }
                     ToolzExpressiveButton(
                         onClick = { if (isDownloaded) onProceed() else onDownloadClick(model) },
                         enabled = !isDownloading,
                         shape = SquircleShape,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
                     ) {
                         if (isDownloading) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
@@ -193,30 +186,31 @@ private fun ModelCard(
     Surface(
         onClick = onClick,
         shape = SquircleShape,
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
         else MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+        border = if (isSelected) BorderStroke(1.6.dp, MaterialTheme.colorScheme.primary) else null,
+        shadowElevation = if (isSelected) 0.dp else 0.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
             Surface(
                 shape = SquircleShape,
                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(42.dp),
             ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth().height(40.dp)) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth().height(42.dp)) {
                     Icon(
                         iconFor(model), null,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(21.dp),
                         tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
                     )
                 }
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(14.dp))
 
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -229,8 +223,8 @@ private fun ModelCard(
                         Spacer(Modifier.width(6.dp))
                         Surface(shape = SquircleShape, color = MaterialTheme.colorScheme.tertiaryContainer) {
                             Text(
-                                "PICK",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                "RECOMMENDED",
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
                                 fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -239,34 +233,26 @@ private fun ModelCard(
                     }
                     if (isDownloaded) {
                         Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Rounded.CheckCircle, "Installed", modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Rounded.CheckCircle, "Ready", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
-                Spacer(Modifier.height(2.dp))
+                // Clear: only essentials — removed long description truncation & marketing labels
                 Text(
-                    model.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "${speedLabel(model)} · ${model.resolution}p · ${model.sizeLabel}",
+                    "${model.resolution}p · ${model.sizeLabel}",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
             if (isDownloading) {
                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
             } else if (isDownloaded) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(
-                        Icons.Rounded.DeleteOutline, "Delete",
-                        modifier = Modifier.size(17.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        Icons.Rounded.DeleteOutline, "Remove",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.66f),
                     )
                 }
             }
@@ -293,13 +279,15 @@ private fun speedLabel(model: BackgroundModel): String = when (model.id) {
     else -> "Fast"
 }
 
-private val peopleModels = listOf(
+private val allModels = listOf(
     BackgroundModel.SELFIE_PORTRAIT,
-    BackgroundModel.MODNET_HD,
-    BackgroundModel.SELFIE_MULTICLASS,
     BackgroundModel.SELFIE_LANDSCAPE,
+    BackgroundModel.MODNET_HD,
+    BackgroundModel.DEEPLABV3_OBJECTS,
+    BackgroundModel.SELFIE_MULTICLASS,
 )
 
+private val peopleModels = allModels.take(4)
 private val objectModels = listOf(BackgroundModel.DEEPLABV3_OBJECTS)
 
 @Composable
