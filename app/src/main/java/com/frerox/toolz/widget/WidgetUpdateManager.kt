@@ -54,35 +54,44 @@ class WidgetUpdateManager @Inject constructor(
         nextTitle: String?,
         queue: List<QueueTrackInfo>
     ) {
-        val glanceIds = GlanceAppWidgetManager(context)
-            .getGlanceIds(MusicGlanceWidget::class.java)
+        // P2-08 fix: Guard getGlanceIds — can throw if AppWidgetHost not ready (e.g. after reboot)
+        val glanceIds = try {
+            GlanceAppWidgetManager(context).getGlanceIds(MusicGlanceWidget::class.java)
+        } catch (e: Exception) {
+            android.util.Log.w("WidgetUpdateMgr", "getGlanceIds failed (non-fatal)", e)
+            return
+        }
 
         if (glanceIds.isEmpty()) return // no widget instances on the home screen — nothing to push
 
         glanceIds.forEach { glanceId ->
-            updateAppWidgetState(context, glanceId) { prefs ->
-                prefs[MusicWidgetState.KEY_TITLE] = title
-                prefs[MusicWidgetState.KEY_ARTIST] = artist
-                if (album != null) prefs[MusicWidgetState.KEY_ALBUM] = album
-                prefs[MusicWidgetState.KEY_POSITION_MS] = positionMs
-                prefs[MusicWidgetState.KEY_DURATION_MS] = durationMs
-                prefs[MusicWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] = capturedAtElapsedMs
-                prefs[MusicWidgetState.KEY_PLAYING] = isPlaying
-                prefs[MusicWidgetState.KEY_HAS_NEXT] = hasNext
-                prefs[MusicWidgetState.KEY_HAS_PREV] = hasPrev
-                if (accentColor != null) prefs[MusicWidgetState.KEY_ACCENT_COLOR] = accentColor
-                prefs[MusicWidgetState.KEY_ART_SHAPE] = artShape
-                if (artFilePath != null) prefs[MusicWidgetState.KEY_ART_PATH] = artFilePath
-                prefs[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
-                if (nextTitle != null) {
-                    prefs[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
-                } else {
-                    prefs.remove(MusicWidgetState.KEY_NEXT_TITLE)
+            try {
+                updateAppWidgetState(context, glanceId) { prefs ->
+                    prefs[MusicWidgetState.KEY_TITLE] = title
+                    prefs[MusicWidgetState.KEY_ARTIST] = artist
+                    if (album != null) prefs[MusicWidgetState.KEY_ALBUM] = album
+                    prefs[MusicWidgetState.KEY_POSITION_MS] = positionMs
+                    prefs[MusicWidgetState.KEY_DURATION_MS] = durationMs
+                    prefs[MusicWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] = capturedAtElapsedMs
+                    prefs[MusicWidgetState.KEY_PLAYING] = isPlaying
+                    prefs[MusicWidgetState.KEY_HAS_NEXT] = hasNext
+                    prefs[MusicWidgetState.KEY_HAS_PREV] = hasPrev
+                    if (accentColor != null) prefs[MusicWidgetState.KEY_ACCENT_COLOR] = accentColor
+                    prefs[MusicWidgetState.KEY_ART_SHAPE] = artShape
+                    if (artFilePath != null) prefs[MusicWidgetState.KEY_ART_PATH] = artFilePath
+                    prefs[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
+                    if (nextTitle != null) {
+                        prefs[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
+                    } else {
+                        prefs.remove(MusicWidgetState.KEY_NEXT_TITLE)
+                    }
+                    prefs[MusicWidgetState.KEY_QUEUE_JSON] = encodeQueueJson(queue)
                 }
-                prefs[MusicWidgetState.KEY_QUEUE_JSON] = encodeQueueJson(queue)
+                // Explicitly trigger a refresh for this instance
+                MusicGlanceWidget().update(context, glanceId)
+            } catch (e: Exception) {
+                android.util.Log.w("WidgetUpdateMgr", "updateMusicWidget failed for $glanceId", e)
             }
-            // Explicitly trigger a refresh for this instance
-            MusicGlanceWidget().update(context, glanceId)
         }
     }
 

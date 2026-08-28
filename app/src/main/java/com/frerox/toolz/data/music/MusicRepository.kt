@@ -60,6 +60,7 @@ class MusicRepository @Inject constructor(
 
     private var liveObserver: ContentObserver? = null
     private var debounceJob: Job? = null
+    private var lastThumbFixMs: Long = 0L
 
     fun hasAudioPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -74,6 +75,7 @@ class MusicRepository @Inject constructor(
     /**
      * Registers a MediaStore ContentObserver for real-time live refresh
      * whenever audio files are added, modified, moved, or deleted on the device.
+     * P0-06 fix: paired with [stopLiveObserver] to avoid leaks on rotation/recreate.
      */
     fun startLiveObserver(scope: CoroutineScope) {
         if (liveObserver != null) return
@@ -84,7 +86,7 @@ class MusicRepository @Inject constructor(
                 debounceJob?.cancel()
                 debounceJob = scope.launch(Dispatchers.IO) {
                     delay(1200) // Debounce rapid file events
-                    scanDeviceForMusic()
+                    runCatching { scanDeviceForMusic() }
                 }
             }
         }
@@ -96,8 +98,25 @@ class MusicRepository @Inject constructor(
                 observer
             )
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("MusicRepository", "registerContentObserver failed", e)
         }
+    }
+
+    /**
+     * P0-06 fix: unregisters the observer and cancels pending debounce.
+     * Must be called from ViewModel.onCleared / Service.onDestroy as appropriate.
+     */
+    fun stopLiveObserver() {
+        liveObserver?.let { observer ->
+            try {
+                context.contentResolver.unregisterContentObserver(observer)
+            } catch (e: Exception) {
+                android.util.Log.w("MusicRepository", "unregisterContentObserver failed", e)
+            }
+            liveObserver = null
+        }
+        debounceJob?.cancel()
+        debounceJob = null
     }
 
     suspend fun getTrackByUri(uri: String): MusicTrack? = withContext(Dispatchers.IO) {
@@ -110,6 +129,12 @@ class MusicRepository @Inject constructor(
 
     suspend fun getPlaylistById(id: Int): Playlist? = withContext(Dispatchers.IO) {
         musicDao.getPlaylistById(id)
+    }
+
+    private fun computeStableId(path: String?, sourceUrl: String?, uri: String, title: String, artist: String?): String {
+        // Prefer persistent identifiers: path > sourceUrl > uri; include title/artist for uniqueness
+        val base = path?.takeIf { it.isNotBlank() } ?: sourceUrl?.takeIf { it.isNotBlank() } ?: uri
+        return "${base.hashCode()}_${title.hashCode()}_${artist.hashCode()}"
     }
 
     suspend fun updateTrackAiData(
@@ -141,8 +166,9 @@ class MusicRepository @Inject constructor(
         if (thumbUri.startsWith("file://")) {
             val filePath = Uri.parse(thumbUri).path ?: return false
             val file = File(filePath)
-            // Storing in cacheDir is volatile; only filesDir thumbs are permanently valid
-            return file.exists() && file.length() > 0 && !filePath.contains("/cache/")
+            // P2-09 fix: use canonicalPath for cache check (encoded paths could bypass contains)
+            val canonical = runCatching { file.canonicalPath }.getOrDefault(filePath)
+            return file.exists() && file.length() > 0 && !canonical.contains("/cache/")
         }
         return true
     }
@@ -170,18 +196,9 @@ class MusicRepository @Inject constructor(
                 return Uri.fromFile(targetFile).toString()
             }
         } catch (e: Exception) {
-            if (path != null && File(path).exists()) {
-                try {
-                    retriever.setDataSource(path)
-                    val artwork = retriever.embeddedPicture
-                    if (artwork != null && artwork.isNotEmpty()) {
-                        FileOutputStream(targetFile).use { it.write(artwork) }
-                        return Uri.fromFile(targetFile).toString()
-                    }
-                } catch (e2: Exception) {}
-            }
+            android.util.Log.d("MusicRepository", "embeddedPicture failed for $uri: ${e.message}")
         } finally {
-            try { retriever.release() } catch (e: Exception) {}
+            try { retriever.release() } catch (_: Exception) {}
         }
 
         // 2. Try ContentResolver.loadThumbnail on Android 10+ (Q+)
@@ -293,7 +310,8 @@ class MusicRepository @Inject constructor(
                             lastPlayed = 0L,
                             playCount = 0,
                             path = path,
-                            dateAdded = System.currentTimeMillis()
+                            dateAdded = System.currentTimeMillis(),
+                            stableId = computeStableId(path, null, contentUriString, title, artist)
                         )
                         musicDao.insertTrack(newTrack)
                         newOrUpdatedTracks.add(newTrack)
@@ -308,10 +326,9 @@ class MusicRepository @Inject constructor(
                         }
 
                         if (existingTrack.uri != contentUriString) {
-                            // Primary key changed (file relocated or re-indexed)
-                            // 1. Delete old row
-                            musicDao.deleteTrackByUri(existingTrack.uri)
-                            // 2. Insert new row with preserved user metadata
+                            // Primary key changed (file relocated or re-indexed) — atomic migration
+                            val stable = existingTrack.stableId.takeIf { it.isNotBlank() }
+                                ?: computeStableId(path ?: existingTrack.path, existingTrack.sourceUrl, contentUriString, title, artist)
                             val updatedTrack = existingTrack.copy(
                                 uri = contentUriString,
                                 title = if (title != "Unknown") title else existingTrack.title,
@@ -320,19 +337,12 @@ class MusicRepository @Inject constructor(
                                 albumId = albumId,
                                 duration = if (duration > 0) duration else existingTrack.duration,
                                 path = path,
-                                thumbnailUri = newThumb
+                                thumbnailUri = newThumb,
+                                stableId = stable
                             )
-                            musicDao.insertTrack(updatedTrack)
+                            // P0-01 fix: single transaction guarantees playlist consistency on crash
+                            musicDao.atomicMigrateUri(existingTrack.uri, updatedTrack)
                             newOrUpdatedTracks.add(updatedTrack)
-
-                            // 3. Migrate playlist entries referencing the old URI
-                            val allPlaylists = musicDao.getAllPlaylistsSync()
-                            allPlaylists.forEach { pl ->
-                                if (pl.trackUris.contains(existingTrack.uri)) {
-                                    val updatedUris = pl.trackUris.map { if (it == existingTrack.uri) contentUriString else it }
-                                    musicDao.updatePlaylist(pl.copy(trackUris = updatedUris))
-                                }
-                            }
                         } else {
                             // Same URI: update in place
                             val needsUpdate = existingTrack.path != path ||
@@ -340,12 +350,15 @@ class MusicRepository @Inject constructor(
                                     (duration > 0 && existingTrack.duration <= 0) ||
                                     newThumb != currentThumb
 
-                            if (needsUpdate) {
+                            if (needsUpdate || existingTrack.stableId.isBlank()) {
+                                val stable = existingTrack.stableId.takeIf { it.isNotBlank() }
+                                    ?: computeStableId(path, existingTrack.sourceUrl, existingTrack.uri, existingTrack.title, existingTrack.artist)
                                 val updatedTrack = existingTrack.copy(
                                     path = path,
                                     albumId = albumId,
                                     duration = if (duration > 0) duration else existingTrack.duration,
-                                    thumbnailUri = newThumb
+                                    thumbnailUri = newThumb,
+                                    stableId = stable
                                 )
                                 musicDao.updateTrack(updatedTrack)
                                 newOrUpdatedTracks.add(updatedTrack)
@@ -365,24 +378,31 @@ class MusicRepository @Inject constructor(
 
                 // If not found in current scan
                 if (!scannedUris.contains(track.uri)) {
+                    // P0-01: also check contentResolver for content:// URIs before pruning
+                    // File.exists() alone can falsely prune when scoped-storage permission was lost.
                     val fileOnDiskExists = track.path?.let { File(it).exists() } == true
-                    if (!fileOnDiskExists) {
-                        // Dead track: remove from database and playlists
-                        musicDao.deleteTrack(track)
-                        val allPlaylists = musicDao.getAllPlaylistsSync()
-                        allPlaylists.forEach { pl ->
-                            if (pl.trackUris.contains(track.uri)) {
-                                musicDao.updatePlaylist(pl.copy(trackUris = pl.trackUris - track.uri))
-                            }
-                        }
+                    val contentExists = if (!fileOnDiskExists && track.uri.startsWith("content://")) {
+                        runCatching {
+                            context.contentResolver.openFileDescriptor(Uri.parse(track.uri), "r")?.use { true } ?: false
+                        }.getOrDefault(false)
+                    } else false
+                    if (!fileOnDiskExists && !contentExists) {
+                        // Dead track: remove atomically with playlist cleanup
+                        musicDao.atomicDeleteTrackAndCleanPlaylists(track)
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("MusicRepository", "scanDeviceForMusic failed", e)
         }
 
-        fixAllThumbnails()
+        // P2: throttle redundant thumbnail pass (scan already handled per-track thumbs)
+        val now = System.currentTimeMillis()
+        val shouldFix = newOrUpdatedTracks.isNotEmpty() || now - lastThumbFixMs > 300_000L // 5 min
+        if (shouldFix) {
+            fixAllThumbnails()
+            lastThumbFixMs = now
+        }
         newOrUpdatedTracks
     }
 
@@ -446,30 +466,27 @@ class MusicRepository @Inject constructor(
                                     lastPlayed = 0L,
                                     playCount = 0,
                                     path = file.uri.path,
-                                    dateAdded = System.currentTimeMillis()
+                                    dateAdded = System.currentTimeMillis(),
+                                    stableId = computeStableId(file.uri.path, null, fileUriString, title, artist)
                                 )
                                 musicDao.insertTrack(track)
                                 tracks.add(track)
                             } else {
                                 if (existingTrack.uri != fileUriString) {
-                                    musicDao.deleteTrackByUri(existingTrack.uri)
+                                    val stable = existingTrack.stableId.takeIf { it.isNotBlank() }
+                                        ?: computeStableId(file.uri.path, existingTrack.sourceUrl, fileUriString, title, artist)
                                     val updated = existingTrack.copy(
                                         uri = fileUriString,
                                         title = title,
                                         artist = artist,
                                         album = album,
                                         duration = if (duration > 0) duration else existingTrack.duration,
-                                        thumbnailUri = thumb ?: existingTrack.thumbnailUri
+                                        thumbnailUri = thumb ?: existingTrack.thumbnailUri,
+                                        stableId = stable
                                     )
-                                    musicDao.insertTrack(updated)
+                                    // atomic migration via DAO
+                                    musicDao.atomicMigrateUri(existingTrack.uri, updated)
                                     tracks.add(updated)
-
-                                    val allPlaylists = musicDao.getAllPlaylistsSync()
-                                    allPlaylists.forEach { pl ->
-                                        if (pl.trackUris.contains(existingTrack.uri)) {
-                                            musicDao.updatePlaylist(pl.copy(trackUris = pl.trackUris.map { if (it == existingTrack.uri) fileUriString else it }))
-                                        }
-                                    }
                                 } else {
                                     val updated = existingTrack.copy(
                                         title = title,
@@ -497,7 +514,8 @@ class MusicRepository @Inject constructor(
     }
 
     private fun isAudioFile(name: String): Boolean {
-        val extensions = listOf(".mp3", ".wav", ".m4a", ".ogg", ".flac")
+        // P2: support more lossless/compressed formats seen via SAF / downloads
+        val extensions = listOf(".mp3", ".wav", ".m4a", ".ogg", ".flac", ".opus", ".aac", ".wma", ".aiff", ".m4b", ".oga")
         return extensions.any { name.lowercase().endsWith(it) }
     }
 
@@ -525,12 +543,14 @@ class MusicRepository @Inject constructor(
                 lastPlayed = 0L,
                 playCount = 0,
                 path = null,
-                dateAdded = System.currentTimeMillis()
+                dateAdded = System.currentTimeMillis(),
+                stableId = computeStableId(null, null, uri.toString(), title, artist)
             )
         } catch (e: Exception) {
+            val fallbackTitle = uri.lastPathSegment?.substringBeforeLast(".") ?: "Unknown"
             MusicTrack(
                 uri = uri.toString(),
-                title = uri.lastPathSegment?.substringBeforeLast(".") ?: "Unknown",
+                title = fallbackTitle,
                 artist = "Unknown Artist",
                 album = "Unknown Album",
                 duration = 0,
@@ -539,7 +559,8 @@ class MusicRepository @Inject constructor(
                 lastPlayed = 0L,
                 playCount = 0,
                 path = null,
-                dateAdded = System.currentTimeMillis()
+                dateAdded = System.currentTimeMillis(),
+                stableId = computeStableId(null, null, uri.toString(), fallbackTitle, "Unknown Artist")
             )
         } finally {
             try {
@@ -569,21 +590,28 @@ class MusicRepository @Inject constructor(
         val existing = track.sourceUrl?.let { musicDao.getTrackBySourceUrl(it) }
             ?: musicDao.getTrackByUri(track.uri)
 
+        // Ensure incoming has stableId
+        val incomingStable = track.stableId.takeIf { it.isNotBlank() }
+            ?: computeStableId(track.path, track.sourceUrl, track.uri, track.title, track.artist)
+        val incoming = track.copy(stableId = incomingStable)
         if (existing == null) {
-            musicDao.insertTrack(track)
-        } else if (existing.uri == track.uri) {
+            musicDao.insertTrack(incoming)
+        } else if (existing.uri == incoming.uri) {
+            val stable = existing.stableId.takeIf { it.isNotBlank() } ?: incomingStable
             musicDao.updateTrack(existing.copy(
-                title       = track.title,
-                artist      = track.artist,
-                album       = track.album,
-                duration    = if (track.duration > 0L) track.duration else existing.duration,
-                thumbnailUri= track.thumbnailUri ?: existing.thumbnailUri,
-                path        = track.path,
-                sourceUrl   = track.sourceUrl ?: existing.sourceUrl,
-                dateAdded   = track.dateAdded
+                title       = incoming.title,
+                artist      = incoming.artist,
+                album       = incoming.album,
+                duration    = if (incoming.duration > 0L) incoming.duration else existing.duration,
+                thumbnailUri= incoming.thumbnailUri ?: existing.thumbnailUri,
+                path        = incoming.path,
+                sourceUrl   = incoming.sourceUrl ?: existing.sourceUrl,
+                dateAdded   = incoming.dateAdded,
+                stableId    = stable
             ))
         } else {
-            val merged = track.copy(
+            val stable = existing.stableId.takeIf { it.isNotBlank() } ?: incomingStable
+            val merged = incoming.copy(
                 isFavorite            = existing.isFavorite,
                 playCount             = existing.playCount,
                 lastPlayed            = existing.lastPlayed,
@@ -593,11 +621,12 @@ class MusicRepository @Inject constructor(
                 aiRecommendationsJson = existing.aiRecommendationsJson,
                 lastAiSync            = existing.lastAiSync,
                 karaokeSingCount      = existing.karaokeSingCount,
-                thumbnailUri          = track.thumbnailUri ?: existing.thumbnailUri,
-                sourceUrl             = track.sourceUrl ?: existing.sourceUrl
+                thumbnailUri          = incoming.thumbnailUri ?: existing.thumbnailUri,
+                sourceUrl             = incoming.sourceUrl ?: existing.sourceUrl,
+                stableId              = stable
             )
-            musicDao.deleteTrackByUri(existing.uri)
-            musicDao.insertTrack(merged)
+            // P0-01: atomic to keep playlist consistency
+            musicDao.atomicMigrateUri(existing.uri, merged)
         }
     }
 

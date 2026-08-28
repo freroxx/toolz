@@ -18,9 +18,19 @@
 package com.frerox.toolz.data.music
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "music_tracks")
+@Entity(
+    tableName = "music_tracks",
+    indices = [
+        Index(value = ["lastPlayed"]),
+        Index(value = ["playCount"]),
+        Index(value = ["sourceUrl"]),
+        Index(value = ["path"]),
+        Index(value = ["stableId"])
+    ]
+)
 data class MusicTrack(
     @PrimaryKey val uri: String,
     val title: String,
@@ -35,6 +45,8 @@ data class MusicTrack(
     val path: String? = null,
     val sourceUrl: String? = null,
     val dateAdded: Long = java.lang.System.currentTimeMillis(),
+    // Stable business key (hash of path|sourceUrl) — URI can change on re-index, this persists
+    val stableId: String = "",
     // AI Cache Fields
     val aiLyrics: String? = null,
     val aiArtistVitals: String? = null,

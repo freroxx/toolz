@@ -28,6 +28,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 
 import com.frerox.toolz.util.MusicVisualizerManager
 import com.frerox.toolz.util.VisualizerAudioProcessor
+import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -44,10 +48,20 @@ object PlayerModule {
 
     @Provides
     @Singleton
+    fun provideSimpleCache(@ApplicationContext context: Context): SimpleCache {
+        val cacheDir = java.io.File(context.cacheDir, "exo_cache")
+        val evictor = LeastRecentlyUsedCacheEvictor(150L * 1024 * 1024) // 150 MB
+        val dbProvider = StandaloneDatabaseProvider(context)
+        return SimpleCache(cacheDir, evictor, dbProvider)
+    }
+
+    @Provides
+    @Singleton
     @androidx.annotation.OptIn(UnstableApi::class)
     fun provideExoPlayer(
         @ApplicationContext context: Context,
-        visualizerManager: MusicVisualizerManager
+        visualizerManager: MusicVisualizerManager,
+        simpleCache: SimpleCache
     ): ExoPlayer {
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -66,8 +80,15 @@ object PlayerModule {
         // This is the critical fix for offline (downloaded) song playback.
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
+        // P1-08 fix: CacheDataSource for catalog streams — 150 MB LRU so repeated
+        // plays / scrubbing don't re-download. Ignores cache on error for resilience.
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(simpleCache)
+            .setUpstreamDataSourceFactory(dataSourceFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(dataSourceFactory)
+            .setDataSourceFactory(cacheDataSourceFactory)
 
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(

@@ -159,19 +159,8 @@ class MusicDownloadWorker @AssistedInject constructor(
                     return@withContext Result.failure()
                 }
 
-                // Save thumbnail locally for immediate offline access
-                var localThumbUri = thumbnailUrl
-                if (thumbFile?.exists() == true) {
-                    try {
-                        val thumbDir = File(applicationContext.filesDir, "thumbnails")
-                        if (!thumbDir.exists()) thumbDir.mkdirs()
-                        val persistentThumb = File(thumbDir, "${trackId}.jpg")
-                        thumbFile.copyTo(persistentThumb, overwrite = true)
-                        localThumbUri = Uri.fromFile(persistentThumb).toString()
-                    } catch (e: Exception) {
-                        android.util.Log.e("MusicDownloadWorker", "Failed to save local thumb", e)
-                    }
-                }
+                // P2: dedup thumbnail persist + track insert
+                var localThumbUri = persistThumbnail(thumbFile, trackId, thumbnailUrl)
 
                 if (tempFile.exists()) tempFile.delete()
                 if (processedFile.exists()) processedFile.delete()
@@ -188,7 +177,8 @@ class MusicDownloadWorker @AssistedInject constructor(
                     thumbnailUri = localThumbUri,
                     path = storedUri,
                     sourceUrl = sourceUrl,
-                    dateAdded = System.currentTimeMillis()
+                    dateAdded = System.currentTimeMillis(),
+                    stableId = "${trackId}_${title.hashCode()}"
                 )
                 musicRepository.upsertDownloadedTrack(musicTrack)
 
@@ -210,18 +200,7 @@ class MusicDownloadWorker @AssistedInject constructor(
                     return@withContext Result.failure()
                 }
 
-                var localThumbUri = thumbnailUrl
-                if (thumbFile?.exists() == true) {
-                    try {
-                        val thumbDir = File(applicationContext.filesDir, "thumbnails")
-                        if (!thumbDir.exists()) thumbDir.mkdirs()
-                        val persistentThumb = File(thumbDir, "${trackId}.jpg")
-                        thumbFile.copyTo(persistentThumb, overwrite = true)
-                        localThumbUri = Uri.fromFile(persistentThumb).toString()
-                    } catch (e: Exception) {
-                        android.util.Log.e("MusicDownloadWorker", "Failed to save local thumb", e)
-                    }
-                }
+                var localThumbUri = persistThumbnail(thumbFile, trackId, thumbnailUrl)
 
                 val musicTrack = MusicTrack(
                     uri = storedUri,
@@ -232,7 +211,8 @@ class MusicDownloadWorker @AssistedInject constructor(
                     thumbnailUri = localThumbUri,
                     path = storedUri,
                     sourceUrl = sourceUrl,
-                    dateAdded = System.currentTimeMillis()
+                    dateAdded = System.currentTimeMillis(),
+                    stableId = "${trackId}_${title.hashCode()}"
                 )
                 musicRepository.upsertDownloadedTrack(musicTrack)
 
@@ -306,50 +286,52 @@ class MusicDownloadWorker @AssistedInject constructor(
         title: String,
         artist: String
     ): Boolean {
+        // P0-04 fix: use arg array (not shell string) to prevent title injection.
+        val safeFormat = format.lowercase().let { if (it in setOf("m4a","mp3","opus")) it else "m4a" }
         val bitrate = when (quality.uppercase()) {
             "LOW" -> "96k"
             "MEDIUM" -> "160k"
             else -> "320k"
         }
-        val extension = format.lowercase()
-        
-        val command = StringBuilder("-i \"${input.absolutePath}\" ")
+        val extension = safeFormat
         
         val includeCover = thumb?.exists() == true && extension != "opus"
+        val args = mutableListOf<String>()
+        args.addAll(listOf("-i", input.absolutePath))
         if (includeCover) {
-            command.append("-i \"${thumb.absolutePath}\" ")
+            args.addAll(listOf("-i", thumb!!.absolutePath))
         }
 
         // Map streams: audio from first input, video (cover) from second input
         if (includeCover) {
-            command.append("-map 0:a -map 1:v ")
+            args.addAll(listOf("-map", "0:a", "-map", "1:v"))
         } else {
-            command.append("-map 0:a ")
+            args.addAll(listOf("-map", "0:a"))
         }
 
-        // Codec and bitrate
+        // Codec and bitrate — avoid re-encoding m4a->m4a when codec already aac
         when (extension) {
-            "mp3" -> command.append("-c:a libmp3lame -b:a $bitrate -id3v2_version 3 ")
-            "opus" -> command.append("-vn -c:a libopus -b:a $bitrate ")
-            "m4a" -> command.append("-c:a aac -b:a $bitrate ") // Re-encode WebM streams to AAC for M4A container compatibility
-            else -> command.append("-c:a copy ")
+            "mp3" -> args.addAll(listOf("-c:a", "libmp3lame", "-b:a", bitrate, "-id3v2_version", "3"))
+            "opus" -> args.addAll(listOf("-vn", "-c:a", "libopus", "-b:a", bitrate))
+            "m4a" -> args.addAll(listOf("-c:a", "aac", "-b:a", bitrate))
+            else -> args.addAll(listOf("-c:a", "copy"))
         }
 
-        // Metadata
-        command.append("-metadata title=\"${ffmpegEscape(title)}\" -metadata artist=\"${ffmpegEscape(artist)}\" ")
+        // Metadata — passed as single arg values, no shell escaping needed
+        args.addAll(listOf("-metadata", "title=$title", "-metadata", "artist=$artist"))
         
         // Attachment disposition for cover art
         if (includeCover) {
             if (extension == "mp3") {
-                command.append("-metadata:s:v title=\"Album cover\" -metadata:s:v comment=\"Cover (front)\" ")
+                args.addAll(listOf("-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"))
             } else {
-                command.append("-disposition:v attached_pic ")
+                args.addAll(listOf("-disposition:v", "attached_pic"))
             }
         }
 
-        command.append("-y \"${output.absolutePath}\"")
+        args.addAll(listOf("-y", output.absolutePath))
 
-        val session = FFmpegKit.execute(command.toString())
+        val session = FFmpegKit.executeWithArguments(args.toTypedArray())
         return ReturnCode.isSuccess(session.returnCode)
     }
 
@@ -587,5 +569,21 @@ class MusicDownloadWorker @AssistedInject constructor(
             .setAutoCancel(true)
             .build()
         notificationManager.notify(id, notification)
+    }
+
+    private fun persistThumbnail(thumbFile: File?, trackId: String, fallbackUrl: String?): String? {
+        if (thumbFile?.exists() == true) {
+            return try {
+                val thumbDir = File(applicationContext.filesDir, "thumbnails")
+                if (!thumbDir.exists()) thumbDir.mkdirs()
+                val persistentThumb = File(thumbDir, "${trackId}.jpg")
+                thumbFile.copyTo(persistentThumb, overwrite = true)
+                Uri.fromFile(persistentThumb).toString()
+            } catch (e: Exception) {
+                android.util.Log.e("MusicDownloadWorker", "Failed to save local thumb", e)
+                fallbackUrl
+            }
+        }
+        return fallbackUrl
     }
 }

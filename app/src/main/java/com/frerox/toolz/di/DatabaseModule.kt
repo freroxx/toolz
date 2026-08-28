@@ -149,6 +149,20 @@ object DatabaseModule {
         }
     }
 
+    // P1-03/P1-04: music_tracks.stableId + indexes for music player performance + future PK migration
+    private val MIGRATION_52_53 = object : Migration(52, 53) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE music_tracks ADD COLUMN stableId TEXT NOT NULL DEFAULT ''")
+            // Backfill stableId deterministically: prefer path > sourceUrl > uri
+            db.execSQL("UPDATE music_tracks SET stableId = COALESCE(path, sourceUrl, uri) WHERE stableId = '' OR stableId IS NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_lastPlayed` ON `music_tracks` (`lastPlayed`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_playCount` ON `music_tracks` (`playCount`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_sourceUrl` ON `music_tracks` (`sourceUrl`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_path` ON `music_tracks` (`path`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_stableId` ON `music_tracks` (`stableId`)")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -214,7 +228,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -266,7 +280,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52)
+                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

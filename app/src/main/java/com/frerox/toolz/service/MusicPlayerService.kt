@@ -56,6 +56,7 @@ import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
+import com.frerox.toolz.data.music.toMediaItem
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.widget.WidgetUpdateManager
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.EXTRA_QUEUE_INDEX
@@ -320,15 +321,22 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     .setUri(Uri.parse(streamUrl))
                     .build()
 
-                // Replace the item in the player
+                // P0-05 fix: validate index still holds same mediaId (queue may have mutated during resolve)
                 for (i in 0 until player.mediaItemCount) {
                     if (player.getMediaItemAt(i).mediaId == item.mediaId) {
-                        player.replaceMediaItem(i, updatedItem)
+                        // Double-check before replacing — bound-check + id check on Main
+                        withContext(Dispatchers.Main) {
+                            if (i < player.mediaItemCount && player.getMediaItemAt(i).mediaId == item.mediaId) {
+                                player.replaceMediaItem(i, updatedItem)
+                            } else {
+                                Log.w("MusicPlayerService", "Skipping stale catalog resolve: queue mutated")
+                            }
+                        }
                         break
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MusicPlayerService", "Catalog resolve failed", e)
             }
         }
     }
@@ -368,13 +376,17 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
         updateWidget(forceBitmapRefresh = true)
 
-        // Register headset and bluetooth receivers
+        // P0-07 fix: specify receiver export flag on Tiramisu+ (required for dynamic receivers)
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_HEADSET_PLUG)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
         }
-        registerReceiver(headsetReceiver, filter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(headsetReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(headsetReceiver, filter)
+        }
         
         // Restore last state if empty
         if (player.mediaItemCount == 0) {
@@ -530,16 +542,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             ) { enabled, ducking -> enabled to ducking }.collect { (enabled, ducking) ->
                 val wasEnabled = audioFocusEnabled
                 val oldDucking = audioFocusDucking
+                val needsAttrUpdate = wasEnabled != enabled || oldDucking != ducking
                 audioFocusEnabled = enabled
                 audioFocusDucking = ducking
 
-                val audioAttributes = AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build()
-                // Disable ExoPlayer automatic handling; we manage focus manually
-                // so both Smart Focus and Allow Ducking toggles are fully respected.
-                player.setAudioAttributes(audioAttributes, false)
+                if (needsAttrUpdate) {
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .setUsage(C.USAGE_MEDIA)
+                        .build()
+                    // Disable ExoPlayer automatic handling; we manage focus manually
+                    player.setAudioAttributes(audioAttributes, false)
+                }
 
                 if (!enabled) {
                     // Smart focus OFF: restore volume, clear resume flag, abandon focus,
@@ -720,6 +734,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         } catch (e: Exception) { emptyList() }
                         
                         val tracks = uris.mapNotNull { musicRepository.getTrackByUri(it) }
+                        if (tracks.size < uris.size) {
+                            Log.w("MusicPlayerService", "restorePlaybackState pruned ${uris.size - tracks.size} missing tracks (deleted)")
+                        }
                         items.addAll(tracks.map { it.toMediaItem() })
                     } else {
                         items.add(track.toMediaItem())
@@ -734,26 +751,6 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 }
             }
         }
-    }
-
-    private fun MusicTrack.toMediaItem(): MediaItem {
-        val meta = MediaMetadata.Builder()
-            .setTitle(title).setArtist(artist ?: "Unknown Artist")
-            .setAlbumTitle(album ?: "Unknown Album").setDisplayTitle(title)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
-            .setArtworkUri(thumbnailUri?.let { Uri.parse(it) })
-            .apply { sourceUrl?.let { setExtras(Bundle().apply { putString("source_url", it) }) } }
-            .build()
-        val playableUri = when {
-            path != null && File(path).exists() -> Uri.fromFile(File(path)).toString()
-            uri.startsWith("content://") || uri.startsWith("file://") -> uri
-            path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
-            path != null && path.startsWith("/") -> Uri.fromFile(File(path)).toString()
-            else -> uri
-        }
-        val parsedUri = if (playableUri.startsWith("/")) Uri.fromFile(File(playableUri)) else Uri.parse(playableUri)
-        return MediaItem.Builder()
-            .setMediaId(uri).setUri(parsedUri).setMediaMetadata(meta).build()
     }
 
     private fun buildQueueSnapshot(): List<QueueTrackInfo> {
@@ -787,20 +784,22 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Tap to open Toolz"
             val album = currentItem?.mediaMetadata?.albumTitle?.toString()
 
-            // Load & persist art bitmap to a file for Glance to read
+            // P2-03 fix: Palette work off Main (was blocking serviceScope/Main)
             if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
                 var bitmap = if (artUri != null) loadBitmap(artUri) else null
                 if (bitmap == null) {
                     bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_music_note)
                 }
-                bitmap?.let {
-                    cachedProcessedBitmap = processThumbnail(it, artShape)
+                bitmap?.let { bmp ->
+                    cachedProcessedBitmap = withContext(Dispatchers.Default) { processThumbnail(bmp, artShape) }
                     lastTrackUri = artUri
                     lastShape = artShape
 
-                    // Extract accent color
-                    val palette = Palette.from(it).generate()
-                    val color = palette.getVibrantColor(palette.getMutedColor(Color.BLUE))
+                    // Extract accent color off Main
+                    val color = withContext(Dispatchers.Default) {
+                        val palette = Palette.from(bmp).generate()
+                        palette.getVibrantColor(palette.getMutedColor(Color.BLUE))
+                    }
                     lastAccentColor = String.format("#%06X", 0xFFFFFF and color)
                 }
             }

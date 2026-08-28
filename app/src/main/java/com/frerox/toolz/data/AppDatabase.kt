@@ -112,7 +112,8 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
     // account type (anon token vs password) is stored metadata instead of a vault
     // name-substring heuristic. See MIGRATION_48_49 in DatabaseModule.
     // P3: 52 adds whisper_outbox + whisper_local_tombstones (see MIGRATION_51_52).
-    version = 52,
+    // Music P1: 53 adds music_tracks.stableId + indexes for lastPlayed/playCount/sourceUrl/path (see MIGRATION_52_53).
+    version = 53,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

@@ -89,4 +89,30 @@ interface MusicDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTracks(tracks: List<MusicTrack>)
+
+    // P0-01 fix: atomic URI migration + playlist repair in a single transaction.
+    // Crash between deleteTrackByUri and insertTrack or playlist updates left
+    // playlists referencing a deleted URI — now either all succeed or none.
+    @Transaction
+    suspend fun atomicMigrateUri(oldUri: String, newTrack: MusicTrack) {
+        deleteTrackByUri(oldUri)
+        insertTrack(newTrack)
+        val playlists = getAllPlaylistsSync()
+        playlists.forEach { pl ->
+            if (pl.trackUris.contains(oldUri)) {
+                updatePlaylist(pl.copy(trackUris = pl.trackUris.map { if (it == oldUri) newTrack.uri else it }))
+            }
+        }
+    }
+
+    @Transaction
+    suspend fun atomicDeleteTrackAndCleanPlaylists(track: MusicTrack) {
+        deleteTrack(track)
+        val playlists = getAllPlaylistsSync()
+        playlists.forEach { pl ->
+            if (pl.trackUris.contains(track.uri)) {
+                updatePlaylist(pl.copy(trackUris = pl.trackUris - track.uri))
+            }
+        }
+    }
 }

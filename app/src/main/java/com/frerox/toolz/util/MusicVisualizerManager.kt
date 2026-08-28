@@ -62,6 +62,20 @@ class MusicVisualizerManager @Inject constructor() {
         }
     }
 
+    fun onPcmFloatData(buffer: ByteBuffer) {
+        synchronized(lock) {
+            val floats = buffer.remaining() / 4
+            repeat(floats) {
+                val f = buffer.float
+                // float -1..1 -> short -32768..32767
+                val s = (f.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                circularBuffer[writePos] = s
+                writePos = (writePos + 1) % circularBufferSize
+            }
+            totalSamplesReceived += floats
+        }
+    }
+
     /**
      * Extracts a spectrum analysis from the most recent audio data.
      * Guaranteed to return a valid spectrum as long as the first 1024 samples have been received.
@@ -174,11 +188,15 @@ class MusicVisualizerManager @Inject constructor() {
 @androidx.media3.common.util.UnstableApi
 class VisualizerAudioProcessor(private val manager: MusicVisualizerManager) : BaseAudioProcessor() {
 
+    private var inputEncoding: Int = C.ENCODING_PCM_16BIT
+
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
-            return AudioFormat.NOT_SET
+        inputEncoding = inputAudioFormat.encoding
+        // P2-04 fix: support float PCM (common on high-res devices) by converting to short; bypass others gracefully.
+        return when (inputAudioFormat.encoding) {
+            C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN, C.ENCODING_PCM_FLOAT -> inputAudioFormat
+            else -> AudioFormat.NOT_SET
         }
-        return inputAudioFormat
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -186,8 +204,16 @@ class VisualizerAudioProcessor(private val manager: MusicVisualizerManager) : Ba
         if (remaining == 0) return
 
         // Extract PCM data for visualization without consuming the main buffer
-        val duplicate = inputBuffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
-        manager.onPcmData(duplicate)
+        try {
+            val duplicate = inputBuffer.asReadOnlyBuffer().order(ByteOrder.nativeOrder())
+            if (inputEncoding == C.ENCODING_PCM_FLOAT) {
+                manager.onPcmFloatData(duplicate)
+            } else {
+                manager.onPcmData(duplicate)
+            }
+        } catch (_: Exception) {
+            // visualizer failure must never break audio pipeline
+        }
 
         // Pass-through to output. We use duplicate() to avoid the "source buffer is this buffer"
         // exception if Media3's buffer management ever reuses the same object for input and output.

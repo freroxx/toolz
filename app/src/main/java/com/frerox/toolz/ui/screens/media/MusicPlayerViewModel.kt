@@ -53,6 +53,7 @@ import com.frerox.toolz.data.catalog.CatalogTrack
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
+import com.frerox.toolz.data.music.toMediaItem
 
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.MusicPlayerService
@@ -76,63 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-enum class SortOrder { TITLE, ARTIST, RECENT }
-
-data class MusicUiState(
-    val tracks                  : List<MusicTrack>          = emptyList(),
-    val playlists               : List<Playlist>            = emptyList(),
-    val favoriteTracks          : List<MusicTrack>          = emptyList(),
-    val recentlyPlayed          : List<MusicTrack>          = emptyList(),
-    val mostPlayed              : List<MusicTrack>          = emptyList(),
-    val currentTrack            : MusicTrack?               = null,
-    val isPlaying               : Boolean                   = false,
-    val playWhenReady           : Boolean                   = false,
-    val isShuffleOn             : Boolean                   = false,
-    val repeatMode              : Int                       = Player.REPEAT_MODE_OFF,
-    val sortOrder               : SortOrder                 = SortOrder.RECENT,
-    val isLoading               : Boolean                   = false,
-    val sleepTimerMinutes       : Int?                      = null,
-    val folders                 : Map<String, List<MusicTrack>> = emptyMap(),
-    val selectedTracks          : Set<String>               = emptySet(),
-    val isSelectionMode         : Boolean                   = false,
-    val showVisualizer          : Boolean                   = false,
-    val artShape                : String                    = "CIRCLE",
-    val rotationEnabled         : Boolean                   = true,
-    val hapticEnabled           : Boolean                   = true,
-    val hapticIntensity         : Float                     = 0.5f,
-    val pipEnabled              : Boolean                   = false,
-    val sleepTimerActive        : Boolean                   = false,
-    val sleepTimerRemaining     : Long?                     = null,
-    val queue                   : List<QueueEntry>          = emptyList(),
-    val currentQueueIndex       : Int                       = 0,
-    val performanceMode         : Boolean                   = false,
-    val playbackPosition        : Long                      = 0L,
-    val duration                : Long                      = 0L,
-    val isOnline                : Boolean                   = false,
-    val isResolvingCatalog      : Boolean                   = false,
-    val playbackSpeed           : Float                     = 1.0f,
-    val equalizerPreset         : String                    = "Normal",
-    val equalizerPresets        : List<String>              = listOf(
-        "Normal", "Pop", "Rock", "Jazz", "Classical",
-        "Dance", "Heavy Metal", "Hip Hop", "Flat", "Custom"
-    ),
-    val customEqualizerGains    : List<Float>               = List(5) { 0f },
-    val visualizerSensitivity   : Float                     = 1.0f,
-    val visualizerAutoSensitivity: Boolean                  = false,
-
-    val showMusicSettings       : Boolean                   = false,
-    val karaokeEnabled          : Boolean                   = true,
-    val isKaraokeActive         : Boolean                   = false,
-    val fastSeeking             : Boolean                   = true,
-    val alwaysSync              : Boolean                   = true,
-    val catalogResults          : List<CatalogTrack>        = emptyList(),
-    val catalogStreamQuality    : String                    = "AUTO",
-    val isMutedByAi             : Boolean                   = false,
-    val karaokeSessionsCount    : Int                       = 0,
-    val karaokeAvgScore         : Int                       = -1
-)
-
-data class QueueEntry(val id: String, val track: MusicTrack)
+// P1-02: MusicUiState/QueueEntry/SortOrder extracted to MusicUiState.kt
 
 @HiltViewModel
 class MusicPlayerViewModel @Inject constructor(
@@ -148,6 +93,11 @@ class MusicPlayerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MusicUiState())
     val uiState = _uiState.asStateFlow()
+    // P2-01 fix: sliced flows so sections can collect only what they need without full-screen recomposition
+    val currentTrackFlow = uiState.map { it.currentTrack }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val isPlayingFlow = uiState.map { it.isPlaying }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _playbackPosition = MutableStateFlow(0L)
     val playbackPosition = _playbackPosition.asStateFlow()
@@ -175,10 +125,9 @@ class MusicPlayerViewModel @Inject constructor(
     // by `_visualizerData.value` (being read on the UI thread) is never the
     // same object this thread is about to write into next.
 
-    private var shakeDetector     : ShakeDetector? = null
-
-    private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-
+    // P1-05 fix: shake-to-skip is now owned solely by MusicPlayerService (single sensor listener).
+    // ViewModel no longer registers its own accelerometer listener to avoid double-skip and
+    // conflicting thresholds (service uses single-shake 15f, ShakeDetector required triple-shake).
     private val _visualizerData = MutableStateFlow(FloatArray(0))
     val visualizerData = _visualizerData.asStateFlow()
 
@@ -252,15 +201,19 @@ class MusicPlayerViewModel @Inject constructor(
 
                 // Persist ephemeral external tracks so they appear in Recently Played.
                 if (track == null && mediaItem != null) {
+                    val ephUri = uri ?: ""
+                    val ephTitle = metadata?.title?.toString() ?: "External Audio"
+                    val ephArtist = metadata?.artist?.toString() ?: "Unknown"
                     track = MusicTrack(
-                        uri         = uri ?: "",
-                        title       = metadata?.title?.toString()       ?: "External Audio",
-                        artist      = metadata?.artist?.toString()      ?: "Unknown",
+                        uri         = ephUri,
+                        title       = ephTitle,
+                        artist      = ephArtist,
                         album       = metadata?.albumTitle?.toString()  ?: "Unknown",
                         duration    = player.duration.coerceAtLeast(0L),
                         thumbnailUri = metadata?.artworkUri?.toString() ?: "",
                         sourceUrl   = sourceUrl,
-                        lastPlayed  = System.currentTimeMillis()
+                        lastPlayed  = System.currentTimeMillis(),
+                        stableId    = (sourceUrl ?: ephUri).hashCode().toString() + "_" + ephTitle.hashCode()
                     )
                     repository.insertTrack(track)
                 } else if (track != null) {
@@ -350,22 +303,31 @@ class MusicPlayerViewModel @Inject constructor(
 
             // Auto-refresh/heal library if file was moved or not found
             viewModelScope.launch(Dispatchers.IO) {
-                repository.scanDeviceForMusic()
+                runCatching { repository.scanDeviceForMusic() }
             }
 
             if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
                 || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
             ) {
+                // P0-03 fix: only re-prepare for transient live-window/timeout, don't nuke queue.
                 player.prepare()
             } else {
                 viewModelScope.launch(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         context,
-                        "Playback error: ${error.localizedMessage ?: "File moved or unplayable"}",
+                        "Playback error: ${error.localizedMessage ?: "File moved or unplayable. Skipping."}",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
+                    // P0-03: preserve queue — skip to next if possible instead of clearing everything.
+                    val p: Player = controller ?: player
+                    if (p.hasNextMediaItem()) {
+                        p.seekToNext()
+                        p.prepare()
+                    } else {
+                        // No next item: just pause, keep current queue intact for retry.
+                        p.pause()
+                    }
                 }
-                player.stop()
             }
         }
 
@@ -396,20 +358,36 @@ class MusicPlayerViewModel @Inject constructor(
 
                 val track = trackMap[item.mediaId] ?: run {
                     val meta = item.mediaMetadata
+                    val tTitle = meta.title?.toString() ?: "External Audio"
+                    val tArtist = meta.artist?.toString() ?: "Unknown"
                     MusicTrack(
                         uri    = item.mediaId,
-                        title  = meta.title?.toString() ?: "External Audio",
-                        artist = meta.artist?.toString() ?: "Unknown",
+                        title  = tTitle,
+                        artist = tArtist,
                         album  = meta.albumTitle?.toString() ?: "Unknown",
-                        duration = 0L
+                        duration = 0L,
+                        stableId = item.mediaId.hashCode().toString() + "_" + tTitle.hashCode()
                     )
                 }
                 entries.add(QueueEntry(id = stableId, track = track))
             }
 
             currentQueueUris = uris
-            _uiState.update { it.copy(queue = entries, currentQueueIndex = p.currentMediaItemIndex.coerceAtLeast(0)) }
+            // P0-02 fix: detect silently dropped tracks (uris not in trackMap but also not external)
+            val missingCount = uris.count { uri ->
+                // external audio stubs are expected missing; real missing = was in previous queue but now no track
+                trackMap[uri] == null && uri.startsWith("content://")
+            }
+            val warning = if (missingCount > 0) {
+                android.util.Log.w("MusicPlayerVM", "Queue pruned $missingCount missing tracks (deleted/moved)")
+                "$missingCount track(s) unavailable — removed from queue"
+            } else null
+            _uiState.update { it.copy(queue = entries, currentQueueIndex = p.currentMediaItemIndex.coerceAtLeast(0), queueWarning = warning) }
         }
+    }
+
+    fun consumeQueueWarning() {
+        _uiState.update { it.copy(queueWarning = null) }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -491,11 +469,7 @@ class MusicPlayerViewModel @Inject constructor(
                 _uiState.update { it.copy(playbackSpeed = speed) }
             }
         }
-        viewModelScope.launch {
-            settingsRepository.musicShakeToSkip.collect { enabled ->
-                if (enabled) startShakeDetection() else stopShakeDetection()
-            }
-        }
+        // P1-05: shake handled by service — no ViewModel sensor registration needed.
         viewModelScope.launch {
             settingsRepository.musicEqualizerPreset.collect { preset ->
                 _uiState.update { it.copy(equalizerPreset = preset) }
@@ -681,15 +655,17 @@ class MusicPlayerViewModel @Inject constructor(
                         
                         // If still null, it might be an ephemeral track not yet persisted or a catalog track
                         if (track == null && metadata != null) {
+                            val cTitle = metadata.title?.toString() ?: "External Audio"
                             track = MusicTrack(
                                 uri = mediaId,
-                                title = metadata.title?.toString() ?: "External Audio",
+                                title = cTitle,
                                 artist = metadata.artist?.toString() ?: "Unknown",
                                 album = metadata.albumTitle?.toString() ?: "Unknown",
                                 duration = dur,
                                 thumbnailUri = metadata.artworkUri?.toString() ?: "",
                                 sourceUrl = sourceUrl,
-                                lastPlayed = System.currentTimeMillis()
+                                lastPlayed = System.currentTimeMillis(),
+                                stableId = (sourceUrl ?: mediaId).hashCode().toString() + "_" + cTitle.hashCode()
                             )
                         }
 
@@ -703,27 +679,6 @@ class MusicPlayerViewModel @Inject constructor(
                 pendingAction = null
             }.onFailure { it.printStackTrace() }
         }, MoreExecutors.directExecutor())
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Shake detection
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private fun startShakeDetection() {
-        if (shakeDetector == null) {
-            // Use _uiState.value.isPlaying for thread safety as sensor events can be on any thread
-            shakeDetector = ShakeDetector { if (_uiState.value.isPlaying) skipNext() }
-        }
-        val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
-        sensorManager.registerListener(
-            shakeDetector,
-            sensor,
-            SensorManager.SENSOR_DELAY_UI
-        )
-    }
-
-    private fun stopShakeDetection() {
-        shakeDetector?.let { sensorManager.unregisterListener(it) }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1277,41 +1232,7 @@ class MusicPlayerViewModel @Inject constructor(
         }
     }
 
-    // ── Media item builders ───────────────────────────────────────────────────
-
-    private fun MusicTrack.toMediaItem(): MediaItem {
-        val meta = MediaMetadata.Builder()
-            .setTitle(title).setArtist(artist ?: "Unknown Artist")
-            .setAlbumTitle(album ?: "Unknown Album").setDisplayTitle(title)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
-            .setArtworkUri(thumbnailUri?.toUri())
-            .apply { sourceUrl?.let { setExtras(android.os.Bundle().apply { putString("source_url", it) }) } }
-            .build()
-        val playableUri = when {
-            path != null && java.io.File(path).exists() -> android.net.Uri.fromFile(java.io.File(path)).toString()
-            uri.startsWith("content://") || uri.startsWith("file://") -> uri
-            path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
-            path != null && path.startsWith("/") -> android.net.Uri.fromFile(java.io.File(path)).toString()
-            else -> uri
-        }
-        val parsedUri = if (playableUri.startsWith("/")) android.net.Uri.fromFile(java.io.File(playableUri)) else playableUri.toUri()
-        return MediaItem.Builder()
-            .setMediaId(uri).setUri(parsedUri).setMediaMetadata(meta).build()
-    }
-
-    private fun CatalogTrack.toMediaItem(): MediaItem {
-        val meta = MediaMetadata.Builder()
-            .setTitle(title).setArtist(artist)
-            .setAlbumTitle("YouTube Catalog").setDisplayTitle(title)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC).setIsPlayable(true)
-            .setArtworkUri(thumbnailUrl?.toUri())
-            .setExtras(android.os.Bundle().apply {
-                putString("source_url", sourceUrl)
-                putBoolean("is_catalog", true)
-            }).build()
-        return MediaItem.Builder()
-            .setMediaId(sourceUrl).setUri(sourceUrl.toUri()).setMediaMetadata(meta).build()
-    }
+    // P1-06: MediaItem mapping now consolidated in data/music/MediaItemMapper.kt
 
     // ─────────────────────────────────────────────────────────────────────────
     // Playlist helpers
@@ -1698,9 +1619,9 @@ class MusicPlayerViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         stopProgressUpdate()
-        stopShakeDetection()
         stopVisualizer()
         sleepTimerJob?.cancel()
+        runCatching { repository.stopLiveObserver() }
         runCatching { equalizer?.release() }
         player.removeListener(playerListener)
         controller?.removeListener(playerListener)

@@ -319,7 +319,15 @@ fun MusicPlayerScreen(
         }
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(state.queueWarning) {
+        state.queueWarning?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.consumeQueueWarning()
+        }
+    }
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             ScreenTopBar(
                 state = state,
@@ -375,18 +383,11 @@ fun MusicPlayerScreen(
                 .fadingEdges(top = 20.dp, bottom = 20.dp)
         ) {
             when {
-                !musicPermission.status.isGranted || !isManageStorageGranted -> {
+                // P1-09 fix: music only needs READ_MEDIA_AUDIO; MANAGE_ALL_FILES is optional
+                // for power users. Don't block playback if audio permission is granted.
+                !musicPermission.status.isGranted -> {
                     PermissionPlaceholder(
-                        onAllow = {
-                            if (!musicPermission.status.isGranted) musicPermission.launchPermissionRequest()
-                            else {
-                                manageStorageLauncher.launch(
-                                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                        data = Uri.parse("package:${context.packageName}")
-                                    }
-                                )
-                            }
-                        }
+                        onAllow = { musicPermission.launchPermissionRequest() }
                     )
                 }
                 state.isLoading && state.tracks.isEmpty() -> {
