@@ -323,7 +323,9 @@ internal fun OverviewTab(
     onOpenWifiSettings: () -> Unit,
     extraCards: (@Composable () -> Unit)? = null
 ) {
-    LazyColumn(
+    var showQuickFixInfo by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
         modifier = Modifier.fillMaxSize().fadingEdges(top = 16.dp, bottom = 40.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)
@@ -409,7 +411,15 @@ internal fun OverviewTab(
                     title = stringResource(R.string.st_WifiTweaksScreen_2b8a),
                     subtitle = state.advice.recommendation.ifBlank { "Latency or loss above healthy thresholds." },
                     icon = Icons.Rounded.AutoFixHigh,
-                    trailing = null
+                    trailing = {
+                        IconButton(onClick = { showQuickFixInfo = true }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Info,
+                                contentDescription = "Quick Fixes info",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
                         FilledTonalButton(
@@ -533,6 +543,23 @@ internal fun OverviewTab(
 
         if (extraCards != null) {
             item { Column(verticalArrangement = Arrangement.spacedBy(NetTokens.SpacingL)) { extraCards() } }
+        }
+        }
+        if (showQuickFixInfo) {
+            AlertDialog(
+                onDismissRequest = { showQuickFixInfo = false },
+                title = { Text("Quick Fixes", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "Quick Fixes diagnoses common network issues — poor signal, congested channel, packet loss or high jitter — and applies safe, reversible optimizations. Tap \"Run fixes\" to apply recommendations, or \"Reset all\" to undo changes.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showQuickFixInfo = false }) { Text("Got it") }
+                },
+                shape = RoundedCornerShape(28.dp)
+            )
         }
     }
 }

@@ -20,6 +20,7 @@ package com.frerox.toolz.ui.screens.network
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
@@ -41,13 +42,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Analytics
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.LocationOff
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
@@ -55,21 +62,18 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,7 +96,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.ui.components.ExpressiveNavigationBar
+import com.frerox.toolz.ui.components.ExpressiveNavigationBarItem
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.ToolzNavigationRail
+import com.frerox.toolz.ui.components.ToolzNavigationRailItem
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.screens.network.components.NetworkConsoleView
 import com.frerox.toolz.ui.screens.network.suite.CellularAuditCard
@@ -106,6 +114,7 @@ import com.frerox.toolz.ui.screens.network.suite.RoutesAuditCard
 import com.frerox.toolz.ui.screens.network.suite.ShizukuAccessDialog
 import com.frerox.toolz.ui.screens.network.suite.ShizukuPrompt
 import com.frerox.toolz.ui.screens.network.suite.SocketsCard
+import android.net.Uri
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -171,24 +180,6 @@ fun NetworkSuiteScreen(
         launch { tweaksVm.events.collect { snackbarHostState.showSnackbar(it) } }
         launch { powerVm.events.collect { snackbarHostState.showSnackbar(it) } }
     }
-    // Auto-enable Shizuku if permission already granted — no tap needed
-    LaunchedEffect(power.privilegedState.isAuthorized, power.privilegedState.isServiceReady) {
-        if (power.privilegedState.isAuthorized && !power.privilegedState.isServiceReady) {
-            powerVm.verifyPrivilegedAccess()
-        }
-    }
-    // M3 Expressive gate — show on entry if Shizuku is required and not ready (once per composition)
-    var hasShownShizukuGate by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(700)
-        if (!hasShownShizukuGate && (!power.privilegedState.isAuthorized || !power.privilegedState.isServiceReady)) {
-            hasShownShizukuGate = true
-            shizukuPrompt = ShizukuPrompt(
-                "Shizuku required",
-                "System tweaks, Private DNS presets, and traceroute need Shizuku. Diagnostics work without it — but for full power, enable Shizuku."
-            )
-        }
-    }
 
     val permissions = remember {
         buildList {
@@ -205,6 +196,47 @@ fun NetworkSuiteScreen(
         permissionState.permissions.any { it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted }
     } else true
     val hasWifiPermission = fineOrCoarse && nearbyGranted
+
+    // ── Permission onboarding (floating) ──────────────────────────────────────
+    var showPermissionOnboarding by remember { mutableStateOf(false) }
+    var permissionOnboardingHandled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(hasWifiPermission, permissionOnboardingHandled) {
+        if (!hasWifiPermission && !permissionOnboardingHandled) {
+            kotlinx.coroutines.delay(350)
+            if (!hasWifiPermission && !permissionOnboardingHandled) {
+                showPermissionOnboarding = true
+            }
+        }
+        if (hasWifiPermission) {
+            showPermissionOnboarding = false
+            permissionOnboardingHandled = true
+        }
+    }
+
+    // Auto-enable Shizuku if permission already granted — no tap needed
+    LaunchedEffect(power.privilegedState.isAuthorized, power.privilegedState.isServiceReady) {
+        if (power.privilegedState.isAuthorized && !power.privilegedState.isServiceReady) {
+            powerVm.verifyPrivilegedAccess()
+        }
+    }
+    // M3 Expressive gate — show on entry if Shizuku is required and not ready (once per composition)
+    // Deferred until permission onboarding is finished
+    var hasShownShizukuGate by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(showPermissionOnboarding, hasWifiPermission, permissionOnboardingHandled) {
+        if (showPermissionOnboarding) return@LaunchedEffect
+        if (hasShownShizukuGate) return@LaunchedEffect
+        if (!permissionOnboardingHandled && !hasWifiPermission) return@LaunchedEffect
+        kotlinx.coroutines.delay(700)
+        if (!hasShownShizukuGate && (!power.privilegedState.isAuthorized || !power.privilegedState.isServiceReady)) {
+            if (showPermissionOnboarding) return@LaunchedEffect
+            hasShownShizukuGate = true
+            shizukuPrompt = ShizukuPrompt(
+                "Shizuku required",
+                "System tweaks, Private DNS presets, and traceroute need Shizuku. Diagnostics work without it — but for full power, enable Shizuku."
+            )
+        }
+    }
 
     fun requestShizukuAccess(featureName: String, supportingText: String) {
         when {
@@ -255,17 +287,12 @@ fun NetworkSuiteScreen(
             )
         },
         bottomBar = {
-            if (!hasWifiPermission) return@Scaffold
             if (isExpanded()) {
                 // rail occupies the Row below instead
             } else {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                ExpressiveNavigationBar {
                     SuiteSection.navEntries.forEachIndexed { index, section ->
-                        NavigationBarItem(
+                        ExpressiveNavigationBarItem(
                             selected = index == selectedSection,
                             onClick = {
                                 vibrationManager?.vibrateTick()
@@ -280,11 +307,13 @@ fun NetworkSuiteScreen(
         }
     ) { padding ->
         Row(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (hasWifiPermission && isExpanded()) {
-                NavigationRail(containerColor = androidx.compose.ui.graphics.Color.Transparent) {
-                    Spacer(Modifier.height(8.dp))
+            if (isExpanded()) {
+                ToolzNavigationRail(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    header = { Spacer(Modifier.height(8.dp)) }
+                ) {
                     SuiteSection.navEntries.forEachIndexed { index, section ->
-                        NavigationRailItem(
+                        ToolzNavigationRailItem(
                             selected = index == selectedSection,
                             onClick = {
                                 vibrationManager?.vibrateTick()
@@ -490,21 +519,58 @@ fun NetworkSuiteScreen(
             }
         })
     }
-    shizukuPrompt?.let { prompt ->
-        ShizukuAccessDialog(
-            prompt = prompt,
-            isServiceReady = power.privilegedState.isServiceReady,
-            isAuthorized = power.privilegedState.isAuthorized,
-            isReachable = power.privilegedState.isReachable,
-            onDismiss = { shizukuPrompt = null },
-            onRequestAccess = { requestShizukuAccess(prompt.featureName, prompt.supportingText) },
-            onVerify = {
-                powerVm.verifyPrivilegedAccess()
-                shizukuPrompt = null
+    // ── Permission onboarding (floating) — must be handled before Shizuku/Beta ─────
+    if (showPermissionOnboarding) {
+        val isPermanentlyDenied = permissionState.revokedPermissions.isNotEmpty() && !permissionState.shouldShowRationale
+        PermissionOnboardingDialog(
+            hasWifiPermission = hasWifiPermission,
+            isPermanentlyDenied = isPermanentlyDenied,
+            permissionState = permissionState,
+            onGrant = {
+                vibrationManager?.vibrateClick()
+                if (isPermanentlyDenied) {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { context.startActivity(intent) }
+                } else {
+                    permissionState.launchMultiplePermissionRequest()
+                }
+            },
+            onDismiss = {
+                vibrationManager?.vibrateClick()
+                showPermissionOnboarding = false
+                permissionOnboardingHandled = true
+            },
+            onOpenSettings = {
+                vibrationManager?.vibrateClick()
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { context.startActivity(intent) }
             }
         )
     }
-    if (uiState.showDisclaimer) {
+
+    if (!showPermissionOnboarding) {
+        shizukuPrompt?.let { prompt ->
+            ShizukuAccessDialog(
+                prompt = prompt,
+                isServiceReady = power.privilegedState.isServiceReady,
+                isAuthorized = power.privilegedState.isAuthorized,
+                isReachable = power.privilegedState.isReachable,
+                onDismiss = { shizukuPrompt = null },
+                onRequestAccess = { requestShizukuAccess(prompt.featureName, prompt.supportingText) },
+                onVerify = {
+                    powerVm.verifyPrivilegedAccess()
+                    shizukuPrompt = null
+                }
+            )
+        }
+    }
+    if (uiState.showDisclaimer && !showPermissionOnboarding) {
         AlertDialog(
             onDismissRequest = { },
             confirmButton = {
@@ -527,6 +593,115 @@ fun NetworkSuiteScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )
     }
+}
+
+// ── Permission onboarding (floating) ────────────────────────────────────────
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+private fun PermissionOnboardingDialog(
+    hasWifiPermission: Boolean,
+    isPermanentlyDenied: Boolean,
+    permissionState: com.google.accompanist.permissions.MultiplePermissionsState,
+    onGrant: () -> Unit,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    val status = when {
+        hasWifiPermission -> "Granted"
+        isPermanentlyDenied -> "Permission denied — open Settings"
+        else -> "Permission needed"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        icon = {
+            Surface(shape = CircleShape, color = if (hasWifiPermission) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer, modifier = Modifier.size(56.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (hasWifiPermission) Icons.Rounded.CheckCircle else Icons.Rounded.LocationOff,
+                        contentDescription = null,
+                        tint = if (hasWifiPermission) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        },
+        title = { Text("Allow Wi-Fi scanning?", fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Toolz needs Nearby Wi-Fi devices (Android 13+) or Location permission to scan nearby networks, check channels, and measure signal.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Surface(shape = RoundedCornerShape(50), color = if (hasWifiPermission) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer) {
+                    Text(
+                        status,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (hasWifiPermission) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Toolz declares NEARBY_WIFI_DEVICES with neverForLocation — your location is never collected, only nearby SSIDs are read to map spectrum. You can skip, but Analyzer and Live Signal will be limited.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        permissionState.permissions.forEach { perm ->
+                            val label = when (perm.permission) {
+                                Manifest.permission.NEARBY_WIFI_DEVICES -> "Nearby Wi-Fi devices"
+                                Manifest.permission.ACCESS_FINE_LOCATION -> "Precise location"
+                                Manifest.permission.ACCESS_COARSE_LOCATION -> "Approximate location"
+                                else -> perm.permission.substringAfterLast(".")
+                            }
+                            val granted = perm.status.isGranted
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Icon(
+                                        if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.LocationOff,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                                }
+                                Text(
+                                    if (granted) "Granted" else "Needed",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onGrant,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text(if (isPermanentlyDenied) "Open Settings" else "Grant access", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isPermanentlyDenied) {
+                    TextButton(onClick = onOpenSettings, shape = RoundedCornerShape(50)) { Text("Settings") }
+                }
+                TextButton(onClick = onDismiss, shape = RoundedCornerShape(50)) { Text("Not now") }
+            }
+        }
+    )
 }
 
 // ── Section compositions ────────────────────────────────────────────────────

@@ -415,7 +415,7 @@ internal fun NetworkMap(uiState: NetworkPowerUiState) {
             }
             // Zoom hint
             Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.align(Alignment.BottomEnd)) {
-                Text("${(zoomScale*100).toInt()}% • pinch to zoom", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${(zoomScale*100).toInt()}%", modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
