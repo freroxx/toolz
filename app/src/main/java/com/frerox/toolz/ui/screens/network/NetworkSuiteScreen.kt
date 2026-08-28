@@ -521,35 +521,15 @@ fun NetworkSuiteScreen(
     }
     // ── Permission onboarding (floating) — must be handled before Shizuku/Beta ─────
     if (showPermissionOnboarding) {
-        val isPermanentlyDenied = permissionState.revokedPermissions.isNotEmpty() && !permissionState.shouldShowRationale
         PermissionOnboardingDialog(
-            hasWifiPermission = hasWifiPermission,
-            isPermanentlyDenied = isPermanentlyDenied,
-            permissionState = permissionState,
             onGrant = {
                 vibrationManager?.vibrateClick()
-                if (isPermanentlyDenied) {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", context.packageName, null)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    runCatching { context.startActivity(intent) }
-                } else {
-                    permissionState.launchMultiplePermissionRequest()
-                }
+                permissionState.launchMultiplePermissionRequest()
             },
             onDismiss = {
                 vibrationManager?.vibrateClick()
                 showPermissionOnboarding = false
                 permissionOnboardingHandled = true
-            },
-            onOpenSettings = {
-                vibrationManager?.vibrateClick()
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.fromParts("package", context.packageName, null)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                runCatching { context.startActivity(intent) }
             }
         )
     }
@@ -595,33 +575,23 @@ fun NetworkSuiteScreen(
     }
 }
 
-// ── Permission onboarding (floating) ────────────────────────────────────────
-@OptIn(ExperimentalPermissionsApi::class)
+// ── Permission onboarding (floating) — clear, single action ───────────────────
 @Composable
 private fun PermissionOnboardingDialog(
-    hasWifiPermission: Boolean,
-    isPermanentlyDenied: Boolean,
-    permissionState: com.google.accompanist.permissions.MultiplePermissionsState,
     onGrant: () -> Unit,
-    onDismiss: () -> Unit,
-    onOpenSettings: () -> Unit
+    onDismiss: () -> Unit
 ) {
-    val status = when {
-        hasWifiPermission -> "Granted"
-        isPermanentlyDenied -> "Permission denied — open Settings"
-        else -> "Permission needed"
-    }
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         icon = {
-            Surface(shape = CircleShape, color = if (hasWifiPermission) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer, modifier = Modifier.size(56.dp)) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(56.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        if (hasWifiPermission) Icons.Rounded.CheckCircle else Icons.Rounded.LocationOff,
+                        Icons.Rounded.Wifi,
                         contentDescription = null,
-                        tint = if (hasWifiPermission) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -629,60 +599,11 @@ private fun PermissionOnboardingDialog(
         },
         title = { Text("Allow Wi-Fi scanning?", fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "Toolz needs Nearby Wi-Fi devices (Android 13+) or Location permission to scan nearby networks, check channels, and measure signal.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-                Surface(shape = RoundedCornerShape(50), color = if (hasWifiPermission) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer) {
-                    Text(
-                        status,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (hasWifiPermission) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "Toolz declares NEARBY_WIFI_DEVICES with neverForLocation — your location is never collected, only nearby SSIDs are read to map spectrum. You can skip, but Analyzer and Live Signal will be limited.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        permissionState.permissions.forEach { perm ->
-                            val label = when (perm.permission) {
-                                Manifest.permission.NEARBY_WIFI_DEVICES -> "Nearby Wi-Fi devices"
-                                Manifest.permission.ACCESS_FINE_LOCATION -> "Precise location"
-                                Manifest.permission.ACCESS_COARSE_LOCATION -> "Approximate location"
-                                else -> perm.permission.substringAfterLast(".")
-                            }
-                            val granted = perm.status.isGranted
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(
-                                        if (granted) Icons.Rounded.CheckCircle else Icons.Rounded.LocationOff,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
-                                }
-                                Text(
-                                    if (granted) "Granted" else "Needed",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            Text(
+                "To find nearby networks and check signal, allow Nearby Wi-Fi devices (or Location on older Android).\n\nYour location is never collected — only network names are read. You can grant now or later from settings.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         },
         confirmButton = {
             Button(
@@ -690,16 +611,11 @@ private fun PermissionOnboardingDialog(
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text(if (isPermanentlyDenied) "Open Settings" else "Grant access", fontWeight = FontWeight.Bold)
+                Text("Grant permissions", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isPermanentlyDenied) {
-                    TextButton(onClick = onOpenSettings, shape = RoundedCornerShape(50)) { Text("Settings") }
-                }
-                TextButton(onClick = onDismiss, shape = RoundedCornerShape(50)) { Text("Not now") }
-            }
+            TextButton(onClick = onDismiss, shape = RoundedCornerShape(50)) { Text("Not now") }
         }
     )
 }

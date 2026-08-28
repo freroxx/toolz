@@ -398,45 +398,37 @@ internal fun OverviewTab(
             }
         }
 
-        // ── QUICK FIXES (P0 diagnose-first) ─────────────────────────────────
-        val hasAdvice = state.advice.recommendation.isNotBlank() &&
-            !state.advice.recommendation.startsWith("Scan nearby")
-        // Prefer diagnose-list over raw thresholds so card never shows without actionable fix
-        val diagnoseEmpty = state.networkConfig.isThrottlingEnabled.not() &&
-            !(state.currentRssi < -70 && state.currentRssi > -100) &&
-            !(state.privateDnsHost.isBlank() && state.privateDnsMode.equals("Automatic", true))
-        if (!diagnoseEmpty || hasAdvice || state.stability.packetLossRate > 0.05 || state.stability.jitterMs > 15.0) {
-            item {
-                NetCard(
-                    title = stringResource(R.string.st_WifiTweaksScreen_2b8a),
-                    subtitle = state.advice.recommendation.ifBlank { "Latency or loss above healthy thresholds." },
-                    icon = Icons.Rounded.AutoFixHigh,
-                    trailing = {
-                        IconButton(onClick = { showQuickFixInfo = true }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Info,
-                                contentDescription = "Quick Fixes info",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+        // ── QUICK FIXES (always visible) ────────────────────────────────────────
+        item {
+            NetCard(
+                title = stringResource(R.string.st_WifiTweaksScreen_2b8a),
+                subtitle = state.advice.recommendation.ifBlank { "Tap Run fixes to diagnose and apply safe optimizations." },
+                icon = Icons.Rounded.AutoFixHigh,
+                trailing = {
+                    IconButton(onClick = { showQuickFixInfo = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = "Quick Fixes info",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
-                        FilledTonalButton(
-                            onClick = onFixConnection,
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Run fixes")
-                        }
-                        OutlinedButton(
-                            onClick = onReset,
-                            shape = RoundedCornerShape(50)
-                        ) {
-                            Text("Reset all")
-                        }
+                }
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(NetTokens.SpacingS)) {
+                    FilledTonalButton(
+                        onClick = onFixConnection,
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Run fixes")
+                    }
+                    OutlinedButton(
+                        onClick = onReset,
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text("Reset all")
                     }
                 }
             }
