@@ -68,19 +68,27 @@ object LyricsExtractor {
         val parentDir = audioFile.parentFile ?: return null
         val baseName = audioFile.nameWithoutExtension
 
-        // Candidate filenames: song.lrc, song.txt, song.LRC, song.TXT
+        // P3-14 extend sidecar to srt/vtt (convert via CaptionConverter)
         val candidates = listOf(
             File(parentDir, "$baseName.lrc"),
             File(parentDir, "$baseName.LRC"),
             File(parentDir, "$baseName.txt"),
-            File(parentDir, "$baseName.TXT")
+            File(parentDir, "$baseName.TXT"),
+            File(parentDir, "$baseName.srt"),
+            File(parentDir, "$baseName.SRT"),
+            File(parentDir, "$baseName.vtt"),
+            File(parentDir, "$baseName.VTT")
         )
 
         for (candidate in candidates) {
             if (candidate.exists() && candidate.isFile) {
                 runCatching {
-                    val content = candidate.readText().trim()
+                    var content = candidate.readText().trim()
                     if (content.isNotBlank()) {
+                        // convert srt/vtt to lrc when needed
+                        if (candidate.extension.equals("srt", true) || candidate.extension.equals("vtt", true)) {
+                            content = com.frerox.toolz.data.catalog.CaptionConverter.convertToLrc(content) ?: content
+                        }
                         val isSynced = content.contains("[0") || content.contains("[1") || content.contains("[2")
                         Log.d(TAG, "Found local sidecar lyrics: ${candidate.absolutePath} (synced=$isSynced)")
                         return Pair(content, isSynced)

@@ -386,6 +386,8 @@ class SettingsRepository @Inject constructor(
     private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format") // "M4A", "OPUS", "MP3"
     private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality") // "HIGH", "MEDIUM", "LOW"
     private val CATALOG_STREAM_QUALITY = stringPreferencesKey("catalog_stream_quality") // "AUTO", "HIGH", "MEDIUM", "LOW"
+    private val MUSIC_CACHE_SIZE_MB = intPreferencesKey("music_cache_size_mb") // 0/50/150/500
+    private val MUSIC_DOWNLOADED_ONLY_FILTER = booleanPreferencesKey("music_downloaded_only_filter")
 
     // Timer Duration Persistence
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
@@ -747,6 +749,8 @@ class SettingsRepository @Inject constructor(
     val downloadFormat: Flow<String> = dataStore.data.map { it[DOWNLOAD_FORMAT] ?: "M4A" }
     val downloadQuality: Flow<String> = dataStore.data.map { it[DOWNLOAD_QUALITY] ?: "HIGH" }
     val catalogStreamQuality: Flow<String> = dataStore.data.map { it[CATALOG_STREAM_QUALITY] ?: "AUTO" }
+    val musicCacheSizeMb: Flow<Int> = dataStore.data.map { it[MUSIC_CACHE_SIZE_MB] ?: 150 }
+    val musicDownloadedOnlyFilter: Flow<Boolean> = dataStore.data.map { it[MUSIC_DOWNLOADED_ONLY_FILTER] ?: false }
 
     val lastTimerMinutes: Flow<Int> = dataStore.data.map { 
         try {
@@ -1062,6 +1066,8 @@ class SettingsRepository @Inject constructor(
     suspend fun setDownloadFormat(format: String) { dataStore.edit { it[DOWNLOAD_FORMAT] = format } }
     suspend fun setDownloadQuality(quality: String) { dataStore.edit { it[DOWNLOAD_QUALITY] = quality } }
     suspend fun setCatalogStreamQuality(quality: String) { dataStore.edit { it[CATALOG_STREAM_QUALITY] = quality } }
+    suspend fun setMusicCacheSizeMb(mb: Int) { dataStore.edit { it[MUSIC_CACHE_SIZE_MB] = mb.coerceIn(0, 500) } }
+    suspend fun setMusicDownloadedOnlyFilter(enabled: Boolean) { dataStore.edit { it[MUSIC_DOWNLOADED_ONLY_FILTER] = enabled } }
 
     suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
         dataStore.edit {

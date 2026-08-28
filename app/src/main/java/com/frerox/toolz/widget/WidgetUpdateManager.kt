@@ -52,7 +52,9 @@ class WidgetUpdateManager @Inject constructor(
         artFilePath: String?,
         isFavorite: Boolean,
         nextTitle: String?,
-        queue: List<QueueTrackInfo>
+        queue: List<QueueTrackInfo>,
+        isShuffleOn: Boolean = false,
+        repeatMode: Int = 0
     ) {
         // P2-08 fix: Guard getGlanceIds — can throw if AppWidgetHost not ready (e.g. after reboot)
         val glanceIds = try {
@@ -80,6 +82,8 @@ class WidgetUpdateManager @Inject constructor(
                     prefs[MusicWidgetState.KEY_ART_SHAPE] = artShape
                     if (artFilePath != null) prefs[MusicWidgetState.KEY_ART_PATH] = artFilePath
                     prefs[MusicWidgetState.KEY_IS_FAVORITE] = isFavorite
+                    prefs[MusicWidgetState.KEY_IS_SHUFFLE] = isShuffleOn
+                    prefs[MusicWidgetState.KEY_REPEAT_MODE] = repeatMode
                     if (nextTitle != null) {
                         prefs[MusicWidgetState.KEY_NEXT_TITLE] = nextTitle
                     } else {

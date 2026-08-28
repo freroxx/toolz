@@ -301,7 +301,7 @@ class CatalogRepository @Inject constructor(
     suspend fun downloadAudioStream(
         streamUrl: String,
         outputFile: java.io.File,
-        onProgress: (Float) -> Unit
+        onProgress: suspend (Float) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()

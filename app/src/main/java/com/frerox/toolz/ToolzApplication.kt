@@ -52,10 +52,23 @@ class ToolzApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var adBlockManager: AdBlockManager
 
+    @Inject
+    lateinit var musicRepository: com.frerox.toolz.data.music.MusicRepository
+
     override fun onCreate() {
         super.onCreate()
         // The new standard for SQLCipher 4.6.1+ is a direct native load
         System.loadLibrary("sqlcipher")
+        // P0-09: ensure live observer unregisters on low memory to avoid leak
+        registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
+                    runCatching { musicRepository.stopLiveObserver() }
+                }
+            }
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {}
+            override fun onLowMemory() { runCatching { musicRepository.stopLiveObserver() } }
+        })
         runCatching {
             val youtubeDl = Class.forName("com.yausername.youtubedl_android.YoutubeDL")
                 .getMethod("getInstance")

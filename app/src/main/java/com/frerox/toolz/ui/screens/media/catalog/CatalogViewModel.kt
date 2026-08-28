@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -92,7 +93,10 @@ data class CatalogUiState(
     val selectedGenre: String? = null,
     val recommendationTitle: String = "Just for you",
     val canLoadMore: Boolean = true,
-    val offlineSongToPlay: CatalogTrack? = null
+    val offlineSongToPlay: CatalogTrack? = null,
+    val downloadedOnly: Boolean = false,
+    val recentSearches: List<String> = emptyList(),
+    val relatedArtists: List<String> = emptyList()
 )
 
 @OptIn(FlowPreview::class)
@@ -122,6 +126,10 @@ class CatalogViewModel @Inject constructor(
 
     val showBetaCard: StateFlow<Boolean> = settingsRepository.showCatalogBetaCard
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    val recentSearchesFlow: StateFlow<List<String>> = appDatabase.catalogSearchDao().getRecentSearches()
+        .map { entries: List<CatalogSearchEntry> -> entries.take(8).map { it.query }.distinct() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var nextPage: Page? = null
     private var currentSearchJob: Job? = null
@@ -250,6 +258,8 @@ class CatalogViewModel @Inject constructor(
         }
 
         loadStorefront()
+        // collect recent searches into uiState
+        recentSearchesFlow.onEach { list -> _uiState.update { it.copy(recentSearches = list) } }.launchIn(viewModelScope + handler)
     }
 
     fun refreshOnOpen(currentTrack: MusicTrack?, force: Boolean = false) {
@@ -322,7 +332,7 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun onGenreSelected(genre: String?) {
-        _uiState.update { it.copy(selectedGenre = genre, query = genre ?: "") }
+        _uiState.update { it.copy(selectedGenre = genre, query = genre ?: "", downloadedOnly = false) }
         if (genre == null) {
             loadStorefront(currentContextTrack)
         } else {
@@ -334,6 +344,17 @@ class CatalogViewModel @Inject constructor(
         _uiState.update { it.copy(query = query, isLoading = query.isNotBlank()) }
         searchQueryFlow.tryEmit(query)
     }
+
+    fun toggleDownloadedOnly() {
+        val new = !_uiState.value.downloadedOnly
+        _uiState.update { it.copy(downloadedOnly = new) }
+    }
+
+    fun clearRecentSearches() {
+        viewModelScope.launch { appDatabase.catalogSearchDao().clearHistory(); _uiState.update { it.copy(recentSearches = emptyList()) } }
+    }
+
+    fun selectRecentSearch(query: String) { onSearchQueryChange(query) }
 
     fun loadMore() {
         if (_uiState.value.query.isNotBlank()) {

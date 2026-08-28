@@ -243,7 +243,8 @@ class MusicDownloadWorker @AssistedInject constructor(
         }
     }
 
-    private fun publishProgressBlocking(notificationId: Int, contentTitle: String, progress: Float) {
+    // P2-13 fix: suspend & Main-safe — no fire-and-forget CoroutineScope leak
+    private suspend fun publishProgressBlocking(notificationId: Int, contentTitle: String, progress: Float) {
         val clamped = progress.coerceIn(0f, 1f)
         val progressInt = (clamped * 100).toInt()
         try {
@@ -251,12 +252,10 @@ class MusicDownloadWorker @AssistedInject constructor(
         } catch (e: Exception) {
             android.util.Log.w("MusicDownloadWorker", "notification update failed (non-fatal): ${e.message}")
         }
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                setProgress(workDataOf(KEY_PROGRESS to clamped))
-            } catch (e: Exception) {
-                android.util.Log.w("MusicDownloadWorker", "setProgress failed (non-fatal): ${e.message}")
-            }
+        try {
+            setProgress(workDataOf(KEY_PROGRESS to clamped))
+        } catch (e: Exception) {
+            android.util.Log.w("MusicDownloadWorker", "setProgress failed (non-fatal): ${e.message}")
         }
     }
 
@@ -562,11 +561,29 @@ class MusicDownloadWorker @AssistedInject constructor(
     }
 
     private fun showErrorNotification(id: Int, title: String, error: String) {
+        val trackId = inputData.getString(KEY_TRACK_ID) ?: ""
+        val retryIntent = Intent(applicationContext, DownloadCancelReceiver::class.java).apply {
+            putExtra("work_id", trackId)
+            putExtra("retry", true)
+            putExtra(KEY_SOURCE_URL, inputData.getString(KEY_SOURCE_URL))
+            putExtra(KEY_TRACK_TITLE, title)
+            putExtra(KEY_TRACK_ARTIST, inputData.getString(KEY_TRACK_ARTIST))
+            putExtra(KEY_THUMBNAIL_URL, inputData.getString(KEY_THUMBNAIL_URL))
+            putExtra(KEY_DURATION, inputData.getLong(KEY_DURATION, 0L))
+            putExtra(KEY_FORMAT, inputData.getString(KEY_FORMAT))
+            putExtra(KEY_QUALITY, inputData.getString(KEY_QUALITY))
+        }
+        // Reuse same receiver for retry; if not handling retry, at least dismiss
+        val retryPending = PendingIntent.getBroadcast(
+            applicationContext, ("retry_$trackId").hashCode(), retryIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("Download Failed")
             .setContentText("$title: $error")
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setAutoCancel(true)
+            .addAction(android.R.drawable.stat_sys_download_done, "Retry", retryPending)
             .build()
         notificationManager.notify(id, notification)
     }

@@ -26,6 +26,34 @@ import java.util.UUID
 class DownloadCancelReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val trackId = intent.getStringExtra("work_id")
+        if (intent.getBooleanExtra("retry", false) && trackId != null) {
+            val sourceUrl = intent.getStringExtra(MusicDownloadWorker.KEY_SOURCE_URL) ?: return
+            val title = intent.getStringExtra(MusicDownloadWorker.KEY_TRACK_TITLE) ?: "Unknown"
+            val artist = intent.getStringExtra(MusicDownloadWorker.KEY_TRACK_ARTIST) ?: "Unknown"
+            val thumb = intent.getStringExtra(MusicDownloadWorker.KEY_THUMBNAIL_URL)
+            val duration = intent.getLongExtra(MusicDownloadWorker.KEY_DURATION, 0L)
+            val format = intent.getStringExtra(MusicDownloadWorker.KEY_FORMAT) ?: "M4A"
+            val quality = intent.getStringExtra(MusicDownloadWorker.KEY_QUALITY) ?: "HIGH"
+            val wm = WorkManager.getInstance(context)
+            wm.cancelAllWorkByTag("download_$trackId")
+            val req = androidx.work.OneTimeWorkRequestBuilder<MusicDownloadWorker>()
+                .setInputData(androidx.work.workDataOf(
+                    MusicDownloadWorker.KEY_TRACK_ID to trackId,
+                    MusicDownloadWorker.KEY_TRACK_TITLE to title,
+                    MusicDownloadWorker.KEY_TRACK_ARTIST to artist,
+                    MusicDownloadWorker.KEY_SOURCE_URL to sourceUrl,
+                    MusicDownloadWorker.KEY_THUMBNAIL_URL to thumb,
+                    MusicDownloadWorker.KEY_DURATION to duration,
+                    MusicDownloadWorker.KEY_FORMAT to format,
+                    MusicDownloadWorker.KEY_QUALITY to quality
+                ))
+                .addTag("download_$trackId")
+                .addTag(MusicDownloadWorker.TAG_MUSIC_DOWNLOAD)
+                .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
+            wm.enqueueUniqueWork("music_download_$trackId", androidx.work.ExistingWorkPolicy.REPLACE, req)
+            return
+        }
         if (trackId != null) {
             WorkManager.getInstance(context).cancelAllWorkByTag("download_$trackId")
         }

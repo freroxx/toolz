@@ -515,6 +515,32 @@ fun CatalogContent(
                         onGenreSelected = { catalogViewModel.onGenreSelected(it) }
                     )
                 }
+                // P- Downloaded-only + recent searches chips
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.FilterChip(
+                            selected = state.downloadedOnly,
+                            onClick = { catalogViewModel.toggleDownloadedOnly() },
+                            label = { Text("Downloaded only") },
+                            leadingIcon = { Icon(Icons.Rounded.CloudDone, null, modifier = Modifier.size(18.dp)) }
+                        )
+                        if (state.recentSearches.isNotEmpty()) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(state.recentSearches.take(5)) { q ->
+                                    AssistChip(
+                                        onClick = { catalogViewModel.selectRecentSearch(q) },
+                                        label = { Text(q, maxLines = 1) },
+                                        leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(16.dp)) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
                 state.error?.let { message ->
                     item(span = StaggeredGridItemSpan.FullLine) {
@@ -543,7 +569,7 @@ fun CatalogContent(
                                 )
                             }
                             catalogTrackRows(
-                                tracks = state.quickPicks,
+                                tracks = if (state.downloadedOnly) state.quickPicks.filter { downloadedSourceUrls.contains(it.sourceUrl.normalizeYoutubeUrl()) } else state.quickPicks,
                                 layoutMode = state.layoutMode,
                                 downloadedSourceUrls = downloadedSourceUrls,
                                 downloadingTracks = state.downloadingTracks,
@@ -565,12 +591,12 @@ fun CatalogContent(
                         item(span = StaggeredGridItemSpan.FullLine) {
                             SectionHeader(
                                 title = stringResource(R.string.st_CatalogScreen_tr7),
-                                subtitle = "${state.trending.size.coerceAtMost(9)} tracks",
+                                subtitle = "${(if (state.downloadedOnly) state.trending.filter { downloadedSourceUrls.contains(it.sourceUrl.normalizeYoutubeUrl()) } else state.trending).size.coerceAtMost(9)} tracks",
                                 icon = Icons.AutoMirrored.Rounded.TrendingUp
                             )
                         }
                         catalogTrackRows(
-                            tracks = state.trending.take(9),
+                            tracks = if (state.downloadedOnly) state.trending.take(9).filter { downloadedSourceUrls.contains(it.sourceUrl.normalizeYoutubeUrl()) } else state.trending.take(9),
                             layoutMode = state.layoutMode,
                             downloadedSourceUrls = downloadedSourceUrls,
                             downloadingTracks = state.downloadingTracks,
@@ -601,7 +627,7 @@ fun CatalogContent(
                             item(span = StaggeredGridItemSpan.FullLine) { RecommendationSkeleton() }
                         } else {
                             catalogTrackRows(
-                                tracks = state.justForYou,
+                                tracks = if (state.downloadedOnly) state.justForYou.filter { downloadedSourceUrls.contains(it.sourceUrl.normalizeYoutubeUrl()) } else state.justForYou,
                                 layoutMode = state.layoutMode,
                                 downloadedSourceUrls = downloadedSourceUrls,
                                 downloadingTracks = state.downloadingTracks,
@@ -666,7 +692,7 @@ fun CatalogContent(
                         }
                     } else {
                         catalogTrackRows(
-                            tracks = state.tracks,
+                            tracks = if (state.downloadedOnly) state.tracks.filter { downloadedSourceUrls.contains(it.sourceUrl.normalizeYoutubeUrl()) } else state.tracks,
                             layoutMode = state.layoutMode,
                             downloadedSourceUrls = downloadedSourceUrls,
                             downloadingTracks = state.downloadingTracks,

@@ -47,6 +47,8 @@ class MusicVisualizerManager @Inject constructor() {
     
     private val lock = Any()
     private var totalSamplesReceived = 0L
+    @Volatile var currentSampleRate: Int = 44100
+    @Volatile private var autoSensitivityEnabled: Boolean = false
 
     /**
      * Called by the AudioProcessor to feed PCM data into the manager.
@@ -76,11 +78,14 @@ class MusicVisualizerManager @Inject constructor() {
         }
     }
 
+    fun setAutoSensitivity(enabled: Boolean) { autoSensitivityEnabled = enabled }
+
     /**
      * Extracts a spectrum analysis from the most recent audio data.
      * Guaranteed to return a valid spectrum as long as the first 1024 samples have been received.
+     * @param sampleRate Optional override; if <=0 uses [currentSampleRate].
      */
-    fun getSpectrum(): FloatArray? {
+    fun getSpectrum(sampleRate: Int = currentSampleRate): FloatArray? {
         synchronized(lock) {
             // Wait for the first window to fill before starting
             if (totalSamplesReceived < fftSize) return null
@@ -107,8 +112,9 @@ class MusicVisualizerManager @Inject constructor() {
             val freqStart = 20.0 * (20000.0 / 20.0).pow(i / 64.0)
             val freqEnd = 20.0 * (20000.0 / 20.0).pow((i + 1) / 64.0)
             
-            // Map frequency to FFT bin (assuming 44100Hz)
-            val binWidth = 44100.0 / fftSize
+            // P2-11 fix: use real sampleRate, not hardcoded 44100
+            val effectiveRate = if (sampleRate > 0) sampleRate else currentSampleRate
+            val binWidth = effectiveRate.toDouble() / fftSize
             val startBin = (freqStart / binWidth).toInt().coerceIn(0, n - 1)
             val endBin = (freqEnd / binWidth).toInt().coerceIn(startBin + 1, n)
             
@@ -126,8 +132,14 @@ class MusicVisualizerManager @Inject constructor() {
                 i < 48 -> 3.5f  // High Mids
                 else   -> 5.0f  // Treble
             }
-            // Sensitivity coefficient: 0.010f (Balanced for compact, aggressive movement)
-            var value = (maxMag * weighting * 0.010f).coerceIn(0f, 100f)
+            // Sensitivity coefficient — auto scales with RMS when auto mode ON
+            var coeff = 0.010f
+            if (autoSensitivityEnabled) {
+                // estimate energy-dependent scaling: low-energy content gets higher coeff
+                val avg = prevSpectrum.average().toFloat().coerceIn(1f, 60f)
+                coeff = (0.010f * (60f / avg).coerceIn(0.85f, 2.2f))
+            }
+            var value = (maxMag * weighting * coeff).coerceIn(0f, 100f)
             
             // Temporal smoothing (Less smoothing for faster reactions)
             value = prevSpectrum[i] * 0.15f + value * 0.85f
@@ -192,6 +204,7 @@ class VisualizerAudioProcessor(private val manager: MusicVisualizerManager) : Ba
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         inputEncoding = inputAudioFormat.encoding
+        manager.currentSampleRate = inputAudioFormat.sampleRate.takeIf { it > 0 } ?: manager.currentSampleRate
         // P2-04 fix: support float PCM (common on high-res devices) by converting to short; bypass others gracefully.
         return when (inputAudioFormat.encoding) {
             C.ENCODING_PCM_16BIT, C.ENCODING_PCM_16BIT_BIG_ENDIAN, C.ENCODING_PCM_FLOAT -> inputAudioFormat

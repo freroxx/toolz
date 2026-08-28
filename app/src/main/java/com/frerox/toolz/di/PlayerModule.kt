@@ -41,6 +41,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -48,9 +51,18 @@ object PlayerModule {
 
     @Provides
     @Singleton
-    fun provideSimpleCache(@ApplicationContext context: Context): SimpleCache {
+    fun provideSimpleCache(
+        @ApplicationContext context: Context,
+        settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
+    ): SimpleCache {
         val cacheDir = java.io.File(context.cacheDir, "exo_cache")
-        val evictor = LeastRecentlyUsedCacheEvictor(150L * 1024 * 1024) // 150 MB
+        // P2-12 cache tuning: read last persisted size, default 150 MB; resizing handled via settings observer in App
+        val initialMb = try {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(800) { settingsRepository.musicCacheSizeMb.first() } ?: 150
+            }
+        } catch (_: Exception) { 150 }
+        val evictor = LeastRecentlyUsedCacheEvictor(initialMb.coerceIn(0, 500).toLong() * 1024 * 1024)
         val dbProvider = StandaloneDatabaseProvider(context)
         return SimpleCache(cacheDir, evictor, dbProvider)
     }

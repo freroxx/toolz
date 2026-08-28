@@ -79,7 +79,8 @@ data class MusicUiState(
     val isMutedByAi             : Boolean                   = false,
     val karaokeSessionsCount    : Int                       = 0,
     val karaokeAvgScore         : Int                       = -1,
-    val queueWarning            : String?                   = null
+    val queueWarning            : String?                   = null,
+    val downloadedOnlyFilter    : Boolean                   = false
 )
 
 data class QueueEntry(val id: String, val track: MusicTrack)

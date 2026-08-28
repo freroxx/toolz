@@ -50,9 +50,13 @@ class MusicActionCallback : ActionCallback {
         const val ACTION_PREV = "prev"
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_SEEK = "seek"
+        const val ACTION_SHUFFLE = "shuffle"
+        const val ACTION_REPEAT = "repeat"
+        const val ACTION_SEEK_POSITION = "seek_position"
 
         // Extra key carrying which queue row was tapped
         const val EXTRA_QUEUE_INDEX = "com.frerox.toolz.EXTRA_QUEUE_INDEX"
+        const val EXTRA_POSITION_MS = "com.frerox.toolz.EXTRA_POSITION_MS"
     }
 
     @EntryPoint
@@ -78,14 +82,25 @@ class MusicActionCallback : ActionCallback {
         // 2. Optimistic UI Updates
         // Toggling these keys locally in Preferences makes Glance re-render
         // the icons instantly while the service works in the background.
-        if (action == ACTION_TOGGLE || action == ACTION_FAVORITE) {
+        if (action == ACTION_TOGGLE || action == ACTION_FAVORITE || action == ACTION_SHUFFLE || action == ACTION_REPEAT) {
             updateAppWidgetState(context, glanceId) { prefs ->
-                if (action == ACTION_TOGGLE) {
-                    val current = prefs[MusicWidgetState.KEY_PLAYING] ?: false
-                    prefs[MusicWidgetState.KEY_PLAYING] = !current
-                } else {
-                    val current = prefs[MusicWidgetState.KEY_IS_FAVORITE] ?: false
-                    prefs[MusicWidgetState.KEY_IS_FAVORITE] = !current
+                when (action) {
+                    ACTION_TOGGLE -> {
+                        val current = prefs[MusicWidgetState.KEY_PLAYING] ?: false
+                        prefs[MusicWidgetState.KEY_PLAYING] = !current
+                    }
+                    ACTION_FAVORITE -> {
+                        val current = prefs[MusicWidgetState.KEY_IS_FAVORITE] ?: false
+                        prefs[MusicWidgetState.KEY_IS_FAVORITE] = !current
+                    }
+                    ACTION_SHUFFLE -> {
+                        val cur = prefs[MusicWidgetState.KEY_IS_SHUFFLE] ?: false
+                        prefs[MusicWidgetState.KEY_IS_SHUFFLE] = !cur
+                    }
+                    ACTION_REPEAT -> {
+                        val cur = prefs[MusicWidgetState.KEY_REPEAT_MODE] ?: 0
+                        prefs[MusicWidgetState.KEY_REPEAT_MODE] = when (cur) { 0 -> 2; 2 -> 1; else -> 0 }
+                    }
                 }
             }
             MusicGlanceWidget().update(context, glanceId)
@@ -99,10 +114,16 @@ class MusicActionCallback : ActionCallback {
                 ACTION_PREV -> MusicPlayerService.ACTION_SKIP_PREV
                 ACTION_FAVORITE -> MusicPlayerService.ACTION_TOGGLE_FAVORITE
                 ACTION_SEEK -> MusicPlayerService.ACTION_SEEK_TO_QUEUE_INDEX
+                ACTION_SHUFFLE -> MusicPlayerService.ACTION_TOGGLE_SHUFFLE
+                ACTION_REPEAT -> MusicPlayerService.ACTION_CYCLE_REPEAT
+                ACTION_SEEK_POSITION -> MusicPlayerService.ACTION_SEEK_TO_POSITION
                 else -> null
             }
             if (action == ACTION_SEEK) {
                 putExtra(EXTRA_QUEUE_INDEX, parameters[PARAM_INDEX] ?: -1)
+            }
+            if (action == ACTION_SEEK_POSITION) {
+                putExtra(EXTRA_POSITION_MS, parameters[PARAM_INDEX]?.toLong() ?: -1L)
             }
         }
 

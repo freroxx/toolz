@@ -113,7 +113,8 @@ import com.frerox.toolz.data.network.SpeedHistoryDao
     // name-substring heuristic. See MIGRATION_48_49 in DatabaseModule.
     // P3: 52 adds whisper_outbox + whisper_local_tombstones (see MIGRATION_51_52).
     // Music P1: 53 adds music_tracks.stableId + indexes for lastPlayed/playCount/sourceUrl/path (see MIGRATION_52_53).
-    version = 53,
+    // Music Polished 54 adds music_tracks.lrcOffsetMs + dedup unique stability (see MIGRATION_53_54).
+    version = 54,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

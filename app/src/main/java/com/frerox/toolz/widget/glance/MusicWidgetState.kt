@@ -19,6 +19,7 @@ package com.frerox.toolz.widget.glance
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.state.GlanceStateDefinition
@@ -58,6 +59,9 @@ object MusicWidgetState {
     val KEY_POSITION_MS = longPreferencesKey("mw_position_ms")
     val KEY_DURATION_MS = longPreferencesKey("mw_duration_ms")
     val KEY_CAPTURED_AT_ELAPSED_MS = longPreferencesKey("mw_captured_at_elapsed_ms")
+
+    val KEY_IS_SHUFFLE = booleanPreferencesKey("mw_is_shuffle")
+    val KEY_REPEAT_MODE = intPreferencesKey("mw_repeat_mode") // 0 OFF, 1 ONE, 2 ALL
 
     // Up-next queue, encoded as a compact JSON array of {id,title,artist,index}
     // objects (see QueueTrackInfo). org.json ships with the Android SDK

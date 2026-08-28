@@ -88,6 +88,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         const val ACTION_SKIP_PREV = "com.frerox.toolz.action.SKIP_PREV"
         const val ACTION_TOGGLE_FAVORITE = "com.frerox.toolz.action.TOGGLE_FAVORITE"
         const val ACTION_SEEK_TO_QUEUE_INDEX = "com.frerox.toolz.action.SEEK_TO_QUEUE_INDEX"
+        const val ACTION_TOGGLE_SHUFFLE = "com.frerox.toolz.action.TOGGLE_SHUFFLE"
+        const val ACTION_CYCLE_REPEAT = "com.frerox.toolz.action.CYCLE_REPEAT"
+        const val ACTION_SEEK_TO_POSITION = "com.frerox.toolz.action.SEEK_TO_POSITION"
 
         // How many upcoming tracks the widget's "Up Next" queue shows.
         // Bounded deliberately: Glance's RemoteViews-backed LazyColumn has
@@ -95,14 +98,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // anyway — the next handful is what's actually useful at a glance.
         private const val MAX_QUEUE_ROWS = 8
 
-        // Correction interval while playing. The widget no longer needs a
-        // per-second push to *look* live — it interpolates position on its
-        // own between updates (see liveProgressFraction) — this loop exists
-        // purely to correct drift from playback speed changes, seeks made
-        // outside the widget, or buffering stalls. 12s keeps drift
-        // imperceptible without re-rendering the widget 12x more than
-        // necessary.
-        private const val PROGRESS_CORRECTION_INTERVAL_MS = 12_000L
+        // P-Revamp: Realtime correction every 2s for true live progress
+        // instead of 12s drift correction. The widget interpolates position
+        // between pushes, but 12s made scrub/seek feel laggy and queue
+        // updates stale. 2s keeps bar smooth and queue fresh with minimal
+        // battery impact (Glance throttles per widgetId).
+        private const val PROGRESS_CORRECTION_INTERVAL_MS = 2_000L
     }
 
     private var mediaSession: MediaSession? = null
@@ -304,6 +305,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             updateWidget()
             savePlaybackState()
         }
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { updateWidget() }
+        override fun onRepeatModeChanged(repeatMode: Int) { updateWidget() }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
@@ -656,6 +659,20 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     }
                 }
             }
+            ACTION_TOGGLE_SHUFFLE -> {
+                player.shuffleModeEnabled = !player.shuffleModeEnabled
+            }
+            ACTION_CYCLE_REPEAT -> {
+                player.repeatMode = when (player.repeatMode) {
+                    Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                    Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                    else -> Player.REPEAT_MODE_OFF
+                }
+            }
+            ACTION_SEEK_TO_POSITION -> {
+                val pos = intent.getLongExtra(com.frerox.toolz.widget.glance.MusicActionCallback.EXTRA_POSITION_MS, -1L)
+                if (pos >= 0) player.seekTo(pos)
+            }
         }
         updateWidget()
         super.onStartCommand(intent, flags, startId)
@@ -835,7 +852,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 artFilePath = artFilePath,
                 isFavorite = isFavorite,
                 nextTitle = nextTitle,
-                queue = queueSnapshot
+                queue = queueSnapshot,
+                isShuffleOn = player.shuffleModeEnabled,
+                repeatMode = player.repeatMode
             )
         }
     }
@@ -847,15 +866,25 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val rect = Rect(0, 0, size, size)
 
-        if (shape == "CIRCLE") {
-            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            canvas.drawBitmap(bitmap, null, rect, paint)
-        } else {
-            val cornerRadius = size * 0.2f
-            canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), cornerRadius, cornerRadius, paint)
-            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-            canvas.drawBitmap(bitmap, null, rect, paint)
+        when (shape) {
+            "CIRCLE" -> {
+                canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+                paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                canvas.drawBitmap(bitmap, null, rect, paint)
+            }
+            "SQUIRCLE", "SQUARE_ROUNDED" -> {
+                // Squircle: larger radius than square (0.32f vs 0.2f) for superellipse feel
+                val cornerRadius = size * 0.32f
+                canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), cornerRadius, cornerRadius, paint)
+                paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                canvas.drawBitmap(bitmap, null, rect, paint)
+            }
+            else -> {
+                val cornerRadius = size * 0.2f
+                canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), cornerRadius, cornerRadius, paint)
+                paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                canvas.drawBitmap(bitmap, null, rect, paint)
+            }
         }
         return output
     }

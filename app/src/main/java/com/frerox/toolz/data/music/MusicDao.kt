@@ -67,8 +67,9 @@ interface MusicDao {
     @Query("SELECT * FROM music_tracks WHERE path = :path")
     suspend fun getTrackByPath(path: String): MusicTrack?
 
-    @Query("SELECT * FROM music_tracks WHERE (title = :title AND artist = :artist AND duration BETWEEN :duration - 2000 AND :duration + 2000) OR path = :path LIMIT 1")
-    suspend fun findDuplicate(title: String, artist: String?, duration: Long, path: String?): MusicTrack?
+    // P2-15 fix: include album when known + duration>0 guard to reduce "Remastered" clash
+    @Query("SELECT * FROM music_tracks WHERE (title = :title AND artist = :artist AND (:album IS NULL OR album = :album) AND (:duration <= 0 OR duration BETWEEN :duration - 2000 AND :duration + 2000)) OR path = :path LIMIT 1")
+    suspend fun findDuplicate(title: String, artist: String?, album: String? = null, duration: Long, path: String?): MusicTrack?
 
     @Query("UPDATE music_tracks SET playCount = playCount + 1, lastPlayed = :timestamp WHERE uri = :uri")
     suspend fun incrementPlayCount(uri: String, timestamp: Long)

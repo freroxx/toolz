@@ -47,6 +47,8 @@ data class MusicTrack(
     val dateAdded: Long = java.lang.System.currentTimeMillis(),
     // Stable business key (hash of path|sourceUrl) — URI can change on re-index, this persists
     val stableId: String = "",
+    // P3-14 per-track LRC offset in ms (−2000..+2000) for manual sync
+    val lrcOffsetMs: Long = 0L,
     // AI Cache Fields
     val aiLyrics: String? = null,
     val aiArtistVitals: String? = null,

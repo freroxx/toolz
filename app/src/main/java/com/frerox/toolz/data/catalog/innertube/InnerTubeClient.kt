@@ -40,10 +40,23 @@ class InnerTubeClient @Inject constructor(
         isLenient = true
     }
 
-    private val apiKey = "AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI"
+    // Open-source: key comes from BuildConfig (local.properties). No hardcoded value in repo.
+    // This is a public YouTube InnerTube web key (same as NewPipe/etc), but externalized so it
+    // can be rotated via local.properties or remote config without a code push.
+    // If blank, all InnerTube calls gracefully no-op and CatalogRepository falls back to NewPipe.
+    private val apiKey: String = com.frerox.toolz.BuildConfig.INNER_TUBE_API_KEY
     private val baseUrl = "https://music.youtube.com/youtubei/v1"
 
+    private fun isConfigured(): Boolean {
+        if (apiKey.isBlank()) {
+            android.util.Log.w("InnerTubeClient", "INNER_TUBE_API_KEY is blank — InnerTube disabled, using NewPipe fallback. Set INNER_TUBE_API_KEY in local.properties (see local.properties.example)")
+            return false
+        }
+        return true
+    }
+
     suspend fun search(query: String, continuation: String? = null): Pair<List<CatalogTrack>, String?> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext emptyList<CatalogTrack>() to null
         val endpoint = "$baseUrl/search?key=$apiKey"
         
         val requestBody = buildJsonObject {
@@ -92,6 +105,7 @@ class InnerTubeClient @Inject constructor(
     }
 
     suspend fun resolveStream(videoId: String): String? = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext null
         val endpoint = "$baseUrl/player?key=$apiKey"
         
         val requestBody = buildJsonObject {
@@ -147,6 +161,7 @@ class InnerTubeClient @Inject constructor(
     }
 
     suspend fun getRelatedArtists(videoId: String): List<String> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext emptyList<String>()
         val endpoint = "$baseUrl/next?key=$apiKey"
         val requestBody = buildJsonObject {
             putJsonObject("context") {

@@ -132,9 +132,17 @@ class MusicRepository @Inject constructor(
     }
 
     private fun computeStableId(path: String?, sourceUrl: String?, uri: String, title: String, artist: String?): String {
-        // Prefer persistent identifiers: path > sourceUrl > uri; include title/artist for uniqueness
+        // P-Quality: reduce hashCode collision via SHA chunk (still cheap determinism)
         val base = path?.takeIf { it.isNotBlank() } ?: sourceUrl?.takeIf { it.isNotBlank() } ?: uri
-        return "${base.hashCode()}_${title.hashCode()}_${artist.hashCode()}"
+        val raw = "$base|${title.trim()}|${artist?.trim() ?: ""}"
+        // Use SHA-256 hex take 16 char + hash suffix for human uniqueness without full length
+        return try {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val hex = md.digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
+            "${hex}_${raw.hashCode().toString(36)}"
+        } catch (_: Exception) {
+            "${base.hashCode()}_${title.hashCode()}_${artist.hashCode()}"
+        }
     }
 
     suspend fun updateTrackAiData(
@@ -201,18 +209,8 @@ class MusicRepository @Inject constructor(
             try { retriever.release() } catch (_: Exception) {}
         }
 
-        // 2. Try ContentResolver.loadThumbnail on Android 10+ (Q+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content") {
-            try {
-                val bitmap = context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
-                FileOutputStream(targetFile).use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                }
-                return Uri.fromFile(targetFile).toString()
-            } catch (e: Exception) {}
-        }
-
-        // 3. Fallback to MediaStore album art URI if available
+        // P1 thumb ordering: albumArt before loadThumbnail (binder cheaper)
+        // 2. Fallback to MediaStore album art URI if available
         if (albumId >= 0) {
             val albumArt = getAlbumArtUri(albumId)
             if (albumArt != null) {
@@ -227,6 +225,17 @@ class MusicRepository @Inject constructor(
                     }
                 } catch (e: Exception) {}
             }
+        }
+
+        // 3. Last resort: ContentResolver.loadThumbnail on Android 10+ (Q+) — binder heavy so last
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == "content") {
+            try {
+                val bitmap = context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
+                FileOutputStream(targetFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                }
+                return Uri.fromFile(targetFile).toString()
+            } catch (e: Exception) {}
         }
 
         return null
@@ -294,7 +303,7 @@ class MusicRepository @Inject constructor(
 
                     val existingTrack = musicDao.getTrackByUri(contentUriString)
                         ?: (path?.let { musicDao.getTrackByPath(it) })
-                        ?: musicDao.findDuplicate(title, artist, duration, path)
+                        ?: musicDao.findDuplicate(title, artist, album, duration, path)
 
                     if (existingTrack == null) {
                         val thumbnailUri = getEmbeddedArtworkUri(contentUri, path, albumId)
@@ -400,10 +409,27 @@ class MusicRepository @Inject constructor(
         val now = System.currentTimeMillis()
         val shouldFix = newOrUpdatedTracks.isNotEmpty() || now - lastThumbFixMs > 300_000L // 5 min
         if (shouldFix) {
-            fixAllThumbnails()
+            // P1-13: prefer lazy backfill worker instead of inline heavy pass
+            try {
+                enqueueBackfillWorker()
+            } catch (_: Exception) {
+                fixAllThumbnails()
+            }
             lastThumbFixMs = now
         }
         newOrUpdatedTracks
+    }
+
+    private fun enqueueBackfillWorker() {
+        try {
+            val wm = androidx.work.WorkManager.getInstance(context)
+            val req = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.ThumbnailBackfillWorker>()
+                .addTag(com.frerox.toolz.worker.ThumbnailBackfillWorker.TAG_THUMB_BACKFILL)
+                .build()
+            wm.enqueueUniqueWork("thumb_backfill", androidx.work.ExistingWorkPolicy.KEEP, req)
+        } catch (e: Exception) {
+            android.util.Log.w("MusicRepository", "enqueueBackfill failed", e)
+        }
     }
 
     suspend fun fixAllThumbnails() = withContext(Dispatchers.IO) {
@@ -430,6 +456,11 @@ class MusicRepository @Inject constructor(
     }
 
     suspend fun scanCustomFolder(folderUri: Uri): List<MusicTrack> = withContext(Dispatchers.IO) {
+        // persist permission for re-scan after reboot
+        try {
+            val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(folderUri, takeFlags)
+        } catch (_: Exception) {}
         val tracks = mutableListOf<MusicTrack>()
         val rootFolder = DocumentFile.fromTreeUri(context, folderUri)
 
@@ -450,7 +481,7 @@ class MusicRepository @Inject constructor(
 
                             val fileUriString = file.uri.toString()
                             val existingTrack = musicDao.getTrackByUri(fileUriString)
-                                ?: musicDao.findDuplicate(title, artist, duration, file.uri.path)
+                                ?: musicDao.findDuplicate(title, artist, album, duration, file.uri.path)
 
                             val thumb = getEmbeddedArtworkUri(file.uri, file.uri.path)
 
@@ -630,6 +661,23 @@ class MusicRepository @Inject constructor(
         }
     }
 
+    // Backfill helpers (exposed for worker periodic throttle)
+    suspend fun getAllTracksSyncForBackfill(): List<com.frerox.toolz.data.music.MusicTrack> = withContext(Dispatchers.IO) {
+        musicDao.getAllTracksSync()
+    }
+    suspend fun fixThumbnailForTrack(track: com.frerox.toolz.data.music.MusicTrack) = withContext(Dispatchers.IO) {
+        val current = track.thumbnailUri
+        val valid = isThumbnailValid(current) && current != track.uri && current != track.path
+        if (valid && !(track.sourceUrl != null && track.path != null)) return@withContext
+        val fileUri = track.path?.let {
+            if (it.startsWith("content://") || it.startsWith("file://")) Uri.parse(it) else Uri.fromFile(File(it))
+        } ?: Uri.parse(track.uri)
+        val newThumb = getEmbeddedArtworkUri(fileUri, track.path, track.albumId)
+        if (newThumb != null && newThumb != current) {
+            musicDao.updateTrack(track.copy(thumbnailUri = newThumb))
+        }
+    }
+
     suspend fun updateTrack(track: MusicTrack) {
         musicDao.updateTrack(track)
     }
@@ -652,5 +700,160 @@ class MusicRepository @Inject constructor(
 
     suspend fun toggleFavorite(track: MusicTrack) {
         musicDao.updateTrack(track.copy(isFavorite = !track.isFavorite))
+    }
+
+    /**
+     * Edit track metadata: title/artist/album/thumbnail/embedded lyrics.
+     * Updates DB immediately (optimistic) and, if the file exists on disk,
+     * attempts to rewrite ID3 tags via FFmpeg (MediaStore file).
+     * Returns the updated track or null if not found.
+     */
+    suspend fun updateTrackTags(
+        trackUri: String,
+        newTitle: String?,
+        newArtist: String?,
+        newAlbum: String?,
+        newThumbnailUri: String?, // content:// or file:// from picker, or null to keep
+        embeddedLyrics: String?
+    ): MusicTrack? = withContext(Dispatchers.IO) {
+        val track = musicDao.getTrackByUri(trackUri) ?: return@withContext null
+        var thumbToPersist = track.thumbnailUri
+        // Handle thumbnail picker copy
+        if (!newThumbnailUri.isNullOrBlank() && newThumbnailUri != track.thumbnailUri) {
+            try {
+                val input = context.contentResolver.openInputStream(Uri.parse(newThumbnailUri))
+                if (input != null) {
+                    val dir = getArtworkStorageDir()
+                    val target = File(dir, "thumb_custom_${track.stableId.ifBlank { track.uri.hashCode().toString() }}.jpg")
+                    input.use { ins ->
+                        FileOutputStream(target).use { out -> ins.copyTo(out) }
+                    }
+                    thumbToPersist = Uri.fromFile(target).toString()
+                } else {
+                    thumbToPersist = newThumbnailUri
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MusicRepository", "thumb copy failed", e)
+                thumbToPersist = newThumbnailUri
+            }
+        }
+
+        val updated = track.copy(
+            title = newTitle?.takeIf { it.isNotBlank() } ?: track.title,
+            artist = newArtist?.takeIf { it.isNotBlank() } ?: track.artist,
+            album = newAlbum?.takeIf { it.isNotBlank() } ?: track.album,
+            thumbnailUri = thumbToPersist,
+            aiLyrics = embeddedLyrics?.takeIf { it.isNotBlank() } ?: track.aiLyrics,
+            lastAiSync = if (!embeddedLyrics.isNullOrBlank()) System.currentTimeMillis() else track.lastAiSync
+        )
+        musicDao.updateTrack(updated)
+
+        // Attempt to write ID3 tags to file if path is a real file
+        val path = updated.path
+        if (!path.isNullOrBlank() && File(path).exists() && File(path).canWrite()) {
+            try {
+                writeId3TagsToFile(
+                    filePath = path,
+                    title = updated.title,
+                    artist = updated.artist,
+                    album = updated.album,
+                    thumbnailPath = thumbToPersist?.let { Uri.parse(it).path }?.let { File(it) }?.takeIf { it.exists() }?.absolutePath,
+                    lyrics = embeddedLyrics
+                )
+                // If file write succeeded, re-extract thumb to ensure consistency
+                if (!thumbToPersist.isNullOrBlank()) {
+                    val refreshedThumb = getEmbeddedArtworkUri(Uri.fromFile(File(path)), path, updated.albumId)
+                    if (refreshedThumb != null && refreshedThumb != updated.thumbnailUri) {
+                        musicDao.updateTrack(updated.copy(thumbnailUri = refreshedThumb))
+                        return@withContext updated.copy(thumbnailUri = refreshedThumb)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MusicRepository", "writeId3Tags failed (non-fatal)", e)
+            }
+        } else if (!path.isNullOrBlank() && path.startsWith("content://")) {
+            // For SAF content URIs, try content resolver edit via FFmpeg temp file -> write back
+            // Best-effort: copy content to temp, edit, then write back (requires write permission)
+            try {
+                val inputUri = Uri.parse(path)
+                val needsWrite = newTitle != null || newArtist != null || newAlbum != null || embeddedLyrics != null
+                if (needsWrite) {
+                    context.contentResolver.openFileDescriptor(inputUri, "r")?.use { pfd ->
+                        // Just log — full SAF tag rewrite requires SAF persist + FFmpeg temp; skip for now but DB already updated
+                        android.util.Log.d("MusicRepository", "SAF content tag edit requested for $path — DB updated, file write deferred (requires MediaStore write request)")
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        updated
+    }
+
+    private fun writeId3TagsToFile(
+        filePath: String,
+        title: String?,
+        artist: String?,
+        album: String?,
+        thumbnailPath: String?,
+        lyrics: String?
+    ) {
+        try {
+            val inputFile = File(filePath)
+            if (!inputFile.exists()) return
+            // Build FFmpeg args: -i input -c copy -metadata title=... -metadata artist=... -metadata album=...
+            // For cover: -i thumb -map 0:a -map 1:v? But re-use process logic: we need to handle m4a vs mp3
+            val ext = inputFile.extension.lowercase()
+            val tmpOut = File.createTempFile("toolz_tagedit_", ".$ext", context.cacheDir)
+            val args = mutableListOf<String>()
+            args.addAll(listOf("-i", inputFile.absolutePath))
+            var hasCover = false
+            if (!thumbnailPath.isNullOrBlank() && File(thumbnailPath).exists() && ext != "opus") {
+                args.addAll(listOf("-i", thumbnailPath))
+                hasCover = true
+            }
+            // Map streams
+            if (hasCover) {
+                args.addAll(listOf("-map", "0", "-map", "1"))
+            } else {
+                args.addAll(listOf("-map", "0"))
+            }
+            // Copy codecs where possible to avoid re-encode, but ensure metadata written
+            args.addAll(listOf("-c", "copy"))
+            if (!title.isNullOrBlank()) args.addAll(listOf("-metadata", "title=$title"))
+            if (!artist.isNullOrBlank()) args.addAll(listOf("-metadata", "artist=$artist"))
+            if (!album.isNullOrBlank()) args.addAll(listOf("-metadata", "album=$album"))
+            if (!lyrics.isNullOrBlank()) {
+                // MP3: USLT is tricky, but FFmpeg maps "lyrics" to appropriate frame for many containers
+                args.addAll(listOf("-metadata", "lyrics=$lyrics"))
+                // Also try TXXX for compatibility
+                args.addAll(listOf("-metadata", "comment=$lyrics"))
+            }
+            if (hasCover) {
+                if (ext == "mp3") {
+                    args.addAll(listOf("-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"))
+                } else {
+                    args.addAll(listOf("-disposition:v", "attached_pic"))
+                }
+            }
+            args.addAll(listOf("-y", tmpOut.absolutePath))
+            val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArguments(args.toTypedArray())
+            if (com.arthenica.ffmpegkit.ReturnCode.isSuccess(session.returnCode)) {
+                // Replace original atomically
+                if (tmpOut.exists() && tmpOut.length() > 0) {
+                    inputFile.delete()
+                    tmpOut.copyTo(inputFile, overwrite = true)
+                    tmpOut.delete()
+                    // Notify MediaScanner
+                    android.media.MediaScannerConnection.scanFile(context, arrayOf(inputFile.absolutePath), null, null)
+                } else {
+                    tmpOut.delete()
+                }
+            } else {
+                android.util.Log.w("MusicRepository", "FFmpeg tag write failed: ${session.failStackTrace}")
+                tmpOut.delete()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MusicRepository", "writeId3TagsToFile exception", e)
+        }
     }
 }

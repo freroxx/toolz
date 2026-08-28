@@ -64,6 +64,10 @@ android {
         // SUPABASE_ANON_KEY=your-anon-key
         buildConfigField("String", "SUPABASE_URL", "\"${localProperties.getProperty("SUPABASE_URL", "")}\"") 
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${localProperties.getProperty("SUPABASE_ANON_KEY", "")}\"")
+        // InnerTube API key — public YouTube web key, but externalized to local.properties for open-source hygiene
+        // and easy rotation without code change. If blank, InnerTube is disabled and NewPipe extractor is used.
+        // See local.properties.example
+        buildConfigField("String", "INNER_TUBE_API_KEY", "\"${localProperties.getProperty("INNER_TUBE_API_KEY", "")}\"")
     }
 
     splits {
