@@ -1,10 +1,10 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- Background circle tinted per tool -->
-    <path android:fillColor="#FF6200EA" android:pathData="M12,2A10,10 0,1 0,22 12,A10 10,0 0,0 12,2z" />
-    <!-- White foreground generic tool glyph (wrench simplified) -->
-    <path android:fillColor="#FFFFFF" android:pathData="M13.5,6.5c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5c0,0.53 0.28,1.0 0.69,1.28L9,10 L7,8 L8,7 L10.21,9.21C10.5,8.8 11,8.5 11.5,8.5c0.83,0 1.5,0.67 1.5,1.5c0,0.5 -0.3,1 -0.71,1.28L14.5,13.5L16.5,11.5L14.29,9.29C14.7,9 15,8.5 15,7.92C15,7.1 14.33,6.5 13.5,6.5zM7.5,13A1.5,1.5 0,0 0,6 14.5A1.5,1.5 0,0 0,7.5 16A1.5,1.5 0,0 0,9 14.5A1.5,1.5 0,0 0,7.5 13z" android:fillAlpha="0.95"/>
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <path android:fillColor="#FF6200EA" android:pathData="M480,80A400,400 0,1 0,480,880A400,400 0,0 0,480,80Z" />
+    <group android:translateY="528" android:pivotX="480" android:pivotY="480" android:scaleX="0.55" android:scaleY="0.55">
+        <path android:fillColor="#FFFFFF" android:pathData="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-220 40q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120-160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm200 0q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120 160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z" />
+    </group>
 </vector>
