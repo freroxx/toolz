@@ -5,11 +5,16 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- PurgeShot: triple-redundant queue — DB + DataStore survive cloud restore; external file survives clear-data -->
+        <include domain="database" path="toolz_db" />
+        <include domain="sharedpref" path="." />
+        <include domain="file" path="datastore/" />
     </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="toolz_db" />
+        <include domain="sharedpref" path="." />
+        <include domain="file" path="datastore/" />
+    </device-transfer>
     <!--
     <device-transfer>
         <include .../>

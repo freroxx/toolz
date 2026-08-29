@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Static app shortcuts – max 4 (OS caps at 5). These appear on long-press of launcher icon. -->
+    <!-- 48 total tools are provided via pinned shortcuts (ToolShortcutManager), user can pin any tool to home screen from inside the app. -->
+    <shortcut
+        android:shortcutId="shortcut_ai_assistant"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_ai_assistant"
+        android:shortcutShortLabel="@string/st_Tool_AiAssistant"
+        android:shortcutLongLabel="@string/st_Tool_AiAssistant_Desc"
+        android:shortcutDisabledMessage="@string/st_Shortcut_Disabled">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.frerox.toolz"
+            android:targetClass="com.frerox.toolz.MainActivity">
+            <extra android:name="navigate_to" android:value="ai_assistant?chatId=-1&amp;isCoachMode=false" />
+            <extra android:name="from_shortcut" android:value="true" />
+            <extra android:name="shortcut_id" android:value="shortcut_ai_assistant" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_notepad"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_notepad"
+        android:shortcutShortLabel="@string/st_Tool_Notepad"
+        android:shortcutLongLabel="@string/st_Tool_Notepad_Desc"
+        android:shortcutDisabledMessage="@string/st_Shortcut_Disabled">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.frerox.toolz"
+            android:targetClass="com.frerox.toolz.MainActivity">
+            <extra android:name="navigate_to" android:value="notepad" />
+            <extra android:name="from_shortcut" android:value="true" />
+            <extra android:name="shortcut_id" android:value="shortcut_notepad" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_timer"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_timer"
+        android:shortcutShortLabel="@string/st_Tool_Timer"
+        android:shortcutLongLabel="@string/st_Tool_Timer_Desc"
+        android:shortcutDisabledMessage="@string/st_Shortcut_Disabled">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.frerox.toolz"
+            android:targetClass="com.frerox.toolz.MainActivity">
+            <extra android:name="navigate_to" android:value="timer" />
+            <extra android:name="from_shortcut" android:value="true" />
+            <extra android:name="shortcut_id" android:value="shortcut_timer" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="shortcut_pomodoro"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_pomodoro"
+        android:shortcutShortLabel="@string/st_Tool_Pomodoro"
+        android:shortcutLongLabel="@string/st_Tool_Pomodoro_Desc"
+        android:shortcutDisabledMessage="@string/st_Shortcut_Disabled">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.frerox.toolz"
+            android:targetClass="com.frerox.toolz.MainActivity">
+            <extra android:name="navigate_to" android:value="pomodoro" />
+            <extra android:name="from_shortcut" android:value="true" />
+            <extra android:name="shortcut_id" android:value="shortcut_pomodoro" />
+        </intent>
+    </shortcut>
+</shortcuts>

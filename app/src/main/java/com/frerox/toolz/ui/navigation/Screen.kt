@@ -131,6 +131,8 @@ sealed class Screen(val route: String) {
 
     // System
     object FileCleaner : Screen("file_cleaner")
+    object PurgeShot : Screen("purge_shot")
+    object ToolShortcuts : Screen("tool_shortcuts")
 
     // Whisper — Privacy Messaging
     object WhisperOnboarding : Screen("whisper_onboarding")

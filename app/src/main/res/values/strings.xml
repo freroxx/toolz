@@ -539,6 +539,8 @@
     <string name="st_Tool_FlipCoin_Desc">Decide</string>
     <string name="st_Tool_BackgroundRemover">Background Remover</string>
     <string name="st_Tool_BackgroundRemover_Desc">Remove BG with AI</string>
+    <string name="st_Tool_PurgeShot">PurgeShot</string>
+    <string name="st_Tool_PurgeShot_Desc">Auto-delete shots</string>
     <string name="st_BackgroundRemover_Pick">Pick Image</string>
     <string name="st_BackgroundRemover_Save">Save Image</string>
     <string name="st_BackgroundRemover_Clear">Clear</string>
@@ -3158,4 +3160,22 @@
     <!-- Bypass verification diagnostics -->
     <string name="st_Whisper_Bypass_RateLimited">Too many attempts — try again in ~15 minutes.</string>
     <string name="st_Whisper_Bypass_Unavailable">Verification service unavailable — check connection or server setup.</string>
+
+    <!-- Tool Shortcuts -->
+    <string name="st_Shortcut_Exit_Title">Exit Tool?</string>
+    <string name="st_Shortcut_Exit_Message">Are you sure you want to exit? You will return to the dashboard.</string>
+    <string name="st_Shortcut_Exit_Confirm">Exit</string>
+    <string name="st_Shortcut_Exit_Cancel">Stay</string>
+    <string name="st_Shortcut_Disabled">Shortcut unavailable</string>
+    <string name="st_Shortcut_NotSupported">Home screen pinning not supported on this launcher</string>
+    <string name="st_Shortcut_PinFailed">Could not pin shortcut</string>
+    <string name="st_Shortcut_Pinning">Pinning %s to home screen…</string>
+    <string name="st_Shortcut_AddToHome">Add to Home Screen</string>
+    <string name="st_Shortcut_AddToHome_Desc">Create a shortcut on your home screen for quick access</string>
+    <string name="st_Shortcut_Added">Shortcut added</string>
+    <string name="st_Shortcut_Manage_Title">Tool Shortcuts</string>
+    <string name="st_Shortcut_Manage_Desc">Pin any of 48 tools directly to your home screen</string>
+    <string name="st_Shortcut_Manage_Search">Search tools…</string>
+    <string name="st_Shortcut_Pin">Pin</string>
+    <string name="st_Shortcut_Pinned">Pinned</string>
 </resources>

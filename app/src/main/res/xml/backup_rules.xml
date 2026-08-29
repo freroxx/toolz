@@ -6,8 +6,11 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- PurgeShot durability: full backup includes DB + DataStore so queue survives update/restore -->
+    <include domain="database" path="toolz_db" />
+    <include domain="database" path="toolz_db-wal" />
+    <include domain="database" path="toolz_db-shm" />
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="datastore/settings.preferences_pb" />
+    <!-- External mirror Documents/Toolz/.purgeshot_queue.json survives clear-data independently (not in backup, persisted via MediaStore) -->
 </full-backup-content>
