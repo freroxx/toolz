@@ -349,6 +349,11 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".service.PurgeShotObserverJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

@@ -45,10 +45,20 @@ class PurgeShotViewModel @Inject constructor(
     val pendingQueue: StateFlow<List<PurgeShotEntity>> = repository.pendingFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allQueue: StateFlow<List<PurgeShotEntity>> = repository.allFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Custom presets parsed from DataStore JSON; fallback to defaults; always capped to 6
-    val activePresets: StateFlow<List<PurgeShotPreset>> = settingsRepository.purgeShotCustomPresets.map { json ->
-        parsePresetsJson(json) ?: PurgeShotPreset.defaults()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PurgeShotPreset.defaults())
+    // Custom presets — Auto sentinel resolved to live autoDuration (so Auto button always reflects setting)
+    val activePresets: StateFlow<List<PurgeShotPreset>> = combine(
+        settingsRepository.purgeShotCustomPresets,
+        autoDurationMs
+    ) { json, autoDur ->
+        val base = parsePresetsJson(json) ?: PurgeShotPreset.defaults()
+        base.take(6).map { p ->
+            if (p.label.equals("Auto", ignoreCase = true) || p.durationMillis == PurgeShotPreset.AUTO_SENTINEL) {
+                p.copy(durationMillis = autoDur, iconName = "auto_awesome")
+            } else p
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PurgeShotPreset.defaults().map {
+        if (it.label == "Auto") it.copy(durationMillis = 15 * 60_000L) else it
+    })
 
     val allOptions: List<PurgeShotPreset> = PurgeShotPreset.allOptions()
 

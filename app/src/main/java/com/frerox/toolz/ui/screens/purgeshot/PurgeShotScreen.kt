@@ -261,13 +261,13 @@ fun PurgeShotScreen(
                                 }
                                 LazyVerticalGrid(
                                     columns = GridCells.Fixed(3),
-                                    modifier = Modifier.heightIn(max = 200.dp),
+                                    modifier = Modifier.heightIn(max = 220.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     userScrollEnabled = false
                                 ) {
                                     itemsIndexed(presets) { _, p ->
-                                        TimerChip(preset = p, isAuto = p.durationMillis == autoDuration)
+                                        TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
                                     }
                                 }
                             }
@@ -603,5 +603,6 @@ private fun iconFor(name: String): ImageVector = when (name.lowercase()) {
     "calendar_today" -> Icons.Rounded.CalendarToday
     "event_repeat" -> Icons.Rounded.EventRepeat
     "calendar_month" -> Icons.Rounded.CalendarMonth
+    "auto_awesome" -> Icons.Rounded.AutoAwesome
     else -> Icons.Rounded.Timer
 }

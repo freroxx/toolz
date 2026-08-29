@@ -68,16 +68,17 @@ data class PurgeShotPreset(
     val iconName: String = "timer" // maps to Icons.Rounded.* in UI
 ) {
     companion object {
+        const val AUTO_SENTINEL = -1L // means "use autoDuration from settings"
         fun defaults(): List<PurgeShotPreset> = listOf(
             PurgeShotPreset("1 min", 60_000L, "timer"),
             PurgeShotPreset("15 min", 15 * 60_000L, "schedule"),
             PurgeShotPreset("30 min", 30 * 60_000L, "hourglass_top"),
             PurgeShotPreset("1 hour", 60 * 60_000L, "hourglass_empty"),
             PurgeShotPreset("1 day", 24 * 60 * 60_000L, "today"),
-            PurgeShotPreset("1 week", 7 * 24 * 60 * 60_000L, "date_range")
+            PurgeShotPreset("Auto", AUTO_SENTINEL, "auto_awesome")
         )
 
-        // Extra presets available in picker (not shown by default)
+        // Extra presets available in picker (not shown by default) — includes Auto sentinel
         fun allOptions(): List<PurgeShotPreset> = listOf(
             PurgeShotPreset("30 sec", 30_000L, "timer"),
             PurgeShotPreset("1 min", 60_000L, "timer"),
@@ -91,7 +92,8 @@ data class PurgeShotPreset(
             PurgeShotPreset("3 days", 3 * 24 * 60 * 60_000L, "calendar_today"),
             PurgeShotPreset("1 week", 7 * 24 * 60 * 60_000L, "date_range"),
             PurgeShotPreset("2 weeks", 14 * 24 * 60 * 60_000L, "event_repeat"),
-            PurgeShotPreset("1 month", 30L * 24 * 60 * 60_000L, "calendar_month")
+            PurgeShotPreset("1 month", 30L * 24 * 60 * 60_000L, "calendar_month"),
+            PurgeShotPreset("Auto", AUTO_SENTINEL, "auto_awesome")
         )
     }
 }

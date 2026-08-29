@@ -354,7 +354,7 @@ fun PurgeShotPopup(
                                 userScrollEnabled = false
                             ) {
                                 itemsIndexed(visiblePresets) { idx, preset ->
-                                    val isAuto = preset.durationMillis == autoDurationMillis
+                                    val isAuto = preset.label.equals("Auto", ignoreCase = true)
                                     PurgePresetChip(
                                         preset = preset,
                                         isAuto = isAuto,
@@ -550,6 +550,7 @@ private fun iconFor(name: String): ImageVector = when (name.lowercase()) {
     "calendar_today" -> Icons.Rounded.CalendarToday
     "event_repeat" -> Icons.Rounded.EventRepeat
     "calendar_month" -> Icons.Rounded.CalendarMonth
+    "auto_awesome" -> Icons.Rounded.AutoAwesome
     else -> Icons.Rounded.Timer
 }
 

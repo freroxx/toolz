@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import java.util.concurrent.TimeUnit
 import com.frerox.toolz.util.network.AdBlockManager
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @HiltAndroidApp
 class ToolzApplication : Application(), Configuration.Provider {
@@ -54,6 +56,14 @@ class ToolzApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var musicRepository: com.frerox.toolz.data.music.MusicRepository
+
+    @Inject
+    lateinit var settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
+
+    @Inject
+    lateinit var purgeShotRepository: com.frerox.toolz.data.purgeshot.PurgeShotRepository
+
+    private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -81,7 +91,46 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
-        // PurgeShot restore is done via Hilt-injected repository in MainActivity & Service, but also kick here via WorkManager fallback is enough
+        // PurgeShot: ensure it works outside Toolz — start observer service + JobScheduler trigger
+        appScope.launch {
+            try {
+                purgeShotRepository.ensureRestoredAndRescheduled()
+                val enabled = settingsRepository.purgeShotEnabled.first()
+                if (enabled) {
+                    val svc = android.content.Intent(this@ToolzApplication, com.frerox.toolz.service.PurgeShotService::class.java).apply {
+                        action = com.frerox.toolz.service.PurgeShotService.ACTION_START
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+                    com.frerox.toolz.service.PurgeShotObserverJobService.schedule(this@ToolzApplication)
+                } else {
+                    com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("ToolzApplication", "PurgeShot init failed", e)
+            }
+        }
+        // Keep PurgeShot observer alive: react to enabled toggle (also handled in MainActivity, but app-level is authoritative outside)
+        appScope.launch {
+            settingsRepository.purgeShotEnabled.collect { enabled ->
+                if (enabled) {
+                    val svc = android.content.Intent(this@ToolzApplication, com.frerox.toolz.service.PurgeShotService::class.java).apply {
+                        action = com.frerox.toolz.service.PurgeShotService.ACTION_START
+                    }
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+                    } catch (_: Exception) {}
+                    com.frerox.toolz.service.PurgeShotObserverJobService.schedule(this@ToolzApplication)
+                } else {
+                    try {
+                        val svc = android.content.Intent(this@ToolzApplication, com.frerox.toolz.service.PurgeShotService::class.java).apply {
+                            action = com.frerox.toolz.service.PurgeShotService.ACTION_STOP
+                        }
+                        startService(svc)
+                    } catch (_: Exception) {}
+                    com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
+                }
+            }
+        }
     }
 
     private fun scheduleWhisperLocalCleanup() {

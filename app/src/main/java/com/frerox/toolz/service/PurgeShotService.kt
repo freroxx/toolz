@@ -116,10 +116,43 @@ class PurgeShotService : Service() {
         observer = null
     }
 
+    private fun hasMediaPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun postMediaPermissionNotification() {
+        try {
+            val intent = Intent(this, com.frerox.toolz.MainActivity::class.java).apply {
+                putExtra("navigate_to", "purgeshot")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val pi = android.app.PendingIntent.getActivity(this, 4101, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val notif = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("PurgeShot needs photo access")
+                .setContentText("Tap to grant access so screenshots can be detected outside Toolz")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+            val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            mgr?.notify(4101, notif)
+        } catch (_: Exception) {}
+    }
+
     private suspend fun handlePossibleScreenshot(triggerUri: Uri?) {
         try {
             if (!settingsRepository.purgeShotEnabled.first()) {
                 Log.d(TAG, "PurgeShot disabled, ignoring")
+                return
+            }
+            if (!hasMediaPermission()) {
+                Log.w(TAG, "Missing media permission — cannot query screenshots outside Toolz")
+                postMediaPermissionNotification()
                 return
             }
             val candidate = queryLatestScreenshot() ?: run {
@@ -137,25 +170,31 @@ class PurgeShotService : Service() {
                 Log.d(TAG, "Stored last uri duplicate: $uriStr")
                 return
             }
-            // Age filter: only screenshots taken within last 10 seconds are considered fresh
+            // Age filter: allow 15s window (JobScheduler batch ~1.3s + MediaStore settle)
             val age = System.currentTimeMillis() - candidate.dateAddedMs
-            if (age > 10_000) {
-                Log.d(TAG, "Candidate too old age=$age ms uri=$uriStr")
+            if (age > 15_000 || age < -2000) {
+                Log.d(TAG, "Candidate too old/new age=$age ms uri=$uriStr")
                 return
             }
-            // Ensure it's actually a screenshot (path contains /screenshots/ or display name contains screenshot)
-            val isScreenshot = candidate.displayName.contains("screenshot", ignoreCase = true) ||
-                (candidate.relativePath?.contains("screenshot", ignoreCase = true) == true) ||
-                (candidate.filePath?.contains("screenshot", ignoreCase = true) == true) ||
-                candidate.displayName.contains("screen", ignoreCase = true)
-            // Some OEMs use "Screenshot" prefix; if not, still consider if very recent image in Screenshots folder
+            // Robust screenshot detection — works outside Toolz on all OEMs
+            val rel = candidate.relativePath ?: ""
+            val buck = candidate.bucketName ?: ""
+            val path = candidate.filePath ?: ""
+            val name = candidate.displayName
+            val isScreenshot = name.contains("screenshot", ignoreCase = true) ||
+                rel.contains("screenshot", ignoreCase = true) ||
+                buck.contains("screenshot", ignoreCase = true) ||
+                path.contains("screenshot", ignoreCase = true) ||
+                name.contains("screen", ignoreCase = true) && (rel.contains("screenshots", ignoreCase = true) || buck.contains("screenshots", ignoreCase = true)) ||
+                buck.equals("Screenshots", ignoreCase = true) ||
+                rel.equals("DCIM/Screenshots", ignoreCase = true) ||
+                rel.equals("Pictures/Screenshots", ignoreCase = true)
             if (!isScreenshot) {
-                // Check if file is in DCIM/Screenshots or Pictures/Screenshots
-                val path = candidate.relativePath ?: candidate.filePath ?: ""
-                val inScreenshotDir = path.contains("Screenshots", ignoreCase = true) ||
-                    path.contains("ScreenShots", ignoreCase = true)
+                val combined = "$rel/$buck/$path/$name"
+                val inScreenshotDir = combined.contains("Screenshots", ignoreCase = true) ||
+                    combined.contains("Screenshot", ignoreCase = true)
                 if (!inScreenshotDir) {
-                    Log.d(TAG, "Not a screenshot (name=${candidate.displayName} path=$path), skipping")
+                    Log.d(TAG, "Not a screenshot (name=$name rel=$rel buck=$buck path=$path) — skipping but still logging for outside-Toolz debugging")
                     return
                 }
             }
@@ -215,20 +254,25 @@ class PurgeShotService : Service() {
         val displayName: String,
         val dateAddedMs: Long,
         val relativePath: String?,
-        val filePath: String?
+        val filePath: String?,
+        val bucketName: String? = null
     )
 
     private fun queryLatestScreenshot(): ScreenshotCandidate? {
         val resolver: ContentResolver = contentResolver
+        // Robust projection — DATE_TAKEN is most accurate for camera/screenshot time, BUCKET for OEM folder name
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.DATE_MODIFIED,
+            MediaStore.Images.Media.DATE_TAKEN,
             MediaStore.Images.Media.RELATIVE_PATH,
-            MediaStore.Images.Media.DATA // deprecated but useful for path
+            MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            MediaStore.Images.Media.DATA // deprecated but useful fallback
         )
-        val sort = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+        // Order by DATE_TAKEN first (screenshot time) then DATE_ADDED
+        val sort = "${MediaStore.Images.Media.DATE_TAKEN} DESC, ${MediaStore.Images.Media.DATE_ADDED} DESC"
         return try {
             resolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -241,19 +285,27 @@ class PurgeShotService : Service() {
                     val nameIdx = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
                     val addedIdx = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
                     val modIdx = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_MODIFIED)
+                    val takenIdx = c.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
                     val relIdx = c.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
+                    val bucketIdx = c.getColumnIndex(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)
                     val dataIdx = c.getColumnIndex(MediaStore.Images.Media.DATA)
                     val id = c.getLong(idIdx)
                     val name = c.getString(nameIdx) ?: "screenshot.jpg"
                     val addedSec = c.getLong(addedIdx)
                     val modSec = c.getLong(modIdx)
-                    // Prefer DATE_ADDED, fallback to DATE_MODIFIED
-                    val epochSec = if (addedSec > 0) addedSec else modSec
-                    val dateAddedMs = epochSec * 1000
+                    val takenMs = if (takenIdx != -1) c.getLong(takenIdx) else 0L
+                    // Best timestamp: DATE_TAKEN if valid, else DATE_ADDED, else DATE_MODIFIED
+                    val dateAddedMs = when {
+                        takenMs > 0 -> takenMs
+                        addedSec > 0 -> addedSec * 1000
+                        modSec > 0 -> modSec * 1000
+                        else -> System.currentTimeMillis()
+                    }
                     val rel = if (relIdx != -1) c.getString(relIdx) else null
+                    val buck = if (bucketIdx != -1) c.getString(bucketIdx) else null
                     val path = if (dataIdx != -1) c.getString(dataIdx) else null
                     val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                    ScreenshotCandidate(uri, name, dateAddedMs, rel, path)
+                    ScreenshotCandidate(uri, name, dateAddedMs, rel, path, buck)
                 } else null
             }
         } catch (e: Exception) {
@@ -322,6 +374,22 @@ class PurgeShotService : Service() {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            "com.frerox.toolz.PURGESHOT_HANDLE_FALLBACK" -> {
+                // JobScheduler fallback — handle screenshot even if observer missed
+                scope.launch {
+                    delay(500)
+                    handlePossibleScreenshot(null)
+                }
+                // Also ensure foreground for next triggers
+                val notif = buildForegroundNotification()
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(NOTIF_ID, notif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                    } else startForeground(NOTIF_ID, notif)
+                } catch (_: Exception) {}
+                scope.launch { runCatching { repository.ensureRestoredAndRescheduled() } }
+                return START_STICKY
             }
         }
         // Start foreground with low-priority notification (required for background observer on Android 14+)
