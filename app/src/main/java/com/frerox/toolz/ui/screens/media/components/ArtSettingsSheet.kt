@@ -65,23 +65,11 @@ fun ArtSettingsSheet(
                 SegmentedButton(
                     selected = artShape == "SQUARE",
                     onClick = { onSetArtShape("SQUARE") },
-                    shape = RoundedCornerShape(0.dp),
+                    shape = RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp),
                     icon = { Icon(Icons.Rounded.CropSquare, null, modifier = Modifier.size(18.dp)) },
                     label = { Text("Square") }
                 )
-                SegmentedButton(
-                    selected = artShape == "SQUIRCLE" || artShape == "SQUARE_ROUNDED",
-                    onClick = { onSetArtShape("SQUIRCLE") },
-                    shape = RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp),
-                    icon = { Icon(Icons.Rounded.RoundedCorner, null, modifier = Modifier.size(18.dp)) },
-                    label = { Text("Squircle") }
-                )
             }
-            Text(
-                "Squircle is a superellipse — smoother than square, softer than circle.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 

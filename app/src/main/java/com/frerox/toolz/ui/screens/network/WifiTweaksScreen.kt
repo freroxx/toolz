@@ -540,17 +540,59 @@ internal fun OverviewTab(
         if (showQuickFixInfo) {
             AlertDialog(
                 onDismissRequest = { showQuickFixInfo = false },
-                title = { Text("Quick Fixes", fontWeight = FontWeight.Bold) },
+                icon = {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.AutoFixHigh,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                },
+                title = { Text("Quick Fixes", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
                 text = {
-                    Text(
-                        "Quick Fixes diagnoses common network issues — poor signal, congested channel, packet loss or high jitter — and applies safe, reversible optimizations. Tap \"Run fixes\" to apply recommendations, or \"Reset all\" to undo changes.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            "Quick Fixes checks your Wi-Fi connection and applies only the fixes that are relevant right now:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        QuickFixInfoBullet(
+                            "Scan throttling on",
+                            "disables it so discovery and roaming feel snappier."
+                        )
+                        QuickFixInfoBullet(
+                            "Weak signal",
+                            "lets Android leave bad Wi-Fi sooner and recover stalled connections faster."
+                        )
+                        QuickFixInfoBullet(
+                            "Private DNS on automatic",
+                            "switches to encrypted Quad9 DNS for stronger privacy."
+                        )
+                        Text(
+                            "Every change is journaled and reversible. Tap \"Run fixes\" to apply them, or \"Reset all\" to undo.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showQuickFixInfo = false }) { Text("Got it") }
+                    Button(
+                        onClick = { showQuickFixInfo = false },
+                        shape = RoundedCornerShape(50)
+                    ) { Text("Got it") }
                 },
-                shape = RoundedCornerShape(28.dp)
+                shape = RoundedCornerShape(28.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         }
     }
@@ -2461,5 +2503,42 @@ private fun DetailRowNet(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun QuickFixInfoBullet(title: String, description: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

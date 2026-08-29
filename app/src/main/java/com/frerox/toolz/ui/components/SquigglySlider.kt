@@ -87,7 +87,12 @@ fun SquigglySlider(
     // Compatibility check: In performance mode, we skip animations
     val performanceMode = LocalPerformanceMode.current
     val infiniteTransition = rememberInfiniteTransition(label = "wave_motion")
-    val phase by if (isPlaying && !performanceMode) {
+
+    // The phase keeps advancing regardless of play state — the wave motion is
+    // visual continuity, not reset — while amplitude eases the squiggle in/out.
+    // This gives a smooth, slow start (flat → gently rippling) and a smooth,
+    // slow stop (rippling → flat) rather than an abrupt jump-cut.
+    val phase by if (!performanceMode) {
         infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2 * PI).toFloat(),
@@ -101,15 +106,20 @@ fun SquigglySlider(
         remember { mutableFloatStateOf(0f) }
     }
 
+    // Slow, eased amplitude so play/pause transitions feel deliberate and fluid.
     val currentAmplitude by animateFloatAsState(
-        targetValue = if (isPlaying && !isDragged && !performanceMode) 6f else if (isDragged) 8f else 0f,
-        animationSpec = if (isPlaying && !performanceMode) spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow) else snap(),
+        targetValue = when {
+            isDragged -> 8f
+            isPlaying && !performanceMode -> 6f
+            else -> 0f
+        },
+        animationSpec = tween(durationMillis = if (isPlaying) 800 else 650, easing = FastOutSlowInEasing),
         label = "amplitude_state"
     )
 
     val thumbScale by animateFloatAsState(
         targetValue = if (isDragged) 1.2f else 1f,
-        animationSpec = if (isPlaying && !performanceMode) spring(Spring.DampingRatioMediumBouncy) else snap(),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         label = "thumb_scale"
     )
 

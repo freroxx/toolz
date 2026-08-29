@@ -2991,6 +2991,69 @@ fun ToolDetailSheet(
 
             Spacer(Modifier.height(14.dp))
 
+            // Add to Home Screen (Pinned Shortcut) – 48 tools
+            val context = LocalContext.current
+            val shortcutDef = remember(tool.route) {
+                com.frerox.toolz.shortcuts.ToolShortcutDefinitions.findByRoute(tool.route)
+            }
+            Surface(
+                onClick = {
+                    vibrationManager?.vibrateTick()
+                    shortcutDef?.let { def ->
+                        com.frerox.toolz.shortcuts.ToolShortcutManager.requestPinShortcut(context, def)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+                shape = SquircleShape,
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(38.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Rounded.AddToHomeScreen, null,
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                stringResource(R.string.st_Shortcut_AddToHome),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                            Text(
+                                stringResource(R.string.st_Shortcut_AddToHome_Desc),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.62f),
+                            )
+                        }
+                    }
+                    Icon(
+                        Icons.Rounded.OpenInNew, null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
             // Open button
             ToolzExpressiveButton(
                 onClick  = { vibrationManager?.vibrateClick(); onNavigate(tool.route) },

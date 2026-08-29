@@ -23,9 +23,9 @@ import com.squareup.moshi.JsonClass
 data class UpdateManifest(
     val versionCode: Int,
     val versionName: String,
-    val changelog: String?,
+    val changelog: String? = null,
     val isCritical: Boolean? = false,
-    val releases: List<UpdateRelease>?
+    val releases: List<UpdateRelease>? = null
 )
 
 @JsonClass(generateAdapter = true)

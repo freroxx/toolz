@@ -165,23 +165,45 @@ class PurgeShotService : Service() {
             val smartAuto = settingsRepository.purgeShotSmartAuto.first()
             val autoDuration = settingsRepository.purgeShotAutoDuration.first()
 
+            // Compute size label for popup metadata (optional, not blocking)
+            val sizeLabel = runCatching {
+                contentResolver.query(candidate.uri, arrayOf(MediaStore.MediaColumns.SIZE, MediaStore.Images.Media.WIDTH, MediaStore.Images.Media.HEIGHT), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val szIdx = c.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                        val wIdx = c.getColumnIndex(MediaStore.Images.Media.WIDTH)
+                        val hIdx = c.getColumnIndex(MediaStore.Images.Media.HEIGHT)
+                        val bytes = if (szIdx != -1) c.getLong(szIdx) else 0L
+                        val w = if (wIdx != -1) c.getInt(wIdx) else 0
+                        val h = if (hIdx != -1) c.getInt(hIdx) else 0
+                        buildString {
+                            if (bytes > 0) append(formatBytes(bytes))
+                            if (w > 0 && h > 0) {
+                                if (isNotEmpty()) append(" • ")
+                                append("${w}×${h}")
+                            }
+                        }.takeIf { it.isNotBlank() }
+                    } else null
+                }
+            }.getOrNull()
+
             if (smartAuto) {
                 // Auto-bypass: directly queue without popup
                 val presetLabel = formatDurationLabel(autoDuration)
                 repository.enqueue(candidate.uri, candidate.displayName, autoDuration, presetLabel, candidate.filePath)
                 Log.i(TAG, "SmartAuto queued $uriStr for $presetLabel")
-                // Show silent notification as feedback (optional)
-                showAutoQueuedNotification(candidate.displayName, presetLabel)
+                // Show silent notification as feedback (with undo)
+                showAutoQueuedNotification(candidate.displayName, presetLabel, candidate.uri, sizeLabel)
             } else {
-                // Trigger expressive popup (Activity overlay)
+                // Trigger expressive popup (Activity overlay) — blur respects performanceMode inside popup
                 val intent = Intent(this@PurgeShotService, PurgeShotPopupActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     putExtra("uri", uriStr)
                     putExtra("displayName", candidate.displayName)
                     putExtra("path", candidate.filePath)
+                    putExtra("sizeLabel", sizeLabel)
                 }
                 startActivity(intent)
-                Log.i(TAG, "Launched PurgeShot popup for $uriStr")
+                Log.i(TAG, "Launched PurgeShot popup for $uriStr size=$sizeLabel")
             }
         } catch (e: Exception) {
             Log.w(TAG, "handlePossibleScreenshot failed", e)
@@ -260,18 +282,38 @@ class PurgeShotService : Service() {
         }
     }
 
-    private fun showAutoQueuedNotification(displayName: String, label: String) {
+    private fun showAutoQueuedNotification(displayName: String, label: String, uri: Uri? = null, sizeLabel: String? = null) {
         try {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+            // Undo action — opens PurgeShot screen
+            val undoIntent = Intent(this, com.frerox.toolz.MainActivity::class.java).apply {
+                putExtra("navigate_to", "purgeshot")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val undoPi = android.app.PendingIntent.getActivity(this, (System.currentTimeMillis() % 10000).toInt(), undoIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             val notif = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("PurgeShot: auto-queued")
-                .setContentText("$displayName → deletes in $label")
+                .setContentText("$displayName → deletes in $label${sizeLabel?.let { " • $it" } ?: ""}")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$displayName will be permanently deleted in $label${sizeLabel?.let { " ($it)" } ?: ""}. Tap Undo to keep it."))
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .addAction(R.drawable.ic_launcher_foreground, "Undo", undoPi)
+                .addAction(R.drawable.ic_launcher_foreground, "Open queue", undoPi)
                 .build()
             mgr.notify((System.currentTimeMillis() % 10000).toInt() + 5000, notif)
         } catch (_: Exception) {}
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        return when {
+            mb >= 1 -> "${(mb * 10).toInt() / 10.0} MB"
+            kb >= 1 -> "${kb.toInt()} KB"
+            else -> "$bytes B"
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

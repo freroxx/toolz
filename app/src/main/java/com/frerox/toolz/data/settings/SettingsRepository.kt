@@ -45,6 +45,13 @@ class SettingsRepository @Inject constructor(
     private val CAFFEINATE_AUTO_ALL_APPS = booleanPreferencesKey("caffeinate_auto_all_apps")
     private val CAFFEINATE_AUTO_SUMMARY_NOTIFICATION = booleanPreferencesKey("caffeinate_auto_summary_notification")
     private val ACCESSIBILITY_BRIDGE_WAS_ACTIVE = booleanPreferencesKey("accessibility_bridge_was_active")
+
+    // PurgeShot — screenshot auto-deletion
+    private val PURGESHOT_ENABLED = booleanPreferencesKey("purgeshot_enabled")
+    private val PURGESHOT_SMART_AUTO = booleanPreferencesKey("purgeshot_smart_auto")
+    private val PURGESHOT_AUTO_DURATION = longPreferencesKey("purgeshot_auto_duration")
+    private val PURGESHOT_CUSTOM_PRESETS = stringPreferencesKey("purgeshot_custom_presets")
+    private val PURGESHOT_LAST_SCREENSHOT_URI = stringPreferencesKey("purgeshot_last_screenshot_uri")
     
     // Timer & Stopwatch Settings
     private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
@@ -361,6 +368,23 @@ class SettingsRepository @Inject constructor(
     val caffeinateAutoAllApps: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTO_ALL_APPS] ?: false }
     val caffeinateAutoSummaryNotification: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTO_SUMMARY_NOTIFICATION] ?: true }
     val accessibilityBridgeWasActive: Flow<Boolean> = dataStore.data.map { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] ?: false }
+
+    // PurgeShot flows
+    val purgeShotEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_ENABLED] ?: true }
+    val purgeShotSmartAuto: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_SMART_AUTO] ?: false }
+    val purgeShotAutoDuration: Flow<Long> = dataStore.data.map { it[PURGESHOT_AUTO_DURATION] ?: 15 * 60_000L } // default 15 min
+    val purgeShotCustomPresets: Flow<String?> = dataStore.data.map { it[PURGESHOT_CUSTOM_PRESETS] }
+    val purgeShotLastScreenshotUri: Flow<String?> = dataStore.data.map { it[PURGESHOT_LAST_SCREENSHOT_URI] }
+
+    suspend fun setPurgeShotEnabled(enabled: Boolean) { dataStore.edit { it[PURGESHOT_ENABLED] = enabled } }
+    suspend fun setPurgeShotSmartAuto(enabled: Boolean) { dataStore.edit { it[PURGESHOT_SMART_AUTO] = enabled } }
+    suspend fun setPurgeShotAutoDuration(duration: Long) { dataStore.edit { it[PURGESHOT_AUTO_DURATION] = duration } }
+    suspend fun setPurgeShotCustomPresets(json: String?) {
+        dataStore.edit { if (json == null) it.remove(PURGESHOT_CUSTOM_PRESETS) else it[PURGESHOT_CUSTOM_PRESETS] = json }
+    }
+    suspend fun setPurgeShotLastScreenshotUri(uri: String?) {
+        dataStore.edit { if (uri == null) it.remove(PURGESHOT_LAST_SCREENSHOT_URI) else it[PURGESHOT_LAST_SCREENSHOT_URI] = uri }
+    }
 
     suspend fun setLiveVpnNotifications(enabled: Boolean) {
         dataStore.edit { it[LIVE_VPN_NOTIFICATIONS] = enabled }

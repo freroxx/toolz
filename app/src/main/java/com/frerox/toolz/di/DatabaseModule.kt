@@ -170,6 +170,22 @@ object DatabaseModule {
         }
     }
 
+    // PurgeShot 54->55: durable screenshot auto-deletion queue
+    private val MIGRATION_54_55 = object : Migration(54, 55) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `purge_shot_queue` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`fileUriString` TEXT NOT NULL, `displayName` TEXT NOT NULL, `filePath` TEXT, " +
+                    "`createdAtMs` INTEGER NOT NULL, `scheduledDeleteAtMs` INTEGER NOT NULL, " +
+                    "`durationMillis` INTEGER NOT NULL, `durationLabel` TEXT NOT NULL, " +
+                    "`status` TEXT NOT NULL, `sourcePackage` TEXT, `attempts` INTEGER NOT NULL, `lastError` TEXT)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_purge_shot_queue_scheduledDeleteAtMs` ON `purge_shot_queue` (`scheduledDeleteAtMs`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_purge_shot_queue_status` ON `purge_shot_queue` (`status`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_purge_shot_queue_fileUriString` ON `purge_shot_queue` (`fileUriString`)")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -235,7 +251,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -287,7 +303,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54)
+                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -410,5 +426,10 @@ object DatabaseModule {
     @Provides
     fun provideScanSnapshotDao(database: AppDatabase): com.frerox.toolz.data.network.ScanSnapshotDao {
         return database.scanSnapshotDao()
+    }
+
+    @Provides
+    fun providePurgeShotDao(database: AppDatabase): com.frerox.toolz.data.purgeshot.PurgeShotDao {
+        return database.purgeShotDao()
     }
 }

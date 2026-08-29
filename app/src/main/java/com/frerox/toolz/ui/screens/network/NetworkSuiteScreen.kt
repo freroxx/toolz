@@ -182,24 +182,32 @@ fun NetworkSuiteScreen(
     }
 
     val permissions = remember {
-        buildList {
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Manifest declares NEARBY_WIFI_DEVICES with neverForLocation — location not required on T+ (Android 13+).
+            listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            listOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
         }
     }
     val permissionState = rememberMultiplePermissionsState(permissions)
-    val fineOrCoarse = permissionState.permissions.any {
-        (it.permission == Manifest.permission.ACCESS_FINE_LOCATION || it.permission == Manifest.permission.ACCESS_COARSE_LOCATION) && it.status.isGranted
+    val hasWifiPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        permissionState.permissions.any {
+            it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted
+        }
+    } else {
+        permissionState.permissions.any {
+            (it.permission == Manifest.permission.ACCESS_FINE_LOCATION ||
+                it.permission == Manifest.permission.ACCESS_COARSE_LOCATION) && it.status.isGranted
+        }
     }
-    val nearbyGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        permissionState.permissions.any { it.permission == Manifest.permission.NEARBY_WIFI_DEVICES && it.status.isGranted }
-    } else true
-    val hasWifiPermission = fineOrCoarse && nearbyGranted
 
     // ── Permission onboarding (floating) ──────────────────────────────────────
     var showPermissionOnboarding by remember { mutableStateOf(false) }
-    var permissionOnboardingHandled by remember { mutableStateOf(false) }
+    var permissionOnboardingHandled by rememberSaveable { mutableStateOf(false) }
+    var hasRequestedPermission by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(hasWifiPermission, permissionOnboardingHandled) {
         if (!hasWifiPermission && !permissionOnboardingHandled) {
@@ -524,7 +532,25 @@ fun NetworkSuiteScreen(
         PermissionOnboardingDialog(
             onGrant = {
                 vibrationManager?.vibrateClick()
-                permissionState.launchMultiplePermissionRequest()
+                val permanentlyDenied = hasRequestedPermission &&
+                    !permissionState.shouldShowRationale &&
+                    permissionState.revokedPermissions.isNotEmpty()
+                if (permanentlyDenied) {
+                    // Motorola / OEMs that auto-deny or user hit "Don't ask again" -> system request is a no-op. Send to Settings.
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    } catch (_: Exception) {
+                        permissionState.launchMultiplePermissionRequest()
+                    }
+                } else {
+                    hasRequestedPermission = true
+                    permissionState.launchMultiplePermissionRequest()
+                }
             },
             onDismiss = {
                 vibrationManager?.vibrateClick()

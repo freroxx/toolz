@@ -1297,23 +1297,22 @@ class WifiTweaksViewModel @Inject constructor(
     }
 
     private fun hasWifiPermissions(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val nearby = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.NEARBY_WIFI_DEVICES
             ) == PackageManager.PERMISSION_GRANTED
         } else {
-            true
+            val fine = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val coarse = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            fine || coarse
         }
-        return (fine || coarse) && nearby
     }
 
     private fun isLocationEnabled(): Boolean {

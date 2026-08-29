@@ -34,6 +34,7 @@ class PurgeShotPopupActivity : ComponentActivity() {
         val uriStr = intent.getStringExtra("uri")
         val displayName = intent.getStringExtra("displayName") ?: "Screenshot"
         val path = intent.getStringExtra("path")
+        val sizeLabel = intent.getStringExtra("sizeLabel") // optional blur-aware metadata
         val uri = uriStr?.let { runCatching { Uri.parse(it) }.getOrNull() }
 
         setContent {
@@ -47,12 +48,20 @@ class PurgeShotPopupActivity : ComponentActivity() {
                     displayName = displayName,
                     presets = presets,
                     autoDurationMillis = autoDuration,
+                    fileSizeLabel = sizeLabel,
                     onSelectDuration = { preset ->
                         viewModel.enqueueForPopup(uriStr, displayName, path, preset.durationMillis, preset.label)
                         finish()
                     },
                     onDismiss = { finish() },
-                    onKeepForever = { finish() }
+                    onKeepForever = { finish() },
+                    onOpenSettings = {
+                        startActivity(android.content.Intent(this@PurgeShotPopupActivity, com.frerox.toolz.MainActivity::class.java).apply {
+                            putExtra("navigate_to", "purgeshot")
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        })
+                        finish()
+                    }
                 )
             }
         }

@@ -55,6 +55,39 @@ class PurgeShotViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
+    // Polished stats — computed from queues (10x: storage saved, next purge, deleted count)
+    val totalDeleted: StateFlow<Int> = allQueue.map { list -> list.count { it.status == PurgeShotEntity.STATUS_DELETED } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val nextPurgeEntity: StateFlow<PurgeShotEntity?> = pendingQueue.map { it.minByOrNull { e -> e.scheduledDeleteAtMs } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // Approximate storage (avg 2.8 MB per screenshot) + live size query for accuracy when possible
+    val estimatedPendingBytes: StateFlow<Long> = pendingQueue.map { list ->
+        // Try to query real sizes in IO, fallback to estimate
+        var sum = 0L
+        for (e in list) {
+            val sz = queryMediaSize(e.fileUriString) ?: 2_800_000L
+            sum += sz
+        }
+        sum
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    val estimatedSavedBytes: StateFlow<Long> = allQueue.map { list ->
+        val deleted = list.filter { it.status == PurgeShotEntity.STATUS_DELETED }
+        var sum = 0L
+        for (e in deleted) {
+            val sz = queryMediaSize(e.fileUriString) ?: 2_800_000L
+            sum += sz
+        }
+        sum
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    // Undo stack — last cancelled item within 5s window
+    private var lastUndone: PurgeShotEntity? = null
+    private val _undoAvailable = MutableStateFlow<PurgeShotEntity?>(null)
+    val undoAvailable: StateFlow<PurgeShotEntity?> = _undoAvailable
+
     init {
         viewModelScope.launch {
             repository.ensureRestoredAndRescheduled()
@@ -66,6 +99,10 @@ class PurgeShotViewModel @Inject constructor(
             }
         }
     }
+
+    fun hasAllFilesAccess(): Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        android.os.Environment.isExternalStorageManager()
+    } else true
 
     fun setEnabled(value: Boolean) {
         viewModelScope.launch {
@@ -91,7 +128,25 @@ class PurgeShotViewModel @Inject constructor(
     }
 
     fun cancelEntry(id: Long) {
-        viewModelScope.launch { repository.cancel(id) }
+        viewModelScope.launch {
+            val entity = dao.getById(id)
+            lastUndone = entity
+            _undoAvailable.value = entity
+            repository.cancel(id)
+            // Auto-clear undo after 5s
+            kotlinx.coroutines.delay(5000)
+            if (_undoAvailable.value?.id == id) _undoAvailable.value = null
+        }
+    }
+
+    fun undoCancel() {
+        val e = _undoAvailable.value ?: lastUndone ?: return
+        viewModelScope.launch {
+            _undoAvailable.value = null
+            // Re-enqueue with same duration but new schedule (fresh timer)
+            val uri = android.net.Uri.parse(e.fileUriString)
+            repository.enqueue(uri, e.displayName, e.durationMillis, e.durationLabel, e.filePath)
+        }
     }
 
     fun deleteNow(id: Long) {
@@ -100,6 +155,20 @@ class PurgeShotViewModel @Inject constructor(
 
     fun clearAllPending() {
         viewModelScope.launch { repository.clearPending() }
+    }
+
+    fun extendEntry(id: Long, extraMillis: Long) {
+        viewModelScope.launch {
+            val e = dao.getById(id) ?: return@launch
+            val newDelay = (e.scheduledDeleteAtMs - System.currentTimeMillis()) + extraMillis
+            if (newDelay <= 0) return@launch
+            // Cancel and re-enqueue with extended duration
+            repository.cancel(id)
+            val uri = android.net.Uri.parse(e.fileUriString)
+            val newDuration = e.durationMillis + extraMillis
+            val label = formatDurationLabel(newDuration)
+            repository.enqueue(uri, e.displayName, newDuration.coerceAtMost(30L * 24 * 60 * 60 * 1000L), label, e.filePath)
+        }
     }
 
     fun enqueueForPopup(uriStr: String?, displayName: String, path: String?, duration: Long, label: String) {
@@ -130,6 +199,33 @@ class PurgeShotViewModel @Inject constructor(
             val svc = Intent(context, PurgeShotService::class.java).apply { action = PurgeShotService.ACTION_STOP }
             context.startService(svc)
         } catch (_: Exception) {}
+    }
+
+    private fun queryMediaSize(uriStr: String): Long? = try {
+        val uri = android.net.Uri.parse(uriStr)
+        context.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val idx = c.getColumnIndex(android.provider.MediaStore.MediaColumns.SIZE)
+                if (idx != -1) c.getLong(idx).takeIf { it > 0 } else null
+            } else null
+        }
+    } catch (_: Exception) { null }
+
+    private fun formatDurationLabel(millis: Long): String = when (millis) {
+        30_000L -> "30 sec"
+        60_000L -> "1 min"
+        5 * 60_000L -> "5 min"
+        15 * 60_000L -> "15 min"
+        30 * 60_000L -> "30 min"
+        60 * 60_000L -> "1 hour"
+        6 * 60 * 60_000L -> "6 hours"
+        12 * 60 * 60_000L -> "12 hours"
+        24 * 60 * 60_000L -> "1 day"
+        3 * 24 * 60 * 60_000L -> "3 days"
+        7 * 24 * 60 * 60_000L -> "1 week"
+        14 * 24 * 60 * 60_000L -> "2 weeks"
+        30L * 24 * 60 * 60_000L -> "1 month"
+        else -> "${millis / 60_000} min"
     }
 
     // --- JSON helpers for presets (max 6 buttons, entirely customizable) ---

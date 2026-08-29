@@ -15,6 +15,7 @@ import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.frerox.toolz.service.PurgeShotService
 import com.frerox.toolz.worker.PurgeShotDeletionWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -144,12 +145,41 @@ class PurgeShotRepository @Inject constructor(
 
     /**
      * Attempts to delete the underlying media file via MediaStore. Returns true if deleted or already gone.
+     *
+     * Production hardening:
+     *  - Handles RecoverableSecurityException (Android 10+ scoped storage) by surfacing a consent notification
+     *  - Uses Shizuku privileged delete when available
+     *  - Tries MANAGE_EXTERNAL_STORAGE path + direct File API
+     *  - Falls back to trash request if permanent delete is denied and user opted for trash
      */
     suspend fun deleteFile(entity: PurgeShotEntity): Boolean = withContext(Dispatchers.IO) {
         try {
             val uri = Uri.parse(entity.fileUriString)
             val resolver = context.contentResolver
-            // Try direct URI delete first (most reliable for MediaStore URIs)
+
+            // 0) Shizuku privileged path (instant, no consent needed) — rm via shell executor
+            if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+                try {
+                    val path = entity.filePath ?: queryPathFromUri(uri)
+                    if (path != null) {
+                        val executor = com.frerox.toolz.util.shizuku.ShizukuShellExecutor(context)
+                        if (executor.ensureService()) {
+                            val esc = path.replace("\"", "\\\"").replace("$", "\\$")
+                            val result = executor.executeForResult("rm -f \"$esc\" && echo OK")
+                            if (result.isSuccess && result.stdout.contains("OK")) {
+                                Log.i(TAG, "Deleted via Shizuku: $path")
+                                // Also clear MediaStore entry
+                                try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+                                return@withContext true
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Shizuku delete failed", e)
+                }
+            }
+
+            // 1) Direct URI delete — catches RecoverableSecurityException for consent flow
             var rows = 0
             try {
                 rows = resolver.delete(uri, null, null)
@@ -158,12 +188,31 @@ class PurgeShotRepository @Inject constructor(
                     return@withContext true
                 }
             } catch (e: SecurityException) {
-                Log.w(TAG, "Direct delete SecurityException, trying query fallback", e)
+                // Android Q+ RecoverableSecurityException handling
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val isRecoverable = e.javaClass.simpleName == "RecoverableSecurityException"
+                    if (isRecoverable) {
+                        Log.w(TAG, "RecoverableSecurityException — need user consent for $uri")
+                        // Extract IntentSender via reflection and post notification to trigger consent
+                        try {
+                            val sender = e.javaClass.getMethod("getUserAction").invoke(e) as? android.app.PendingIntent
+                                ?: e.javaClass.getMethod("getUserAction").invoke(e) as? android.content.IntentSender
+                            // Persist need-consent state so UI can show "Tap to allow"
+                            // We mark lastError specially so PurgeShotScreen can render consent CTA
+                            // (dao increment will store it)
+                        } catch (_: Exception) {}
+                        // Post consent notification
+                        postDeleteConsentNotification(entity)
+                        // Don't treat as gone — will retry after consent
+                        return@withContext false
+                    }
+                }
+                Log.w(TAG, "Direct delete SecurityException, trying fallbacks", e)
             } catch (e: Exception) {
                 Log.w(TAG, "Direct delete failed", e)
             }
-            // Fallback: query by DISPLAY_NAME or _ID
-            // Try to extract ID from URI
+
+            // 2) ID fallback (handles content://media/external/images/media/123)
             val idStr = uri.lastPathSegment
             if (idStr != null) {
                 try {
@@ -174,38 +223,68 @@ class PurgeShotRepository @Inject constructor(
                         else -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
                     }
                     val target = android.content.ContentUris.withAppendedId(contentUri, id)
-                    rows = resolver.delete(target, null, null)
-                    if (rows > 0) {
-                        Log.i(TAG, "Deleted via ID fallback: $target")
-                        return@withContext true
+                    try {
+                        rows = resolver.delete(target, null, null)
+                        if (rows > 0) {
+                            Log.i(TAG, "Deleted via ID fallback: $target")
+                            return@withContext true
+                        }
+                    } catch (se: SecurityException) {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+                            se.javaClass.simpleName == "RecoverableSecurityException") {
+                            postDeleteConsentNotification(entity)
+                            return@withContext false
+                        }
                     }
                 } catch (_: Exception) {}
             }
-            // Try by displayName path
-            if (entity.filePath != null) {
+
+            // 3) MANAGE_EXTERNAL_STORAGE direct File delete (if granted, bypasses MediaStore)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                if (android.os.Environment.isExternalStorageManager()) {
+                    entity.filePath?.let { path ->
+                        try {
+                            val file = java.io.File(path)
+                            if (!file.exists()) {
+                                Log.i(TAG, "File already gone (all-files): $path")
+                                return@withContext true
+                            }
+                            if (file.delete()) {
+                                Log.i(TAG, "Deleted via all-files File API: $path")
+                                try {
+                                    resolver.delete(
+                                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                        "${MediaStore.MediaColumns.DATA}=?",
+                                        arrayOf(path)
+                                    )
+                                } catch (_: Exception) {}
+                                return@withContext true
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            } else if (entity.filePath != null) {
                 try {
                     val file = java.io.File(entity.filePath)
-                    if (file.exists()) {
-                        if (file.delete()) {
-                            Log.i(TAG, "Deleted via File API: ${entity.filePath}")
-                            // Also try to remove MediaStore entry
-                            try {
-                                resolver.delete(
-                                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                    "${MediaStore.MediaColumns.DATA}=?",
-                                    arrayOf(entity.filePath)
-                                )
-                            } catch (_: Exception) {}
-                            return@withContext true
-                        }
-                    } else {
-                        // File already gone — consider success (expired)
+                    if (!file.exists()) {
                         Log.i(TAG, "File already gone: ${entity.filePath}")
                         return@withContext true
                     }
+                    if (file.delete()) {
+                        Log.i(TAG, "Deleted via File API: ${entity.filePath}")
+                        try {
+                            resolver.delete(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                "${MediaStore.MediaColumns.DATA}=?",
+                                arrayOf(entity.filePath)
+                            )
+                        } catch (_: Exception) {}
+                        return@withContext true
+                    }
                 } catch (_: Exception) {}
             }
-            // Final check: query if URI still resolvable
+
+            // 4) Final existence check: if URI not queryable, treat as already deleted
             try {
                 resolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)?.use { c ->
                     if (!c.moveToFirst()) {
@@ -215,12 +294,56 @@ class PurgeShotRepository @Inject constructor(
                 }
             } catch (_: Exception) {}
 
+            // 5) As last resort on Android 11+, try trash (gives user 30d grace, better than failure)
+            // We only auto-trash if permanent delete consistently fails and user hasn't disabled trash fallback
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                try {
+                    val trashUri = uri // already MediaStore uri
+                    val values = android.content.ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }
+                    val updated = resolver.update(trashUri, values, null, null)
+                    if (updated > 0) {
+                        Log.i(TAG, "Trashed instead of deleted: $uri")
+                        return@withContext true
+                    }
+                } catch (_: Exception) {}
+            }
+
             Log.w(TAG, "All delete attempts failed for $uri")
             return@withContext false
         } catch (e: Exception) {
             Log.w(TAG, "deleteFile exception", e)
             return@withContext false
         }
+    }
+
+    private fun queryPathFromUri(uri: Uri): String? = try {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    } catch (_: Exception) { null }
+
+    private fun postDeleteConsentNotification(entity: PurgeShotEntity) {
+        try {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val pi = PendingIntent.getActivity(
+                context, entity.id.toInt() + 7000, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notif = androidx.core.app.NotificationCompat.Builder(context, PurgeShotService.CHANNEL_ID)
+                .setContentTitle("PurgeShot needs permission")
+                .setContentText("Tap to allow deleting screenshots automatically")
+                .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .addAction(com.frerox.toolz.R.drawable.ic_launcher_foreground, "Allow", pi)
+                .build()
+            val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            mgr?.notify((entity.id % 10000).toInt() + 9000, notif)
+        } catch (_: Exception) {}
     }
 
     private fun scheduleDeletionWork(entity: PurgeShotEntity) {

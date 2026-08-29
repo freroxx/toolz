@@ -24,6 +24,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -146,9 +147,22 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         const val EXTRA_NAVIGATE_TO = "navigate_to"
         const val EXTRA_SHOW_UPDATE = "show_update"
         const val EXTRA_SHOW_UPDATE_DIALOG = "show_update_dialog"
+        const val EXTRA_FROM_SHORTCUT = "from_shortcut"
+        const val EXTRA_SHORTCUT_ID = "shortcut_id"
         const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
 
         val LocalFlashlightRepository = staticCompositionLocalOf<FlashlightRepository?> { null }
+
+        /**
+         * Whether this intent originated from a tool shortcut (static or pinned).
+         * Checks both boolean and string extras and existence (static shortcuts store as string "true").
+         */
+        fun isShortcutIntent(intent: Intent?): Boolean {
+            if (intent == null) return false
+            if (intent.getBooleanExtra(EXTRA_FROM_SHORTCUT, false)) return true
+            if (intent.getStringExtra(EXTRA_FROM_SHORTCUT) == "true") return true
+            return intent.hasExtra(EXTRA_FROM_SHORTCUT)
+        }
     }
     @Inject
     lateinit var settingsRepository: SettingsRepository
@@ -346,6 +360,22 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             }
         }
 
+        // PurgeShot: keep ContentObserver alive and restore queue after every launch (survives update/clear-data via external mirror)
+        lifecycleScope.launch {
+            settingsRepository.purgeShotEnabled.collect { enabled ->
+                val svc = android.content.Intent(this@MainActivity, com.frerox.toolz.service.PurgeShotService::class.java).apply {
+                    action = if (enabled) com.frerox.toolz.service.PurgeShotService.ACTION_START else com.frerox.toolz.service.PurgeShotService.ACTION_STOP
+                }
+                try {
+                    if (enabled) {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+                    } else {
+                        startService(svc)
+                    }
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+
         lifecycleScope.launch {
             combine(
                 settingsRepository.flashlightNotificationsEnabled,
@@ -507,6 +537,11 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         if (intent.hasExtra(EXTRA_NAVIGATE_TO) || 
             intent.hasExtra(EXTRA_SHOW_UPDATE) || 
             intent.hasExtra(EXTRA_SHOW_UPDATE_DIALOG)) {
+            return true
+        }
+
+        // Tool shortcuts – skip loading, go directly to tool
+        if (isShortcutIntent(intent)) {
             return true
         }
 
@@ -691,7 +726,7 @@ fun UpdateOverlayContent(
 fun UpdateOverlayPreview() {
     ToolzTheme {
         UpdateOverlayContent(
-            availableVersion = "1.1.1",
+            availableVersion = "1.1.2",
             changelog = """
                 # Major Update: Expressive UI
                 
@@ -740,10 +775,22 @@ fun ToolzNavHost(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var pendingExternalRoute by remember { mutableStateOf<String?>(null) }
+    var pendingIsShortcut by remember { mutableStateOf(false) }
+    var launchedFromShortcut by remember { mutableStateOf(MainActivity.isShortcutIntent(incomingIntent)) }
+    var showShortcutExitDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Reset shortcut flag when returning to dashboard/onboarding
+    LaunchedEffect(currentRoute) {
+        if (currentRoute == Screen.Dashboard.route || currentRoute == "onboarding" || currentRoute == null) {
+            launchedFromShortcut = false
+            showShortcutExitDialog = false
+        }
+    }
 
     LaunchedEffect(incomingIntentVersion) {
         val latestIntent = incomingIntent ?: return@LaunchedEffect
+        val isShortcut = MainActivity.isShortcutIntent(latestIntent)
         
         // 1. Resolve route first (handles aliases specifically)
         val resolvedRoute = resolveExternalNavigationRoute(latestIntent)
@@ -785,12 +832,14 @@ fun ToolzNavHost(
 
                     pdfViewModel.openPdf(uri, title)
                     pendingExternalRoute = Screen.PdfReader.route
+                    pendingIsShortcut = isShortcut
                     return@LaunchedEffect
                 }
             }
         }
 
         pendingExternalRoute = resolvedRoute
+        pendingIsShortcut = isShortcut && resolvedRoute != null
     }
 
     LaunchedEffect(pendingExternalRoute, onboardingCompleted, currentRoute) {
@@ -803,8 +852,48 @@ fun ToolzNavHost(
                 launchSingleTop = true
             }
         }
+        // Mark as shortcut-launched if the intent was a shortcut and target is not dashboard
+        launchedFromShortcut = pendingIsShortcut && route != Screen.Dashboard.route && route != "onboarding"
+        pendingIsShortcut = false
         pendingExternalRoute = null
     }
+
+    // ── Shortcut exit confirmation ────────────────────────────────────────
+    // When launched from a pinned/static shortcut, intercept back to show confirmation.
+    val isToolRoute = currentRoute != null && currentRoute != Screen.Dashboard.route && currentRoute != "onboarding"
+    val shouldConfirmExit = launchedFromShortcut && isToolRoute
+    val toolOnBack: () -> Unit = {
+        if (shouldConfirmExit) {
+            showShortcutExitDialog = true
+        } else {
+            navController.popBackStack()
+        }
+    }
+
+    BackHandler(enabled = shouldConfirmExit) {
+        showShortcutExitDialog = true
+    }
+
+    if (showShortcutExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showShortcutExitDialog = false },
+            title = { Text(stringResource(R.string.st_Shortcut_Exit_Title)) },
+            text = { Text(stringResource(R.string.st_Shortcut_Exit_Message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showShortcutExitDialog = false
+                    launchedFromShortcut = false
+                    navController.popBackStack()
+                }) { Text(stringResource(R.string.st_Shortcut_Exit_Confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShortcutExitDialog = false }) {
+                    Text(stringResource(R.string.st_Shortcut_Exit_Cancel))
+                }
+            }
+        )
+    }
+
     NavHost(
         navController = navController,
         startDestination = if (onboardingCompleted) Screen.Dashboard.route else "onboarding",
@@ -855,9 +944,10 @@ fun ToolzNavHost(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 viewModel = hiltViewModel(),
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToUpdate = { navController.navigate(Screen.Update.route) },
                 onNavigateToBackupRestore = { navController.navigate(Screen.BackupRestore.route) },
+                onNavigateToToolShortcuts = { navController.navigate(Screen.ToolShortcuts.route) },
                 onResetOnboarding = {
                     navController.navigate("onboarding") {
                         popUpTo(Screen.Dashboard.route) { inclusive = true }
@@ -874,7 +964,7 @@ fun ToolzNavHost(
             BackupRestoreScreen(
                 viewModel = hiltViewModel<BackupRestoreViewModel>(),
                 initialRestoreUri = initialUri,
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
 
@@ -882,7 +972,7 @@ fun ToolzNavHost(
             val context = LocalContext.current
             val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
             UpdateScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 currentVersionName = packageInfo.versionName ?: "1.0.0",
                 currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     packageInfo.longVersionCode
@@ -902,20 +992,20 @@ fun ToolzNavHost(
         ) {
             AiAssistantScreen(
                 onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
 
         composable(Screen.Timer.route) {
-            TimerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            TimerScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.Stopwatch.route) {
-            StopwatchScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            StopwatchScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
 
         composable(Screen.Search.route) {
             SearchScreen(
-                onBackClick = { navController.popBackStack() },
+                onBackClick = { toolOnBack() },
                 onResultClick = { url ->
                     if (url == Screen.AdBlockConfig.route) {
                         navController.navigate(Screen.AdBlockConfig.route)
@@ -929,7 +1019,7 @@ fun ToolzNavHost(
 
         composable(Screen.AdBlockConfig.route) {
             com.frerox.toolz.ui.screens.search.AdBlockSettingsScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToNextDnsSetup = { url ->
                     navController.navigate(Screen.NextDnsSetup.createRoute(url))
                 }
@@ -944,13 +1034,13 @@ fun ToolzNavHost(
             val decodedUrl = java.net.URLDecoder.decode(url, "UTF-8")
             com.frerox.toolz.ui.screens.search.NextDnsSetupScreen(
                 url = decodedUrl,
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
 
         composable(Screen.TabManagement.route) {
             TabManagementScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onTabClick = { id, url ->
                     navController.navigate(Screen.Browser.createRoute(url))
                 },
@@ -971,7 +1061,7 @@ fun ToolzNavHost(
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()
             WebViewScreen(
                 url = decodedUrl,
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onManageTabs = { navController.navigate(Screen.TabManagement.route) },
                 onNavigateToPdf = { uri, title ->
                     pdfViewModel.openPdf(Uri.parse(uri), title)
@@ -983,19 +1073,19 @@ fun ToolzNavHost(
             )
         }
         composable(Screen.WorldClock.route) {
-            WorldClockScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            WorldClockScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.Pomodoro.route) {
-            PomodoroScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            PomodoroScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.FocusFlow.route) {
-            FocusFlowScreen(onNavigateBack = { navController.popBackStack() })
+            FocusFlowScreen(onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Caffeinate.route) {
-            CaffeinateScreen(onNavigateBack = { navController.popBackStack() })
+            CaffeinateScreen(onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Todo.route) {
-            TodoScreen(viewModel = hiltViewModel(), onNavigateBack = { navController.popBackStack() })
+            TodoScreen(viewModel = hiltViewModel(), onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Calendar.route) {
             CalendarScreen(viewModel = hiltViewModel())
@@ -1014,7 +1104,7 @@ fun ToolzNavHost(
                 viewModel = hiltViewModel(),
                 initialTab = initialTab,
                 initialUri = initialUri,
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
         composable(
@@ -1032,7 +1122,7 @@ fun ToolzNavHost(
 
             FileConverterScreen(
                 viewModel = hiltViewModel(),
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 initialUri = uri,
                 initialTitle = title,
                 initialUris = initialUris
@@ -1045,18 +1135,18 @@ fun ToolzNavHost(
             val initialUri = backStackEntry.arguments?.getString("initialUri")
             BackgroundRemoverScreen(
                 initialUri = initialUri,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { toolOnBack() }
             )
         }
         composable(Screen.Flashlight.route) {
-            FlashlightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            FlashlightScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.ScreenLight.route) {
-            ScreenLightScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            ScreenLightScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.Magnifier.route) {
             val vm: MagnifierViewModel = hiltViewModel()
-            MagnifierScreen(onBack = { navController.popBackStack() }, settingsRepository = vm.repository)
+            MagnifierScreen(onBack = { toolOnBack() }, settingsRepository = vm.repository)
         }
         composable(
             route = Screen.Scanner.route,
@@ -1065,7 +1155,7 @@ fun ToolzNavHost(
             val initialUri = backStackEntry.arguments?.getString("initialImageUri")
             ScannerScreen(
                 initialImageUri = initialUri,
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToGenerator = {
                     navController.navigate(Screen.QrGenerator.route) {
                         popUpTo(Screen.Scanner.route) { inclusive = true }
@@ -1077,7 +1167,7 @@ fun ToolzNavHost(
             val qrVm: QRViewModel = hiltViewModel()
             QRGeneratorScreen(
                 viewModel = qrVm,
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToScanner = {
                     navController.navigate(Screen.Scanner.route) {
                         popUpTo(Screen.QrGenerator.route) { inclusive = true }
@@ -1086,25 +1176,25 @@ fun ToolzNavHost(
             )
         }
         composable(Screen.LightMeter.route) {
-            LightMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            LightMeterScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
 
         composable(Screen.Compass.route) {
-            CompassScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            CompassScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.BubbleLevel.route) {
-            BubbleLevelScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            BubbleLevelScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.Speedometer.route) {
-            SpeedometerScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            SpeedometerScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.Altimeter.route) {
-            AltimeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            AltimeterScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.StepCounter.route) {
             StepCounterScreen(
                 viewModel = hiltViewModel(), 
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToTrends = { navController.navigate(Screen.StepTrends.route) },
                 onNavigateToAiAssistant = { chatId ->
                     navController.navigate(Screen.AiAssistant.createRoute(chatId, isCoachMode = true))
@@ -1114,31 +1204,31 @@ fun ToolzNavHost(
         composable(Screen.StepTrends.route) {
             StepTrendsScreen(
                 viewModel = hiltViewModel(),
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
         composable(Screen.VoiceRecorder.route) {
-            VoiceRecorderScreen(onBack = { navController.popBackStack() })
+            VoiceRecorderScreen(onBack = { toolOnBack() })
         }
 
         composable(Screen.Calculator.route) {
-            CalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            CalculatorScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.UnitConverter.route) {
-            UnitConverterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            UnitConverterScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.TipCalculator.route) {
-            TipCalculatorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            TipCalculatorScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.BmiCalculator.route) {
-            BmiScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            BmiScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.EquationSolver.route) {
-            EquationSolverScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            EquationSolverScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
 
         composable(Screen.Ruler.route) {
-            RulerScreen(onBack = { navController.popBackStack() })
+            RulerScreen(onBack = { toolOnBack() })
         }
         composable(
             route = Screen.SmartEncrypter.route,
@@ -1152,20 +1242,20 @@ fun ToolzNavHost(
             SmartEncrypterScreen(
                 initialUri = initialUri,
                 mode = mode,
-                onBack = { navController.popBackStack() }
+                onBack = { toolOnBack() }
             )
         }
         composable(Screen.SoundMeter.route) {
-            SoundMeterScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            SoundMeterScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.ColorPicker.route) {
-            ColorPickerScreen(onBack = { navController.popBackStack() })
+            ColorPickerScreen(onBack = { toolOnBack() })
         }
         composable(Screen.PasswordGenerator.route) {
-            RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            RandomGeneratorScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.PasswordVault.route) {
-            PasswordVaultScreen(onBackClick = { navController.popBackStack() })
+            PasswordVaultScreen(onBackClick = { toolOnBack() })
         }
         composable(
             route = Screen.Notepad.route + "?initialNoteId={initialNoteId}",
@@ -1175,7 +1265,7 @@ fun ToolzNavHost(
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()
             NotepadScreen(
                 viewModel = hiltViewModel(),
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onPlayAudio = { uri ->
                     val track = musicViewModel.uiState.value.tracks.find { it.uri == uri }
                     track?.let { musicViewModel.playTrack(it) }
@@ -1189,24 +1279,24 @@ fun ToolzNavHost(
             )
         }
         composable(Screen.BatteryInfo.route) {
-            BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            BatteryInfoScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         composable(Screen.DeviceInfo.route) {
-            DeviceInfoScreen(onBack = { navController.popBackStack() })
+            DeviceInfoScreen(onBack = { toolOnBack() })
         }
         composable(Screen.FlipCoin.route) {
             FlipCoinScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 settingsRepository = settingsRepository
             )
         }
         composable(Screen.PeriodicTable.route) {
-            PeriodicTableScreen(onBack = { navController.popBackStack() })
+            PeriodicTableScreen(onBack = { toolOnBack() })
         }
         composable(Screen.PdfReader.route) {
             ToolzPdfScreen(
                 viewModel = pdfViewModel,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { toolOnBack() },
                 onNavigateToNote = { noteId ->
                     navController.navigate(Screen.Notepad.route + "?initialNoteId=$noteId")
                 },
@@ -1216,22 +1306,22 @@ fun ToolzNavHost(
             )
         }
         composable(Screen.NotificationVault.route) {
-            NotificationVaultScreen(onNavigateBack = { navController.popBackStack() })
+            NotificationVaultScreen(onNavigateBack = { toolOnBack() })
         }
         composable(Screen.Clipboard.route) {
-            ClipboardScreen(viewModel = hiltViewModel(), onBack = { navController.popBackStack() })
+            ClipboardScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
         // P3 single entry: both legacy routes map to NetworkSuiteScreen (PowerSuite retired)
         composable(Screen.NetworkPowerSuite.route) {
-            NetworkSuiteScreen(onBack = { navController.popBackStack() })
+            NetworkSuiteScreen(onBack = { toolOnBack() })
         }
         composable(Screen.WifiTweaks.route) {
-            NetworkSuiteScreen(onBack = { navController.popBackStack() })
+            NetworkSuiteScreen(onBack = { toolOnBack() })
         }
         composable(Screen.FileCleaner.route) {
             val musicViewModel: MusicPlayerViewModel = hiltViewModel()
             CleanerScreen(
-                onBack = { navController.popBackStack() },
+                onBack = { toolOnBack() },
                 onNavigateToPdf = { uri, title ->
                     pdfViewModel.openPdf(uri, title)
                     navController.navigate(Screen.PdfReader.route)
@@ -1275,7 +1365,7 @@ fun ToolzNavHost(
                             popUpTo(Screen.WhisperAuth.route) { inclusive = true }
                         }
                     },
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { toolOnBack() }
                 )
             }
         }
@@ -1308,7 +1398,7 @@ fun ToolzNavHost(
         }
         composable(Screen.WhisperChat.route) {
             WhisperChatScreen(
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { toolOnBack() },
                 onNavigateToProfile = { userId ->
                     navController.navigate(Screen.WhisperUserProfile.createRoute(userId))
                 }
@@ -1317,11 +1407,17 @@ fun ToolzNavHost(
 
         composable(Screen.WhisperUserProfile.route) {
             WhisperUserProfileScreen(
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { toolOnBack() },
                 onNavigateToChat = { otherUserId ->
                     navController.navigate(Screen.WhisperChat.createRoute(otherUserId))
                 }
             )
+        }
+        composable(Screen.PurgeShot.route) {
+            com.frerox.toolz.ui.screens.purgeshot.PurgeShotScreen(onBack = { toolOnBack() })
+        }
+        composable(Screen.ToolShortcuts.route) {
+            com.frerox.toolz.ui.screens.shortcuts.ToolShortcutsScreen(onBack = { toolOnBack() })
         }
     }
 }

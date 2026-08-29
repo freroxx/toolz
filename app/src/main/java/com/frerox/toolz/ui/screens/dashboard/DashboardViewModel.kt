@@ -537,6 +537,7 @@ class DashboardViewModel @Inject constructor(
                 ToolItem(com.frerox.toolz.R.string.st_Tool_PeriodicTable, Icons.Rounded.Science, Screen.PeriodicTable.route, com.frerox.toolz.R.string.st_Tool_PeriodicTable_Desc, Color(0xFF5E35B1)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_Caffeinate, Icons.Rounded.Coffee, Screen.Caffeinate.route, com.frerox.toolz.R.string.st_Tool_Caffeinate_Desc, Color(0xFF6F4E37)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_FlipCoin, Icons.Rounded.Casino, Screen.FlipCoin.route, com.frerox.toolz.R.string.st_Tool_FlipCoin_Desc, Color(0xFFFB8C00)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_PurgeShot, Icons.Rounded.DeleteSweep, Screen.PurgeShot.route, com.frerox.toolz.R.string.st_Tool_PurgeShot_Desc, Color(0xFFEF6C00)),
             ),
         ),
     )

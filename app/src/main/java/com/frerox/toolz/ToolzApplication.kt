@@ -80,6 +80,8 @@ class ToolzApplication : Application(), Configuration.Provider {
         }
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
+        schedulePurgeShotReschedule()
+        // PurgeShot restore is done via Hilt-injected repository in MainActivity & Service, but also kick here via WorkManager fallback is enough
     }
 
     private fun scheduleWhisperLocalCleanup() {
@@ -99,6 +101,17 @@ class ToolzApplication : Application(), Configuration.Provider {
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "WhisperEncryptedDelivery",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
+    }
+
+    private fun schedulePurgeShotReschedule() {
+        val request = PeriodicWorkRequestBuilder<com.frerox.toolz.worker.PurgeShotRescheduleWorker>(6, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(false).build())
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "PurgeShotReschedule",
             ExistingPeriodicWorkPolicy.KEEP,
             request,
         )

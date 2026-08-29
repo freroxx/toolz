@@ -77,6 +77,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onNavigateToUpdate: () -> Unit,
     onNavigateToBackupRestore: () -> Unit,
+    onNavigateToToolShortcuts: () -> Unit = {},
     onResetOnboarding: () -> Unit
 ) {
     val vibrationManager = LocalVibrationManager.current
@@ -1034,6 +1035,18 @@ fun SettingsScreen(
                                     onClick = {
                                         vibrationManager?.vibrateClick()
                                         onNavigateToBackupRestore()
+                                    }
+                                )
+                            }
+
+                            if (matches(searchQuery, "shortcut", "pin", "home screen", "tool shortcut", "launcher")) {
+                                SettingsItem(
+                                    title = stringResource(R.string.st_Shortcut_Manage_Title),
+                                    subtitle = stringResource(R.string.st_Shortcut_Manage_Desc),
+                                    icon = Icons.Rounded.AddToHomeScreen,
+                                    onClick = {
+                                        vibrationManager?.vibrateClick()
+                                        onNavigateToToolShortcuts()
                                     }
                                 )
                             }
