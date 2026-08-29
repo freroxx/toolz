@@ -23,8 +23,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -241,31 +243,18 @@ fun PurgeShotScreen(
                                         checked = smartAuto,
                                         onCheckedChange = { viewModel.setSmartAuto(it) }
                                     )
-                                    ExpressiveCard(
-                                        onClick = { showAutoPicker = true },
-                                        shape = RoundedCornerShape(24.dp),
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                    ) {
-                                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                                Surface(modifier = Modifier.size(36.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
-                                                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(18.dp)) }
-                                                }
-                                                Column {
-                                                    Text("Auto time", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                                    Text(durationLabel(autoDuration), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
+                                    AutoTimeExpressiveCard(
+                                        durationMillis = autoDuration,
+                                        durationLabel = durationLabel(autoDuration),
+                                        onClick = { showAutoPicker = true }
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                // Timers — clear grid, fluid edit
+                // Timers — clear M3 Expressive grid, fixed (no bugged sheet height)
                 item {
                     StaggeredEntrance(index = 3) {
                         ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
@@ -278,16 +267,17 @@ fun PurgeShotScreen(
                                         Text("Edit", fontWeight = FontWeight.Bold)
                                     }
                                 }
-                                LazyVerticalGrid(
-                                    columns = GridCells.Fixed(3),
-                                    modifier = Modifier.heightIn(max = 220.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    userScrollEnabled = false
-                                ) {
-                                    itemsIndexed(presets) { idx, p ->
-                                        StaggeredEntrance(index = idx) {
-                                            TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
+                                // Simple 3-column flow without nested LazyVerticalGrid bug — stable measurement inside LazyColumn
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    presets.chunked(3).forEachIndexed { rowIdx, row ->
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                            row.forEach { p ->
+                                                Box(modifier = Modifier.weight(1f)) {
+                                                    TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
+                                                }
+                                            }
+                                            // Fill empty cells to keep 3-col alignment
+                                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                                         }
                                     }
                                 }
@@ -501,6 +491,70 @@ private fun QueueCard(entry: PurgeShotEntity, onKeep: () -> Unit, onDeleteNow: (
     }
 }
 
+@Composable
+private fun AutoTimeExpressiveCard(
+    durationMillis: Long,
+    durationLabel: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 380f),
+        label = "autoTimeScale"
+    )
+    // M3 Expressive: clear tonal card, large rounded, subtle border, spring press
+    Surface(
+        onClick = {
+            haptic.tick()
+            onClick()
+        },
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { scaleX = scale; scaleY = scale },
+        interactionSource = interaction
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.weight(1f)) {
+                // Expressive leading container — primaryContainer circle with Timer icon
+                Surface(modifier = Modifier.size(44.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                    Text("Auto time", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    AnimatedContent(
+                        targetState = durationLabel,
+                        transitionSpec = { (fadeIn() + slideInVertically { it / 3 }).togetherWith(fadeOut()) },
+                        label = "autoLabel"
+                    ) { label ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.Schedule, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                        }
+                    }
+                    Text("Smart Auto deletes after this", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f))
+                }
+            }
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.9f)) {
+                Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(8.dp).size(18.dp))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PresetSheet(
@@ -511,122 +565,175 @@ private fun PresetSheet(
 ) {
     var selected by remember(current) { mutableStateOf(current.toMutableList()) }
     val haptic = rememberToolzHapticFeedback()
+    val scrollState = rememberScrollState()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        dragHandle = { BottomSheetDefaults.DragHandle(width = 36.dp) }
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        dragHandle = { BottomSheetDefaults.DragHandle(width = 36.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)) }
     ) {
         Column(
-            Modifier
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 380f)),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(bottom = 16.dp)
+                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f)),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Header — simple, clear
+            // Header — Material 3 Expressive clear
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("Choose timers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                    Text("Up to 6 • Auto works with Smart Auto", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Choose timers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Up to 6 • Auto follows Smart Auto", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 AnimatedContent(targetState = selected.size, label = "count") { count ->
-                    Surface(shape = CircleShape, color = if (count == 6) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer) {
-                        Text("$count/6", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (count == 6) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                if (count == 6) Icons.Rounded.CheckCircle else Icons.Rounded.Timer,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text("$count/6", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
                     }
                 }
             }
 
-            // Selected — fluid chips with remove
-            AnimatedVisibility(visible = selected.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Your popup", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.heightIn(max = 180.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        userScrollEnabled = false
-                    ) {
-                        itemsIndexed(selected, key = { _, p -> p.label + p.durationMillis }) { idx, p ->
-                            StaggeredEntrance(index = idx) {
-                                ExpressiveCard(
-                                    onClick = {
-                                        haptic.tick()
-                                        selected = selected.toMutableList().apply { removeAt(idx) }
-                                    },
-                                    shape = RoundedCornerShape(18.dp),
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    modifier = Modifier.animateItem()
-                                ) {
-                                    Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Icon(iconFor(p.iconName), null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                        Text(p.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("tap to remove", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+            // Selected — expressive cards, no LazyVerticalGrid bug (uses chunked Row)
+            AnimatedVisibility(
+                visible = selected.isNotEmpty(),
+                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                            Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.padding(6.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Text("Your popup • tap to remove", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        selected.chunked(3).forEachIndexed { rowIdx, row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                row.forEachIndexed { colIdx, p ->
+                                    val idx = rowIdx * 3 + colIdx
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        StaggeredEntrance(index = idx) {
+                                            ExpressiveCard(
+                                                onClick = {
+                                                    haptic.tick()
+                                                    selected = selected.toMutableList().apply { removeAt(idx) }
+                                                },
+                                                shape = RoundedCornerShape(18.dp),
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                                            ) {
+                                                Column(
+                                                    Modifier.padding(14.dp).fillMaxWidth(),
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Surface(modifier = Modifier.size(32.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
+                                                        Box(contentAlignment = Alignment.Center) { Icon(iconFor(p.iconName), null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) }
+                                                    }
+                                                    Text(p.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                    Text("tap to remove", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.65f))
+                                                }
+                                            }
+                                        }
                                     }
                                 }
+                                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
                 }
             }
 
-            // All durations — simple 3-col fluid grid
-            Text("All durations", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.heightIn(max = 320.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                itemsIndexed(allOptions) { idx, opt ->
-                    val isSelected = selected.any { it.label == opt.label && it.durationMillis == opt.durationMillis }
-                    val canAdd = selected.size < 6
-                    StaggeredEntrance(index = idx + 4) {
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                haptic.tick()
-                                selected = when {
-                                    isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
-                                    canAdd -> (selected + opt).toMutableList()
-                                    else -> selected
-                                }
-                            },
-                            label = { Text(opt.label, fontWeight = FontWeight.SemiBold, maxLines = 1) },
-                            leadingIcon = {
-                                Icon(
-                                    iconFor(opt.iconName), null,
-                                    modifier = Modifier.size(16.dp).graphicsLayer {
-                                        scaleX = if (isSelected) 1.1f else 1f
-                                        scaleY = if (isSelected) 1.1f else 1f
+            // All durations — 3-col FilterChips using chunked Rows (no LazyVerticalGrid measurement bug)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("All durations", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Tap to add • max 6", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    allOptions.chunked(3).forEachIndexed { rowIdx, row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { opt ->
+                                val isSelected = selected.any { it.label == opt.label && it.durationMillis == opt.durationMillis }
+                                val canAdd = selected.size < 6
+                                val enabled = isSelected || canAdd
+                                Box(modifier = Modifier.weight(1f)) {
+                                    StaggeredEntrance(index = rowIdx * 3 + 4) {
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                haptic.tick()
+                                                selected = when {
+                                                    isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
+                                                    canAdd -> (selected + opt).toMutableList()
+                                                    else -> selected
+                                                }
+                                            },
+                                            label = { Text(opt.label, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    iconFor(opt.iconName), null,
+                                                    modifier = Modifier.size(16.dp).graphicsLayer {
+                                                        scaleX = if (isSelected) 1.08f else 1f
+                                                        scaleY = if (isSelected) 1.08f else 1f
+                                                    },
+                                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            },
+                                            enabled = enabled,
+                                            shape = RoundedCornerShape(16.dp),
+                                            modifier = Modifier.fillMaxWidth().bouncyClick(enabled = enabled) {},
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = enabled,
+                                                selected = isSelected,
+                                                borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f),
+                                                selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                            )
+                                        )
                                     }
-                                )
-                            },
-                            enabled = isSelected || canAdd,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.animateItem().bouncyClick(enabled = isSelected || canAdd) {},
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        )
+                                }
+                            }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
                 }
             }
 
-            // Actions — expressive, fluid
+            // Actions — M3 Expressive clear
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("Cancel", fontWeight = FontWeight.Bold) }
+                ToolzOutlinedExpressiveButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(vertical = 16.dp)
+                ) { Text("Cancel", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge) }
                 ToolzExpressiveButton(
                     onClick = { haptic.success(); onSave(selected) },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(vertical = 16.dp),
                     enabled = selected.isNotEmpty()
-                ) { Text("Save ${selected.size}", fontWeight = FontWeight.Black) }
+                ) { Text("Save ${selected.size}", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge) }
             }
-            Spacer(Modifier.navigationBarsPadding())
+            Spacer(Modifier.navigationBarsPadding().height(8.dp))
         }
     }
 }
@@ -639,28 +746,107 @@ private fun AutoPickerSheet(
     onDismiss: () -> Unit,
     onSelect: (Long) -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Auto delete after", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-            Text("Used when Smart Auto is on — no popup, just queue.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            options.forEach { opt ->
-                val selected = opt.durationMillis == currentDuration
-                Surface(
-                    onClick = { onSelect(opt.durationMillis) },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(iconFor(opt.iconName), null, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(opt.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.Black else FontWeight.Medium, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-                        }
-                        if (selected) Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary)
+    val haptic = rememberToolzHapticFeedback()
+    val scrollState = rememberScrollState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        dragHandle = { BottomSheetDefaults.DragHandle(width = 36.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header — simple clear M3 Expressive
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
+                    }
+                    Column {
+                        Text("Auto delete after", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                        Text("Smart Auto queues with this delay", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.Info, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text("No popup — auto-queues instantly", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f))
+
+            // Options — clear selectable cards
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                options.forEachIndexed { idx, opt ->
+                    val selected = opt.durationMillis == currentDuration
+                    StaggeredEntrance(index = idx) {
+                        val interaction = remember { MutableInteractionSource() }
+                        val pressed by interaction.collectIsPressedAsState()
+                        val scale by animateFloatAsState(
+                            targetValue = if (pressed) 0.98f else 1f,
+                            animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
+                            label = "autoOptScale"
+                        )
+                        Surface(
+                            onClick = {
+                                haptic.tick()
+                                onSelect(opt.durationMillis)
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = if (selected) 1.dp else 0.dp,
+                            border = if (selected) androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer { scaleX = scale; scaleY = scale },
+                            interactionSource = interaction
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.weight(1f)) {
+                                    Surface(
+                                        modifier = Modifier.size(42.dp),
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(iconFor(opt.iconName), null, modifier = Modifier.size(20.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer)
+                                        }
+                                    }
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(opt.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.Black else FontWeight.SemiBold, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
+                                        Text(durationToHumane(opt.durationMillis) + " • ${opt.label}", style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                AnimatedContent(targetState = selected, label = "check") { isSel ->
+                                    if (isSel) {
+                                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                                            Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.padding(6.dp).size(18.dp))
+                                        }
+                                    } else {
+                                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))) {
+                                            Box(modifier = Modifier.size(30.dp)) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.navigationBarsPadding().height(8.dp))
         }
     }
 }

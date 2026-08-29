@@ -51,8 +51,14 @@ class PurgeShotObserverJobService : JobService() {
                             JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS
                         )
                     )
+                    .addTriggerContentUri(
+                        JobInfo.TriggerContentUri(
+                            MediaStore.Files.getContentUri("external"),
+                            JobInfo.TriggerContentUri.FLAG_NOTIFY_FOR_DESCENDANTS
+                        )
+                    )
                     .setTriggerContentMaxDelay(900) // batch within 0.9s
-                    .setTriggerContentUpdateDelay(400)
+                    .setTriggerContentUpdateDelay(300)
                 // NOTE: setPersisted(true) is illegal together with addTriggerContentUri — the
                 // platform throws IllegalArgumentException for content-trigger jobs marked
                 // persisted, since content triggers are re-registered per dispatch rather than

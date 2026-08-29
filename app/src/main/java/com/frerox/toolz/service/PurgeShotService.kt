@@ -197,10 +197,29 @@ class PurgeShotService : Service() {
         }
     }
 
+    private fun tryStartForeground(notification: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android 14+ throws ForegroundServiceStartNotAllowedException when starting FGS from background
+            // after swipe or boot while app not in foreground. Don't crash — keep the ContentObserver
+            // alive as a background observer (works while process is alive) and rely on JobScheduler +
+            // WorkManager poll for outside-process detection. The observer will still catch screenshots
+            // while the service process lives, just without a sticky notification.
+            Log.w(TAG, "startForeground blocked (background), continuing as background observer", e)
+            // Still ensure detector + Job are armed so "outside Toolz" path works.
+            try { PurgeShotObserverJobService.schedule(this) } catch (_: Exception) {}
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -209,24 +228,13 @@ class PurgeShotService : Service() {
                 // re-run detection immediately rather than wait for the next MediaStore change.
                 scope.launch { handleTrigger() }
                 val notif = buildForegroundNotification()
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        startForeground(NOTIF_ID, notif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-                    } else {
-                        startForeground(NOTIF_ID, notif)
-                    }
-                } catch (_: Exception) {
-                }
+                tryStartForeground(notif)
                 scope.launch { runCatching { repository.ensureRestoredAndRescheduled() } }
                 return START_STICKY
             }
         }
         val notif = buildForegroundNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
+        tryStartForeground(notif)
         scope.launch { runCatching { repository.ensureRestoredAndRescheduled() } }
         return START_STICKY
     }

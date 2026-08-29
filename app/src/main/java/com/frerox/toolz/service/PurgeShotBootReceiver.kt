@@ -33,7 +33,10 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
             Intent.ACTION_LOCKED_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_PACKAGE_REPLACED,
-            "android.intent.action.QUICKBOOT_POWERON"
+            "android.intent.action.QUICKBOOT_POWERON",
+            Intent.ACTION_USER_PRESENT,
+            "android.intent.action.BOOT_COMPLETED",
+            "android.intent.action.LOCKED_BOOT_COMPLETED"
         )
     }
 
@@ -85,8 +88,13 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
                         // that both the live observer and the content-trigger job miss.
                         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                             "PurgeShotDetect",
-                            ExistingPeriodicWorkPolicy.KEEP,
+                            ExistingPeriodicWorkPolicy.UPDATE,
                             PeriodicWorkRequestBuilder<PurgeShotDetectWorker>(15, TimeUnit.MINUTES).build()
+                        )
+                        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                            "PurgeShotReschedule",
+                            ExistingPeriodicWorkPolicy.UPDATE,
+                            PeriodicWorkRequestBuilder<com.frerox.toolz.worker.PurgeShotRescheduleWorker>(6, TimeUnit.HOURS).build()
                         )
                     } else {
                         PurgeShotObserverJobService.cancel(context)
