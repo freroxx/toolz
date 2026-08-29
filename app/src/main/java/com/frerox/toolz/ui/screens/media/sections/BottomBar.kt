@@ -104,7 +104,7 @@ fun ScreenBottomBar(
             ),
             exit = fadeOut(tween(200)) + slideOutVertically(
                 animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow),
-                targetOffsetY = { -it }
+                targetOffsetY = { it }
             )
         ) {
             val trackToDisplay = state.currentTrack ?: MusicTrack(
@@ -510,7 +510,7 @@ fun MiniPlayer(
                                 }
                         ) {
                             AnimatedContent(
-                                targetState = track.thumbnailUri,
+                                targetState = track.uri to track.thumbnailUri,
                                 transitionSpec = {
                                     if (performanceMode) {
                                         EnterTransition.None togetherWith ExitTransition.None
@@ -520,13 +520,13 @@ fun MiniPlayer(
                                     }
                                 },
                                 label = "artTransition"
-                            ) { uri ->
-                                AsyncImage(
-                                    model = uri,
-                                    contentDescription = null,
+                            ) { pair ->
+                                AlbumArtImage(
+                                    url = pair.second,
+                                    seed = track.title,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop,
-                                    error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                                    iconSize = 24.dp
                                 )
                             }
                         }
@@ -583,7 +583,12 @@ fun MiniPlayer(
                             .padding(end = 8.dp)
                     ) {
                         AnimatedContent(
-                            targetState = track,
+                            // Key on semantic display identity (uri + title + artist), NOT the
+                            // whole MusicTrack instance: the 45s library auto-refresh re-emits
+                            // fresh MusicTrack objects with identical fields, which used to
+                            // replay this swap animation every refresh. Identical content must
+                            // not animate — only a real track change does.
+                            targetState = "${track.uri}|${track.title}|${track.artist}",
                             transitionSpec = {
                                 if (performanceMode) {
                                     EnterTransition.None togetherWith ExitTransition.None
@@ -593,17 +598,17 @@ fun MiniPlayer(
                                 }.using(SizeTransform(clip = false))
                             },
                             label = "trackInfoTransition"
-                        ) { currentTrack ->
+                        ) { _ ->
                             Column {
                                 Text(
-                                    text = currentTrack.title,
+                                    text = track.title,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     color = if (isDark) Color(0xFFEEEEEE) else Color(0xFF111111)
                                 )
-                                val artistText = currentTrack.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
+                                val artistText = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }?.uppercase() ?: "UNKNOWN ARTIST"
                                 Text(
                                     text = artistText,
                                     style = MaterialTheme.typography.labelMedium,
@@ -666,7 +671,20 @@ fun MiniPlayer(
                             )
                         } else {
                             Crossfade(targetState = isPlaying, animationSpec = tween(180), label = "ppMini") { playing ->
-                                Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, modifier = Modifier.size(30.dp))
+                                // Same real morph as the full player (scale + fade), so play/pause
+                                // reads as one shape transforming rather than two icons dissolving.
+                                AnimatedContent(
+                                    targetState = playing,
+                                    transitionSpec = {
+                                        (scaleIn(initialScale = 0.5f, animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)) + fadeIn(tween(140)))
+                                            .togetherWith(
+                                                scaleOut(targetScale = 0.5f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessHigh)) + fadeOut(tween(100))
+                                            )
+                                    },
+                                    label = "ppMiniMorph"
+                                ) { pl ->
+                                    Icon(if (pl) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, modifier = Modifier.size(30.dp))
+                                }
                             }
                         }
                     }

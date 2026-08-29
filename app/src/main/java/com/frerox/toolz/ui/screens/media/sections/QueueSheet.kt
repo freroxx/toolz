@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.frerox.toolz.data.music.MusicTrack
+import com.frerox.toolz.ui.components.AlbumArtImage
 import com.frerox.toolz.ui.components.DragDropState
 import com.frerox.toolz.ui.components.dragDropColumn
 import com.frerox.toolz.ui.components.dragDropItem
@@ -413,12 +414,12 @@ private fun NowPlayingHeroCard(
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         shadowElevation = 4.dp
                     ) {
-                        AsyncImage(
-                            model = track.thumbnailUri,
-                            contentDescription = "Album art for ${track.title}",
+                        AlbumArtImage(
+                            url = track.thumbnailUri,
+                            seed = track.title,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
-                            error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                            iconSize = 26.dp
                         )
                     }
                     Spacer(Modifier.width(14.dp))
@@ -667,12 +668,12 @@ fun QueueItem(
                 shape = RoundedCornerShape(13.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant
             ) {
-                AsyncImage(
-                    model = qTrack.thumbnailUri,
-                    contentDescription = "Album art for ${qTrack.title}",
+                AlbumArtImage(
+                    url = qTrack.thumbnailUri,
+                    seed = qTrack.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                    iconSize = 22.dp
                 )
             }
             Spacer(Modifier.width(14.dp))

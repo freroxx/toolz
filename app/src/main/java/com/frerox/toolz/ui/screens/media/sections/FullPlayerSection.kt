@@ -227,7 +227,10 @@ fun FullPlayerView(
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
     val track = state.currentTrack ?: return
     val configuration = LocalConfiguration.current
-    
+    // Full-screen drop distance for the exit choreography: the sheet slides
+    // down past the bottom of the screen before it's dismissed.
+    val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
+
     val pauseCd = stringResource(R.string.st_MusicPlayerScreen_pause68)
     val playCd = stringResource(R.string.st_MusicPlayerScreen_play69)
 
@@ -250,14 +253,21 @@ fun FullPlayerView(
     var showArtSettings by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    // The sheet state lives for the whole sheet composition and is reused on
+    // every open/close lifecycle; dismiss is driven by our own exitProgress
+    // choreography below (isExiting), so this state is only ever the sheet's
+    // structural anchor (Expanded/Hidden), not the exit animation driver.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     // ── Open/close choreography ──
     // Entrance: a gentle pop-in (slight overshoot via spring) instead of
     // relying only on the sheet's own default slide-up, so opening the full
     // player feels like one deliberate motion rather than two stacked ones.
-    // Exit: a shrink/fade/settle-down of the whole sheet before the callbacks
-    // actually fire. This now covers BOTH a normal dismiss (back press, scrim
-    // tap, swipe-down) and "Stop & exit" — the same choreography either way,
-    // the only difference is whether onStop() runs first.
+    // Exit: the whole sheet slides down off-screen (a full display height),
+    // with a subtle scale-down and fade, before the callbacks fire. This now
+    // covers BOTH a normal dismiss (back press, scrim tap, swipe-down) and
+    // "Stop & exit" — the same choreography either way, the only difference
+    // being whether onStop() runs before onDismiss().
     val entranceProgress = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         entranceProgress.animateTo(1f, animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow))
@@ -266,6 +276,11 @@ fun FullPlayerView(
     var isExiting by remember { mutableStateOf(false) }
     var exitStopsPlayback by remember { mutableStateOf(false) }
     val exitProgress = remember { Animatable(0f) }
+    // Distance the whole sheet travels on exit — one full display height, so
+    // the surface drops all the way off-screen instead of settling by a token
+    // 48dp nudge. Resolved once per configuration (it cannot change mid-exit)
+    // and captured into the graphicsLayer lambda, keeping per-frame reads there.
+    val exitSlidePx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
     LaunchedEffect(isExiting) {
         if (isExiting) {
             exitProgress.animateTo(1f, animationSpec = tween(360, easing = FastOutSlowInEasing))
@@ -273,9 +288,9 @@ fun FullPlayerView(
             onDismiss()
         }
     }
-    // Normal close (back/scrim/swipe): plays the shrink-out, but doesn't stop playback.
+    // Normal close (back/scrim/swipe): plays the slide-down, but doesn't stop playback.
     val requestClose: () -> Unit = { if (!isExiting) { exitStopsPlayback = false; isExiting = true } }
-    // "Stop & exit" menu action: same shrink-out, but stops playback first.
+    // "Stop & exit" menu action: same slide-down, but stops playback first.
     val requestStopAndExit: () -> Unit = { if (!isExiting) { exitStopsPlayback = true; isExiting = true } }
 
     // ── Sleep timer completion → stop & exit ──
@@ -368,7 +383,7 @@ fun FullPlayerView(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = requestClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Color.Transparent,
         dragHandle = null,
@@ -382,10 +397,10 @@ fun FullPlayerView(
                 .fillMaxSize()
                 .graphicsLayer {
                     val p = exitProgress.value
-                    scaleX = 1f - p * 0.16f
-                    scaleY = 1f - p * 0.16f
+                    scaleX = 1f - p * 0.02f
+                    scaleY = 1f - p * 0.02f
                     alpha = 1f - p
-                    translationY = p * 48.dp.toPx()
+                    translationY = p * screenHeightPx
                 },
             color = MaterialTheme.colorScheme.surface
         ) {
@@ -815,12 +830,12 @@ fun FullPlayerView(
                                         color = MaterialTheme.colorScheme.surfaceVariant,
                                         border = BorderStroke(1.dp, dynamicColors.primary.copy(alpha = 0.10f))
                                     ) {
-                                        AsyncImage(
-                                            model = nextArt.thumbnailUri,
-                                            contentDescription = "Album art for ${nextArt.title}",
-                                            contentScale = ContentScale.Crop,
+                                        AlbumArtImage(
+                                            url = nextArt.thumbnailUri,
+                                            seed = nextArt.title,
                                             modifier = Modifier.fillMaxSize(),
-                                            error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                                            contentScale = ContentScale.Crop,
+                                            iconSize = 48.dp
                                         )
                                     }
                                 }
@@ -842,12 +857,12 @@ fun FullPlayerView(
                                         color = MaterialTheme.colorScheme.surfaceVariant,
                                         border = BorderStroke(1.dp, dynamicColors.primary.copy(alpha = 0.10f))
                                     ) {
-                                        AsyncImage(
-                                            model = prevArt.thumbnailUri,
-                                            contentDescription = "Album art for ${prevArt.title}",
-                                            contentScale = ContentScale.Crop,
+                                        AlbumArtImage(
+                                            url = prevArt.thumbnailUri,
+                                            seed = prevArt.title,
                                             modifier = Modifier.fillMaxSize(),
-                                            error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                                            contentScale = ContentScale.Crop,
+                                            iconSize = 48.dp
                                         )
                                     }
                                 }
@@ -878,12 +893,12 @@ fun FullPlayerView(
                                     color = MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(1.dp, dynamicColors.primary.copy(alpha = 0.10f))
                                 ) {
-                                    AsyncImage(
-                                        model = track.thumbnailUri,
-                                        contentDescription = "Album art for ${track.title}",
-                                        contentScale = ContentScale.Crop,
+                                    AlbumArtImage(
+                                        url = track.thumbnailUri,
+                                        seed = track.title,
                                         modifier = Modifier.fillMaxSize(),
-                                        error = rememberVectorPainter(Icons.Rounded.MusicNote)
+                                        contentScale = ContentScale.Crop,
+                                        iconSize = 48.dp
                                     )
                                 }
                             }
@@ -909,16 +924,16 @@ fun FullPlayerView(
                                         transitionSpec = {
                                             val dir = skipDirection
                                             val enter = fadeIn(tween(360, easing = FastOutSlowInEasing)) +
-                                                slideInVertically(
+                                                slideInHorizontally(
                                                     animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow)
-                                                ) { h -> h / 3 } +
+                                                ) { w -> (w / 3) * dir } +
                                                 scaleIn(
                                                     initialScale = 0.92f,
                                                     animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-                                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                                    transformOrigin = TransformOrigin(if (dir > 0) 0f else 1f, 0.5f)
                                                 )
                                             val exit = fadeOut(tween(180, easing = FastOutLinearInEasing)) +
-                                                slideOutVertically(tween(180)) { h -> -h / 4 }
+                                                slideOutHorizontally(tween(180)) { w -> -(w / 4) * dir }
                                             enter.togetherWith(exit).using(SizeTransform(clip = false))
                                         },
                                         label = "trackTitle"
@@ -930,19 +945,22 @@ fun FullPlayerView(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.basicMarquee()
+                                            modifier = Modifier
+                                                .basicMarquee()
+                                                .horizontalFadingEdges(left = 24.dp, right = 24.dp)
                                         )
                                     }
                                     AnimatedContent(
                                         targetState = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }
                                             ?: "Unknown artist",
                                         transitionSpec = {
+                                            val dir = skipDirection
                                             val enter = fadeIn(tween(360, delayMillis = 40, easing = FastOutSlowInEasing)) +
-                                                slideInVertically(
+                                                slideInHorizontally(
                                                     animationSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMediumLow)
-                                                ) { h -> h / 3 }
+                                                ) { w -> (w / 3) * dir }
                                             val exit = fadeOut(tween(150, easing = FastOutLinearInEasing)) +
-                                                slideOutVertically(tween(150)) { h -> -h / 4 }
+                                                slideOutHorizontally(tween(150)) { w -> -(w / 4) * dir }
                                             enter.togetherWith(exit).using(SizeTransform(clip = false))
                                         },
                                         label = "trackArtist"
@@ -1047,9 +1065,21 @@ fun FullPlayerView(
                             // ── 4. Slider ──
                             Spacer(Modifier.height(18.dp))
                             val currentPos = sliderPos ?: playbackPosition
+                            // Glide the slider thumb back to its resting place when a new
+                            // track drops the position to a small value: pass the RAW target
+                            // while scrubbing (sliderPos != null) so the thumb tracks the
+                            // finger 1:1, and smoothly tween short of that (e.g. a track
+                            // switch resetting to 0) otherwise. snap() in performance mode.
+                            val sliderGlide by animateFloatAsState(
+                                targetValue = currentPos.toFloat(),
+                                animationSpec = if (state.performanceMode || sliderPos != null) snap() else
+                                    tween(450, easing = FastOutSlowInEasing),
+                                label = "sliderGlide"
+                            )
+                            val sliderValue = if (sliderPos != null || state.performanceMode) currentPos.toFloat() else sliderGlide
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 SquigglySlider(
-                                    value = currentPos.toFloat(),
+                                    value = sliderValue,
                                     onValueChange = { onSliderChange(it.toLong()) },
                                     onValueChangeFinished = onSliderChangeFinished,
                                     valueRange = 0f..(duration.toFloat().coerceAtLeast(1f)),

@@ -161,16 +161,17 @@ class ToolzApplication : Application(), Configuration.Provider {
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "PurgeShotReschedule",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
         // Poll for missed screenshots every 15 min — backup for OEMs where JobScheduler / observer dies outside Toolz
+        // UPDATE ensures the periodic work survives app updates and policy changes; KEEP would silently retain stale interval.
         val detect = PeriodicWorkRequestBuilder<com.frerox.toolz.worker.PurgeShotDetectWorker>(15, TimeUnit.MINUTES)
             .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(false).build())
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "PurgeShotDetect",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             detect,
         )
     }

@@ -164,7 +164,9 @@ class MusicRepository @Inject constructor(
 
     private fun getArtworkStorageDir(): File {
         val dir = File(context.filesDir, "album_thumbs")
-        if (!dir.exists()) dir.mkdirs()
+        if (!dir.exists() && !dir.mkdirs()) {
+            android.util.Log.w("MusicRepository", "getArtworkStorageDir: failed to create $dir")
+        }
         return dir
     }
 
@@ -181,12 +183,14 @@ class MusicRepository @Inject constructor(
         return true
     }
 
-    private fun getEmbeddedArtworkUri(uri: Uri, path: String? = null, albumId: Long = -1): String? {
+    private fun getEmbeddedArtworkUri(uri: Uri, path: String? = null, albumId: Long = -1, forceRefresh: Boolean = false): String? {
         val thumbsDir = getArtworkStorageDir()
         val uniqueKey = "${path ?: uri.toString()}_${albumId}".hashCode()
         val targetFile = File(thumbsDir, "thumb_${uniqueKey}.jpg")
 
-        if (targetFile.exists() && targetFile.length() > 0) {
+        // Unless forced, serve the cached extraction. forceRefresh is used right after
+        // a file rewrite so the cache can't serve stale pre-edit artwork.
+        if (!forceRefresh && targetFile.exists() && targetFile.length() > 0) {
             return Uri.fromFile(targetFile).toString()
         }
 
@@ -718,19 +722,35 @@ class MusicRepository @Inject constructor(
     ): MusicTrack? = withContext(Dispatchers.IO) {
         val track = musicDao.getTrackByUri(trackUri) ?: return@withContext null
         var thumbToPersist = track.thumbnailUri
+        // True when this save actually picked a new cover — used below to decide
+        // whether re-extracting embedded art is safe (vs. clobbering a custom pick).
+        val hadThumbChange = !newThumbnailUri.isNullOrBlank() && newThumbnailUri != track.thumbnailUri
         // Handle thumbnail picker copy
-        if (!newThumbnailUri.isNullOrBlank() && newThumbnailUri != track.thumbnailUri) {
+        if (hadThumbChange) {
             try {
-                val input = context.contentResolver.openInputStream(Uri.parse(newThumbnailUri))
-                if (input != null) {
-                    val dir = getArtworkStorageDir()
-                    val target = File(dir, "thumb_custom_${track.stableId.ifBlank { track.uri.hashCode().toString() }}.jpg")
-                    input.use { ins ->
-                        FileOutputStream(target).use { out -> ins.copyTo(out) }
-                    }
-                    thumbToPersist = Uri.fromFile(target).toString()
-                } else {
+                val sourceUri = Uri.parse(newThumbnailUri)
+                val dir = getArtworkStorageDir()
+                val target = File(dir, "thumb_custom_${track.stableId.ifBlank { track.uri.hashCode().toString() }}.jpg")
+                // Already pointing at our persisted custom thumb — nothing to copy.
+                if (newThumbnailUri == Uri.fromFile(target).toString()) {
                     thumbToPersist = newThumbnailUri
+                } else {
+                    val input = context.contentResolver.openInputStream(sourceUri)
+                        // contentResolver may refuse temp/cache URIs; fall back to a direct file read.
+                        ?: if (newThumbnailUri.startsWith("file://")) {
+                            sourceUri.path?.let { File(it) }?.takeIf { it.exists() && it.isFile }?.inputStream()
+                        } else null
+                    if (input != null) {
+                        input.use { ins ->
+                            FileOutputStream(target).use { out -> ins.copyTo(out) }
+                        }
+                        // Persist the file URI only when the copy actually landed.
+                        thumbToPersist =
+                            if (target.exists() && target.length() > 0) Uri.fromFile(target).toString()
+                            else newThumbnailUri
+                    } else {
+                        thumbToPersist = newThumbnailUri
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.w("MusicRepository", "thumb copy failed", e)
@@ -751,7 +771,7 @@ class MusicRepository @Inject constructor(
         // Attempt to write ID3 tags to file if path is a real file
         val path = updated.path
         if (!path.isNullOrBlank() && File(path).exists() && File(path).canWrite()) {
-            try {
+            val writeOk = try {
                 writeId3TagsToFile(
                     filePath = path,
                     title = updated.title,
@@ -760,16 +780,24 @@ class MusicRepository @Inject constructor(
                     thumbnailPath = thumbToPersist?.let { Uri.parse(it).path }?.let { File(it) }?.takeIf { it.exists() }?.absolutePath,
                     lyrics = embeddedLyrics
                 )
-                // If file write succeeded, re-extract thumb to ensure consistency
-                if (!thumbToPersist.isNullOrBlank()) {
-                    val refreshedThumb = getEmbeddedArtworkUri(Uri.fromFile(File(path)), path, updated.albumId)
-                    if (refreshedThumb != null && refreshedThumb != updated.thumbnailUri) {
-                        musicDao.updateTrack(updated.copy(thumbnailUri = refreshedThumb))
-                        return@withContext updated.copy(thumbnailUri = refreshedThumb)
-                    }
-                }
             } catch (e: Exception) {
                 android.util.Log.w("MusicRepository", "writeId3Tags failed (non-fatal)", e)
+                false
+            }
+            // Re-extract embedded art ONLY when this save actually rewrote the file
+            // AND a new cover was embedded. Guarding on writeOk keeps a failed FFmpeg
+            // attempt (or a stale cached extraction) from clobbering the freshly picked
+            // custom thumb with the OLD embedded art; forceRefresh invalidates the
+            // per-path artwork cache so it reflects the file as rewritten just now.
+            if (writeOk && hadThumbChange) {
+                val refreshedThumb = runCatching {
+                    getEmbeddedArtworkUri(Uri.fromFile(File(path)), path, updated.albumId, forceRefresh = true)
+                }.getOrNull()
+                if (refreshedThumb != null && refreshedThumb != updated.thumbnailUri) {
+                    val withRefreshed = updated.copy(thumbnailUri = refreshedThumb)
+                    musicDao.updateTrack(withRefreshed)
+                    return@withContext withRefreshed
+                }
             }
         } else if (!path.isNullOrBlank() && path.startsWith("content://")) {
             // For SAF content URIs, try content resolver edit via FFmpeg temp file -> write back
@@ -789,6 +817,12 @@ class MusicRepository @Inject constructor(
         updated
     }
 
+    /**
+     * Rewrites ID3/comment tags (plus optional attached cover) via FFmpeg.
+     * If the file was created from a picker copy, [thumbnailPath] points at the
+     * copied artwork so a successful rewrite re-embeds it into the track file.
+     * Returns true only when the rewritten file replaced the original on disk.
+     */
     private fun writeId3TagsToFile(
         filePath: String,
         title: String?,
@@ -796,64 +830,114 @@ class MusicRepository @Inject constructor(
         album: String?,
         thumbnailPath: String?,
         lyrics: String?
-    ) {
-        try {
+    ): Boolean {
+        return try {
             val inputFile = File(filePath)
-            if (!inputFile.exists()) return
-            // Build FFmpeg args: -i input -c copy -metadata title=... -metadata artist=... -metadata album=...
-            // For cover: -i thumb -map 0:a -map 1:v? But re-use process logic: we need to handle m4a vs mp3
+            if (!inputFile.exists()) return false
             val ext = inputFile.extension.lowercase()
             val tmpOut = File.createTempFile("toolz_tagedit_", ".$ext", context.cacheDir)
-            val args = mutableListOf<String>()
-            args.addAll(listOf("-i", inputFile.absolutePath))
-            var hasCover = false
-            if (!thumbnailPath.isNullOrBlank() && File(thumbnailPath).exists() && ext != "opus") {
-                args.addAll(listOf("-i", thumbnailPath))
-                hasCover = true
-            }
-            // Map streams
-            if (hasCover) {
-                args.addAll(listOf("-map", "0", "-map", "1"))
-            } else {
-                args.addAll(listOf("-map", "0"))
-            }
-            // Copy codecs where possible to avoid re-encode, but ensure metadata written
-            args.addAll(listOf("-c", "copy"))
-            if (!title.isNullOrBlank()) args.addAll(listOf("-metadata", "title=$title"))
-            if (!artist.isNullOrBlank()) args.addAll(listOf("-metadata", "artist=$artist"))
-            if (!album.isNullOrBlank()) args.addAll(listOf("-metadata", "album=$album"))
-            if (!lyrics.isNullOrBlank()) {
-                // MP3: USLT is tricky, but FFmpeg maps "lyrics" to appropriate frame for many containers
-                args.addAll(listOf("-metadata", "lyrics=$lyrics"))
-                // Also try TXXX for compatibility
-                args.addAll(listOf("-metadata", "comment=$lyrics"))
-            }
-            if (hasCover) {
-                if (ext == "mp3") {
-                    args.addAll(listOf("-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"))
-                } else {
-                    args.addAll(listOf("-disposition:v", "attached_pic"))
-                }
-            }
-            args.addAll(listOf("-y", tmpOut.absolutePath))
-            val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArguments(args.toTypedArray())
-            if (com.arthenica.ffmpegkit.ReturnCode.isSuccess(session.returnCode)) {
-                // Replace original atomically
-                if (tmpOut.exists() && tmpOut.length() > 0) {
-                    inputFile.delete()
-                    tmpOut.copyTo(inputFile, overwrite = true)
-                    tmpOut.delete()
-                    // Notify MediaScanner
-                    android.media.MediaScannerConnection.scanFile(context, arrayOf(inputFile.absolutePath), null, null)
-                } else {
-                    tmpOut.delete()
-                }
-            } else {
+
+            val args = buildTagEditArgs(
+                inputPath = inputFile.absolutePath,
+                thumbnailPath = thumbnailPath,
+                title = title,
+                artist = artist,
+                album = album,
+                lyrics = lyrics,
+                tmpOutPath = tmpOut.absolutePath
+            )
+
+            val session = com.arthenica.ffmpegkit.FFmpegKit.executeWithArguments(args)
+            if (!com.arthenica.ffmpegkit.ReturnCode.isSuccess(session.returnCode)) {
                 android.util.Log.w("MusicRepository", "FFmpeg tag write failed: ${session.failStackTrace}")
                 tmpOut.delete()
+                return false
             }
+            if (!tmpOut.exists() || tmpOut.length() <= 0) {
+                tmpOut.delete()
+                return false
+            }
+
+            // Atomic-ish replace with a rollback backup: a failed copy can never
+            // destroy the original file (previous version deleted it first, which
+            // risked losing the track if the copy then failed).
+            val backup = File(inputFile.parentFile, ".${inputFile.name}.toolz.bak")
+            try {
+                inputFile.copyTo(backup, overwrite = true)
+                tmpOut.copyTo(inputFile, overwrite = true)
+                tmpOut.delete()
+                backup.delete()
+            } catch (e: Exception) {
+                android.util.Log.w("MusicRepository", "tag file replace failed, restoring backup", e)
+                runCatching { backup.copyTo(inputFile, overwrite = true) }
+                backup.delete()
+                tmpOut.delete()
+                return false
+            }
+
+            // Let MediaStore know the file changed so embedded art / metadata
+            // consumers pick up the new values.
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(inputFile.absolutePath), null, null)
+            true
         } catch (e: Exception) {
             android.util.Log.w("MusicRepository", "writeId3TagsToFile exception", e)
+            false
         }
     }
+}
+
+/**
+ * Builds the FFmpeg arguments for a tag/cover rewrite. Pure string building kept
+ * top-level (internal) so it is unit-testable without Android/FFmpegKit.
+ *
+ * Stream mapping:
+ *  - With cover: keep ONLY the original audio streams and take the picked image
+ *    as the attached-picture stream (`-map 0:a -map 1:v`). Mapping the full `0`
+ *    would also carry a pre-existing cover stream across, producing duplicated
+ *    artwork on mp3/m4a that already had art.
+ *  - Without cover: preserve every original stream untouched (`-map 0`).
+ */
+internal fun buildTagEditArgs(
+    inputPath: String,
+    thumbnailPath: String?,
+    title: String?,
+    artist: String?,
+    album: String?,
+    lyrics: String?,
+    tmpOutPath: String
+): Array<String> {
+    val ext = inputPath.substringAfterLast('.').lowercase()
+    val args = mutableListOf<String>()
+    args.addAll(listOf("-i", inputPath))
+    var hasCover = false
+    if (!thumbnailPath.isNullOrBlank() && File(thumbnailPath).exists() && ext != "opus") {
+        args.addAll(listOf("-i", thumbnailPath))
+        hasCover = true
+    }
+    if (hasCover) {
+        args.addAll(listOf("-map", "0:a", "-map", "1:v"))
+    } else {
+        args.addAll(listOf("-map", "0"))
+    }
+    // Copy codecs where possible to avoid re-encode, but ensure metadata written
+    args.addAll(listOf("-c", "copy"))
+    // id3v2.3 is the most widely compatible tag version for players.
+    if (ext == "mp3") args.addAll(listOf("-id3v2_version", "3"))
+    if (!title.isNullOrBlank()) args.addAll(listOf("-metadata", "title=$title"))
+    if (!artist.isNullOrBlank()) args.addAll(listOf("-metadata", "artist=$artist"))
+    if (!album.isNullOrBlank()) args.addAll(listOf("-metadata", "album=$album"))
+    if (!lyrics.isNullOrBlank()) {
+        // MP3: ffmpeg maps `lyrics` to the USLT frame with id3v2.3;
+        // MP4/M4A: written as the ©lyr metadata tag.
+        args.addAll(listOf("-metadata", "lyrics=$lyrics"))
+    }
+    if (hasCover) {
+        if (ext == "mp3") {
+            args.addAll(listOf("-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"))
+        } else {
+            args.addAll(listOf("-disposition:v", "attached_pic"))
+        }
+    }
+    args.addAll(listOf("-y", tmpOutPath))
+    return args.toTypedArray()
 }
