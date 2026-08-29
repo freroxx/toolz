@@ -164,6 +164,15 @@ class ToolzApplication : Application(), Configuration.Provider {
             ExistingPeriodicWorkPolicy.KEEP,
             request,
         )
+        // Poll for missed screenshots every 15 min — backup for OEMs where JobScheduler / observer dies outside Toolz
+        val detect = PeriodicWorkRequestBuilder<com.frerox.toolz.worker.PurgeShotDetectWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(false).build())
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "PurgeShotDetect",
+            ExistingPeriodicWorkPolicy.KEEP,
+            detect,
+        )
     }
 
     override val workManagerConfiguration: Configuration

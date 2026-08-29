@@ -20,6 +20,10 @@ class PurgeShotAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != "com.frerox.toolz.PURGE_ALARM") return
         val id = intent.getLongExtra("purge_id", -1L)
+        if (id < 0L) {
+            Log.w(TAG, "Alarm fired with missing/invalid purge_id, ignoring")
+            return
+        }
         Log.i(TAG, "Alarm fired for id=$id")
         try {
             val data = Data.Builder().putLong("purge_id", id).build()

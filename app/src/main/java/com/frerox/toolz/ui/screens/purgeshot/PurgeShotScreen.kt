@@ -12,8 +12,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -31,7 +34,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,12 +45,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import com.frerox.toolz.data.purgeshot.PurgeShotEntity
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
 import com.frerox.toolz.ui.components.*
+import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
-import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -62,6 +68,7 @@ fun PurgeShotScreen(
     val nextPurge by viewModel.nextPurgeEntity.collectAsStateWithLifecycle()
     val undoItem by viewModel.undoAvailable.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val performanceMode = LocalPerformanceMode.current
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     LaunchedEffect(Unit) {
@@ -98,8 +105,8 @@ fun PurgeShotScreen(
                 title = "PurgeShot",
                 subtitle = when {
                     !enabled -> "Paused"
-                    pending.isEmpty() -> if (totalDeleted > 0) "$totalDeleted deleted" else "Ready"
-                    else -> "${pending.size} queued • next in ${nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—"}"
+                    pending.isEmpty() -> if (totalDeleted > 0) "$totalDeleted deleted" else "Ready to save space"
+                    else -> "${pending.size} queued • next ${nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—"}"
                 },
                 navigationIcon = {
                     IconButton(
@@ -135,11 +142,13 @@ fun PurgeShotScreen(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().toolzBackground().padding(top = padding.calculateTopPadding())) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .fadingEdges(top = 12.dp, bottom = 16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // Permission – only when needed
+                // Permission card — fluid, only when needed
                 if (!hasAllFilesState && pending.isNotEmpty()) {
                     item {
                         StaggeredEntrance(index = 0) {
@@ -161,7 +170,7 @@ fun PurgeShotScreen(
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text("Allow deleting screenshots", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Grant All-files access once — then deletions happen silently.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
+                                        Text("One-time All-files access — then silent auto-delete.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
                                     }
                                     Icon(Icons.Rounded.ChevronRight, null)
                                 }
@@ -170,7 +179,7 @@ fun PurgeShotScreen(
                     }
                 }
 
-                // Hero — simple, animated
+                // Hero — fluid, simple, expressive
                 item {
                     StaggeredEntrance(index = 1) {
                         ExpressiveCard(
@@ -181,11 +190,11 @@ fun PurgeShotScreen(
                             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                     Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primary) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.DeleteSweep, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
+                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("Screenshots that self-destruct", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text("Pick a timer when you shoot — we handle the rest.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
+                                        Text("Self-destructing screenshots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text("Save storage without thinking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
                                     }
                                 }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -193,18 +202,28 @@ fun PurgeShotScreen(
                                     HeroStat(label = "Deleted", value = "$totalDeleted", modifier = Modifier.weight(1f))
                                     HeroStat(label = "Next", value = nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—", modifier = Modifier.weight(1f))
                                 }
+                                if (pending.isNotEmpty()) {
+                                    ToolzWavyLinearProgressIndicator(
+                                        progress = {
+                                            nextPurge?.let { 1f - ((it.scheduledDeleteAtMs - System.currentTimeMillis()).toFloat() / it.durationMillis.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } ?: 0f
+                                        },
+                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(8.dp)),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // Controls — enable + smart auto + auto time
+                // Controls — fluid toggle with spring
                 item {
                     StaggeredEntrance(index = 2) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             ToggleRow(
                                 title = "PurgeShot",
-                                subtitle = if (enabled) "Watching screenshots" else "Paused",
+                                subtitle = if (enabled) "Watching Screenshots" else "Paused",
                                 icon = Icons.Rounded.ScreenshotMonitor,
                                 checked = enabled,
                                 onCheckedChange = { viewModel.setEnabled(it) }
@@ -217,7 +236,7 @@ fun PurgeShotScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ToggleRow(
                                         title = "Smart Auto",
-                                        subtitle = if (smartAuto) "Auto-queues ${durationLabel(autoDuration)} — no popup" else "Show popup to pick each time",
+                                        subtitle = if (smartAuto) "No popup — auto ${durationLabel(autoDuration)}" else "Show popup each time",
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = smartAuto,
                                         onCheckedChange = { viewModel.setSmartAuto(it) }
@@ -246,7 +265,7 @@ fun PurgeShotScreen(
                     }
                 }
 
-                // Timers
+                // Timers — clear grid, fluid edit
                 item {
                     StaggeredEntrance(index = 3) {
                         ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
@@ -266,10 +285,13 @@ fun PurgeShotScreen(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     userScrollEnabled = false
                                 ) {
-                                    itemsIndexed(presets) { _, p ->
-                                        TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
+                                    itemsIndexed(presets) { idx, p ->
+                                        StaggeredEntrance(index = idx) {
+                                            TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
+                                        }
                                     }
                                 }
+                                Text("Tap Edit to choose up to 6. Auto follows Smart Auto.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -277,14 +299,10 @@ fun PurgeShotScreen(
 
                 // Queue header
                 item {
-                    StaggeredEntrance(index = 4) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                            if (pending.isNotEmpty()) {
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                                    Text("${pending.size}", modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                }
-                            }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        if (pending.isNotEmpty()) {
+                            ExpressiveStatePill(text = "${pending.size} pending", icon = Icons.Rounded.HourglassEmpty, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -293,24 +311,31 @@ fun PurgeShotScreen(
                     item {
                         StaggeredEntrance(index = 5) {
                             ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                                Column(Modifier.padding(32.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(Modifier.padding(28.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Surface(modifier = Modifier.size(64.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoDelete, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
                                     }
-                                    Text("All clear", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-                                    Text("Screenshots you choose will appear here. With Smart Auto they queue silently.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                                    Text("No queued shots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                                    Text("Take a screenshot — pick a timer or let Smart Auto handle it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                                    ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
+                                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Demo shot", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
                     items(pending, key = { it.id }) { entry ->
-                        QueueCard(
-                            entry = entry,
-                            onKeep = { viewModel.cancelEntry(entry.id) },
-                            onDeleteNow = { viewModel.deleteNow(entry.id) },
-                            onExtend = { viewModel.extendEntry(entry.id, 15 * 60_000L) }
-                        )
+                        StaggeredEntrance(index = 0) {
+                            QueueCard(
+                                entry = entry,
+                                onKeep = { viewModel.cancelEntry(entry.id) },
+                                onDeleteNow = { viewModel.deleteNow(entry.id) },
+                                onExtend = { viewModel.extendEntry(entry.id, 15 * 60_000L) }
+                            )
+                        }
                     }
                 }
 
@@ -330,7 +355,7 @@ fun PurgeShotScreen(
     if (showAutoPicker) {
         AutoPickerSheet(
             currentDuration = autoDuration,
-            options = viewModel.allOptions,
+            options = viewModel.allOptions.filter { !it.label.equals("Auto", true) },
             onDismiss = { showAutoPicker = false },
             onSelect = { viewModel.setAutoDuration(it); showAutoPicker = false }
         )
@@ -341,7 +366,7 @@ fun PurgeShotScreen(
             shape = RoundedCornerShape(24.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("Clear ${pending.size} queued?", fontWeight = FontWeight.Black) },
-            text = { Text("Files stay on device — only their timers are removed.") },
+            text = { Text("Files stay — only timers are removed.") },
             confirmButton = {
                 Button(
                     onClick = { viewModel.clearAllPending(); showClearConfirm = false },
@@ -355,17 +380,26 @@ fun PurgeShotScreen(
 
 @Composable
 private fun HeroStat(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)) {
+    // Fluid morph: value changes animate with spring
+    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)) {
         Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, letterSpacing = 0.6.sp, color = MaterialTheme.colorScheme.primary, fontSize = 10.sp)
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            AnimatedContent(targetState = value, transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.88f)).togetherWith(fadeOut()) }, label = "heroStat") { v ->
+                Text(v, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
 
 @Composable
 private fun ToggleRow(title: String, subtitle: String, icon: ImageVector, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    ExpressiveCard(onClick = { onCheckedChange(!checked) }, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    val scale by animateFloatAsState(targetValue = if (checked) 1f else 0.96f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 420f), label = "toggleScale")
+    ExpressiveCard(
+        onClick = { onCheckedChange(!checked) },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+    ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
                 Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = if (checked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest) {
@@ -383,10 +417,16 @@ private fun ToggleRow(title: String, subtitle: String, icon: ImageVector, checke
 
 @Composable
 private fun TimerChip(preset: PurgeShotPreset, isAuto: Boolean) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(targetValue = if (pressed) 0.94f else 1f, animationSpec = spring(dampingRatio = 0.55f, stiffness = 480f), label = "chip")
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = if (isAuto) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { scaleX = scale; scaleY = scale },
+        tonalElevation = if (isAuto) 1.dp else 0.dp
     ) {
         Column(Modifier.padding(vertical = 12.dp, horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(iconFor(preset.iconName), null, modifier = Modifier.size(18.dp), tint = if (isAuto) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -417,17 +457,23 @@ private fun QueueCard(entry: PurgeShotEntity, onKeep: () -> Unit, onDeleteNow: (
     }
     val overdue = remaining <= 0
     ExpressiveCard(onClick = {}, shape = RoundedCornerShape(20.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(14.dp).animateContentSize(spring(dampingRatio = 0.8f, stiffness = 380f)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                // Thumbnail preview — fluid
+                Surface(modifier = Modifier.size(44.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+                    AsyncImage(
+                        model = entry.fileUriString,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
                 }
                 Column(Modifier.weight(1f)) {
                     Text(entry.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(entry.durationLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
-                    Text(if (overdue) "Deleting…" else formatRemaining(remaining), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                Surface(shape = RoundedCornerShape(10.dp), color = if (overdue) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
+                    Text(if (overdue) "Deleting…" else formatRemaining(remaining), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = if (overdue) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
                 }
             }
             ToolzWavyLinearProgressIndicator(
@@ -437,20 +483,18 @@ private fun QueueCard(entry: PurgeShotEntity, onKeep: () -> Unit, onDeleteNow: (
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onExtend, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
+                ToolzTonalExpressiveButton(onClick = onExtend, modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 10.dp)) {
                     Icon(Icons.Rounded.MoreTime, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("+15m", fontWeight = FontWeight.Bold)
+                    Text("+15m", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
-                OutlinedButton(onClick = onKeep, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(vertical = 10.dp)) {
-                    Icon(Icons.Rounded.Undo, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Keep")
+                ToolzOutlinedExpressiveButton(onClick = onKeep, modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 10.dp)) {
+                    Text("Keep", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
-                Button(onClick = onDeleteNow, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(vertical = 10.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                ToolzExpressiveButton(onClick = onDeleteNow, modifier = Modifier.weight(1f), contentPadding = PaddingValues(vertical = 10.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                     Icon(Icons.Rounded.DeleteForever, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Delete")
+                    Text("Now", fontWeight = FontWeight.Black, fontSize = 13.sp)
                 }
             }
         }
@@ -466,55 +510,123 @@ private fun PresetSheet(
     onSave: (List<PurgeShotPreset>) -> Unit
 ) {
     var selected by remember(current) { mutableStateOf(current.toMutableList()) }
-    ModalBottomSheet(onDismissRequest = onDismiss, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), containerColor = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val haptic = rememberToolzHapticFeedback()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        dragHandle = { BottomSheetDefaults.DragHandle(width = 36.dp) }
+    ) {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 380f)),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            // Header — simple, clear
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Edit timers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                    Text("${selected.size}/6", modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Column {
+                    Text("Choose timers", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text("Up to 6 • Auto works with Smart Auto", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                AnimatedContent(targetState = selected.size, label = "count") { count ->
+                    Surface(shape = CircleShape, color = if (count == 6) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer) {
+                        Text("$count/6", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
             }
-            if (selected.isNotEmpty()) {
-                LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.heightIn(max = 160.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), userScrollEnabled = false) {
-                    itemsIndexed(selected, key = { _, p -> p.label + p.durationMillis }) { idx, p ->
-                        Surface(
-                            onClick = { selected = selected.toMutableList().apply { removeAt(idx) } },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(iconFor(p.iconName), null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                Text(p.label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1)
-                                Text("tap to remove", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Selected — fluid chips with remove
+            AnimatedVisibility(visible = selected.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Your popup", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.heightIn(max = 180.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        userScrollEnabled = false
+                    ) {
+                        itemsIndexed(selected, key = { _, p -> p.label + p.durationMillis }) { idx, p ->
+                            StaggeredEntrance(index = idx) {
+                                ExpressiveCard(
+                                    onClick = {
+                                        haptic.tick()
+                                        selected = selected.toMutableList().apply { removeAt(idx) }
+                                    },
+                                    shape = RoundedCornerShape(18.dp),
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.animateItem()
+                                ) {
+                                    Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(iconFor(p.iconName), null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Text(p.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("tap to remove", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
+                                    }
+                                }
                             }
                         }
                     }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f))
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
             }
-            Text("All durations", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.heightIn(max = 260.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                itemsIndexed(allOptions) { _, opt ->
+
+            // All durations — simple 3-col fluid grid
+            Text("All durations", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.heightIn(max = 320.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                itemsIndexed(allOptions) { idx, opt ->
                     val isSelected = selected.any { it.label == opt.label && it.durationMillis == opt.durationMillis }
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            selected = when {
-                                isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
-                                selected.size < 6 -> (selected + opt).toMutableList()
-                                else -> selected
-                            }
-                        },
-                        label = { Text(opt.label, fontWeight = FontWeight.SemiBold) },
-                        leadingIcon = { Icon(iconFor(opt.iconName), null, modifier = Modifier.size(14.dp)) },
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    val canAdd = selected.size < 6
+                    StaggeredEntrance(index = idx + 4) {
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                haptic.tick()
+                                selected = when {
+                                    isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
+                                    canAdd -> (selected + opt).toMutableList()
+                                    else -> selected
+                                }
+                            },
+                            label = { Text(opt.label, fontWeight = FontWeight.SemiBold, maxLines = 1) },
+                            leadingIcon = {
+                                Icon(
+                                    iconFor(opt.iconName), null,
+                                    modifier = Modifier.size(16.dp).graphicsLayer {
+                                        scaleX = if (isSelected) 1.1f else 1f
+                                        scaleY = if (isSelected) 1.1f else 1f
+                                    }
+                                )
+                            },
+                            enabled = isSelected || canAdd,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.animateItem().bouncyClick(enabled = isSelected || canAdd) {},
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        )
+                    }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("Cancel") }
-                Button(onClick = { onSave(selected) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("Save", fontWeight = FontWeight.Black) }
+
+            // Actions — expressive, fluid
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                ToolzOutlinedExpressiveButton(onClick = onDismiss, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("Cancel", fontWeight = FontWeight.Bold) }
+                ToolzExpressiveButton(
+                    onClick = { haptic.success(); onSave(selected) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = selected.isNotEmpty()
+                ) { Text("Save ${selected.size}", fontWeight = FontWeight.Black) }
             }
+            Spacer(Modifier.navigationBarsPadding())
         }
     }
 }
