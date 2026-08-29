@@ -4,17 +4,14 @@
 
 package com.frerox.toolz.ui.components
 
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.net.Uri
-import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -29,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -45,18 +41,16 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
-import com.frerox.toolz.ui.theme.LocalBackgroundGradientEnabled
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlinx.coroutines.delay
 
 /**
- * PurgeShot M3 Expressive popup — 10x polished.
+ * PurgeShot M3 Expressive popup — clean, fluid, no blur.
  *
- * - Full M3 expressive motion (spring, stagger, morph)
- * - Optional blur scrim (respects performanceMode + backgroundGradientEnabled)
+ * - M3 expressive motion (spring, stagger, morph)
  * - Drag handle + swipe-to-dismiss, auto-dismiss 12s progress, success morph
- * - Metadata: name / size / status, wavy countdown hint
- * - Built only from ui/components/ primitives
+ * - Metadata: name / size / status
+ * - Clear scrim (no blur), built only from ui/components/ primitives
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -74,8 +68,6 @@ fun PurgeShotPopup(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val performanceMode = LocalPerformanceMode.current
-    val gradientEnabled = LocalBackgroundGradientEnabled.current
-    val blurEnabled = !performanceMode && gradientEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     var selected by remember { mutableStateOf<PurgeShotPreset?>(null) }
     var isSuccess by remember { mutableStateOf(false) }
@@ -118,12 +110,7 @@ fun PurgeShotPopup(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = if (blurEnabled) 0.28f else 0.52f))
-            .then(
-                if (blurEnabled) Modifier.graphicsLayer {
-                    renderEffect = RenderEffect.createBlurEffect(22f, 22f, Shader.TileMode.CLAMP).asComposeRenderEffect()
-                } else Modifier
-            )
+            .background(Color.Black.copy(alpha = 0.48f))
             .clickable(enabled = selected == null) { haptic.tick(); onDismiss() }
             .semantics { contentDescription = "PurgeShot scrim, tap to keep screenshot" },
         contentAlignment = Alignment.Center
@@ -433,17 +420,19 @@ fun PurgeShotPopup(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "Blends with system • ",
+                                    "Tap outside or drag to keep • ",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                 )
-                                Text(
-                                    if (onOpenSettings != null) "Blurs optional" else "Smart Auto skips this",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable(enabled = onOpenSettings != null) { onOpenSettings?.invoke() }
-                                )
+                                if (onOpenSettings != null) {
+                                    Text(
+                                        "Smart Auto skips this",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.clickable { onOpenSettings.invoke() }
+                                    )
+                                }
                             }
                         } else {
                             // Success bar
