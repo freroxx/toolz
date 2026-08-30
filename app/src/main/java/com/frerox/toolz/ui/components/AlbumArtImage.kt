@@ -55,7 +55,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 
-private val placeholderPalette = listOf(
+internal val placeholderPalette = listOf(
     Color(0xFFFF6B6B),
     Color(0xFF4ECDC4),
     Color(0xFFFFD93D),
@@ -80,7 +80,7 @@ private val placeholderPalette = listOf(
 
 // 12-strong expressive icon set, each verified to exist in Icons.Rounded
 // (QueueMusic lives under AutoMirrored to avoid the deprecated mirror alias).
-private val placeholderIcons = listOf(
+internal val placeholderIcons = listOf(
     Icons.Rounded.MusicNote,
     Icons.Rounded.Audiotrack,
     Icons.Rounded.LibraryMusic,
@@ -96,14 +96,14 @@ private val placeholderIcons = listOf(
 )
 
 /** Deterministic icon-safe color from the seed. */
-private fun pickColor(seed: String): Color {
+internal fun pickColor(seed: String): Color {
     val hash = seed.hashCode()
     val index = (hash and Int.MAX_VALUE) % placeholderPalette.size
     return placeholderPalette[index]
 }
 
 /** Deterministic icon from the seed, spread independently of color. */
-private fun pickIcon(seed: String): ImageVector {
+internal fun pickIcon(seed: String): ImageVector {
     val hash = seed.hashCode()
     val index = ((hash ushr 8) and Int.MAX_VALUE) % placeholderIcons.size
     return placeholderIcons[index]
