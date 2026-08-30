@@ -105,6 +105,7 @@ fun SettingsScreen(
     val pomodoroNotifications by viewModel.pomodoroNotifications.collectAsState(initial = true)
     val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
     val caffeinateSummaryNotification by viewModel.caffeinateAutoSummaryNotification.collectAsState(initial = true)
+    val purgeShotNotifications by viewModel.purgeShotNotifications.collectAsState(initial = true)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
@@ -1011,6 +1012,16 @@ fun SettingsScreen(
                                             icon = Icons.Rounded.Coffee,
                                             checked = caffeinateSummaryNotification,
                                             onCheckedChange = { viewModel.setCaffeinateAutoSummaryNotification(it) }
+                                        )
+                                    }
+
+                                    if (matches(searchQuery, "purgeshot", "screenshot", "delete", "scheduled")) {
+                                        SettingsToggleItem(
+                                            title = "PurgeShot",
+                                            subtitle = "Show notification when screenshot deletion is scheduled",
+                                            icon = Icons.Rounded.ScreenshotMonitor,
+                                            checked = purgeShotNotifications,
+                                            onCheckedChange = { viewModel.setPurgeShotNotifications(it) }
                                         )
                                     }
                                 }

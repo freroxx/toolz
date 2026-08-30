@@ -13,26 +13,27 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.lifecycleScope
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.data.purgeshot.PurgeShotHandler
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.components.PurgeShotPopup
 import com.frerox.toolz.ui.screens.purgeshot.PurgeShotViewModel
 import com.frerox.toolz.ui.theme.ToolzTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
- * Popup shown immediately after a screenshot is detected. Because the detection that triggers
- * this is nearly always running from a background context — [PurgeShotService]'s ContentObserver
- * callback or [PurgeShotObserverJobService]'s JobScheduler dispatch, neither of which has a
- * visible Activity on the back stack — this must be launched with FLAG_ACTIVITY_NEW_TASK, and on
- * a locked or off screen it also needs to explicitly ask to show over the lock screen and turn
- * the screen on. Without both of those the launch either throws (missing NEW_TASK from a
- * non-Activity context) or is silently dropped by Android 10+ background-activity-start limits,
- * which is almost certainly why the popup "sometimes never shows" for screenshots taken while
- * Toolz itself isn't the foreground app.
+ * Popup shown immediately after screenshot(s) are detected.
+ * Supports both single and batched screenshots.
  */
 @AndroidEntryPoint
 class PurgeShotPopupActivity : ComponentActivity() {
+
+    @Inject lateinit var settingsRepository: SettingsRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -53,11 +54,16 @@ class PurgeShotPopupActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         window.setBackgroundDrawableResource(android.R.color.transparent)
 
-        val uriStr = intent.getStringExtra("uri")
-        val displayName = intent.getStringExtra("displayName") ?: "Screenshot"
-        val path = intent.getStringExtra("path")
-        val sizeLabel = intent.getStringExtra("sizeLabel")
-        val uri = uriStr?.let { runCatching { Uri.parse(it) }.getOrNull() }
+        val urisList: List<String> = intent.getStringArrayListExtra("uris")
+            ?: listOfNotNull(intent.getStringExtra("uri"))
+        val namesList: List<String> = intent.getStringArrayListExtra("displayNames")
+            ?: listOfNotNull(intent.getStringExtra("displayName"))
+        val pathsList: List<String> = intent.getStringArrayListExtra("paths")
+            ?: listOfNotNull(intent.getStringExtra("path"))
+
+        val uriList = urisList.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+        val displayName = if (uriList.size > 1) "${uriList.size} Screenshots" else (namesList.firstOrNull() ?: "Screenshot")
+        val sizeLabel = if (uriList.size <= 1) intent.getStringExtra("sizeLabel") else null
 
         setContent {
             ToolzTheme {
@@ -66,13 +72,26 @@ class PurgeShotPopupActivity : ComponentActivity() {
                 val autoDuration by viewModel.autoDurationMs.collectAsState(initial = 15 * 60_000L)
 
                 PurgeShotPopup(
-                    screenshotUri = uri,
+                    screenshotUri = uriList.firstOrNull(),
                     displayName = displayName,
                     presets = presets,
                     autoDurationMillis = autoDuration,
                     fileSizeLabel = sizeLabel,
+                    screenshotUris = uriList,
                     onSelectDuration = { preset ->
-                        viewModel.enqueueForPopup(uriStr, displayName, path, preset.durationMillis, preset.label)
+                        viewModel.enqueueMultiple(urisList, namesList, pathsList, preset.durationMillis, preset.label)
+                        lifecycleScope.launch {
+                            PurgeShotHandler.showScheduledNotification(
+                                this@PurgeShotPopupActivity,
+                                settingsRepository,
+                                urisList.size,
+                                preset.label
+                            )
+                        }
+                        finish()
+                    },
+                    onDeleteNow = {
+                        viewModel.deleteMultiple(urisList, pathsList)
                         finish()
                     },
                     onDismiss = { finish() },

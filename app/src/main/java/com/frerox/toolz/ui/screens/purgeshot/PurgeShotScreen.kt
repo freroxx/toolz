@@ -65,6 +65,7 @@ fun PurgeShotScreen(
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val smartAuto by viewModel.smartAuto.collectAsStateWithLifecycle()
     val autoDuration by viewModel.autoDurationMs.collectAsStateWithLifecycle()
+    val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
     val presets by viewModel.activePresets.collectAsStateWithLifecycle()
     val pending by viewModel.pendingQueue.collectAsStateWithLifecycle()
     val totalDeleted by viewModel.totalDeleted.collectAsStateWithLifecycle()
@@ -547,6 +548,13 @@ fun PurgeShotScreen(
                                         durationLabel = durationLabel(autoDuration),
                                         onClick = { showAutoPicker = true }
                                     )
+                                    ToggleRow(
+                                        title = "Notifications",
+                                        subtitle = if (notificationsEnabled) "Show notification when deletion is scheduled" else "Silent (no notifications)",
+                                        icon = Icons.Rounded.NotificationsActive,
+                                        checked = notificationsEnabled,
+                                        onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                                    )
                                 }
                             }
                         }
@@ -867,87 +875,163 @@ private fun PresetSheet(
     var selected by remember(current) { mutableStateOf(current.toMutableList()) }
     val haptic = rememberToolzHapticFeedback()
     val scrollState = rememberScrollState()
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 0.dp,
-        dragHandle = { BottomSheetDefaults.DragHandle(width = 36.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)) }
+        dragHandle = { BottomSheetDefaults.DragHandle(width = 40.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)) }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp)
-                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f)),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+                .padding(bottom = 20.dp)
+                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f)),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Header — Material 3 Expressive clear
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Choose timers", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
-                    Text("Up to 6 • Auto follows Smart Auto", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                AnimatedContent(targetState = selected.size, label = "count") { count ->
+            // ── Header ──────────────────────────────────────────
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
                     Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (count == 6) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                        tonalElevation = 0.dp
+                        modifier = Modifier.size(46.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer
                     ) {
-                        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                if (count == 6) Icons.Rounded.CheckCircle else Icons.Rounded.Timer,
+                                Icons.Rounded.Timer,
                                 null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
                             )
-                            Text("$count/6", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = if (count == 6) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                     }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "Choose timers",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Pick up to 6 for the popup",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Counter pill
+                val count = selected.size
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (count == 6) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f))
+                ) {
+                    Text(
+                        text = "$count / 6",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        color = if (count == 6) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            // Selected — expressive cards, no LazyVerticalGrid bug (uses chunked Row)
-            AnimatedVisibility(
-                visible = selected.isNotEmpty(),
-                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
-                            Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.padding(6.dp).size(14.dp), tint = MaterialTheme.colorScheme.primary)
+            // ── Selected Sequence Preview Strip ──────────────────
+            if (selected.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "POPUP ORDER",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.6.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                "Tap to remove",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
                         }
-                        Text("Your popup • tap to remove", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        selected.chunked(3).forEachIndexed { rowIdx, row ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                                row.forEachIndexed { colIdx, p ->
-                                    val idx = rowIdx * 3 + colIdx
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        StaggeredEntrance(index = idx) {
-                                            ExpressiveCard(
-                                                onClick = {
-                                                    haptic.tick()
-                                                    selected = selected.toMutableList().apply { removeAt(idx) }
-                                                },
-                                                shape = RoundedCornerShape(18.dp),
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer
+
+                        selected.chunked(3).forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                row.forEach { p ->
+                                    val itemIdx = selected.indexOf(p)
+                                    val isAuto = p.label.equals("Auto", ignoreCase = true)
+                                    Surface(
+                                        onClick = {
+                                            haptic.tick()
+                                            selected = selected.toMutableList().apply { remove(p) }
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isAuto) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        modifier = Modifier.weight(1f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                                modifier = Modifier.size(20.dp)
                                             ) {
-                                                Column(
-                                                    Modifier.padding(14.dp).fillMaxWidth(),
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    Surface(modifier = Modifier.size(32.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
-                                                        Box(contentAlignment = Alignment.Center) { Icon(iconFor(p.iconName), null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) }
-                                                    }
-                                                    Text(p.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                                    Text("tap to remove", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.65f))
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        "${itemIdx + 1}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Black,
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
                                                 }
                                             }
+                                            Text(
+                                                p.label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Icon(
+                                                Icons.Rounded.Close,
+                                                contentDescription = "Remove",
+                                                modifier = Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
                                 }
@@ -955,85 +1039,174 @@ private fun PresetSheet(
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
                 }
             }
 
-            // All durations — 3-col FilterChips using chunked Rows (no LazyVerticalGrid measurement bug)
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("All durations", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Tap to add • max 6", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    allOptions.chunked(3).forEachIndexed { rowIdx, row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { opt ->
-                                val isSelected = selected.any { it.label == opt.label && it.durationMillis == opt.durationMillis }
-                                val canAdd = selected.size < 6
-                                val enabled = isSelected || canAdd
-                                Box(modifier = Modifier.weight(1f)) {
-                                    StaggeredEntrance(index = rowIdx * 3 + 4) {
-                                        FilterChip(
-                                            selected = isSelected,
-                                            onClick = {
-                                                haptic.tick()
-                                                selected = when {
-                                                    isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
-                                                    canAdd -> (selected + opt).toMutableList()
-                                                    else -> selected
-                                                }
-                                            },
-                                            label = { Text(opt.label, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp) },
-                                            leadingIcon = {
-                                                Icon(
-                                                    iconFor(opt.iconName), null,
-                                                    modifier = Modifier.size(16.dp).graphicsLayer {
-                                                        scaleX = if (isSelected) 1.08f else 1f
-                                                        scaleY = if (isSelected) 1.08f else 1f
-                                                    },
-                                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            },
-                                            enabled = enabled,
-                                            shape = RoundedCornerShape(16.dp),
-                                            modifier = Modifier.fillMaxWidth().bouncyClick(enabled = enabled) {},
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = enabled,
-                                                selected = isSelected,
-                                                borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f),
-                                                selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+            // ── Grid of All Timer Options ────────────────────────
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "AVAILABLE TIMERS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.6.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(
+                        onClick = {
+                            haptic.tick()
+                            selected = PurgeShotPreset.defaults().toMutableList()
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Reset defaults", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                allOptions.chunked(2).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        row.forEach { opt ->
+                            val isSelected = selected.any { it.label == opt.label && it.durationMillis == opt.durationMillis }
+                            val selectedIndex = selected.indexOfFirst { it.label == opt.label && it.durationMillis == opt.durationMillis }
+                            val isAuto = opt.label.equals("Auto", ignoreCase = true)
+                            val canAdd = selected.size < 6
+
+                            val interaction = remember { MutableInteractionSource() }
+                            val pressed by interaction.collectIsPressedAsState()
+                            val scale by animateFloatAsState(
+                                targetValue = if (pressed) 0.95f else 1f,
+                                animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+                                label = "presetScale"
+                            )
+
+                            Surface(
+                                onClick = {
+                                    haptic.tick()
+                                    selected = when {
+                                        isSelected -> selected.filterNot { it.label == opt.label && it.durationMillis == opt.durationMillis }.toMutableList()
+                                        canAdd -> (selected + opt).toMutableList()
+                                        else -> selected
+                                    }
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                tonalElevation = if (isSelected) 2.dp else 0.dp,
+                                border = if (isSelected) {
+                                    androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                                } else {
+                                    androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f))
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .graphicsLayer { scaleX = scale; scaleY = scale },
+                                interactionSource = interaction
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(38.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainerHighest
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                iconFor(opt.iconName),
+                                                null,
+                                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
                                             )
+                                        }
+                                    }
+
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            opt.label,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                        Text(
+                                            if (isAuto) "Smart Auto" else durationToHumane(opt.durationMillis),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    if (isSelected) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    "${selectedIndex + 1}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = Color.White,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                                            modifier = Modifier.size(22.dp)
+                                        ) {}
                                     }
                                 }
                             }
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
+                        repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
 
-            // Actions — M3 Expressive clear
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            // ── Bottom Action Buttons ────────────────────────────
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
                 ToolzOutlinedExpressiveButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(20.dp),
                     contentPadding = PaddingValues(vertical = 16.dp)
-                ) { Text("Cancel", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge) }
+                ) {
+                    Text("Cancel", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                }
                 ToolzExpressiveButton(
-                    onClick = { haptic.success(); onSave(selected) },
+                    onClick = {
+                        haptic.success()
+                        onSave(selected)
+                    },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(20.dp),
                     contentPadding = PaddingValues(vertical = 16.dp),
                     enabled = selected.isNotEmpty()
-                ) { Text("Save ${selected.size}", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge) }
+                ) {
+                    Text(
+                        "Save (${selected.size})",
+                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
+
             Spacer(Modifier.navigationBarsPadding().height(8.dp))
         }
     }

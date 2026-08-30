@@ -15,10 +15,20 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.PurgeShotActionReceiver
 import com.frerox.toolz.service.PurgeShotPopupActivity
 import com.frerox.toolz.service.PurgeShotService
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object PurgeShotHandler {
     private const val TAG = "PurgeShotHandler"
+    private const val BATCH_DEBOUNCE_MS = 1200L
+    private const val SCHEDULED_NOTIF_ID = 4150
+
+    private val batchMutex = Mutex()
+    private val pendingBatch = mutableListOf<PurgeShotService.ScreenshotCandidate>()
+    private val handlerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var batchJob: Job? = null
 
     suspend fun handleNewScreenshot(
         context: Context,
@@ -27,94 +37,123 @@ object PurgeShotHandler {
         candidate: PurgeShotService.ScreenshotCandidate
     ) {
         val uriStr = candidate.uri.toString()
-        // dedup via DataStore
-        val storedLast = settingsRepository.purgeShotLastScreenshotUri.first()
-        if (uriStr == storedLast) {
-            Log.d(TAG, "dedup storedLast $uriStr")
-            return
+
+        batchMutex.withLock {
+            // Dedup within current pending batch
+            if (pendingBatch.any { it.uri.toString() == uriStr }) {
+                Log.d(TAG, "dedup within batch $uriStr")
+                return
+            }
+
+            // Dedup against stored last screenshot if recent
+            val storedLast = settingsRepository.purgeShotLastScreenshotUri.first()
+            if (uriStr == storedLast && pendingBatch.isEmpty()) {
+                Log.d(TAG, "dedup storedLast $uriStr")
+                return
+            }
+            settingsRepository.setPurgeShotLastScreenshotUri(uriStr)
+
+            pendingBatch.add(candidate)
+            Log.d(TAG, "Added to batch: $uriStr (total: ${pendingBatch.size})")
+
+            // Reset debounce timer to accumulate any additional rapid screenshots
+            batchJob?.cancel()
+            batchJob = handlerScope.launch {
+                delay(BATCH_DEBOUNCE_MS)
+                processBatch(context, repository, settingsRepository)
+            }
         }
-        settingsRepository.setPurgeShotLastScreenshotUri(uriStr)
+    }
+
+    private suspend fun processBatch(
+        context: Context,
+        repository: PurgeShotRepository,
+        settingsRepository: SettingsRepository
+    ) {
+        val batch = batchMutex.withLock {
+            val list = pendingBatch.toList()
+            pendingBatch.clear()
+            list
+        }
+
+        if (batch.isEmpty()) return
+        Log.i(TAG, "Processing batch of ${batch.size} screenshot(s)")
 
         val smartAuto = settingsRepository.purgeShotSmartAuto.first()
         val autoDuration = settingsRepository.purgeShotAutoDuration.first()
-
-        val sizeLabel = querySizeLabel(context, candidate.uri)
+        val label = formatDurationLabel(autoDuration)
 
         if (smartAuto) {
-            // Smart Auto: no popup, directly queue with auto time — this is the spec
-            val label = formatDurationLabel(autoDuration)
-            repository.enqueue(candidate.uri, candidate.displayName, autoDuration, label, candidate.filePath)
-            Log.i(TAG, "SmartAuto queued $uriStr for $label")
-            showAutoNotification(context, candidate.displayName, label, sizeLabel)
+            // Smart Auto: queue immediately with auto time
+            for (item in batch) {
+                repository.enqueue(item.uri, item.displayName, autoDuration, label, item.filePath)
+            }
+            Log.i(TAG, "SmartAuto queued ${batch.size} screenshot(s) for $label")
+            showScheduledNotification(context, settingsRepository, batch.size, label)
             return
         }
 
-        // Not smart-auto: popup vs notification routing.
-        // Previous code did: if canShowPopup try popup and RETURN (assuming success). On Android 10+,
-        // background activity start is silently blocked without exception, so we returned thinking
-        // popup showed, but user saw nothing — this was the "doesn't work anywhere at all" root cause
-        // when screenshot taken outside Toolz (isFocused=false) and overlay not granted.
-        // Fixed: when app is not focused (outside Toolz), ALWAYS show notification fallback first.
-        // Popup is best-effort additional (only if overlay/Focused), never exclusive.
         val isFocused = ToolzApplication.isFocused.value
         val canOverlay = canDrawOverlays(context)
         val canShowPopup = isFocused || canOverlay || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
         val hasNotifPerm = hasNotificationPermission(context)
 
-        // If we are inside Toolz (focused), popup is reliable — try it first, fallback to notification only on exception.
+        val urisList = ArrayList(batch.map { it.uri.toString() })
+        val namesList = ArrayList(batch.map { it.displayName })
+        val pathsList = ArrayList(batch.map { it.filePath ?: "" })
+        val singleCandidate = batch.last()
+        val sizeLabel = if (batch.size == 1) querySizeLabel(context, singleCandidate.uri) else null
+
+        // 1. If inside Toolz (focused): launch popup directly
         if (isFocused) {
             if (canShowPopup) {
                 try {
                     val intent = Intent(context, PurgeShotPopupActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        putExtra("uri", uriStr)
-                        putExtra("displayName", candidate.displayName)
-                        putExtra("path", candidate.filePath)
+                        putStringArrayListExtra("uris", urisList)
+                        putStringArrayListExtra("displayNames", namesList)
+                        putStringArrayListExtra("paths", pathsList)
+                        putExtra("uri", singleCandidate.uri.toString())
+                        putExtra("displayName", if (batch.size > 1) "${batch.size} Screenshots" else singleCandidate.displayName)
+                        putExtra("path", singleCandidate.filePath)
                         putExtra("sizeLabel", sizeLabel)
                     }
                     context.startActivity(intent)
-                    Log.i(TAG, "Popup launched (focused) for $uriStr")
-                    // Even when focused, also ensure notification fallback is NOT needed — popup is visible.
+                    Log.i(TAG, "Popup launched (focused) for batch of ${batch.size}")
                     return
                 } catch (e: Exception) {
                     Log.w(TAG, "Popup failed even when focused, fallback to notification", e)
                 }
             }
-            // Focused but popup failed or not allowed — try notification if permitted
             if (hasNotifPerm) {
-                showPopupFallbackNotification(context, candidate, sizeLabel)
-            } else {
-                Log.w(TAG, "No notification permission and popup failed — user will see nothing, post permission notification")
-                // Try to at least post a permission request via the helper (will be blocked too but attempt)
-                showPopupFallbackNotification(context, candidate, sizeLabel)
+                showPopupFallbackNotification(context, batch, sizeLabel)
             }
             return
         }
 
-        // Outside Toolz: ALWAYS show notification first (guaranteed outside-process path).
-        // This is the "works everywhere" guarantee — notification works even when app dead, BAL blocked, or overlay denied.
+        // 2. Outside Toolz: Post notification first (guaranteed outside-process delivery)
         if (hasNotifPerm) {
-            showPopupFallbackNotification(context, candidate, sizeLabel)
-            Log.i(TAG, "Fallback notification shown (outside Toolz) for $uriStr")
-        } else {
-            Log.w(TAG, "Missing POST_NOTIFICATIONS, notification will be silently blocked — attempting popup via overlay as last resort")
+            showPopupFallbackNotification(context, batch, sizeLabel)
+            Log.i(TAG, "Fallback notification shown (outside Toolz) for batch of ${batch.size}")
         }
 
-        // Best-effort popup as well when overlay/focus allows — don't return early on assumed success,
-        // because BAL may silently block without exception. We log attempt but notification is already shown.
+        // 3. Best-effort popup over other apps when overlay permission is granted
         if (canShowPopup) {
             try {
                 val intent = Intent(context, PurgeShotPopupActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    putExtra("uri", uriStr)
-                    putExtra("displayName", candidate.displayName)
-                    putExtra("path", candidate.filePath)
+                    putStringArrayListExtra("uris", urisList)
+                    putStringArrayListExtra("displayNames", namesList)
+                    putStringArrayListExtra("paths", pathsList)
+                    putExtra("uri", singleCandidate.uri.toString())
+                    putExtra("displayName", if (batch.size > 1) "${batch.size} Screenshots" else singleCandidate.displayName)
+                    putExtra("path", singleCandidate.filePath)
                     putExtra("sizeLabel", sizeLabel)
                 }
                 context.startActivity(intent)
-                Log.i(TAG, "Popup also attempted (outside Toolz, overlay=$canOverlay) for $uriStr")
+                Log.i(TAG, "Popup attempted outside Toolz for batch of ${batch.size}")
             } catch (e: Exception) {
-                Log.w(TAG, "Popup BAL blocked outside Toolz (notification already shown)", e)
+                Log.w(TAG, "Popup start blocked outside Toolz (notification already active)", e)
             }
         }
     }
@@ -127,8 +166,6 @@ object PurgeShotHandler {
             context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
                     android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
-            // Below 13, notifications are granted by default (unless user disabled in settings, which we can't check synchronously without NM)
-            // Check via NotificationManagerCompat areNotificationsEnabled as best-effort
             androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
     }
@@ -164,65 +201,111 @@ object PurgeShotHandler {
     /** @see PurgeShotUtils.formatDurationLabel */
     internal fun formatDurationLabel(duration: Long): String = PurgeShotUtils.formatDurationLabel(duration)
 
-    private fun showAutoNotification(context: Context, displayName: String, label: String, sizeLabel: String?) {
+    /**
+     * The ONLY user-facing notification posted after screenshot deletion is scheduled.
+     * Controlled by the in-app notification toggle setting.
+     */
+    suspend fun showScheduledNotification(
+        context: Context,
+        settingsRepository: SettingsRepository,
+        count: Int,
+        label: String
+    ) {
+        val enabled = try { settingsRepository.purgeShotNotificationsEnabled.first() } catch (_: Exception) { true }
+        if (!enabled) return
+
         try {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
             ensureChannel(context)
+
             val openIntent = Intent(context, MainActivity::class.java).apply {
                 putExtra("navigate_to", "purgeshot")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
-            val pi = PendingIntent.getActivity(context, (System.currentTimeMillis() % 10000).toInt(), openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val pi = PendingIntent.getActivity(
+                context,
+                SCHEDULED_NOTIF_ID,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val title = if (count > 1) "Screenshots scheduled ($count)" else "Screenshot scheduled"
+            val text = "Will be deleted in $label"
+
             val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
-                .setContentTitle("PurgeShot • auto-queued")
-                .setContentText("$displayName • $label${sizeLabel?.let { " • $it" } ?: ""}")
-                .setStyle(NotificationCompat.BigTextStyle().bigText("$displayName will be deleted in $label. Tap to undo."))
+                .setContentTitle(title)
+                .setContentText(text)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .addAction(R.drawable.ic_launcher_foreground, "Undo", pi)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(pi)
                 .build()
-            mgr.notify((System.currentTimeMillis() % 10000).toInt() + 5000, notif)
+
+            mgr.notify(SCHEDULED_NOTIF_ID, notif)
         } catch (_: Exception) {}
     }
 
-    private fun showPopupFallbackNotification(context: Context, candidate: PurgeShotService.ScreenshotCandidate, sizeLabel: String?) {
+    private fun showPopupFallbackNotification(
+        context: Context,
+        batch: List<PurgeShotService.ScreenshotCandidate>,
+        sizeLabel: String?
+    ) {
         try {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
             ensureChannel(context)
 
-            // Build 6 timer actions as notification buttons (first 3 as actions, rest via open)
+            val isMultiple = batch.size > 1
+            val title = if (isMultiple) "Delete these ${batch.size} screenshots?" else "Delete this screenshot?"
+            val bodyText = if (isMultiple) "${batch.size} screenshots • tap to choose" else "${batch[0].displayName}${sizeLabel?.let { " • $it" } ?: ""} • tap to choose"
+
             val builder = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
-                .setContentTitle("Delete this screenshot?")
-                .setContentText("${candidate.displayName}${sizeLabel?.let { " • $it" } ?: ""} • tap to choose")
+                .setContentTitle(title)
+                .setContentText(bodyText)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
-            // Full-screen popup intent (when user taps body or heads-up popdown)
+            val urisList = ArrayList(batch.map { it.uri.toString() })
+            val namesList = ArrayList(batch.map { it.displayName })
+            val pathsList = ArrayList(batch.map { it.filePath ?: "" })
+
+            // Full-screen popup intent
             val popupIntent = Intent(context, PurgeShotPopupActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                putExtra("uri", candidate.uri.toString())
-                putExtra("displayName", candidate.displayName)
-                putExtra("path", candidate.filePath)
+                putStringArrayListExtra("uris", urisList)
+                putStringArrayListExtra("displayNames", namesList)
+                putStringArrayListExtra("paths", pathsList)
+                putExtra("uri", batch.last().uri.toString())
+                putExtra("displayName", if (isMultiple) "${batch.size} Screenshots" else batch.last().displayName)
+                putExtra("path", batch.last().filePath)
                 putExtra("sizeLabel", sizeLabel)
             }
-            val popupPi = PendingIntent.getActivity(context, candidate.uri.hashCode(), popupIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val popupPi = PendingIntent.getActivity(
+                context,
+                batch.hashCode(),
+                popupIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
             builder.setContentIntent(popupPi)
             builder.setFullScreenIntent(popupPi, true)
 
-            // Add Keep action
+            // Keep action
             val keepIntent = Intent(context, PurgeShotActionReceiver::class.java).apply {
                 action = "PURGE_KEEP"
-                putExtra("uri", candidate.uri.toString())
+                putStringArrayListExtra("uris", urisList)
+                putExtra("uri", batch.last().uri.toString())
             }
-            val keepPi = PendingIntent.getBroadcast(context, candidate.uri.hashCode() + 1, keepIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val keepPi = PendingIntent.getBroadcast(
+                context,
+                batch.hashCode() + 1,
+                keepIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
             builder.addAction(R.drawable.ic_launcher_foreground, "Keep", keepPi)
 
-            // Add up to 3 quick timer actions
+            // Quick timer actions
             val quick = listOf(
                 "1 min" to 60_000L,
                 "15 min" to 15 * 60_000L,
@@ -231,17 +314,25 @@ object PurgeShotHandler {
             quick.forEachIndexed { idx, (label, millis) ->
                 val actIntent = Intent(context, PurgeShotActionReceiver::class.java).apply {
                     action = "PURGE_ENQUEUE"
-                    putExtra("uri", candidate.uri.toString())
-                    putExtra("displayName", candidate.displayName)
-                    putExtra("path", candidate.filePath)
+                    putStringArrayListExtra("uris", urisList)
+                    putStringArrayListExtra("displayNames", namesList)
+                    putStringArrayListExtra("paths", pathsList)
+                    putExtra("uri", batch.last().uri.toString())
+                    putExtra("displayName", batch.last().displayName)
+                    putExtra("path", batch.last().filePath)
                     putExtra("duration", millis)
                     putExtra("label", label)
                 }
-                val pi = PendingIntent.getBroadcast(context, candidate.uri.hashCode() + 10 + idx, actIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val pi = PendingIntent.getBroadcast(
+                    context,
+                    batch.hashCode() + 10 + idx,
+                    actIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
                 builder.addAction(R.drawable.ic_launcher_foreground, label, pi)
             }
 
-            mgr.notify(candidate.uri.hashCode(), builder.build())
+            mgr.notify(batch.hashCode(), builder.build())
         } catch (_: Exception) {}
     }
 

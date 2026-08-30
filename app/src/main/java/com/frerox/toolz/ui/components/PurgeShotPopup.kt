@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -30,7 +32,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -43,86 +44,46 @@ import coil3.compose.AsyncImagePainter
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
 import com.frerox.toolz.data.purgeshot.PurgeShotUtils
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
-import kotlinx.coroutines.delay
 
 /**
  * PurgeShot M3 Expressive popup — clean, fluid, no blur.
  *
- * - M3 expressive motion (spring, stagger, morph)
- * - Drag handle + swipe-to-dismiss, auto-dismiss 12s progress, success morph
- * - Metadata: name / size / status
- * - Clear scrim (no blur), built only from ui/components/ primitives
+ * Supports batched screenshots (multiple URIs shown as a grid of thumbnails).
+ * No auto-dismiss — user MUST make an explicit choice (Keep / Auto / Delete / timer).
+ * No delayed scheduled popup — immediately calls back so scheduled notification is posted.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PurgeShotPopup(
     screenshotUri: Uri?,
     displayName: String,
-    presets: List<PurgeShotPreset>, // max 6
+    presets: List<PurgeShotPreset>,
     autoDurationMillis: Long,
-    fileSizeLabel: String? = null, // e.g. "2.4 MB • 1080×2400"
+    fileSizeLabel: String? = null,
     onSelectDuration: (PurgeShotPreset) -> Unit,
     onDismiss: () -> Unit,
+    onDeleteNow: (() -> Unit)? = null,
     onKeepForever: () -> Unit = onDismiss,
     onOpenSettings: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    screenshotUris: List<Uri> = listOfNotNull(screenshotUri)
 ) {
     val haptic = rememberToolzHapticFeedback()
-    val performanceMode = LocalPerformanceMode.current
-
-    var selected by remember { mutableStateOf<PurgeShotPreset?>(null) }
-    var isSuccess by remember { mutableStateOf(false) }
+    val isMultiple = screenshotUris.size > 1
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
-
-    // Auto-dismiss safety: 12s keeps file forever (never auto-deletes without consent)
-    var autoDismissProgress by remember { mutableFloatStateOf(1f) }
-    LaunchedEffect(Unit) {
-        if (performanceMode) return@LaunchedEffect
-        val total = 12_000L
-        val step = 50L
-        var elapsed = 0L
-        while (elapsed < total && selected == null) {
-            delay(step)
-            elapsed += step
-            autoDismissProgress = 1f - (elapsed.toFloat() / total)
-        }
-        if (selected == null) onDismiss()
-    }
-    LaunchedEffect(selected) {
-        if (selected != null) {
-            isSuccess = true
-            delay(520)
-            onSelectDuration(selected!!)
-        }
-    }
-
-    // Entrance spring for card
-    val cardScale by animateFloatAsState(
-        targetValue = if (isSuccess) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
-        label = "cardScale"
-    )
-    val cardCorner by animateDpAsState(
-        targetValue = if (isSuccess) 48.dp else 36.dp,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
-        label = "cardCorner"
-    )
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.48f))
-            .clickable(enabled = selected == null) { haptic.tick(); onDismiss() }
-            .semantics { contentDescription = "PurgeShot scrim, tap to keep screenshot" },
+            .background(Color.Black.copy(alpha = 0.52f))
+            .semantics { contentDescription = "PurgeShot popup" },
         contentAlignment = Alignment.Center
     ) {
-        // Card — drag to dismiss
+        // Card with vertical drag gesture to dismiss
         Box(
             modifier = Modifier
                 .offset(y = dragOffsetY.dp)
                 .graphicsLayer {
-                    scaleX = cardScale
-                    scaleY = cardScale
                     alpha = (1f - (kotlin.math.abs(dragOffsetY) / 520f)).coerceIn(0.6f, 1f)
                 }
                 .pointerInput(Unit) {
@@ -130,7 +91,7 @@ fun PurgeShotPopup(
                         onDragEnd = {
                             if (kotlin.math.abs(dragOffsetY) > 120) {
                                 haptic.tick()
-                                onDismiss()
+                                onKeepForever()
                             } else dragOffsetY = 0f
                         }
                     ) { _, dragAmount -> dragOffsetY += dragAmount * 0.55f }
@@ -140,312 +101,326 @@ fun PurgeShotPopup(
                 ExpressiveCard(
                     onClick = {},
                     modifier = Modifier
-                        .widthIn(max = 400.dp)
-                        .padding(horizontal = 18.dp)
-                        .clickable(enabled = false) {},
-                    shape = RoundedCornerShape(cardCorner),
+                        .widthIn(max = 420.dp)
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(36.dp),
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     elevation = 0.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.10f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
                 ) {
+                    val scrollState = rememberScrollState()
                     Column(
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier
+                            .padding(20.dp)
+                            .verticalScroll(scrollState),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Top auto-dismiss wavy progress (premium, not alarming)
-                        if (selected == null && !performanceMode) {
-                            ToolzWavyLinearProgressIndicator(
-                                progress = { autoDismissProgress },
-                                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(8.dp)),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                            )
-                            Spacer(Modifier.height(12.dp))
-                        }
-
                         // Drag handle
                         Box(
                             modifier = Modifier
                                 .width(36.dp)
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                .semantics { contentDescription = "Drag to dismiss" }
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                        )
+                        Spacer(Modifier.height(16.dp))
+
+                        // ── Header ──────────────────────────────────────────────
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(50.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Rounded.DeleteSweep, null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    "PurgeShot",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    if (isMultiple) "Delete these ${screenshotUris.size} screenshots?" else "Delete this screenshot?",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2
+                                )
+                                if (!isMultiple && fileSizeLabel != null) {
+                                    Text(
+                                        fileSizeLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        maxLines = 1,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // ── Thumbnail(s) ─────────────────────────────────────────
+                        if (isMultiple) {
+                            MultiScreenshotGrid(uris = screenshotUris, count = screenshotUris.size)
+                        } else {
+                            SingleThumbnail(uri = screenshotUri, displayName = displayName)
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // ── Timer preset grid ────────────────────────────────────
+                        Text(
+                            "Choose when to delete",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 4.dp)
                         )
                         Spacer(Modifier.height(14.dp))
 
-                        // Header with morphing success
-                        AnimatedContent(
-                            targetState = isSuccess,
-                            transitionSpec = {
-                                (fadeIn(tween(220)) + scaleIn(spring(dampingRatio = 0.6f))).togetherWith(
-                                    fadeOut(tween(180)) + scaleOut()
-                                )
-                            },
-                            label = "headerMorph"
-                        ) { success ->
-                            if (success) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Surface(modifier = Modifier.size(48.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(26.dp))
-                                        }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Scheduled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                                        Text(
-                                            "${selected?.label} • will be deleted permanently",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            } else {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.weight(1f)) {
-                                        Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
-                                            }
-                                        }
-                                        Column(Modifier.weight(1f)) {
-                                            Text("PurgeShot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1)
-                                            Text("Delete this screenshot?", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                            if (fileSizeLabel != null) {
-                                                Text(fileSizeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1, fontSize = 11.sp)
-                                            }
-                                        }
-                                    }
-                                    IconButton(onClick = { haptic.tick(); onDismiss() }, modifier = Modifier.semantics { contentDescription = "Keep forever" }) {
-                                        Icon(Icons.Rounded.Close, "Dismiss", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
-                        // Thumbnail with expressive loading & scrim label
-                        if (!isSuccess) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 148.dp, max = 196.dp),
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                tonalElevation = 0.dp
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    var imageState by remember { mutableStateOf<AsyncImagePainter.State?>(null) }
-                                    AsyncImage(
-                                        model = screenshotUri,
-                                        contentDescription = "Screenshot preview: $displayName",
-                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)),
-                                        contentScale = ContentScale.Crop,
-                                        onState = { imageState = it }
-                                    )
-                                    if (imageState is AsyncImagePainter.State.Loading && !performanceMode) {
-                                        // Subtle shimmer placeholder
-                                        Box(
-                                            Modifier.fillMaxSize().background(
-                                                androidx.compose.ui.graphics.Brush.linearGradient(
-                                                    listOf(
-                                                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                        MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                        MaterialTheme.colorScheme.surfaceContainerHighest
-                                                    )
-                                                )
-                                            )
-                                        )
-                                    }
-                                    if (imageState is AsyncImagePainter.State.Error) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Icon(Icons.Rounded.BrokenImage, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                                            Text("Preview unavailable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    // Bottom scrim label
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomStart)
-                                            .fillMaxWidth()
-                                            .background(
-                                                Color.Black.copy(alpha = 0.46f),
-                                                RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
-                                            )
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                            Icon(Icons.Rounded.Image, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(14.dp))
-                                            Text(
-                                                displayName,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color.White,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.18f)) {
-                                                Text(
-                                                    "PNG",
-                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Color.White,
-                                                    fontWeight = FontWeight.Black,
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(14.dp))
-                        } else {
-                            // Success confetti-ish surface
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(96.dp),
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                        Text(
-                                            "Undo in settings → PurgeShot queue",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(14.dp))
-                        }
-
-                        // Subtitle with storage hint
-                        if (!isSuccess) {
-                            Text(
-                                "Choose when it vanishes — freed space is instant.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            )
-                            Spacer(Modifier.height(16.dp))
-                        }
-
-                        // Preset grid
-                        if (!isSuccess) {
-                            val visiblePresets = presets.take(6)
-                            val columns = if (visiblePresets.size <= 3) 3 else if (visiblePresets.size == 4) 2 else 3
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(columns),
-                                modifier = Modifier.fillMaxWidth().heightIn(max = 232.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                                userScrollEnabled = false
-                            ) {
-                                itemsIndexed(visiblePresets) { idx, preset ->
-                                    val isAuto = preset.label.equals("Auto", ignoreCase = true)
-                                    PurgePresetChip(
-                                        preset = preset,
-                                        isAuto = isAuto,
-                                        index = idx,
-                                        onClick = { haptic.success(); selected = preset }
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(16.dp))
-                        }
-
-                        // Bottom actions
-                        if (!isSuccess) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ToolzOutlinedExpressiveButton(
-                                    onClick = { haptic.tick(); onKeepForever() },
-                                    modifier = Modifier.weight(1f).semantics { contentDescription = "Keep forever, don't delete" },
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(vertical = 14.dp)
-                                ) {
-                                    Icon(Icons.Rounded.Block, null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Keep", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
-                                }
-                                // Auto pill — tappable to set auto quickly
-                                Surface(
+                        val visiblePresets = presets.take(6)
+                        val columns = if (visiblePresets.size <= 3) 3 else 3
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(columns),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            userScrollEnabled = false
+                        ) {
+                            itemsIndexed(visiblePresets) { idx, preset ->
+                                val isAuto = preset.label.equals("Auto", ignoreCase = true)
+                                PurgePresetChip(
+                                    preset = preset,
+                                    isAuto = isAuto,
+                                    index = idx,
                                     onClick = {
-                                        haptic.tick()
-                                        val autoPreset = presets.find { it.durationMillis == autoDurationMillis }
-                                            ?: PurgeShotPreset(presetLabelFor(autoDurationMillis), autoDurationMillis, "timer")
-                                        selected = autoPreset
-                                    },
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier.weight(1f).semantics { contentDescription = "Use auto time ${presetLabelFor(autoDurationMillis)}" }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            "Auto: ${presetLabelFor(autoDurationMillis)}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        haptic.success()
+                                        onSelectDuration(preset)
                                     }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+
+                        // ── Action buttons ───────────────────────────────────
+                        // Row 1: Keep + Auto
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ToolzOutlinedExpressiveButton(
+                                onClick = { haptic.tick(); onKeepForever() },
+                                modifier = Modifier.weight(1f).semantics { contentDescription = "Keep forever, don't delete" },
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(vertical = 14.dp)
+                            ) {
+                                Icon(Icons.Rounded.Block, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Keep", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                            }
+
+                            // Auto button
+                            Surface(
+                                onClick = {
+                                    haptic.tick()
+                                    val autoPreset = presets.find { it.durationMillis == autoDurationMillis }
+                                        ?: PurgeShotPreset(presetLabelFor(autoDurationMillis), autoDurationMillis, "timer")
+                                    onSelectDuration(autoPreset)
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.weight(1f).semantics { contentDescription = "Use auto time ${presetLabelFor(autoDurationMillis)}" }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Auto: ${presetLabelFor(autoDurationMillis)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
+                        }
+
+                        // Row 2: Delete now button — full-width, error container color, below keep/auto
+                        if (onDeleteNow != null) {
                             Spacer(Modifier.height(10.dp))
+                            ToolzExpressiveButton(
+                                onClick = { haptic.success(); onDeleteNow() },
+                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Delete immediately" },
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(vertical = 14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            ) {
+                                Icon(Icons.Rounded.DeleteForever, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (isMultiple) "Delete all now" else "Delete now",
+                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+                        if (onOpenSettings != null) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.Center
                             ) {
                                 Text(
-                                    "Tap outside or drag to keep • ",
+                                    "Smart Auto skips this popup",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clickable { onOpenSettings.invoke() }
                                 )
-                                if (onOpenSettings != null) {
-                                    Text(
-                                        "Smart Auto skips this",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.clickable { onOpenSettings.invoke() }
-                                    )
-                                }
                             }
-                        } else {
-                            // Success bar
-                            LinearProgressIndicator(
-                                progress = { 1f },
-                                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(8.dp)),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                            )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SingleThumbnail(uri: Uri?, displayName: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 200.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        tonalElevation = 0.dp
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            var imageState by remember { mutableStateOf<AsyncImagePainter.State?>(null) }
+            AsyncImage(
+                model = uri,
+                contentDescription = "Screenshot: $displayName",
+                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)),
+                contentScale = ContentScale.Crop,
+                onState = { imageState = it }
+            )
+            if (imageState is AsyncImagePainter.State.Error) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.BrokenImage, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    Text("Preview unavailable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            // Bottom scrim label
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(
+                        Color.Black.copy(alpha = 0.45f),
+                        RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Image, null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(14.dp))
+                    Text(
+                        displayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MultiScreenshotGrid(uris: List<Uri>, count: Int) {
+    val displayUris = uris.take(4)
+    val remaining = count - displayUris.size
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val rows = displayUris.chunked(2)
+            rows.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    row.forEachIndexed { idx, uri ->
+                        Box(modifier = Modifier.weight(1f)) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(90.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Box {
+                                    AsyncImage(
+                                        model = uri,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    if (idx == displayUris.lastIndex && remaining > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(16.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                "+$remaining",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Black,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    repeat(2 - row.size) { Box(modifier = Modifier.weight(1f)) {} }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Rounded.PhotoLibrary, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "$count screenshots",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -463,7 +438,7 @@ private fun PurgePresetChip(
         val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
         val isPressed by interaction.collectIsPressedAsState()
         val scale by animateFloatAsState(
-            targetValue = if (isPressed) 0.94f else 1f,
+            targetValue = if (isPressed) 0.93f else 1f,
             animationSpec = spring(dampingRatio = 0.5f, stiffness = 420f),
             label = "chipScale"
         )
@@ -473,7 +448,7 @@ private fun PurgePresetChip(
             color = if (isAuto) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(88.dp)
+                .height(86.dp)
                 .graphicsLayer { scaleX = scale; scaleY = scale }
                 .then(
                     if (isAuto) Modifier.border(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.34f), RoundedCornerShape(22.dp)) else Modifier
@@ -496,7 +471,7 @@ private fun PurgePresetChip(
                         Icon(icon, null, modifier = Modifier.size(16.dp), tint = if (isAuto) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(5.dp))
                 Text(
                     preset.label,
                     style = MaterialTheme.typography.labelMedium,

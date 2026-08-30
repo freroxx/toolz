@@ -52,6 +52,7 @@ class SettingsRepository @Inject constructor(
     private val PURGESHOT_AUTO_DURATION = longPreferencesKey("purgeshot_auto_duration")
     private val PURGESHOT_CUSTOM_PRESETS = stringPreferencesKey("purgeshot_custom_presets")
     private val PURGESHOT_LAST_SCREENSHOT_URI = stringPreferencesKey("purgeshot_last_screenshot_uri")
+    private val PURGESHOT_NOTIFICATIONS_ENABLED = booleanPreferencesKey("purgeshot_notifications_enabled")
     
     // Timer & Stopwatch Settings
     private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
@@ -375,10 +376,12 @@ class SettingsRepository @Inject constructor(
     val purgeShotAutoDuration: Flow<Long> = dataStore.data.map { it[PURGESHOT_AUTO_DURATION] ?: 15 * 60_000L } // default 15 min
     val purgeShotCustomPresets: Flow<String?> = dataStore.data.map { it[PURGESHOT_CUSTOM_PRESETS] }
     val purgeShotLastScreenshotUri: Flow<String?> = dataStore.data.map { it[PURGESHOT_LAST_SCREENSHOT_URI] }
+    val purgeShotNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_NOTIFICATIONS_ENABLED] ?: true }
 
     suspend fun setPurgeShotEnabled(enabled: Boolean) { dataStore.edit { it[PURGESHOT_ENABLED] = enabled } }
     suspend fun setPurgeShotSmartAuto(enabled: Boolean) { dataStore.edit { it[PURGESHOT_SMART_AUTO] = enabled } }
     suspend fun setPurgeShotAutoDuration(duration: Long) { dataStore.edit { it[PURGESHOT_AUTO_DURATION] = duration } }
+    suspend fun setPurgeShotNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[PURGESHOT_NOTIFICATIONS_ENABLED] = enabled } }
     suspend fun setPurgeShotCustomPresets(json: String?) {
         dataStore.edit { if (json == null) it.remove(PURGESHOT_CUSTOM_PRESETS) else it[PURGESHOT_CUSTOM_PRESETS] = json }
     }

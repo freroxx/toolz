@@ -301,40 +301,6 @@ object PurgeShotDetector {
      * Both callers share this so a fix to the pipeline (a new heuristic, a new age gate)
      * only has to happen once.
      */
-    private fun postMediaPermissionNotification(context: Context) {
-        try {
-            val intent = android.content.Intent(context, com.frerox.toolz.MainActivity::class.java).apply {
-                putExtra("navigate_to", "purgeshot")
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            val pi = android.app.PendingIntent.getActivity(context, 4101, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
-            // Ensure channel exists — use PurgeShotService alert channel id
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                if (nm.getNotificationChannel(com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID) == null) {
-                    val ch = android.app.NotificationChannel(
-                        com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID,
-                        com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_NAME,
-                        android.app.NotificationManager.IMPORTANCE_HIGH
-                    ).apply {
-                        description = "PurgeShot screenshot alerts and permissions"
-                        setShowBadge(true)
-                    }
-                    nm.createNotificationChannel(ch)
-                }
-            }
-            val notif = androidx.core.app.NotificationCompat.Builder(context, com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID)
-                .setContentTitle("PurgeShot needs photo access")
-                .setContentText("Tap to grant access so screenshots can be detected everywhere")
-                .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-                .setContentIntent(pi)
-                .setAutoCancel(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
-                .build()
-            nm.notify(4101, notif)
-        } catch (_: Exception) {}
-    }
-
     suspend fun detectAndHandle(
         context: Context,
         repository: PurgeShotRepository,
@@ -353,10 +319,7 @@ object PurgeShotDetector {
         }
         val hasPerm = hasMediaPermission(context)
         if (!hasPerm) {
-            Log.w(TAG, "missing media permission — will post permission notification and try query anyway (may throw)")
-            postMediaPermissionNotification(context)
-            // Don't hard-return: try query anyway — on some devices SecurityException is not thrown for query() but for open, and Files fallback may still work.
-            // If query throws SecurityException below, we catch and post notification again.
+            Log.w(TAG, "missing media permission — will attempt query anyway")
         }
         if (awaitSettle) delay(SETTLE_DELAY_MS)
 
@@ -364,7 +327,6 @@ object PurgeShotDetector {
             queryRecent(context.contentResolver, 8)
         } catch (e: SecurityException) {
             Log.w(TAG, "queryRecent SecurityException — missing permission", e)
-            postMediaPermissionNotification(context)
             return false
         } catch (e: Exception) {
             Log.w(TAG, "queryRecent failed", e)
@@ -372,8 +334,6 @@ object PurgeShotDetector {
         }
         if (recent.isEmpty()) {
             Log.d(TAG, "no candidate")
-            // If we had no permission, queryRecent would already be empty; ensure notification posted
-            if (!hasPerm) postMediaPermissionNotification(context)
             return false
         }
         // Find first fresh + screenshot-like among most recent 8. This handles the case where

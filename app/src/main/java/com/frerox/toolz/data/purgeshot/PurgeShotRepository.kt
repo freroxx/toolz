@@ -198,7 +198,7 @@ class PurgeShotRepository @Inject constructor(
                 }
             }
 
-            // 1) Direct URI delete — catches RecoverableSecurityException for consent flow
+            // 1) Direct URI delete
             var rows = 0
             try {
                 rows = resolver.delete(uri, null, null)
@@ -207,12 +207,6 @@ class PurgeShotRepository @Inject constructor(
                     return@withContext true
                 }
             } catch (e: SecurityException) {
-                // Android Q+ RecoverableSecurityException handling (type-safe check, minSdk 31)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && e is android.app.RecoverableSecurityException) {
-                    Log.w(TAG, "RecoverableSecurityException — need user consent for $uri")
-                    postDeleteConsentNotification(entity, e.userAction.actionIntent)
-                    return@withContext false
-                }
                 Log.w(TAG, "Direct delete SecurityException, trying fallbacks", e)
             } catch (e: Exception) {
                 Log.w(TAG, "Direct delete failed", e)
@@ -236,11 +230,7 @@ class PurgeShotRepository @Inject constructor(
                             return@withContext true
                         }
                     } catch (se: SecurityException) {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
-                            se is android.app.RecoverableSecurityException) {
-                            postDeleteConsentNotification(entity, se.userAction.actionIntent)
-                            return@withContext false
-                        }
+                        Log.w(TAG, "ID fallback SecurityException", se)
                     }
                 } catch (_: Exception) {}
             }
@@ -331,32 +321,6 @@ class PurgeShotRepository @Inject constructor(
             }
         }
     } catch (_: Exception) { null }
-
-    private fun postDeleteConsentNotification(entity: PurgeShotEntity, consentIntent: PendingIntent? = null) {
-        try {
-            val pi = consentIntent ?: run {
-                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:${context.packageName}")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                PendingIntent.getActivity(
-                    context, entity.id.toInt() + 7000, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            }
-            val notif = androidx.core.app.NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
-                .setContentTitle("PurgeShot needs permission")
-                .setContentText("Tap to allow deleting ${entity.displayName}")
-                .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-                .setContentIntent(pi)
-                .setAutoCancel(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
-                .addAction(com.frerox.toolz.R.drawable.ic_launcher_foreground, "Allow", pi)
-                .build()
-            val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-            mgr?.notify((entity.id % 10000).toInt() + 9000, notif)
-        } catch (_: Exception) {}
-    }
 
     private fun scheduleDeletionWork(entity: PurgeShotEntity) {
         try {

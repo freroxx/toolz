@@ -10,9 +10,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import com.frerox.toolz.R
+import com.frerox.toolz.data.purgeshot.PurgeShotHandler
 import com.frerox.toolz.data.purgeshot.PurgeShotRepository
+import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,54 +27,57 @@ class PurgeShotActionReceiver : BroadcastReceiver() {
     }
 
     @Inject lateinit var repository: PurgeShotRepository
+    @Inject lateinit var settingsRepository: SettingsRepository
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
-        val uriStr = intent.getStringExtra("uri") ?: return
-        val uri = Uri.parse(uriStr)
+        val urisList: List<String> = intent.getStringArrayListExtra("uris")
+            ?: listOfNotNull(intent.getStringExtra("uri"))
+        if (urisList.isEmpty()) return
+
         val notifMgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+
+        // Cancel the alert notification
+        try {
+            intent.getStringExtra("uri")?.let { notifMgr?.cancel(Uri.parse(it).hashCode()) }
+            notifMgr?.cancel(urisList.hashCode())
+        } catch (_: Exception) {}
 
         when (intent.action) {
             "PURGE_KEEP" -> {
-                // Dismiss only — no repository write, safe to run synchronously.
-                try {
-                    notifMgr?.cancel(uri.hashCode())
-                } catch (_: Exception) {
-                }
+                Log.d(TAG, "Keep chosen for ${urisList.size} screenshot(s)")
             }
             "PURGE_ENQUEUE" -> {
-                val displayName = intent.getStringExtra("displayName") ?: "Screenshot"
-                val path = intent.getStringExtra("path")
+                val namesList: List<String> = intent.getStringArrayListExtra("displayNames")
+                    ?: listOfNotNull(intent.getStringExtra("displayName"))
+                val pathsList: List<String> = intent.getStringArrayListExtra("paths")
+                    ?: listOfNotNull(intent.getStringExtra("path"))
                 val duration = intent.getLongExtra("duration", 15 * 60_000L)
                 val label = intent.getStringExtra("label") ?: "15 min"
 
-                // goAsync() is required here: repository.enqueue() is a suspend Room/DataStore
-                // write, and without extending the receiver's priority window the system can
-                // reclaim this process before the write lands — the notification action would
-                // appear to succeed (dismissed, confirmation shown) while nothing was actually
-                // queued for deletion.
                 val pending = goAsync()
                 scope.launch {
                     try {
-                        repository.enqueue(uri, displayName, duration, label, path)
-                        Log.i(TAG, "Enqueued via notification: $label")
+                        urisList.forEachIndexed { idx, uriStr ->
+                            val uri = Uri.parse(uriStr)
+                            val name = namesList.getOrElse(idx) { "Screenshot_${idx + 1}" }
+                            val path = pathsList.getOrNull(idx)
+                            repository.enqueue(uri, name, duration, label, path)
+                        }
+                        Log.i(TAG, "Enqueued ${urisList.size} screenshot(s) via notification: $label")
+
+                        // Show the single "Screenshot scheduled" notification
+                        PurgeShotHandler.showScheduledNotification(
+                            context,
+                            settingsRepository,
+                            urisList.size,
+                            label
+                        )
                     } catch (e: Exception) {
                         Log.w(TAG, "enqueue failed", e)
                     } finally {
                         pending.finish()
                     }
-                }
-
-                try {
-                    notifMgr?.cancel(uri.hashCode())
-                    val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
-                        .setContentTitle("PurgeShot queued")
-                        .setContentText("$displayName • $label")
-                        .setSmallIcon(R.drawable.ic_launcher_foreground)
-                        .setAutoCancel(true)
-                        .build()
-                    notifMgr?.notify(uri.hashCode() + 1000, notif)
-                } catch (_: Exception) {
                 }
             }
         }

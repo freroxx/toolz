@@ -48,6 +48,7 @@ class PurgeShotViewModel @Inject constructor(
     val enabled = settingsRepository.purgeShotEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val smartAuto = settingsRepository.purgeShotSmartAuto.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val autoDurationMs = settingsRepository.purgeShotAutoDuration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 15 * 60_000L)
+    val notificationsEnabled = settingsRepository.purgeShotNotificationsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val pendingCount = repository.pendingCountFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val pendingQueue: StateFlow<List<PurgeShotEntity>> = repository.pendingFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -223,11 +224,56 @@ class PurgeShotViewModel @Inject constructor(
         }
     }
 
+    fun setNotificationsEnabled(value: Boolean) {
+        viewModelScope.launch { settingsRepository.setPurgeShotNotificationsEnabled(value) }
+    }
+
     fun enqueueForPopup(uriStr: String?, displayName: String, path: String?, duration: Long, label: String) {
         if (uriStr == null) return
         viewModelScope.launch {
             val uri = Uri.parse(uriStr)
             repository.enqueue(uri, displayName, duration, label, path)
+        }
+    }
+
+    fun enqueueMultiple(uris: List<String>, names: List<String>, paths: List<String?>, duration: Long, label: String) {
+        viewModelScope.launch {
+            uris.forEachIndexed { idx, uriStr ->
+                val uri = Uri.parse(uriStr)
+                val name = names.getOrElse(idx) { "Screenshot_${idx + 1}" }
+                val path = paths.getOrNull(idx)
+                repository.enqueue(uri, name, duration, label, path)
+            }
+        }
+    }
+
+    fun deleteUriNow(uriStr: String, path: String? = null) {
+        viewModelScope.launch {
+            val entity = PurgeShotEntity(
+                fileUriString = uriStr,
+                displayName = "Screenshot",
+                filePath = path,
+                scheduledDeleteAtMs = System.currentTimeMillis(),
+                durationMillis = 0L,
+                durationLabel = "Now"
+            )
+            repository.deleteFile(entity)
+        }
+    }
+
+    fun deleteMultiple(uris: List<String>, paths: List<String?>) {
+        viewModelScope.launch {
+            uris.forEachIndexed { idx, uriStr ->
+                val entity = PurgeShotEntity(
+                    fileUriString = uriStr,
+                    displayName = "Screenshot_${idx + 1}",
+                    filePath = paths.getOrNull(idx),
+                    scheduledDeleteAtMs = System.currentTimeMillis(),
+                    durationMillis = 0L,
+                    durationLabel = "Now"
+                )
+                repository.deleteFile(entity)
+            }
         }
     }
 

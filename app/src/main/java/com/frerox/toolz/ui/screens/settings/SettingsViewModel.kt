@@ -78,6 +78,7 @@ class SettingsViewModel @Inject constructor(
     val eventReminderNotifications = repository.eventReminderNotifications
     val pomodoroNotifications = repository.pomodoroNotifications
     val flashlightNotificationsEnabled = repository.flashlightNotificationsEnabled
+    val purgeShotNotifications = repository.purgeShotNotificationsEnabled
     val notificationRetentionDays = repository.notificationRetentionDays
 
     val widgetBackgroundColor = repository.widgetBackgroundColor
@@ -159,6 +160,7 @@ class SettingsViewModel @Inject constructor(
     fun setEventReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setEventReminderNotifications(enabled) }
     fun setPomodoroNotifications(enabled: Boolean) = viewModelScope.launch { repository.setPomodoroNotifications(enabled) }
     fun setFlashlightNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setFlashlightNotificationsEnabled(enabled) }
+    fun setPurgeShotNotifications(enabled: Boolean) = viewModelScope.launch { repository.setPurgeShotNotificationsEnabled(enabled) }
     fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }
 
     fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color) }
