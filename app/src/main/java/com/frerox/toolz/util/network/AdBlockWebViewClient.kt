@@ -54,7 +54,18 @@ open class AdBlockWebViewClient(
 
     @Deprecated("Deprecated in Java")
     override fun shouldInterceptRequest(view: WebView?, url: String?): WebResourceResponse? {
-        return intercept(url ?: "")
+        // The deprecated single-URL variant has no isForMainFrame flag, so we heuristically
+        // skip short URLs (scheme + host only, no path) to avoid blocking page navigations.
+        // Sub-resources always carry a path or query, so this is a safe approximation.
+        val u = url ?: return null
+        val normalized = if (u.startsWith("//")) "https:$u" else u
+        val hasPath = try {
+            val uri = java.net.URI(normalized)
+            uri.path?.let { it.length > 1 } ?: false
+        } catch (_: Exception) {
+            normalized.substringAfter("://").contains("/")
+        }
+        return if (hasPath) intercept(u) else null
     }
 
     private fun intercept(url: String): WebResourceResponse? {
@@ -91,7 +102,76 @@ open class AdBlockWebViewClient(
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
+        if (adBlockEnabled()) {
+            injectCosmeticFilter(view)
+        }
         onPageFinished(url)
+    }
+
+    /**
+     * Injects a small JS snippet that hides common ad/tracker/overlay elements
+     * that survived network-level blocking because they are served from the page's
+     * own origin or hard-coded into the HTML.
+     *
+     * Uses display:none on matched elements and sets up a MutationObserver so that
+     * dynamically-inserted elements are hidden as well.
+     */
+    private fun injectCosmeticFilter(view: WebView?) {
+        view ?: return
+        val js = """
+(function() {
+  if (window.__adblockInjected) return;
+  window.__adblockInjected = true;
+
+  var adSelectors = [
+    /* Common ad wrappers */
+    '[id*="google_ads"]','[id*="googead"]','[id*="dfp-ad"]','[id*="dfp_ad"]',
+    '[class*="google-ads"]','[class*="googlead"]','[class*="googletag"]',
+    '[class*="adsbygoogle"]','ins.adsbygoogle',
+    /* Generic ad id/class patterns */
+    '[id^="ad-"]','[id^="ad_"]','[id*="-ad-"]','[id*="_ad_"]',
+    '[class^="ad-"]','[class^="ad_"]','[class*="-ad-"]','[class*="_ad_"]',
+    '[id*="banner-ad"]','[id*="ad-banner"]','[class*="banner-ad"]','[class*="ad-banner"]',
+    '[id*="sponsor"]','[class*="sponsor"]',
+    /* Cookie consent / GDPR banners */
+    '[id*="cookie-banner"]','[id*="cookiebanner"]','[id*="cookie-consent"]',
+    '[class*="cookie-banner"]','[class*="cookiebanner"]','[class*="cookie-consent"]',
+    '[id*="gdpr"]','[class*="gdpr"]','[id*="ccpa"]','[class*="ccpa"]',
+    '#onetrust-banner-sdk','#onetrust-consent-sdk','.qc-cmp2-container',
+    '#CybotCookiebotDialog','#cookielaw-icon','#cookie-law-info-bar',
+    /* Sticky/overlay ad elements */
+    '[id*="sticky-ad"]','[class*="sticky-ad"]',
+    '[id*="adhesion"]','[class*="adhesion"]',
+    '[id*="floating-ad"]','[class*="floating-ad"]',
+    /* Outbrain / Taboola / similar content widgets */
+    '[data-widget-id*="outbrain"]','.OUTBRAIN','[id*="outbrain"]',
+    '.trc_rbox_container','[id*="taboola"]','[class*="taboola"]',
+    '[id*="revcontent"]','[class*="revcontent"]',
+    '[id*="mgid"]','[class*="mgid"]'
+  ];
+
+  function hideAds() {
+    adSelectors.forEach(function(sel) {
+      try {
+        document.querySelectorAll(sel).forEach(function(el) {
+          if (el.style.display !== 'none') {
+            el.style.setProperty('display', 'none', 'important');
+          }
+        });
+      } catch(e) {}
+    });
+  }
+
+  hideAds();
+
+  /* Watch for dynamically inserted ad elements */
+  var observer = new MutationObserver(function(mutations) {
+    hideAds();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+})();
+""".trimIndent()
+        view.evaluateJavascript(js, null)
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

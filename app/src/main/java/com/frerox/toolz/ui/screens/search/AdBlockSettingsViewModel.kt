@@ -26,8 +26,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.File
 import javax.inject.Inject
+
 
 enum class NextDnsHealth { UNKNOWN, CONNECTED, NOT_LINKED, ERROR }
 
@@ -116,30 +118,48 @@ class AdBlockSettingsViewModel @Inject constructor(
             _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
             return
         }
-        
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Use a separate client for health probe with standard User-Agent and cache buster
+                // Build a DoH client that actually routes through NextDNS so that
+                // test.nextdns.io resolves via our configured NextDNS profile and
+                // returns the correct "status":"ok" + "configuration":"<id>" payload.
+                val bootstrapDns = okhttp3.dnsoverhttps.DnsOverHttps.Builder()
+                    .client(
+                        okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                    )
+                    .url("https://dns.nextdns.io/$id".toHttpUrl())
+                    .bootstrapDnsHosts(
+                        java.net.InetAddress.getByName("45.90.28.0"),
+                        java.net.InetAddress.getByName("45.90.30.0")
+                    )
+                    .build()
+
                 val client = okhttp3.OkHttpClient.Builder()
+                    .dns(bootstrapDns)
                     .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                     .build()
-                
+
                 val timestamp = System.currentTimeMillis()
                 val request = okhttp3.Request.Builder()
                     .url("https://test.nextdns.io/?_=$timestamp")
                     .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
                     .header("Cache-Control", "no-cache")
                     .build()
-                
+
                 val response = client.newCall(request).execute()
                 val content = response.body.string()
-                
-                // Parse NextDNS probe JSON
-                val isOk = content.contains("\"status\": \"ok\"")
-                val isUnconfigured = content.contains("\"status\": \"unconfigured\"")
-                val hasConfig = content.contains("\"configuration\": \"$id\"")
-                
+
+                // NextDNS probe JSON can be compact (no spaces after colons) or pretty-printed.
+                // Match both variants: "status":"ok" and "status": "ok"
+                val isOk = content.contains("\"status\":\"ok\"") || content.contains("\"status\": \"ok\"")
+                val isUnconfigured = content.contains("\"status\":\"unconfigured\"") || content.contains("\"status\": \"unconfigured\"")
+                val hasConfig = content.contains("\"configuration\":\"$id\"") || content.contains("\"configuration\": \"$id\"")
+
                 when {
                     isOk && hasConfig -> _nextDnsHealth.value = NextDnsHealth.CONNECTED
                     isOk && !hasConfig -> _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
