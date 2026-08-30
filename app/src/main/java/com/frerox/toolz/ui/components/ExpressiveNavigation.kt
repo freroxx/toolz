@@ -287,6 +287,7 @@ fun ToolzFloatingToolbar(
 
     val todoState by todoViewModel?.uiState?.collectAsState(null) ?: remember { mutableStateOf(null) }
     val focusScore by focusViewModel?.productivityScore?.collectAsState(0) ?: remember { mutableStateOf(0) }
+    val isFocusAuthorized by focusViewModel?.isFullyAuthorized?.collectAsState(false) ?: remember { mutableStateOf(false) }
     
     val pillTodoEnabled by settingsRepository?.pillTodoEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
     val pillFocusEnabled by settingsRepository?.pillFocusEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
@@ -300,19 +301,33 @@ fun ToolzFloatingToolbar(
     val pillFlashlightEnabled by settingsRepository?.pillFlashlightEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
     val pillCatalogDownloadEnabled by settingsRepository?.pillCatalogDownloadEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
 
-    val hasActiveService = showToolzPill && ((pillMusicEnabled && (musicState?.isPlaying == true || musicState?.currentTrack != null)) ||
-                          (pillTimerEnabled && (timerState?.isRunning == true || timerState?.isRinging == true || (timerState?.remainingTime ?: 0L) > 0L)) ||
-                          (pillStopwatchEnabled && stopwatchState?.isRunning == true) ||
-                          (pillPomodoroEnabled && pomodoroState?.isRunning == true) ||
-                          (pillRecorderEnabled && (recordingState?.isRecording == true || recordingState?.isPaused == true)) ||
-                          (pillCaffeinateEnabled && isCaffeinated) || 
-                          (pillFlashlightEnabled && isFlashlightOn) ||
-                          (pillStepsEnabled && stepsState?.isEnabledInSettings == true) ||
-                          (pillCatalogDownloadEnabled && catalogState?.downloadingTracks?.isNotEmpty() == true) ||
-                          (pillTodoEnabled && todoState?.tasks?.isNotEmpty() == true) ||
-                          (pillFocusEnabled && focusScore > 0))
+    // Whether any pill page exists (controls expansion). Mirrors UniversalPill pages logic.
+    val hasAnyPillPage = (pillCatalogDownloadEnabled && catalogState?.downloadingTracks?.isNotEmpty() == true) ||
+            (pillMusicEnabled && (musicState?.isPlaying == true || musicState?.currentTrack != null)) ||
+            (pillTimerEnabled && (timerState?.isRunning == true || timerState?.isRinging == true || (timerState?.remainingTime ?: 0L) > 0L)) ||
+            (pillStopwatchEnabled && (stopwatchState?.isRunning == true || (stopwatchState?.elapsedTime ?: 0L) > 0L)) ||
+            (pillPomodoroEnabled && pomodoroState?.isRunning == true) ||
+            (pillRecorderEnabled && (recordingState?.isRecording == true || recordingState?.isPaused == true)) ||
+            (pillTodoEnabled && todoState?.tasks?.isNotEmpty() == true) ||
+            (pillCaffeinateEnabled && isCaffeinated) ||
+            (pillFlashlightEnabled && isFlashlightOn) ||
+            (pillFocusEnabled && isFocusAuthorized && focusScore > 0) ||
+            (pillStepsEnabled && stepsState?.isSensorPresent == true && stepsState?.isEnabledInSettings == true)
 
-    val showPillContent = showToolzPill && (hasActiveService || fillThePill)
+    // Whether any pill is actively running (controls glowing border). Mirrors UniversalPill isActive.
+    val hasActiveService = showToolzPill && (
+            (pillMusicEnabled && musicState?.isPlaying == true) ||
+            (pillTimerEnabled && timerState?.isRunning == true) ||
+            (pillStopwatchEnabled && stopwatchState?.isRunning == true) ||
+            (pillPomodoroEnabled && pomodoroState?.isRunning == true) ||
+            (pillRecorderEnabled && recordingState?.isRecording == true) ||
+            (pillCaffeinateEnabled && isCaffeinated) ||
+            (pillFlashlightEnabled && isFlashlightOn) ||
+            (pillCatalogDownloadEnabled && catalogState?.downloadingTracks?.isNotEmpty() == true) ||
+            (pillStepsEnabled && stepsState?.isSensorPresent == true && stepsState?.isEnabledInSettings == true && stepsState?.motionStatus != "IDLE")
+            )
+
+    val showPillContent = showToolzPill && (hasAnyPillPage || fillThePill)
 
     val toolbarWidth by animateDpAsState(
         targetValue = if (showPillContent) 340.dp else 260.dp,

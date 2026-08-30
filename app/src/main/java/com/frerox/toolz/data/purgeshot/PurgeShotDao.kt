@@ -70,4 +70,10 @@ interface PurgeShotDao {
 
     @Query("SELECT * FROM purge_shot_queue WHERE fileUriString = :uri AND status = 'PENDING' LIMIT 1")
     suspend fun findPendingByUri(uri: String): PurgeShotEntity?
+
+    @Query("SELECT * FROM purge_shot_queue WHERE filePath = :path AND status = 'PENDING' LIMIT 1")
+    suspend fun findPendingByPath(path: String): PurgeShotEntity?
+
+    @Query("SELECT * FROM purge_shot_queue WHERE filePath = :path LIMIT 1")
+    suspend fun findAnyByPath(path: String): PurgeShotEntity?
 }

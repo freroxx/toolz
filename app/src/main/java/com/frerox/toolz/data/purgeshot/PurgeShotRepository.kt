@@ -62,14 +62,18 @@ class PurgeShotRepository @Inject constructor(
                     // Filter: keep only future or recently-expired (last 30 days)
                     val now = System.currentTimeMillis()
                     val cutoff = now - TimeUnit.DAYS.toMillis(30)
-                    val toRestore = external.filter { it.scheduledDeleteAtMs > cutoff }
+                    var toRestore = external.filter { it.scheduledDeleteAtMs > cutoff }
                     if (toRestore.isNotEmpty()) {
+                        // Dedup restore by uri and filePath to avoid duping after clear-data restore
+                        toRestore = toRestore.distinctBy { it.filePath ?: it.fileUriString }
                         // Reset IDs to 0 for autoGenerate to avoid PK collisions
                         val clean = toRestore.map { it.copy(id = 0) }
                         dao.insertAll(clean)
                     }
                 }
             }
+            // Deduplicate any existing pending duplicates (e.g. legacy dupes before fix)
+            deduplicatePending()
             // Re-schedule all pending regardless (handles reboot / update)
             val allPending = dao.getPendingSync()
             for (e in allPending) {
@@ -84,6 +88,34 @@ class PurgeShotRepository @Inject constructor(
         }
     }
 
+    private suspend fun deduplicatePending() {
+        val pending = dao.getPendingSync()
+        if (pending.size <= 1) return
+        val grouped = pending.groupBy { it.filePath ?: it.fileUriString }
+        var removed = 0
+        for ((_, group) in grouped) {
+            if (group.size > 1) {
+                // Keep earliest (lowest id / earliest scheduled)
+                val sorted = group.sortedBy { it.id }
+                val keep = sorted.first()
+                val dupes = sorted.drop(1)
+                for (dupe in dupes) {
+                    try {
+                        dao.deleteById(dupe.id)
+                        cancelWork(dupe.id)
+                        cancelAlarm(dupe.id)
+                        removed++
+                    } catch (_: Exception) {}
+                }
+                Log.w(TAG, "deduplicatePending removed ${dupes.size} dupes for key=${keep.filePath ?: keep.fileUriString} keepId=${keep.id}")
+            }
+        }
+        if (removed > 0) {
+            scope.launch { externalBackup.mirrorToExternal(dao.getPendingSync()) }
+            Log.i(TAG, "deduplicatePending total removed=$removed")
+        }
+    }
+
     suspend fun enqueue(
         fileUri: Uri,
         displayName: String,
@@ -91,9 +123,27 @@ class PurgeShotRepository @Inject constructor(
         label: String,
         filePath: String? = null
     ): PurgeShotEntity {
+        // Dedup: skip if same uri or same filePath already pending
+        val uriStr = fileUri.toString()
+        val existingByUri = dao.findPendingByUri(uriStr)
+        if (existingByUri != null) {
+            Log.w(TAG, "skip duplicate enqueue uri=$uriStr already pending id=${existingByUri.id}")
+            PurgeShotHandler.markUriHandled(uriStr)
+            if (filePath != null) PurgeShotHandler.markUriHandled(filePath)
+            return existingByUri
+        }
+        if (filePath != null) {
+            val existingByPath = dao.findPendingByPath(filePath)
+            if (existingByPath != null) {
+                Log.w(TAG, "skip duplicate enqueue path=$filePath already pending id=${existingByPath.id} uri=$uriStr")
+                PurgeShotHandler.markUriHandled(uriStr)
+                PurgeShotHandler.markUriHandled(filePath)
+                return existingByPath
+            }
+        }
         val now = System.currentTimeMillis()
         val entity = PurgeShotEntity(
-            fileUriString = fileUri.toString(),
+            fileUriString = uriStr,
             displayName = displayName,
             filePath = filePath,
             createdAtMs = now,
@@ -135,7 +185,42 @@ class PurgeShotRepository @Inject constructor(
         label: String
     ): List<PurgeShotEntity> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val entities = items.map { (uri, name, path) ->
+        // Deduplicate incoming batch by uri and by filePath to prevent same screenshot queued multiple times
+        val distinctItems = items.distinctBy { (uri, _, path) -> (path ?: uri.toString()) }
+        val filtered = mutableListOf<Triple<Uri, String, String?>>()
+        val seenPaths = mutableSetOf<String>()
+        val seenUris = mutableSetOf<String>()
+        for ((uri, name, path) in distinctItems) {
+            val uriStr = uri.toString()
+            // In-batch dedup by uri/path already via distinctBy, but also protect against uri vs path alias
+            if (uriStr in seenUris) continue
+            if (path != null && path in seenPaths) continue
+            // DB dedup — skip if already pending by uri or path
+            val dupByUri = dao.findPendingByUri(uriStr)
+            if (dupByUri != null) {
+                Log.w(TAG, "skip duplicate batch uri=$uriStr pending id=${dupByUri.id}")
+                PurgeShotHandler.markUriHandled(uriStr)
+                if (path != null) PurgeShotHandler.markUriHandled(path)
+                continue
+            }
+            if (path != null) {
+                val dupByPath = dao.findPendingByPath(path)
+                if (dupByPath != null) {
+                    Log.w(TAG, "skip duplicate batch path=$path pending id=${dupByPath.id}")
+                    PurgeShotHandler.markUriHandled(uriStr)
+                    PurgeShotHandler.markUriHandled(path)
+                    continue
+                }
+            }
+            seenUris.add(uriStr)
+            if (path != null) seenPaths.add(path)
+            filtered.add(Triple(uri, name, path))
+        }
+        if (filtered.isEmpty()) {
+            Log.i(TAG, "Enqueue batch filtered to 0 — all duplicates")
+            return@withContext emptyList()
+        }
+        val entities = filtered.map { (uri, name, path) ->
             PurgeShotEntity(
                 fileUriString = uri.toString(),
                 displayName = name,
@@ -150,6 +235,7 @@ class PurgeShotRepository @Inject constructor(
         val ids = dao.insertAll(entities)
         val created = entities.mapIndexed { idx, e ->
             PurgeShotHandler.markUriHandled(e.fileUriString)
+            if (e.filePath != null) PurgeShotHandler.markUriHandled(e.filePath)
             val id = ids.getOrElse(idx) { 0L }
             e.copy(id = id).also {
                 scheduleDeletionWork(it)
@@ -161,7 +247,7 @@ class PurgeShotRepository @Inject constructor(
                 externalBackup.mirrorToExternal(dao.getPendingSync())
             } catch (_: Exception) {}
         }
-        Log.i(TAG, "Enqueued batch of ${created.size} screenshots for $label")
+        Log.i(TAG, "Enqueued batch of ${created.size} screenshots for $label (filtered ${items.size} -> ${filtered.size})")
         created
     }
 
@@ -179,8 +265,16 @@ class PurgeShotRepository @Inject constructor(
         dao.getByUri(uriString)
     }
 
+    suspend fun getEntryByPath(path: String): PurgeShotEntity? = withContext(Dispatchers.IO) {
+        dao.findAnyByPath(path)
+    }
+
     suspend fun hasEntry(uriString: String): Boolean = withContext(Dispatchers.IO) {
         dao.getByUri(uriString) != null
+    }
+
+    suspend fun hasEntryForPath(path: String): Boolean = withContext(Dispatchers.IO) {
+        dao.findAnyByPath(path) != null
     }
 
     suspend fun deleteMultipleFiles(

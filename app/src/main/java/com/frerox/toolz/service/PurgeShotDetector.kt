@@ -151,10 +151,11 @@ object PurgeShotDetector {
                                 modSec > 0 -> modSec * 1000
                                 else -> System.currentTimeMillis()
                             }
-                            // Deduplicate against Images results by displayName+ts proximity
+                            // Deduplicate against Images results by displayName+ts proximity or exact filePath
                             if (results.any { it.displayName == name && kotlin.math.abs(it.dateAddedMs - ts) < 5000 }) continue
                             val rel = if (relIdx != -1) c.getString(relIdx) else null
                             val path = if (dataIdx != -1) c.getString(dataIdx) else null
+                            if (path != null && results.any { it.filePath == path }) continue
                             val uri = ContentUris.withAppendedId(filesUri, id)
                             // Try to map to Images URI if possible for deletion path; keep Files URI as fallback
                             results.add(PurgeShotService.ScreenshotCandidate(uri, name, ts, rel, path, null))
@@ -337,6 +338,7 @@ object PurgeShotDetector {
             return false
         }
         val freshScreenshots = mutableListOf<PurgeShotService.ScreenshotCandidate>()
+        val seenInThisBatch = mutableSetOf<String>()
         var staleReason: String? = null
         for (c in recent) {
             if (!isFreshEnough(c, isPoll)) {
@@ -345,12 +347,27 @@ object PurgeShotDetector {
             }
             if (!looksLikeScreenshot(c)) continue
             val uriStr = c.uri.toString()
-            if (PurgeShotHandler.isUriHandled(uriStr)) continue
+            val path = c.filePath
+            // Deduplicate within this detection batch by uri or path
+            val dedupKey = path ?: uriStr
+            if (dedupKey in seenInThisBatch) continue
+            if (PurgeShotHandler.isAnyHandled(uriStr, path)) continue
             if (repository.hasEntry(uriStr)) {
                 PurgeShotHandler.markUriHandled(uriStr)
+                if (path != null) PurgeShotHandler.markUriHandled(path)
                 continue
             }
+            if (path != null && repository.hasEntryForPath(path)) {
+                PurgeShotHandler.markUriHandled(uriStr)
+                PurgeShotHandler.markUriHandled(path)
+                continue
+            }
+            if (path != null && seenInThisBatch.contains(path)) continue
+            if (seenInThisBatch.contains(uriStr)) continue
             freshScreenshots.add(c)
+            seenInThisBatch.add(dedupKey)
+            if (path != null) seenInThisBatch.add(path)
+            seenInThisBatch.add(uriStr)
         }
         if (freshScreenshots.isEmpty()) {
             val top = recent.firstOrNull()

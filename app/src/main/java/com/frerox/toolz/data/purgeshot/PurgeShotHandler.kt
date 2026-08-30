@@ -37,11 +37,32 @@ object PurgeShotHandler {
     private val _isPopupActive = MutableStateFlow(false)
     val isPopupActive: StateFlow<Boolean> = _isPopupActive.asStateFlow()
 
-    // Thread-safe set of recently handled URIs to prevent duplicate popups / duplicate enqueues
+    // Thread-safe set of recently handled URIs/paths to prevent duplicate popups / duplicate enqueues
     private val handledUris = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
 
     fun isUriHandled(uriStr: String): Boolean {
         return handledUris.contains(uriStr)
+    }
+
+    /** Returns true if uri was newly marked, false if already handled (atomic check-and-add). */
+    fun tryMarkHandled(uriStr: String): Boolean {
+        synchronized(handledUris) {
+            if (handledUris.contains(uriStr)) return false
+            handledUris.add(uriStr)
+            if (handledUris.size > 200) {
+                val it = handledUris.iterator()
+                if (it.hasNext()) { it.next(); it.remove() }
+            }
+            return true
+        }
+    }
+
+    fun isAnyHandled(uriStr: String, filePath: String?): Boolean {
+        synchronized(handledUris) {
+            if (handledUris.contains(uriStr)) return true
+            if (filePath != null && handledUris.contains(filePath)) return true
+            return false
+        }
     }
 
     fun markUriHandled(uriStr: String) {
@@ -74,9 +95,23 @@ object PurgeShotHandler {
 
     fun addCandidateDirectly(candidate: PopupCandidate) {
         _activeBatchFlow.update { current ->
-            if (current.any { it.uri == candidate.uri }) current
+            if (current.any { it.uri == candidate.uri || (candidate.filePath != null && it.filePath == candidate.filePath) }) current
             else current + candidate
         }
+    }
+
+    /** Atomically adds candidate if not already present by uri or filePath. Returns true if added. */
+    fun tryAddCandidate(candidate: PopupCandidate): Boolean {
+        var added = false
+        _activeBatchFlow.update { current ->
+            if (current.any { it.uri == candidate.uri || (candidate.filePath != null && it.filePath == candidate.filePath) }) {
+                current
+            } else {
+                added = true
+                current + candidate
+            }
+        }
+        return added
     }
 
     suspend fun handleNewScreenshot(
@@ -86,32 +121,38 @@ object PurgeShotHandler {
         candidate: PurgeShotService.ScreenshotCandidate
     ) {
         val uriStr = candidate.uri.toString()
+        val path = candidate.filePath
 
-        // 1. Memory check: already handled recently?
-        if (isUriHandled(uriStr)) {
-            Log.d(TAG, "skip already handled uri $uriStr")
+        // 1. Memory check: already handled recently? (check both uri and filePath)
+        if (isAnyHandled(uriStr, path)) {
+            Log.d(TAG, "skip already handled uri $uriStr path=$path")
             return
         }
 
-        // 2. Database check: is this URI already in the database (PENDING, DELETED, CANCELLED)?
-        val existingInDb = repository.getEntryByUri(uriStr)
-        if (existingInDb != null) {
-            Log.d(TAG, "skip uri already in database (status=${existingInDb.status}) $uriStr")
+        // 2. Database check: is this URI or filePath already in the database (any status)?
+        val existingByUri = repository.getEntryByUri(uriStr)
+        if (existingByUri != null) {
+            Log.d(TAG, "skip uri already in database (status=${existingByUri.status}) $uriStr")
             markUriHandled(uriStr)
+            if (path != null) markUriHandled(path)
             return
         }
-
-        // 3. Dedup check within currently active batch
-        val currentBatch = _activeBatchFlow.value
-        if (currentBatch.any { it.uri.toString() == uriStr }) {
-            Log.d(TAG, "dedup within activeBatch $uriStr")
-            return
+        if (path != null) {
+            val existingByPath = repository.getEntryByPath(path)
+            if (existingByPath != null) {
+                Log.d(TAG, "skip path already in database (status=${existingByPath.status}) path=$path uri=$uriStr")
+                markUriHandled(uriStr)
+                markUriHandled(path)
+                return
+            }
         }
 
-        // 4. Stored last screenshot dedup
+        // 3. Stored last screenshot dedup (quick DataStore check)
         val storedLast = try { settingsRepository.purgeShotLastScreenshotUri.first() } catch (_: Exception) { null }
-        if (uriStr == storedLast && currentBatch.isEmpty()) {
-            Log.d(TAG, "dedup storedLast $uriStr")
+        if ((uriStr == storedLast || (path != null && path == storedLast)) && _activeBatchFlow.value.isEmpty()) {
+            Log.d(TAG, "dedup storedLast $uriStr path=$path")
+            markUriHandled(uriStr)
+            if (path != null) markUriHandled(path)
             return
         }
         settingsRepository.setPurgeShotLastScreenshotUri(uriStr)
@@ -121,8 +162,14 @@ object PurgeShotHandler {
         val label = formatDurationLabel(autoDuration)
 
         if (smartAuto) {
-            markUriHandled(uriStr)
-            repository.enqueue(candidate.uri, candidate.displayName, autoDuration, label, candidate.filePath)
+            // Atomic claim: if another coroutine already claimed this uri/path, skip
+            val claimed = tryMarkHandled(uriStr)
+            if (!claimed) {
+                Log.d(TAG, "smartAuto race skip $uriStr")
+                return
+            }
+            if (path != null) markUriHandled(path)
+            repository.enqueue(candidate.uri, candidate.displayName, autoDuration, label, path)
             Log.i(TAG, "SmartAuto queued $uriStr for $label")
             showScheduledNotification(context, settingsRepository, 1, label)
             return
@@ -132,12 +179,16 @@ object PurgeShotHandler {
         val popupCandidate = PopupCandidate(
             uri = candidate.uri,
             displayName = candidate.displayName,
-            filePath = candidate.filePath,
+            filePath = path,
             sizeLabel = sizeLabel
         )
 
-        // 3. Append to active batch
-        _activeBatchFlow.update { it + popupCandidate }
+        // 3. Append to active batch atomically (dedup by uri or filePath)
+        val added = tryAddCandidate(popupCandidate)
+        if (!added) {
+            Log.d(TAG, "dedup within activeBatch race $uriStr path=$path")
+            return
+        }
         val updatedBatch = _activeBatchFlow.value
         Log.i(TAG, "Appended screenshot to active batch (now ${updatedBatch.size} items, popupActive=${_isPopupActive.value})")
 
