@@ -680,10 +680,10 @@ class SettingsRepository @Inject constructor(
     val musicLyricsAlwaysSync: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_ALWAYS_SYNC] ?: true }
     val musicLyricsWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[MUSIC_LYRICS_WORD_SYNC_ENABLED] ?: true }
     val karaokeWordSyncEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_WORD_SYNC_ENABLED] ?: true }
-    val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: false }
-    // Mode supersedes the legacy boolean. Default is MANUAL (explicit user choice).
+    val karaokeSingConfidentlyEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SING_CONFIDENTLY_ENABLED] ?: true }
+    // Mode supersedes the legacy boolean. Default is AUTO_PROCEED (enabled by default).
     val karaokeSingConfidentlyMode: Flow<String> = dataStore.data.map {
-        it[KARAOKE_SING_CONFIDENTLY_MODE] ?: "MANUAL"
+        it[KARAOKE_SING_CONFIDENTLY_MODE] ?: "AUTO_PROCEED"
     }
     val karaokeSpeechCorrectionEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_SPEECH_CORRECTION_ENABLED] ?: false }
     val karaokeQuickSingEnabled: Flow<Boolean> = dataStore.data.map { it[KARAOKE_QUICK_SING_ENABLED] ?: true }

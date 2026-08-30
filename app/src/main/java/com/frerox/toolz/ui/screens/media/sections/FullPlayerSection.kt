@@ -433,11 +433,16 @@ fun FullPlayerView(
                             onToggleKaraoke = onToggleKaraoke,
                             onPlay = {
                                 onPlay()
-                                if (aiState.isSingConfidentlyActive || aiState.isResolvingInstrumental) {
-                                    aiViewModel.toggleSingConfidentlyActive(true) { onSeek(it) }
+                                if (aiState.isSingConfidentlyActive) {
+                                    aiViewModel.playInstrumental()
                                 }
                             },
-                            onPause = { onPause() },
+                            onPause = {
+                                onPause()
+                                if (aiState.isSingConfidentlyActive) {
+                                    aiViewModel.pauseInstrumental()
+                                }
+                            },
                             onStop = {
                                 onStop()
                                 if (aiState.isSingConfidentlyActive || aiState.isResolvingInstrumental) {

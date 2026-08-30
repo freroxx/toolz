@@ -478,6 +478,8 @@ fun HomeTabContent(
 ) {
     val performanceMode = LocalPerformanceMode.current
     val allTools = remember(categories) { categories.flatMap { it.items } }
+    var toolForDetail by remember { mutableStateOf<ToolItem?>(null) }
+    var pinnedExpanded by remember { mutableStateOf(true) }
 
     LazyColumn(
         modifier = Modifier
@@ -500,14 +502,24 @@ fun HomeTabContent(
 
         if (pinnedTools.isNotEmpty()) {
             item(key = "pinned_section_header") {
-                SectionHeader("PINNED")
+                CollapsibleSectionHeader(
+                    title = "PINNED",
+                    expanded = pinnedExpanded,
+                    onToggle = { pinnedExpanded = !pinnedExpanded }
+                )
             }
             item(key = "pinned_grid") {
-                val pinnedItems = remember(pinnedTools, allTools) {
-                    pinnedTools.mapNotNull { route -> allTools.find { it.route == route } }
-                }
-                Column(modifier = Modifier.padding(bottom = 12.dp)) {
-                    ToolGridSection(pinnedItems, onNavigate, { onTogglePin(it.route) })
+                AnimatedVisibility(
+                    visible = pinnedExpanded,
+                    enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                    exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
+                ) {
+                    val pinnedItems = remember(pinnedTools, allTools) {
+                        pinnedTools.mapNotNull { route -> allTools.find { it.route == route } }
+                    }
+                    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                        ToolGridSection(pinnedItems, onNavigate, { onTogglePin(it.route) })
+                    }
                 }
             }
         }
@@ -530,18 +542,28 @@ fun HomeTabContent(
             }
         }
 
-        // Smart Flow tools in Home
+        // Smart Flow tools in Home — long-press opens ToolDetailSheet
         tabCategories.forEachIndexed { ci, cat ->
             item(key = "cat_header_${cat.titleRes}_home") {
                 SectionHeader("ESSENTIALS")
             }
             item(key = "cat_body_${cat.titleRes}_home") {
-                ToolGridSection(cat.items, onNavigate)
+                ToolGridSection(cat.items, onNavigate, { toolForDetail = it })
                 Spacer(Modifier.height(4.dp))
             }
         }
 
         item(key = "dashboard_bottom_spacer") { Spacer(Modifier.height(160.dp)) }
+    }
+
+    toolForDetail?.let { tool ->
+        ToolDetailSheet(
+            tool        = tool,
+            isPinned    = pinnedTools.contains(tool.route),
+            onDismiss   = { toolForDetail = null },
+            onNavigate  = { toolForDetail = null; onNavigate(it) },
+            onTogglePin = { onTogglePin(tool.route) },
+        )
     }
 }
 
@@ -1366,48 +1388,54 @@ fun RecentSection(
     onNavigate: (String) -> Unit,
 ) {
     val all = remember(categories) { categories.flatMap { it.items } }
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
+    val tools = remember(recentTools, all) {
+        recentTools.take(8).mapNotNull { route -> all.find { it.route == route } }
+    }
+    if (tools.isEmpty()) return
+
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
         SectionHeader(stringResource(R.string.st_DashboardScreen_e1f2))
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding        = PaddingValues(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding        = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
         ) {
-            items(recentTools.take(8)) { route ->
-                val tool = all.find { it.route == route } ?: return@items
-                RecentItem(tool, onNavigate)
+            items(tools, key = { it.route }) { tool ->
+                RecentChip(tool = tool, onNavigate = onNavigate)
             }
         }
     }
 }
 
 @Composable
-private fun RecentItem(tool: ToolItem, onNavigate: (String) -> Unit) {
+private fun RecentChip(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
-    Column(
-        modifier            = Modifier
-            .width(64.dp) // More compact
-            .bouncyClick { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    Surface(
+        onClick = { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
+        shape = CircleShape,
+        color = tool.color.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, tool.color.copy(alpha = 0.18f)),
+        modifier = Modifier.height(44.dp),
     ) {
-        Surface(
-            modifier = Modifier.size(56.dp),
-            shape    = ExtraLargeExpressiveShape,
-            color    = tool.color.copy(alpha = 0.1f),
+        Row(
+            modifier            = Modifier.padding(horizontal = 14.dp),
+            verticalAlignment   = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(tool.icon, null, tint = tool.color, modifier = Modifier.size(24.dp))
-            }
+            Icon(
+                tool.icon,
+                contentDescription = null,
+                tint     = tool.color,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                stringResource(tool.titleRes),
+                style      = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                maxLines   = 1,
+                overflow   = TextOverflow.Ellipsis,
+                color      = MaterialTheme.colorScheme.onSurface,
+            )
         }
-        Text(
-            stringResource(tool.titleRes),
-            style      = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Black,
-            maxLines   = 1,
-            overflow   = TextOverflow.Ellipsis,
-            textAlign  = TextAlign.Center,
-            letterSpacing = 0.5.sp,
-        )
     }
 }
 
@@ -1804,10 +1832,45 @@ fun SectionHeader(title: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(title,
-            style         = MaterialTheme.typography.labelLarge, // Smaller, cleaner header
+            style         = MaterialTheme.typography.labelLarge,
             fontWeight    = FontWeight.Black,
             letterSpacing = 2.sp,
             color         = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+    }
+}
+
+@Composable
+fun CollapsibleSectionHeader(title: String, expanded: Boolean, onToggle: () -> Unit) {
+    val vibrationManager = LocalVibrationManager.current
+    val rotationAngle by animateFloatAsState(
+        targetValue = if (expanded) 0f else -90f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "chevronRotation"
+    )
+    Row(
+        modifier = Modifier
+            .padding(top = 28.dp, bottom = 14.dp)
+            .fillMaxWidth()
+            .bouncyClick {
+                vibrationManager?.vibrateTick()
+                onToggle()
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            title,
+            style         = MaterialTheme.typography.labelLarge,
+            fontWeight    = FontWeight.Black,
+            letterSpacing = 2.sp,
+            color         = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+        )
+        Icon(
+            Icons.Rounded.ExpandMore,
+            contentDescription = if (expanded) "Collapse" else "Expand",
+            modifier = Modifier.size(18.dp).rotate(rotationAngle),
+            tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+        )
     }
 }
 
