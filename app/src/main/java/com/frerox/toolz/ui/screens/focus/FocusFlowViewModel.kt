@@ -135,6 +135,9 @@ class FocusFlowViewModel @Inject constructor(
     private val _hasUsagePermission = MutableStateFlow(false)
     val hasUsagePermission: StateFlow<Boolean> = _hasUsagePermission.asStateFlow()
 
+    private val _isFullyAuthorized = MutableStateFlow(false)
+    val isFullyAuthorized: StateFlow<Boolean> = _isFullyAuthorized.asStateFlow()
+
     /**
      * AI-determined categories. Pre-loaded from SharedPreferences so results
      * from previous sessions are immediately available without re-calling Groq.
@@ -489,8 +492,13 @@ class FocusFlowViewModel @Inject constructor(
 
     fun refreshStats() {
         viewModelScope.launch {
-            _hasUsagePermission.value = usageRepository.hasUsageStatsPermission()
-            if (!_hasUsagePermission.value) {
+            val usageGranted = usageRepository.hasUsageStatsPermission()
+            val overlayGranted = android.provider.Settings.canDrawOverlays(context)
+            val accessibilityGranted = checkAccessibilityEnabled(context)
+            _hasUsagePermission.value = usageGranted
+            _isFullyAuthorized.value = usageGranted && overlayGranted && accessibilityGranted
+
+            if (!usageGranted) {
                 _rawStats.value = emptyList()
                 return@launch
             }
@@ -797,6 +805,15 @@ class FocusFlowViewModel @Inject constructor(
         val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
+
+    private fun checkAccessibilityEnabled(context: Context): Boolean = try {
+        val enabled = android.provider.Settings.Secure.getInt(context.contentResolver, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED)
+        if (enabled == 1) {
+            val service = "${context.packageName}/com.frerox.toolz.service.FocusFlowAccessibilityService"
+            val services = android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            services?.contains(service) == true
+        } else false
+    } catch (_: Exception) { false }
 
     override fun onCleared() {
         super.onCleared()

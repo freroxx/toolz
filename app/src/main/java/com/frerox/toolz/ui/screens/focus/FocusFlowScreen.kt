@@ -103,7 +103,7 @@ fun FocusFlowScreen(
     val scope             = rememberCoroutineScope()
 
     var canDrawOverlays         by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    var isAccessibilityEnabled  by remember { mutableStateOf(false) }
+    var isAccessibilityEnabled  by remember { mutableStateOf(checkAccessibilityEnabled(context)) }
     var selectedAppForSettings  by remember { mutableStateOf<AppUsageInfo?>(null) }
     var appToRename             by remember { mutableStateOf<AppUsageInfo?>(null) }
     var showWeeklySheet         by remember { mutableStateOf(false) }
