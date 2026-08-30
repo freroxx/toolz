@@ -172,12 +172,13 @@ fun KaraokeView(
 
     // ── Current lyric index ───────────────────────────────────────────────────
     val listState = rememberLazyListState()
-    val currentLineIndex by remember(playbackPosition, aiState.lyricsState.syncedLyrics) {
-        derivedStateOf {
-            val lyrics = aiState.lyricsState.syncedLyrics
-            if (lyrics.isEmpty()) -1
-            else lyrics.indexOfLast { it.timeMs <= playbackPosition }
-        }
+    // +250ms offset so the highlight leads slightly — matching the same offset
+    // used in NowPlayingAiScreen for consistent LRC timestamp mapping.
+    val syncedPlaybackPosition = playbackPosition + 250L
+    val currentLineIndex = remember(syncedPlaybackPosition, aiState.lyricsState.syncedLyrics) {
+        val lyrics = aiState.lyricsState.syncedLyrics
+        if (lyrics.isEmpty()) -1
+        else lyrics.indexOfLast { it.timeMs <= syncedPlaybackPosition }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -296,6 +297,9 @@ fun KaraokeView(
     // ── Effects ───────────────────────────────────────────────────────────────
     LaunchedEffect(state.currentTrack?.uri, phase) {
         if (phase == KaraokePhase.SPLASH) {
+            onPause()
+            onSeek(0L)
+            aiViewModel.seekTo(0L)
             if (!micPermission.status.isGranted) {
                 // Only request once per track change; system suppresses repeated permanent denials
                 micPermission.launchPermissionRequest()
@@ -318,6 +322,7 @@ fun KaraokeView(
     LaunchedEffect(
         minSplashTimeElapsed,
         aiState.isSearchingInstrumental,
+        aiState.isResolvingInstrumental,
         searchTimeoutElapsed,
         showSingConfidentlyDialog,
         showManualPickSheet,
@@ -339,47 +344,56 @@ fun KaraokeView(
                 && !wasSingConfidentlyHandled
             ) {
                 onPause()
+                onSeek(0L)
+                aiViewModel.seekTo(0L)
                 showManualPickSheet = true
                 return@LaunchedEffect
             }
 
-            // Proceed if search finished OR timeout elapsed (fallback to original without instrumental)
-            val canProceed = !aiState.isSearchingInstrumental || searchTimeoutElapsed
-            if (canProceed) {
-                // Auto-Proceed Mode: silently switch to instrumental as soon as a match is found
-                if (aiState.instrumentalMatch != null
-                    && aiState.singConfidentlyMode == com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.AUTO_PROCEED
-                    && !aiState.isSingConfidentlyActive
-                    && !hasStartedOnce
-                    && !wasSingConfidentlyHandled
-                ) {
-                    wasSingConfidentlyHandled = true
-                    onPause() // Mute until countdown is done
-                    aiViewModel.toggleSingConfidentlyActive(true) { onSeek(it) }
-                    // Fall through to countdown
-                }
+            // Auto-Proceed Mode: silently switch to instrumental as soon as a match is found
+            if (aiState.instrumentalMatch != null
+                && aiState.singConfidentlyMode == com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.AUTO_PROCEED
+                && !aiState.isSingConfidentlyActive
+                && !hasStartedOnce
+                && !wasSingConfidentlyHandled
+            ) {
+                wasSingConfidentlyHandled = true
+                onPause()
+                onSeek(0L)
+                aiViewModel.seekTo(0L)
+                aiViewModel.toggleSingConfidentlyActive(active = true, autoPlay = false) { onSeek(0L) }
+                return@LaunchedEffect
+            }
 
-                // Auto Mode: show the recommendation dialog
-                if (aiState.instrumentalMatch != null
-                    && aiState.singConfidentlyMode == com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.AUTO
-                    && !aiState.isSingConfidentlyActive
-                    && !showSingConfidentlyDialog
-                    && !hasStartedOnce
-                    && !wasSingConfidentlyHandled
-                ) {
+            // Auto Mode: show the recommendation dialog
+            if (aiState.instrumentalMatch != null
+                && aiState.singConfidentlyMode == com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.AUTO
+                && !aiState.isSingConfidentlyActive
+                && !showSingConfidentlyDialog
+                && !hasStartedOnce
+                && !wasSingConfidentlyHandled
+            ) {
+                onPause()
+                onSeek(0L)
+                aiViewModel.seekTo(0L)
+                showSingConfidentlyDialog = true
+                return@LaunchedEffect
+            }
+
+            // Wait for instrumental search and resolving if Sing Confidently is enabled
+            val isWaitingForInstrumental = (aiState.singConfidentlyMode != com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.OFF)
+                && (aiState.isSearchingInstrumental || aiState.isResolvingInstrumental)
+
+            val canProceed = !isWaitingForInstrumental || searchTimeoutElapsed
+            if (canProceed && !showSingConfidentlyDialog && !showManualPickSheet) {
+                if (hasStartedOnce) {
+                    phase = KaraokePhase.ACTIVE
+                    onPlay()
+                } else {
                     onPause()
-                    showSingConfidentlyDialog = true
-                    return@LaunchedEffect
-                }
-
-                if (!showSingConfidentlyDialog && !showManualPickSheet) {
-                    if (hasStartedOnce) {
-                        phase = KaraokePhase.ACTIVE
-                        onPlay()
-                    } else {
-                        onPause() // Ensure music is paused before countdown starts
-                        phase = KaraokePhase.COUNTDOWN
-                    }
+                    onSeek(0L)
+                    aiViewModel.seekTo(0L)
+                    phase = KaraokePhase.COUNTDOWN
                 }
             }
         }
@@ -387,10 +401,15 @@ fun KaraokeView(
 
     LaunchedEffect(phase) {
         if (phase == KaraokePhase.COUNTDOWN) {
+            onPause()
+            onSeek(0L)
+            aiViewModel.seekTo(0L)
             for (i in 3 downTo 1) {
                 countdownTick = i
                 delay(1000L)
             }
+            onSeek(0L)
+            aiViewModel.seekTo(0L)
             onPlay()
             phase = KaraokePhase.ACTIVE
             hasStartedOnce = true
@@ -415,46 +434,48 @@ fun KaraokeView(
         }
     }
 
-    // Auto-start Speech Correct or Audio Saving when phase is ACTIVE.
-    // We strictly enforce exclusive mic ownership.
+    // Unified mic lifecycle — single LaunchedEffect with phase gate.
+    // Previously two effects shared identical keys and raced: #8 delayed start vs #9 immediate pause/resume.
+    // Now gated to ACTIVE so COUNTDOWN 3s pause doesn't schedule 5s destroy that kills ACTIVE start.
     LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlayIntent) {
-        if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && isLogicalPlayIntent) {
-            // Add a stability delay to prevent mic flickering at the very start of the session
-            // while the media player is still buffering or transitioning.
-            delay(400)
-            if (aiState.karaokeSpeechCorrectionEnabled) {
-                // EXCLUSIVE: Speech Correction owns the mic.
-                if (isAudioSavingEnabled || mediaRecorder != null) {
-                    isAudioSavingEnabled = false
-                    stopMediaRecording(scope, mediaRecorder, isMediaRecorderStarted) {
-                        mediaRecorder = null
-                        isMediaRecorderStarted = false
-                        // Safety delay to ensure hardware release before claiming it again
-                        scope.launch {
-                            delay(200)
-                            aiViewModel.startKaraokeRecording()
+        if (phase != KaraokePhase.ACTIVE || !micPermission.status.isGranted) return@LaunchedEffect
+        if (aiState.karaokeSpeechCorrectionEnabled) {
+            if (isLogicalPlayIntent) {
+                if (!aiState.isKaraokeRecording) {
+                    delay(400)
+                    if (!isLogicalPlayIntent || phase != KaraokePhase.ACTIVE) return@LaunchedEffect
+                    // EXCLUSIVE: Speech Correction owns the mic
+                    if (isAudioSavingEnabled || mediaRecorder != null) {
+                        isAudioSavingEnabled = false
+                        stopMediaRecording(scope, mediaRecorder, isMediaRecorderStarted) {
+                            mediaRecorder = null
+                            isMediaRecorderStarted = false
+                            scope.launch {
+                                delay(200)
+                                if (isLogicalPlayIntent && phase == KaraokePhase.ACTIVE) aiViewModel.startKaraokeRecording()
+                            }
                         }
+                    } else {
+                        aiViewModel.startKaraokeRecording()
                     }
                 } else {
-                    aiViewModel.startKaraokeRecording()
+                    aiViewModel.resumeKaraokeListening()
                 }
-            } else if (isAudioSavingEnabled && mediaRecorder == null && !isRecorderStarting) {
-                startAudioRecording()
-            } else if (aiState.autoRecordEnabled && !isAudioSavingEnabled && !isManualRecordingMode && mediaRecorder == null && !isRecorderStarting) {
-                isAudioSavingEnabled = true
-                startAudioRecording()
+            } else {
+                aiViewModel.pauseKaraokeListening()
             }
-        }
-    }
-
-    // FIX: Decouple microphone listening from the player's buffering state.
-    // Toggling the SpeechRecognizer on/off during 1-second buffering gaps
-    // is what causes the persistent flickering. We now use isLogicalPlayIntent
-    // (based on playWhenReady) which survives buffering blips.
-    LaunchedEffect(phase, micPermission.status.isGranted, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlayIntent) {
-        if (phase == KaraokePhase.ACTIVE && micPermission.status.isGranted && aiState.karaokeSpeechCorrectionEnabled) {
-            if (isLogicalPlayIntent) aiViewModel.resumeKaraokeListening()
-            else aiViewModel.pauseKaraokeListening()
+        } else {
+            // Speech off: MediaRecorder owns mic — only start when intent true
+            if (isLogicalPlayIntent) {
+                delay(400)
+                if (!isLogicalPlayIntent || phase != KaraokePhase.ACTIVE || aiState.karaokeSpeechCorrectionEnabled) return@LaunchedEffect
+                if (isAudioSavingEnabled && mediaRecorder == null && !isRecorderStarting) {
+                    startAudioRecording()
+                } else if (aiState.autoRecordEnabled && !isAudioSavingEnabled && !isManualRecordingMode && mediaRecorder == null && !isRecorderStarting) {
+                    isAudioSavingEnabled = true
+                    startAudioRecording()
+                }
+            }
         }
     }
 
@@ -623,7 +644,7 @@ fun KaraokeView(
                             KaraokeLyricsPane(
                                 lyrics                   = aiState.lyricsState.syncedLyrics,
                                 currentIndex             = currentLineIndex,
-                                playbackPosition         = playbackPosition,
+                                playbackPosition         = syncedPlaybackPosition,
                                 speechCorrectionEnabled  = aiState.karaokeSpeechCorrectionEnabled,
                                 onSeek                   = onSeek,
                                 listState                = listState,
@@ -688,6 +709,7 @@ fun KaraokeView(
                     }
                     recordingFile = null
                     phase = KaraokePhase.IDLE
+                    onToggleKaraoke()
                     if (isSkipRequested || isNaturalFinish) {
                         onNextSongConfirmed()
                     } else {
@@ -726,6 +748,7 @@ fun KaraokeView(
                     }
                     recordingFile = null
                     phase = KaraokePhase.IDLE
+                    onToggleKaraoke()
                     if (isSkipRequested || isNaturalFinish) {
                         onNextSongConfirmed()
                     } else {
@@ -848,7 +871,7 @@ fun KaraokeView(
             onSwitch = {
                 showSingConfidentlyDialog = false
                 wasSingConfidentlyHandled = true
-                aiViewModel.toggleSingConfidentlyActive(true) { onSeek(it) }
+                aiViewModel.toggleSingConfidentlyActive(active = true, autoPlay = false) { onSeek(0L) }
             },
             onKeep = { 
                 showSingConfidentlyDialog = false 
@@ -874,7 +897,7 @@ fun KaraokeView(
                 showManualPickSheet = false
                 wasSingConfidentlyHandled = true
                 aiViewModel.setInstrumentalMatch(pickedTrack)
-                aiViewModel.toggleSingConfidentlyActive(true) { onSeek(it) }
+                aiViewModel.toggleSingConfidentlyActive(active = true, autoPlay = false) { onSeek(0L) }
             },
             onDismiss = { 
                 showManualPickSheet = false
@@ -1161,7 +1184,7 @@ private fun KaraokeLine(
 ) {
     val scale by animateFloatAsState(
         targetValue = when {
-            isCurrent -> 1f
+            isCurrent -> 1.08f
             isPast    -> 0.88f
             else      -> 0.84f
         },
@@ -1172,8 +1195,8 @@ private fun KaraokeLine(
     val alpha by animateFloatAsState(
         targetValue = when {
             isCurrent -> 1f
-            isPast    -> 0.32f
-            else      -> 0.16f
+            isPast    -> 0.42f
+            else      -> 0.20f
         },
         animationSpec = if (performanceMode) snap() else tween(350),
         label         = "lineAlpha"
@@ -1273,7 +1296,7 @@ private fun KaraokeWord(
     val missedColor    = Color(0xFFFF5252).copy(alpha = 0.7f) // Subdued Red
     val activeColor    = MaterialTheme.colorScheme.primary
     val pastColor      = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-    val pendingColor   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val pendingColor   = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.70f)
     val farColor       = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)
 
     val color = when {

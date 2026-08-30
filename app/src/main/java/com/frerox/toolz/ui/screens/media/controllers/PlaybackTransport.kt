@@ -182,6 +182,7 @@ class PlaybackTransport(
 
             withContext(Dispatchers.Main) {
                 val p: Player = playerOrController()
+                uiState.update { it.copy(isKaraokeActive = false) }
                 if (isSameQueue) {
                     val idx = trackUris.indexOf(track.uri)
                     if (idx != -1) { p.seekTo(idx, 0L); p.play(); return@withContext }
@@ -231,6 +232,7 @@ class PlaybackTransport(
 
             withContext(Dispatchers.Main) {
                 val p: Player = playerOrController()
+                uiState.update { it.copy(isKaraokeActive = false) }
                 p.stop()
                 p.setMediaItem(item)
                 p.prepare()
@@ -391,7 +393,7 @@ class PlaybackTransport(
     fun stop() {
         val p: Player = playerOrController()
         p.stop(); p.clearMediaItems()
-        uiState.update { it.copy(currentTrack = null, isPlaying = false, playbackPosition = 0L, duration = 0L, isResolvingCatalog = false) }
+        uiState.update { it.copy(currentTrack = null, isPlaying = false, isKaraokeActive = false, playbackPosition = 0L, duration = 0L, isResolvingCatalog = false) }
         _playbackPosition.value = 0L; _duration.value = 0L
         hapticClick()
     }

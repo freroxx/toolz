@@ -249,7 +249,7 @@ class NowPlayingAiViewModel @Inject constructor(
                                     while (_uiState.value.isInstrumentalPlaying && _uiState.value.isSingConfidentlyActive) {
                                         val pos = _instrumentalPlayer?.currentPosition ?: 0L
                                         updateProgress(pos)
-                                        delay(500)
+                                        delay(16)
                                     }
                                 }
                             }
@@ -330,7 +330,7 @@ class NowPlayingAiViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.karaokeSingConfidentlyMode.collect { modeStr ->
-                val mode = try { SingConfidentlyMode.valueOf(modeStr) } catch (_: Exception) { SingConfidentlyMode.MANUAL }
+                val mode = try { SingConfidentlyMode.valueOf(modeStr) } catch (_: Exception) { SingConfidentlyMode.AUTO_PROCEED }
                 _uiState.update { it.copy(singConfidentlyMode = mode) }
             }
         }
@@ -1214,8 +1214,8 @@ class NowPlayingAiViewModel @Inject constructor(
         }
     }
 
-    fun toggleSingConfidentlyActive(active: Boolean, onSync: (Long) -> Unit) {
-        Log.d(TAG, "toggleSingConfidentlyActive: active=$active")
+    fun toggleSingConfidentlyActive(active: Boolean, autoPlay: Boolean = true, onSync: (Long) -> Unit) {
+        Log.d(TAG, "toggleSingConfidentlyActive: active=$active, autoPlay=$autoPlay")
         if (active) {
             val match = _uiState.value.instrumentalMatch ?: run {
                 Log.w(TAG, "No instrumental match found")
@@ -1232,11 +1232,13 @@ class NowPlayingAiViewModel @Inject constructor(
                     viewModelScope.launch(Dispatchers.Main.immediate) {
                         onSync(_playbackPositionMs.value)
                         instrumentalPlayer.seekTo(_playbackPositionMs.value)
-                        instrumentalPlayer.play()
                         onSetMutedByAi?.invoke(true)
                         onPauseOriginal?.invoke(false)
+                        if (autoPlay) {
+                            instrumentalPlayer.play()
+                        }
                     }
-                    Log.d(TAG, "Instrumental player resumed, original muted")
+                    Log.d(TAG, "Instrumental player prepared/resumed, original muted")
                     return
                 }
 
@@ -1251,8 +1253,10 @@ class NowPlayingAiViewModel @Inject constructor(
 
                     onSetMutedByAi?.invoke(true)
                     onPauseOriginal?.invoke(false)
-                    instrumentalPlayer.play()
-                    Log.d(TAG, "Sing Confidently active: Instrumental playing (pre-resolved), original muted")
+                    if (autoPlay) {
+                        instrumentalPlayer.play()
+                    }
+                    Log.d(TAG, "Sing Confidently active: Instrumental prepared (pre-resolved), original muted")
                 }
                 return
             }
@@ -1281,9 +1285,11 @@ class NowPlayingAiViewModel @Inject constructor(
 
                         onSetMutedByAi?.invoke(true)
                         onPauseOriginal?.invoke(false)
-                        instrumentalPlayer.play()
+                        if (autoPlay) {
+                            instrumentalPlayer.play()
+                        }
 
-                        Log.d(TAG, "Sing Confidently active: Instrumental playing, original muted")
+                        Log.d(TAG, "Sing Confidently active: Instrumental prepared/playing, original muted")
                     } else {
                         Log.w(TAG, "Failed to resolve instrumental stream, falling back to original")
                         _uiState.update { it.copy(isSingConfidentlyActive = false, isResolvingInstrumental = false) }
@@ -1330,6 +1336,14 @@ class NowPlayingAiViewModel @Inject constructor(
             onSetMutedByAi?.invoke(false)
         }
         stopKaraokeRecording()
+    }
+
+    fun playInstrumental() {
+        viewModelScope.launch(Dispatchers.Main.immediate) {
+            onSetMutedByAi?.invoke(true)
+            onPauseOriginal?.invoke(false)
+            _instrumentalPlayer?.play()
+        }
     }
 
     fun pauseInstrumental() {
@@ -1562,6 +1576,12 @@ class NowPlayingAiViewModel @Inject constructor(
 
     fun pauseKaraokeListening() {
         if (!_uiState.value.isKaraokeRecording) return
+        // Don't pause within 4s of cold start (covers SPLASH 1.4s + COUNTDOWN 3s where music intentionally paused)
+        // Previously MusicPlayerScreen paused mic during COUNTDOWN right after early AUTO_PROCEED start, killing it.
+        if (System.currentTimeMillis() - sessionStartMs < 4000L) {
+            Log.d(TAG, "pauseKaraokeListening suppressed — within 4s of start (SPLASH/COUNTDOWN)")
+            return
+        }
         _uiState.update { it.copy(isListening = false, isReconnecting = false, micRms = 0f) }
         restartJob?.cancel()
         watchdogJob?.cancel()

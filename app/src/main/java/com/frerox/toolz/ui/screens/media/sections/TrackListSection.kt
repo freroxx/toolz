@@ -398,7 +398,7 @@ fun TrackListItem(
                     android.widget.Toast.makeText(context, nalwfMsg, android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.playTrack(track, tracks)
-                    viewModel.toggleKaraokeMode()
+                    viewModel.setKaraokeMode(true)
                     onOpenFullPlayer()
                 }
             },
@@ -429,7 +429,7 @@ fun TrackListItem(
                     android.widget.Toast.makeText(context, nalwfMsg, android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     viewModel.playTrack(track, tracks)
-                    viewModel.toggleKaraokeMode()
+                    viewModel.setKaraokeMode(true)
                     onOpenFullPlayer()
                 }
             },

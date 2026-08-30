@@ -317,16 +317,14 @@ fun MusicPlayerScreen(
     }
 
     val isLogicalPlaying = state.isPlaying || aiState.isInstrumentalPlaying
+    val isLogicalPlayIntent = state.playWhenReady || aiState.isInstrumentalPlaying
 
-    // FIX: Decouple microphone listening from the player's buffering state.
-    // The previous version would pause/resume the recognizer on every 1s
-    // buffering gap, causing the "on/off" flickering reported by users.
-    // We now use playWhenReady for intent-based gating.
-    LaunchedEffect(state.isKaraokeActive, aiState.karaokeSpeechCorrectionEnabled, state.playWhenReady) {
-        if (state.isKaraokeActive && aiState.karaokeSpeechCorrectionEnabled) {
-            if (state.playWhenReady) aiViewModel.resumeKaraokeListening()
-            else aiViewModel.pauseKaraokeListening()
-        }
+    // Unified with KaraokeScreen: use isLogicalPlayIntent and require isKaraokeRecording
+    // Previously bare playWhenReady + no phase gate caused pause during COUNTDOWN before start and conflicting resume when Sing Confidently active.
+    LaunchedEffect(state.isKaraokeActive, aiState.karaokeSpeechCorrectionEnabled, isLogicalPlayIntent, aiState.isKaraokeRecording) {
+        if (!state.isKaraokeActive || !aiState.karaokeSpeechCorrectionEnabled || !aiState.isKaraokeRecording) return@LaunchedEffect
+        if (isLogicalPlayIntent) aiViewModel.resumeKaraokeListening()
+        else aiViewModel.pauseKaraokeListening()
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -456,7 +454,7 @@ fun MusicPlayerScreen(
                                         android.widget.Toast.makeText(context, "No available lyrics were found", android.widget.Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.playTrack(track)
-                                        viewModel.toggleKaraokeMode()
+                                        viewModel.setKaraokeMode(true)
                                         showFullPlayer = true
                                     }
                                 },
