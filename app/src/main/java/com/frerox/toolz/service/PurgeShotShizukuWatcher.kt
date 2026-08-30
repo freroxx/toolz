@@ -114,11 +114,11 @@ class PurgeShotShizukuWatcher @Inject constructor(
 
     private suspend fun runWatcherLoop() {
         try {
-            // CRITICAL FIX: default to true on DataStore read failure (fail open).
+            // CRITICAL FIX: default to false on DataStore read failure (fail closed).
             // When the process is cold-started by an accessibility event or JobScheduler,
-            // DataStore may not be initialized yet and first() throws. Defaulting to false
-            // caused the watcher to silently abort on every cold start.
-            val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+            // DataStore may not be initialized yet and first() throws. Defaulting to true
+            // previously forced the watcher on for everyone — now we fail closed.
+            val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
             if (!enabled) {
                 Log.d(TAG, "purgeShot disabled, not starting shizuku watcher")
                 _isWatching.value = false
@@ -153,7 +153,7 @@ class PurgeShotShizukuWatcher @Inject constructor(
             delay(5000)
             if (watcherJob?.isActive == true) {
                 try {
-                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
                     if (enabled) runWatcherLoop()
                 } catch (_: Exception) {}
             }
@@ -210,7 +210,7 @@ class PurgeShotShizukuWatcher @Inject constructor(
         Log.i(TAG, "starting polling fallback every 2s")
         while (watcherJob?.isActive == true) {
             try {
-                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
                 if (!enabled) {
                     Log.d(TAG, "polling: disabled, stopping")
                     break
