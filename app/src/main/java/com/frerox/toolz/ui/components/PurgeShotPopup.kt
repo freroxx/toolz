@@ -151,12 +151,18 @@ fun PurgeShotPopup(
                                     fontWeight = FontWeight.Black,
                                     maxLines = 1
                                 )
-                                Text(
-                                    if (isMultiple) "Delete these ${screenshotUris.size} screenshots?" else "Delete this screenshot?",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2
-                                )
+                                AnimatedContent(
+                                    targetState = screenshotUris.size,
+                                    transitionSpec = { (fadeIn() + slideInVertically()).togetherWith(fadeOut() + slideOutVertically()) },
+                                    label = "popupTitleMorph"
+                                ) { count ->
+                                    Text(
+                                        if (count > 1) "Delete these $count screenshots?" else "Delete this screenshot?",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
+                                    )
+                                }
                                 if (!isMultiple && fileSizeLabel != null) {
                                     Text(
                                         fileSizeLabel,
@@ -172,10 +178,16 @@ fun PurgeShotPopup(
                         Spacer(Modifier.height(16.dp))
 
                         // ── Thumbnail(s) ─────────────────────────────────────────
-                        if (isMultiple) {
-                            MultiScreenshotGrid(uris = screenshotUris, count = screenshotUris.size)
-                        } else {
-                            SingleThumbnail(uri = screenshotUri, displayName = displayName)
+                        AnimatedContent(
+                            targetState = isMultiple,
+                            transitionSpec = { fadeIn(tween(220)).togetherWith(fadeOut(tween(180))) },
+                            label = "thumbnailMorph"
+                        ) { multiple ->
+                            if (multiple) {
+                                MultiScreenshotGrid(uris = screenshotUris, count = screenshotUris.size)
+                            } else {
+                                SingleThumbnail(uri = screenshotUris.firstOrNull() ?: screenshotUri, displayName = displayName)
+                            }
                         }
 
                         Spacer(Modifier.height(16.dp))

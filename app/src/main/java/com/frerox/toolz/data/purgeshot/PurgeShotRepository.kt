@@ -27,13 +27,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import com.frerox.toolz.data.settings.SettingsRepository
 import javax.inject.Singleton
 
 @Singleton
 class PurgeShotRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: PurgeShotDao,
-    private val externalBackup: PurgeShotExternalBackupHelper
+    private val externalBackup: PurgeShotExternalBackupHelper,
+    private val settingsRepository: SettingsRepository
 ) {
     companion object {
         private const val TAG = "PurgeShotRepo"
@@ -110,6 +112,86 @@ class PurgeShotRepository @Inject constructor(
         }
         Log.i(TAG, "Enqueued $displayName -> $label (${durationMillis}ms) id=$id")
         return inserted
+    }
+
+    fun enqueueMultipleAsync(
+        items: List<Triple<Uri, String, String?>>,
+        durationMillis: Long,
+        label: String,
+        onComplete: ((List<PurgeShotEntity>) -> Unit)? = null
+    ) {
+        scope.launch {
+            val res = enqueueMultiple(items, durationMillis, label)
+            if (res.isNotEmpty()) {
+                PurgeShotHandler.showScheduledNotification(context, settingsRepository, res.size, label)
+            }
+            onComplete?.invoke(res)
+        }
+    }
+
+    suspend fun enqueueMultiple(
+        items: List<Triple<Uri, String, String?>>,
+        durationMillis: Long,
+        label: String
+    ): List<PurgeShotEntity> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val entities = items.map { (uri, name, path) ->
+            PurgeShotEntity(
+                fileUriString = uri.toString(),
+                displayName = name,
+                filePath = path,
+                createdAtMs = now,
+                scheduledDeleteAtMs = now + durationMillis,
+                durationMillis = durationMillis,
+                durationLabel = label,
+                status = PurgeShotEntity.STATUS_PENDING
+            )
+        }
+        val ids = dao.insertAll(entities)
+        val created = entities.mapIndexed { idx, e ->
+            val id = ids.getOrElse(idx) { 0L }
+            e.copy(id = id).also {
+                scheduleDeletionWork(it)
+                scheduleExactAlarm(it)
+            }
+        }
+        scope.launch {
+            try {
+                externalBackup.mirrorToExternal(dao.getPendingSync())
+            } catch (_: Exception) {}
+        }
+        Log.i(TAG, "Enqueued batch of ${created.size} screenshots for $label")
+        created
+    }
+
+    fun deleteMultipleFilesAsync(
+        items: List<Pair<Uri, String?>>,
+        onComplete: ((Int) -> Unit)? = null
+    ) {
+        scope.launch {
+            val deleted = deleteMultipleFiles(items)
+            onComplete?.invoke(deleted)
+        }
+    }
+
+    suspend fun deleteMultipleFiles(
+        items: List<Pair<Uri, String?>>
+    ): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for ((uri, path) in items) {
+            val entity = PurgeShotEntity(
+                fileUriString = uri.toString(),
+                displayName = "Screenshot",
+                filePath = path,
+                scheduledDeleteAtMs = System.currentTimeMillis(),
+                durationMillis = 0L,
+                durationLabel = "Now"
+            )
+            val ok = deleteFile(entity)
+            if (ok) count++
+        }
+        Log.i(TAG, "Deleted $count of ${items.size} files in batch")
+        count
     }
 
     suspend fun cancel(id: Long) {

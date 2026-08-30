@@ -236,45 +236,34 @@ class PurgeShotViewModel @Inject constructor(
         }
     }
 
-    fun enqueueMultiple(uris: List<String>, names: List<String>, paths: List<String?>, duration: Long, label: String) {
-        viewModelScope.launch {
-            uris.forEachIndexed { idx, uriStr ->
-                val uri = Uri.parse(uriStr)
-                val name = names.getOrElse(idx) { "Screenshot_${idx + 1}" }
-                val path = paths.getOrNull(idx)
-                repository.enqueue(uri, name, duration, label, path)
-            }
+    fun enqueueMultiple(
+        uris: List<String>,
+        names: List<String>,
+        paths: List<String?>,
+        duration: Long,
+        label: String,
+        onComplete: ((List<PurgeShotEntity>) -> Unit)? = null
+    ) {
+        val items = uris.mapIndexed { idx, uriStr ->
+            Triple(Uri.parse(uriStr), names.getOrElse(idx) { "Screenshot_${idx + 1}" }, paths.getOrNull(idx))
         }
+        repository.enqueueMultipleAsync(items, duration, label, onComplete)
     }
 
     fun deleteUriNow(uriStr: String, path: String? = null) {
-        viewModelScope.launch {
-            val entity = PurgeShotEntity(
-                fileUriString = uriStr,
-                displayName = "Screenshot",
-                filePath = path,
-                scheduledDeleteAtMs = System.currentTimeMillis(),
-                durationMillis = 0L,
-                durationLabel = "Now"
-            )
-            repository.deleteFile(entity)
-        }
+        val items = listOf(Pair(Uri.parse(uriStr), path))
+        repository.deleteMultipleFilesAsync(items)
     }
 
-    fun deleteMultiple(uris: List<String>, paths: List<String?>) {
-        viewModelScope.launch {
-            uris.forEachIndexed { idx, uriStr ->
-                val entity = PurgeShotEntity(
-                    fileUriString = uriStr,
-                    displayName = "Screenshot_${idx + 1}",
-                    filePath = paths.getOrNull(idx),
-                    scheduledDeleteAtMs = System.currentTimeMillis(),
-                    durationMillis = 0L,
-                    durationLabel = "Now"
-                )
-                repository.deleteFile(entity)
-            }
+    fun deleteMultiple(
+        uris: List<String>,
+        paths: List<String?>,
+        onComplete: ((Int) -> Unit)? = null
+    ) {
+        val items = uris.mapIndexed { idx, uriStr ->
+            Pair(Uri.parse(uriStr), paths.getOrNull(idx))
         }
+        repository.deleteMultipleFilesAsync(items, onComplete)
     }
 
     // Debug only — gated behind BuildConfig.DEBUG to avoid leaking dummy queue entries in release

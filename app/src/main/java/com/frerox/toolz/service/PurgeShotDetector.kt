@@ -336,11 +336,7 @@ object PurgeShotDetector {
             Log.d(TAG, "no candidate")
             return false
         }
-        // Find first fresh + screenshot-like among most recent 8. This handles the case where
-        // a gallery sync or download inserts a non-screenshot right after the screenshot — the
-        // latest row wouldn't be a screenshot, but the screenshot is still within the 60s window
-        // at position 1-3. Previously we only looked at position 0 and falsely dropped it.
-        var chosen: PurgeShotService.ScreenshotCandidate? = null
+        val freshScreenshots = mutableListOf<PurgeShotService.ScreenshotCandidate>()
         var staleReason: String? = null
         for (c in recent) {
             if (!isFreshEnough(c, isPoll)) {
@@ -348,11 +344,9 @@ object PurgeShotDetector {
                 continue
             }
             if (!looksLikeScreenshot(c)) continue
-            chosen = c
-            break
+            freshScreenshots.add(c)
         }
-        if (chosen == null) {
-            // Log why: either all stale or none looked like screenshot. Check top candidate for debug.
+        if (freshScreenshots.isEmpty()) {
             val top = recent.firstOrNull()
             if (top != null && !isFreshEnough(top, isPoll) && staleReason != null) {
                 Log.d(TAG, "candidate stale, $staleReason")
@@ -362,8 +356,11 @@ object PurgeShotDetector {
             return false
         }
 
-        PurgeShotHandler.handleNewScreenshot(context, repository, settingsRepository, chosen)
-        Log.i(TAG, "handed off ${chosen.displayName} uri=${chosen.uri}")
+        // Hand off in chronological order (oldest to newest)
+        for (candidate in freshScreenshots.reversed()) {
+            PurgeShotHandler.handleNewScreenshot(context, repository, settingsRepository, candidate)
+            Log.i(TAG, "handed off ${candidate.displayName} uri=${candidate.uri}")
+        }
         return true
     }
 }

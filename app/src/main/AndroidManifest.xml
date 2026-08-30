@@ -331,6 +331,7 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:taskAffinity=""
+            android:launchMode="singleTask"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
@@ -369,14 +370,6 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".service.PurgeShotActionReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="PURGE_KEEP" />
-                <action android:name="PURGE_ENQUEUE" />
-            </intent-filter>
-        </receiver>
 
         <service
             android:name=".service.PurgeShotObserverJobService"

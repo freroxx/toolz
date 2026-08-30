@@ -4,17 +4,19 @@
 
 package com.frerox.toolz.service
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.frerox.toolz.MainActivity
+import com.frerox.toolz.data.purgeshot.PopupCandidate
 import com.frerox.toolz.data.purgeshot.PurgeShotHandler
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
 import com.frerox.toolz.data.settings.SettingsRepository
@@ -26,8 +28,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Popup shown immediately after screenshot(s) are detected.
- * Supports both single and batched screenshots.
+ * Single-task popup activity that displays over the screen when screenshots are taken.
+ * Reactively displays all accumulated screenshots in real-time if multiple screenshots
+ * are taken while the popup is visible (solving the popup screenshotting loop).
  */
 @AndroidEntryPoint
 class PurgeShotPopupActivity : ComponentActivity() {
@@ -36,6 +39,8 @@ class PurgeShotPopupActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        PurgeShotHandler.setPopupActive(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -54,48 +59,97 @@ class PurgeShotPopupActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         window.setBackgroundDrawableResource(android.R.color.transparent)
 
-        val urisList: List<String> = intent.getStringArrayListExtra("uris")
-            ?: listOfNotNull(intent.getStringExtra("uri"))
-        val namesList: List<String> = intent.getStringArrayListExtra("displayNames")
-            ?: listOfNotNull(intent.getStringExtra("displayName"))
-        val pathsList: List<String> = intent.getStringArrayListExtra("paths")
-            ?: listOfNotNull(intent.getStringExtra("path"))
-
-        val uriList = urisList.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
-        val displayName = if (uriList.size > 1) "${uriList.size} Screenshots" else (namesList.firstOrNull() ?: "Screenshot")
-        val sizeLabel = if (uriList.size <= 1) intent.getStringExtra("sizeLabel") else null
+        // Seed initial candidate if active batch is currently empty
+        intent.getStringExtra("uri")?.let { uriStr ->
+            val uri = runCatching { Uri.parse(uriStr) }.getOrNull()
+            if (uri != null) {
+                val displayName = intent.getStringExtra("displayName") ?: "Screenshot"
+                val path = intent.getStringExtra("path")
+                val sizeLabel = intent.getStringExtra("sizeLabel")
+                PurgeShotHandler.addCandidateDirectly(
+                    PopupCandidate(uri, displayName, path, sizeLabel)
+                )
+            }
+        }
 
         setContent {
             ToolzTheme {
                 val viewModel: PurgeShotViewModel = hiltViewModel()
-                val presets by viewModel.activePresets.collectAsState(initial = PurgeShotPreset.defaults())
-                val autoDuration by viewModel.autoDurationMs.collectAsState(initial = 15 * 60_000L)
+                val presets: List<PurgeShotPreset> by viewModel.activePresets.collectAsStateWithLifecycle(initialValue = PurgeShotPreset.defaults())
+                val autoDuration: Long by viewModel.autoDurationMs.collectAsStateWithLifecycle(initialValue = 15 * 60_000L)
+                val activeBatch: List<PopupCandidate> by PurgeShotHandler.activeBatchFlow.collectAsStateWithLifecycle()
+
+                val uris: List<Uri> = activeBatch.map { it.uri }
+                val displayName: String = if (activeBatch.size > 1) {
+                    "${activeBatch.size} Screenshots"
+                } else {
+                    activeBatch.firstOrNull()?.displayName ?: (intent.getStringExtra("displayName") ?: "Screenshot")
+                }
+                val sizeLabel: String? = if (activeBatch.size <= 1) {
+                    activeBatch.firstOrNull()?.sizeLabel ?: intent.getStringExtra("sizeLabel")
+                } else null
 
                 PurgeShotPopup(
-                    screenshotUri = uriList.firstOrNull(),
+                    screenshotUri = uris.firstOrNull(),
                     displayName = displayName,
                     presets = presets,
                     autoDurationMillis = autoDuration,
                     fileSizeLabel = sizeLabel,
-                    screenshotUris = uriList,
+                    screenshotUris = uris,
                     onSelectDuration = { preset ->
-                        viewModel.enqueueMultiple(urisList, namesList, pathsList, preset.durationMillis, preset.label)
-                        lifecycleScope.launch {
-                            PurgeShotHandler.showScheduledNotification(
-                                this@PurgeShotPopupActivity,
-                                settingsRepository,
-                                urisList.size,
-                                preset.label
-                            )
+                        val currentItems: List<PopupCandidate> = if (activeBatch.isNotEmpty()) {
+                            activeBatch
+                        } else {
+                            val u = intent.getStringExtra("uri")
+                            if (u != null) {
+                                listOf(
+                                    PopupCandidate(
+                                        Uri.parse(u),
+                                        intent.getStringExtra("displayName") ?: "Screenshot",
+                                        intent.getStringExtra("path"),
+                                        sizeLabel
+                                    )
+                                )
+                            } else emptyList()
                         }
+                        val urisList: List<String> = currentItems.map { it.uri.toString() }
+                        val namesList: List<String> = currentItems.map { it.displayName }
+                        val pathsList: List<String?> = currentItems.map { it.filePath }
+
+                        viewModel.enqueueMultiple(urisList, namesList, pathsList, preset.durationMillis, preset.label)
+                        PurgeShotHandler.clearActiveBatch()
                         finish()
                     },
                     onDeleteNow = {
+                        val currentItems: List<PopupCandidate> = if (activeBatch.isNotEmpty()) {
+                            activeBatch
+                        } else {
+                            val u = intent.getStringExtra("uri")
+                            if (u != null) {
+                                listOf(
+                                    PopupCandidate(
+                                        Uri.parse(u),
+                                        intent.getStringExtra("displayName") ?: "Screenshot",
+                                        intent.getStringExtra("path"),
+                                        sizeLabel
+                                    )
+                                )
+                            } else emptyList()
+                        }
+                        val urisList: List<String> = currentItems.map { it.uri.toString() }
+                        val pathsList: List<String?> = currentItems.map { it.filePath }
                         viewModel.deleteMultiple(urisList, pathsList)
+                        PurgeShotHandler.clearActiveBatch()
                         finish()
                     },
-                    onDismiss = { finish() },
-                    onKeepForever = { finish() },
+                    onDismiss = {
+                        PurgeShotHandler.clearActiveBatch()
+                        finish()
+                    },
+                    onKeepForever = {
+                        PurgeShotHandler.clearActiveBatch()
+                        finish()
+                    },
                     onOpenSettings = {
                         startActivity(
                             android.content.Intent(this@PurgeShotPopupActivity, MainActivity::class.java).apply {
@@ -103,6 +157,7 @@ class PurgeShotPopupActivity : ComponentActivity() {
                                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
                             }
                         )
+                        PurgeShotHandler.clearActiveBatch()
                         finish()
                     }
                 )
@@ -110,9 +165,38 @@ class PurgeShotPopupActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        PurgeShotHandler.setPopupActive(true)
+        intent.getStringExtra("uri")?.let { uriStr ->
+            val uri = runCatching { Uri.parse(uriStr) }.getOrNull()
+            if (uri != null) {
+                val displayName = intent.getStringExtra("displayName") ?: "Screenshot"
+                val path = intent.getStringExtra("path")
+                val sizeLabel = intent.getStringExtra("sizeLabel")
+                PurgeShotHandler.addCandidateDirectly(
+                    PopupCandidate(uri, displayName, path, sizeLabel)
+                )
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PurgeShotHandler.setPopupActive(true)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        PurgeShotHandler.setPopupActive(false)
+        PurgeShotHandler.clearActiveBatch()
+    }
+
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         super.onBackPressed()
+        PurgeShotHandler.clearActiveBatch()
         finish()
     }
 }
