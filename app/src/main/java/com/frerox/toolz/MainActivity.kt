@@ -818,6 +818,13 @@ fun ToolzNavHost(
             }
         }
 
+        // 2b. Handle Whisper Friend Requests Deep Link
+        if (latestIntent.action == "com.frerox.toolz.OPEN_WHISPER_FRIEND_REQUESTS" ||
+            latestIntent.getBooleanExtra("open_friend_requests", false)) {
+            navController.navigate(Screen.Whisper.route)
+            return@LaunchedEffect
+        }
+
         // 3. Handle PDF if NOT handled by a specific alias already
         // (If resolvedRoute is PdfReader, we'll handle it here to call openPdf)
         if (resolvedRoute == Screen.PdfReader.route || 

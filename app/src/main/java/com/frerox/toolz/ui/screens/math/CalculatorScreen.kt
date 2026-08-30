@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -266,32 +268,64 @@ fun CalculatorDisplay(
         ) {
 
             // ── Formula (previous expression) ─────────────────────────────────
+            val formulaScrollState = rememberScrollState()
+            LaunchedEffect(state.formula) {
+                formulaScrollState.animateScrollTo(formulaScrollState.maxValue)
+            }
             AnimatedContent(
                 targetState = state.formula,
                 transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
                 label = "formula_text",
                 modifier = Modifier.fillMaxWidth(),
             ) { formula ->
-                Text(
-                    text = formula.ifEmpty { " " },
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
-                    textAlign = TextAlign.End,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val formulaFontSp = when {
+                    formula.length > 35 -> 11.sp
+                    formula.length > 25 -> 13.sp
+                    formula.length > 18 -> 14.sp
+                    else                -> 16.sp
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(formulaScrollState),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Text(
+                        text = formula.ifEmpty { " " },
+                        style = MaterialTheme.typography.titleSmall.copy(fontSize = formulaFontSp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.50f),
+                        textAlign = TextAlign.End,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
             }
 
             Spacer(Modifier.height(6.dp))
 
-            // ── Main display number — spring-physics slide on change ───────────
+            // ── Main display number — spring-physics slide on change with dynamic zoom-out ───────────
+            val displayLength = state.display.length
             val displayFontSp = when {
-                state.display.length > 15 -> 32.sp
-                state.display.length > 11 -> 48.sp
-                state.display.length > 8  -> 64.sp
-                else                      -> 78.sp
+                displayLength > 36 -> 18.sp
+                displayLength > 28 -> 22.sp
+                displayLength > 22 -> 28.sp
+                displayLength > 17 -> 34.sp
+                displayLength > 13 -> 44.sp
+                displayLength > 10 -> 54.sp
+                displayLength > 7  -> 64.sp
+                else               -> 76.sp
+            }
+            val letterSpacingSp = when {
+                displayLength > 22 -> 0.sp
+                displayLength > 13 -> (-1).sp
+                else               -> (-2).sp
+            }
+            val displayScrollState = rememberScrollState()
+            LaunchedEffect(state.display) {
+                displayScrollState.animateScrollTo(displayScrollState.maxValue)
             }
 
             AnimatedContent(
@@ -309,21 +343,29 @@ fun CalculatorDisplay(
                 label = "display_value",
                 modifier = Modifier.fillMaxWidth(),
             ) { display ->
-                Text(
-                    text = display,
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontSize = displayFontSp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = (-2).sp,
-                    ),
-                    color = when {
-                        state.error != null -> MaterialTheme.colorScheme.error
-                        else               -> MaterialTheme.colorScheme.onSurface
-                    },
-                    textAlign = TextAlign.End,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(displayScrollState),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Text(
+                        text = display,
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontSize = displayFontSp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = letterSpacingSp,
+                        ),
+                        color = when {
+                            state.error != null -> MaterialTheme.colorScheme.error
+                            else               -> MaterialTheme.colorScheme.onSurface
+                        },
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
             }
 
             // ── Live "preview" result ─────────────────────────────────────────

@@ -117,11 +117,42 @@ class WhisperErrorMapperTest {
 
     @Test
     fun testMap_structuredStatusBeatsPhraseMatching() {
-        // V2-FIX (reviewwhisper.md): a 500 whose message merely mentions a keyword must
-        // surface as ServerBusy, not be misrouted into the phrase buckets below it.
-        val mapped = WhisperErrorMapper.map(restException(HttpStatusCode.InternalServerError, error = "You have been blocked by this user"))
+        // V2-FIX (reviewwhisper.md): a 500 whose message mentions a lower-tier keyword
+        // must surface as ServerBusy, not be misrouted into the phrase buckets below it.
+        val mapped = WhisperErrorMapper.map(restException(HttpStatusCode.InternalServerError, error = "Connection reset: offline database"))
         assertTrue(mapped is UiText.StringResource)
         assertEquals(R.string.st_Whisper_Error_ServerBusy, (mapped as UiText.StringResource).resId)
+    }
+
+    @Test
+    fun testMap_aubupRecoveryAndAccessFileErrors() {
+        val incorrectCode = WhisperErrorMapper.map(Exception("Incorrect Whisper Code or corrupted access file."))
+        assertTrue(incorrectCode is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AubupIncorrectCode, (incorrectCode as UiText.StringResource).resId)
+
+        val invalidPassword = WhisperErrorMapper.map(Exception("Invalid password or corrupted data"))
+        assertTrue(invalidPassword is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AubupIncorrectCode, (invalidPassword as UiText.StringResource).resId)
+
+        val invalidFile = WhisperErrorMapper.map(Exception("This file is not a valid Whisper Access File."))
+        assertTrue(invalidFile is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AubupInvalidFile, (invalidFile as UiText.StringResource).resId)
+
+        val codeLength = WhisperErrorMapper.map(Exception("Whisper Code must be exactly 6 digits."))
+        assertTrue(codeLength is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Aubup_CodeLengthError, (codeLength as UiText.StringResource).resId)
+
+        val noCredentials = WhisperErrorMapper.map(Exception("No credentials found for @alice in Password Vault. Please re-enter credentials."))
+        assertTrue(noCredentials is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AubupNoCredentials, (noCredentials as UiText.StringResource).resId)
+
+        val encryptFailed = WhisperErrorMapper.map(Exception("Encryption failed with the provided Whisper Code."))
+        assertTrue(encryptFailed is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AubupEncryptionFailed, (encryptFailed as UiText.StringResource).resId)
+
+        val unreadable = WhisperErrorMapper.map(Exception("Access file exceeds the 1 MB limit"))
+        assertTrue(unreadable is UiText.StringResource)
+        assertEquals(R.string.st_Whisper_Error_AccessFileUnreadable, (unreadable as UiText.StringResource).resId)
     }
 
     @Test(expected = CancellationException::class)

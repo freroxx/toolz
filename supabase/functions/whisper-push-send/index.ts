@@ -50,20 +50,41 @@ serve(async (request) => {
   const saJson = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON");
   if (!saJson) return json({ error: "Push is not configured" }, 503);
 
-  // 2. Parse the Database Webhook payload (INSERT on public.messages).
+  // 2. Parse the Database Webhook payload (INSERT on public.messages or public.friends).
   let record: any;
+  let table: string = "";
   try {
     const payload = await request.json();
     record = payload?.record ?? payload?.new ?? null;
+    table = payload?.table ?? "";
   } catch {
     return json({ error: "Invalid request" }, 400);
   }
-  const messageId = typeof record?.id === "string" ? record.id : "";
-  const senderId = typeof record?.sender_id === "string" ? record.sender_id : "";
-  const receiverId = typeof record?.receiver_id === "string" ? record.receiver_id : "";
-  if (!messageId || !senderId || !receiverId || senderId === receiverId) {
+
+  const isFriendRequest = table === "friends" || (typeof record?.user_a === "string" && typeof record?.user_b === "string");
+  let messageId = "";
+  let senderId = "";
+  let receiverId = "";
+  let isFriendPush = false;
+  let senderName = "";
+
+  if (isFriendRequest) {
+    if (record?.status !== "pending") {
+      return json({ skipped: "not_pending_friend_request" }, 200);
+    }
+    senderId = typeof record?.user_a === "string" ? record.user_a : "";
+    receiverId = typeof record?.user_b === "string" ? record.user_b : "";
+    messageId = typeof record?.id === "string" ? record.id : "";
+    isFriendPush = true;
+  } else {
+    messageId = typeof record?.id === "string" ? record.id : "";
+    senderId = typeof record?.sender_id === "string" ? record.sender_id : "";
+    receiverId = typeof record?.receiver_id === "string" ? record.receiver_id : "";
+  }
+
+  if (!senderId || !receiverId || senderId === receiverId) {
     // Webhooks must acknowledge with 2xx or Supabase retries forever.
-    return json({ skipped: "not_a_pushable_message" }, 200);
+    return json({ skipped: "not_a_pushable_event" }, 200);
   }
 
   const serviceHeaders = {
@@ -71,6 +92,22 @@ serve(async (request) => {
     Authorization: `Bearer ${serviceRoleKey}`,
     "Content-Type": "application/json",
   };
+
+  if (isFriendPush) {
+    try {
+      const senderProfileRes = await fetch(
+        `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(senderId)}&select=display_name,username&limit=1`,
+        { headers: serviceHeaders },
+      );
+      if (senderProfileRes.ok) {
+        const pRows = await senderProfileRes.json();
+        const p = pRows?.[0];
+        senderName = p?.display_name || p?.username || "";
+      }
+    } catch {
+      // Best effort profile name resolution
+    }
+  }
 
   // 3. Skip when the receiver was seen recently — the app is foregrounded and the
   //    message arrives via realtime anyway; a push would be redundant noise.
@@ -128,6 +165,10 @@ serve(async (request) => {
    // FIX: include messageId for client-side dedupe and collapse handling.
    let sent = 0;
    let pruned = 0;
+   const fcmDataPayload: Record<string, string> = isFriendPush
+     ? { whisper_friend_request: "true", senderId, senderName, messageId }
+     : { whisper_new_message: "true", senderId, messageId };
+
    for (const token of tokens) {
      try {
        const fcmRes = await fetch(
@@ -141,8 +182,8 @@ serve(async (request) => {
            body: JSON.stringify({
              message: {
                token,
-               data: { whisper_new_message: "true", senderId, messageId },
-               android: { priority: "HIGH", collapse_key: senderId },
+               data: fcmDataPayload,
+               android: { priority: "HIGH", collapse_key: isFriendPush ? `friend_${senderId}` : senderId },
              },
            }),
            signal: AbortSignal.timeout(10_000),

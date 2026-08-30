@@ -377,7 +377,11 @@
     <string name="st_Whisper_Error_RequestFailed">Request could not be completed. Please try again.</string>
     <string name="st_Whisper_Error_ServerBusy">Server is temporarily busy. Retrying...</string>
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Could not decrypt this message.</string>
-        <string name="st_Whisper_Error_KeyChanged">Safety number changed for this contact. Review it before sending.</string>
+    <string name="st_Whisper_Error_KeyChanged">Safety number changed for this contact. Review it before sending.</string>
+    <string name="st_Whisper_Error_AubupIncorrectCode">Incorrect Whisper Code or corrupted access file.</string>
+    <string name="st_Whisper_Error_AubupInvalidFile">This file is not a valid Whisper Access File.</string>
+    <string name="st_Whisper_Error_AubupNoCredentials">No credentials found in Password Vault for this account.</string>
+    <string name="st_Whisper_Error_AubupEncryptionFailed">Failed to encrypt access file with the provided Whisper Code.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
     <string name="st_Whisper_Beta_Warning_Desc">Whisper is in active development. Messages are end-to-end encrypted with per-message forward secrecy: each message uses a one-time key that is destroyed after use. Features may change while we polish the experience — feedback is welcome!</string>

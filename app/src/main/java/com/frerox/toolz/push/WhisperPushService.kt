@@ -52,6 +52,19 @@ class WhisperPushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val senderId = message.data["senderId"].orEmpty()
         val messageId = message.data["messageId"].orEmpty()
+
+        if (message.data["whisper_friend_request"].toBoolean() || message.data["type"] == "friend_request") {
+            if (senderId.isNotEmpty()) {
+                val senderName = message.data["senderName"].takeIf { !it.isNullOrBlank() }
+                    ?: applicationContext.getString(com.frerox.toolz.R.string.st_Whisper_SomeoneDefault)
+                notificationManager.showFriendRequestNotification(
+                    fromId = senderId,
+                    fromName = senderName
+                )
+            }
+            return
+        }
+
         if (!message.data["whisper_new_message"].toBoolean() || senderId.isEmpty()) return
 
         // Generic, content-free notification — identical body to the in-app realtime

@@ -375,7 +375,11 @@
     <string name="st_Whisper_Error_RequestFailed">La requête n\'a pas pu être effectuée. Veuillez réessayer.</string>
     <string name="st_Whisper_Error_ServerBusy">Le serveur est temporairement occupé. Nouvelle tentative...</string>
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Impossible de déchiffrer ce message.</string>
-        <string name="st_Whisper_Error_KeyChanged">Le numéro de sécurité de ce contact a changé. Vérifiez-le avant d\'envoyer.</string>
+    <string name="st_Whisper_Error_KeyChanged">Le numéro de sécurité de ce contact a changé. Vérifiez-le avant d\'envoyer.</string>
+    <string name="st_Whisper_Error_AubupIncorrectCode">Code Whisper incorrect ou fichier d\'accès corrompu.</string>
+    <string name="st_Whisper_Error_AubupInvalidFile">Ce fichier n\'est pas un fichier d\'accès Whisper valide.</string>
+    <string name="st_Whisper_Error_AubupNoCredentials">Aucun identifiant trouvé dans le coffre-fort pour ce compte.</string>
+    <string name="st_Whisper_Error_AubupEncryptionFailed">Échec du chiffrement du fichier d\'accès avec le code Whisper fourni.</string>
     <string name="st_Whisper_Beta_Badge">BÊTA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Bêta</string>
     <string name="st_Whisper_Beta_Warning_Desc">Whisper est en developpement actif. Les messages sont chiffres de bout en bout avec confidentialite prospective : chaque message utilise une cle a usage unique detruite apres usage. Des fonctionnalites peuvent evoluer pendant que nous peaufinons l\'experience — vos retours sont les bienvenus !</string>

@@ -387,7 +387,8 @@ class WhisperAuthViewModel @Inject constructor(
     }
 
     private suspend fun loginWithPayload(payload: WhisperAccessPayload) {
-        val result = if (payload.authType == "TOKEN") {
+        val isToken = payload.authType.equals("TOKEN", ignoreCase = true)
+        val result = if (isToken) {
             authManager.loginWithToken(payload.credential)
         } else {
             authManager.loginWithUsername(payload.username, payload.credential)
@@ -397,16 +398,16 @@ class WhisperAuthViewModel @Inject constructor(
             // BUGFIX (P0-RestorePopup): Order matters — see restoreFromVault.
             _aubupState.value = AubupRecoveryState.Restored(
                 username = payload.username,
-                authType = payload.authType,
+                authType = if (isToken) "TOKEN" else "PASSWORD",
                 credential = payload.credential,
             )
             _authState.value = WhisperAuthState.Authenticated
             // Re-save to vault on successful recovery
             aubupManager.upsertWhisperVaultEntry(
-                name = if (payload.authType == "TOKEN") "Whisper Anon: ${payload.username}" else "Whisper: ${payload.username}",
+                name = if (isToken) "Whisper Anon: ${payload.username}" else "Whisper: ${payload.username}",
                 username = payload.username,
                 credential = payload.credential,
-                isToken = payload.authType == "TOKEN"
+                isToken = isToken
             )
         }.onFailure { err ->
             // V2-FIX A-M3: UiText payload (see restoreFromVault).

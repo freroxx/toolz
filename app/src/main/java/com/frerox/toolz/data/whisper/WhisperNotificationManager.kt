@@ -83,6 +83,7 @@ class WhisperNotificationManager @Inject constructor(
     private var nextMessageId = FIRST_MESSAGE_NOTIF_ID
     @Volatile private var isInForeground = false
     @Volatile var currentChatId: String? = null
+    @Volatile var isViewingFriendRequests: Boolean = false
     // Dedupe: same messageId from FCM + realtime must not double-notify within TTL.
     private val recentlyNotifiedMessageIds = ConcurrentHashMap<String, Long>()
     private val NOTIF_DEDUPE_TTL_MS = 30_000L
@@ -227,11 +228,11 @@ class WhisperNotificationManager @Inject constructor(
 
     /** Friend request notification — stable sender id avoids display-name collisions. V2-FIX M-H?: id lives in the dedicated FRIEND_REQUEST_* band, disjoint from conversation ids. */
     fun showFriendRequestNotification(fromId: String, fromName: String) {
-        if (isInForeground) return
+        if (isInForeground && isViewingFriendRequests) return
         val notifId = friendRequestNotifId(fromId)
-        // Tapping the notification opens MainActivity and surfaces the request list;
-        // there is no chat to deep-link into, so only the request flag is passed.
+        // Tapping the notification opens MainActivity and surfaces the request list
         val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.frerox.toolz.OPEN_WHISPER_FRIEND_REQUESTS"
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("open_friend_requests", true)
         }
@@ -251,7 +252,7 @@ class WhisperNotificationManager @Inject constructor(
             // Sender names and requests stay off the lock screen like message notifications.
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setGroup(GROUP_KEY)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()

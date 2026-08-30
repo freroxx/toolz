@@ -375,7 +375,11 @@
     <string name="st_Whisper_Error_RequestFailed">A solicitação não pôde ser concluída. Tente novamente.</string>
     <string name="st_Whisper_Error_ServerBusy">O servidor está temporariamente ocupado. Tentando novamente...</string>
     <string name="st_Whisper_Error_DecryptionFailed">⚠️ Não foi possível descriptografar esta mensagem.</string>
-        <string name="st_Whisper_Error_KeyChanged">O número de segurança deste contato mudou. Verifique antes de enviar.</string>
+    <string name="st_Whisper_Error_KeyChanged">O número de segurança deste contato mudou. Verifique antes de enviar.</string>
+    <string name="st_Whisper_Error_AubupIncorrectCode">Código Whisper incorreto ou arquivo de acesso corrompido.</string>
+    <string name="st_Whisper_Error_AubupInvalidFile">Este arquivo não é um arquivo de acesso do Whisper válido.</string>
+    <string name="st_Whisper_Error_AubupNoCredentials">Nenhuma credencial encontrada no Cofre para esta conta.</string>
+    <string name="st_Whisper_Error_AubupEncryptionFailed">Falha ao criptografar o arquivo de acesso com o código Whisper fornecido.</string>
     <string name="st_Whisper_Beta_Badge">BETA</string>
     <string name="st_Whisper_Beta_Warning_Title">Whisper Beta</string>
     <string name="st_Whisper_Beta_Warning_Desc">O Whisper está em desenvolvimento ativo. As mensagens são criptografadas de ponta a ponta com sigilo perfeito: cada mensagem usa uma chave de uso único destruída após o uso. Recursos podem mudar enquanto aprimoramos a experiência — seu feedback é bem-vindo!</string>

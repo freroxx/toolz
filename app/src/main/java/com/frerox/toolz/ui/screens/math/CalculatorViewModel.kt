@@ -19,13 +19,18 @@ package com.frerox.toolz.ui.screens.math
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.data.math.MathHistory
+import com.frerox.toolz.data.math.MathHistoryDao
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import net.objecthunter.exp4j.ExpressionBuilder
+import java.math.BigDecimal
 import java.util.Locale
 import javax.inject.Inject
 
@@ -41,13 +46,24 @@ data class CalculatorState(
 
 @HiltViewModel
 class CalculatorViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val mathHistoryDao: MathHistoryDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorState())
     val uiState: StateFlow<CalculatorState> = _uiState.asStateFlow()
 
     private var isNewExpression = true
+
+    init {
+        viewModelScope.launch {
+            mathHistoryDao.getAllHistory().collect { historyList ->
+                _uiState.update { state ->
+                    state.copy(history = historyList.map { it.expression to it.result })
+                }
+            }
+        }
+    }
 
     fun onDigit(digit: String) {
         _uiState.update {
@@ -158,8 +174,11 @@ class CalculatorViewModel @Inject constructor(
                 val result = expression.evaluate()
                 
                 val formattedResult = formatResult(result)
+                val sourceExpr = state.display
                 
-                val newHistory = (listOf(state.display to formattedResult) + state.history).take(20)
+                viewModelScope.launch {
+                    mathHistoryDao.insert(MathHistory(expression = sourceExpr, result = formattedResult))
+                }
                 
                 isNewExpression = true
                 state.copy(
@@ -167,7 +186,6 @@ class CalculatorViewModel @Inject constructor(
                     formula = balancedDisplay + " =", 
                     liveResult = null,
                     error = null,
-                    history = newHistory
                 )
             } catch (e: Exception) {
                 state.copy(error = "Invalid Expression")
@@ -197,18 +215,44 @@ class CalculatorViewModel @Inject constructor(
     }
 
     fun clearHistory() {
-        _uiState.update { it.copy(history = emptyList()) }
+        viewModelScope.launch {
+            mathHistoryDao.clearAll()
+        }
     }
 
     private fun formatResult(value: Double): String {
-        return if (value.isInfinite()) "Infinity"
-        else if (value.isNaN()) "NaN"
-        else if (value % 1.0 == 0.0) value.toLong().toString()
-        else {
-            if (Math.abs(value) < 1E-10 || Math.abs(value) > 1E10) {
-                String.format(Locale.US, "%.6e", value)
-            } else {
-                String.format(Locale.US, "%.8f", value).trimEnd('0').trimEnd('.')
+        return when {
+            value.isInfinite() -> "Infinity"
+            value.isNaN() -> "NaN"
+            else -> {
+                val absVal = Math.abs(value)
+                if (absVal == 0.0) {
+                    "0"
+                } else if (absVal >= 1e16 || (absVal < 1e-9 && absVal > 0.0)) {
+                    // Scientific notation for very large or very small numbers
+                    val formatted = String.format(Locale.US, "%.10e", value)
+                    val parts = formatted.split("e", "E")
+                    if (parts.size == 2) {
+                        val mantissa = parts[0].trimEnd('0').trimEnd('.')
+                        val exp = parts[1].replace("+", "").toIntOrNull() ?: parts[1]
+                        "${mantissa}E$exp"
+                    } else {
+                        formatted
+                    }
+                } else {
+                    // Clean decimal representation eliminating IEEE-754 precision artifacts (e.g. 0.1 + 0.2 = 0.30000000000000004)
+                    val formatted = String.format(Locale.US, "%.12g", value).trim()
+                    try {
+                        val bd = BigDecimal(formatted)
+                        bd.stripTrailingZeros().toPlainString()
+                    } catch (_: Exception) {
+                        if (value % 1.0 == 0.0 && absVal < Long.MAX_VALUE.toDouble()) {
+                            value.toLong().toString()
+                        } else {
+                            String.format(Locale.US, "%.8f", value).trimEnd('0').trimEnd('.')
+                        }
+                    }
+                }
             }
         }
     }

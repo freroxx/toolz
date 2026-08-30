@@ -176,6 +176,33 @@ object WhisperErrorMapper {
             msg.contains("Safety number changed", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_KeyChanged)
 
+            // AUBUP / Access File recovery and decryption errors
+            msg.contains("Incorrect Whisper Code", ignoreCase = true) ||
+                msg.contains("Invalid password or corrupted data", ignoreCase = true) ||
+                msg.contains("corrupted access file", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_AubupIncorrectCode)
+
+            msg.contains("not a valid Whisper Access File", ignoreCase = true) ||
+                msg.contains("Malformed encrypted data", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_AubupInvalidFile)
+
+            msg.contains("Whisper Code must be exactly 6 digits", ignoreCase = true) ||
+                msg.contains("Whisper Codes do not match", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Aubup_CodeLengthError)
+
+            msg.contains("No credentials found in Password Vault", ignoreCase = true) ||
+                msg.contains("No credentials found for", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_AubupNoCredentials)
+
+            msg.contains("Encryption failed with the provided Whisper Code", ignoreCase = true) ||
+                msg.contains("Encryption failed", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_AubupEncryptionFailed)
+
+            msg.contains("Access file exceeds", ignoreCase = true) ||
+                msg.contains("Could not read the selected file", ignoreCase = true) ||
+                msg.contains("max 1 MB", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_AccessFileUnreadable)
+
             // Decryption sentinel
             msg.contains("Decryption failed", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_DecryptionFailed)
