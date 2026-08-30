@@ -23,12 +23,12 @@ import com.squareup.moshi.JsonClass
 //  Language options
 // ─────────────────────────────────────────────────────────────
 
-enum class OcrLanguage(val displayName: String) {
-    LATIN      ("English / Latin / European"),
-    CHINESE    ("Chinese (Simplified / Traditional)"),
-    JAPANESE   ("Japanese"),
-    KOREAN     ("Korean"),
-    DEVANAGARI ("Devanagari — Hindi / Sanskrit"),
+enum class OcrLanguage(val displayName: String, val tessCode: String) {
+    LATIN      ("All Supported (EN / FR / PT / ES)", "eng+fra+por+spa"),
+    ENGLISH    ("English", "eng"),
+    FRENCH     ("Français", "fra"),
+    PORTUGUESE ("Português (Brasil)", "por"),
+    SPANISH    ("Español", "spa"),
 }
 
 // ─────────────────────────────────────────────────────────────

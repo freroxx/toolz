@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,8 +63,7 @@ import com.frerox.toolz.ui.components.bouncyClick
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import android.location.LocationManager
 import kotlinx.coroutines.launch
 import java.util.*
 
@@ -81,6 +81,32 @@ fun WorldClockScreen(
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
 
+    @SuppressLint("MissingPermission")
+    fun requestLocationUpdate() {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        try {
+            val lastKnown = try {
+                lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            } catch (_: Exception) { null }
+
+            if (lastKnown != null) {
+                viewModel.updateUserLocation(lastKnown.latitude, lastKnown.longitude)
+            }
+
+            val provider = when {
+                lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                else -> LocationManager.PASSIVE_PROVIDER
+            }
+
+            lm.getCurrentLocation(provider, null, ContextCompat.getMainExecutor(context)) { loc ->
+                loc?.let { viewModel.updateUserLocation(it.latitude, it.longitude) }
+            }
+        } catch (_: Exception) {}
+    }
+
     // ── GPS permission launcher ───────────────────────────────────────────────
     @SuppressLint("MissingPermission")
     val locationLauncher = rememberLauncherForActivityResult(
@@ -88,11 +114,7 @@ fun WorldClockScreen(
     ) { granted ->
         viewModel.setLocationGranted(granted)
         if (granted) {
-            val fused = LocationServices.getFusedLocationProviderClient(context)
-            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                .addOnSuccessListener { loc ->
-                    loc?.let { viewModel.updateUserLocation(it.latitude, it.longitude) }
-                }
+            requestLocationUpdate()
         }
     }
 
@@ -104,11 +126,7 @@ fun WorldClockScreen(
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
             viewModel.setLocationGranted(true)
-            val fused = LocationServices.getFusedLocationProviderClient(context)
-            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                .addOnSuccessListener { loc ->
-                    loc?.let { viewModel.updateUserLocation(it.latitude, it.longitude) }
-                }
+            requestLocationUpdate()
         } else {
             locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }

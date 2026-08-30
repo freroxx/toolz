@@ -23,8 +23,9 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.LocationListener
+import android.location.LocationManager
 import androidx.lifecycle.ViewModel
-import com.google.android.gms.location.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,18 +83,15 @@ class AltimeterViewModel @Inject constructor(
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
-    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     private val _uiState = MutableStateFlow(AltimeterState())
     val uiState: StateFlow<AltimeterState> = _uiState.asStateFlow()
 
-    private val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val location = result.lastLocation ?: return
-            // Use GPS as a baseline or fallback if barometer is absent or uninitialized
-            if (pressureSensor == null || _uiState.value.pressureHpa == 0f) {
-                updateAltitude(location.altitude, "GPS", location.accuracy)
-            }
+    private val locationListener = LocationListener { location ->
+        // Use GPS as a baseline or fallback if barometer is absent or uninitialized
+        if (pressureSensor == null || _uiState.value.pressureHpa == 0f) {
+            updateAltitude(location.altitude, "GPS", location.accuracy)
         }
     }
 
@@ -103,7 +101,7 @@ class AltimeterViewModel @Inject constructor(
             val timeDelta = if (state.lastUpdateTime > 0) (currentTime - state.lastUpdateTime) / 1000.0 else 0.0
             val altitudeDelta = altitude - state.altitudeMeters
             val rawClimbRate = if (timeDelta > 0.1) altitudeDelta / timeDelta else state.climbRateMps
-            
+
             // Apply simple low-pass filter to smooth climb rate
             val smoothedClimbRate = state.climbRateMps * 0.8 + rawClimbRate * 0.2
 
@@ -124,16 +122,19 @@ class AltimeterViewModel @Inject constructor(
         if (pressureSensor != null) {
             sensorManager.registerListener(this, pressureSensor, SensorManager.SENSOR_DELAY_UI)
         }
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000)
-            .setMinUpdateDistanceMeters(1f)
-            .build()
-        fusedLocationClient.requestLocationUpdates(request, locationCallback, context.mainLooper)
+        // 3 000 ms interval, 1 m minimum distance — matches the old FusedLocation request
+        locationManager.requestLocationUpdates(
+            LocationManager.GPS_PROVIDER,
+            3_000L,
+            1.0f,
+            locationListener
+        )
         _uiState.update { it.copy(isTracking = true) }
     }
 
     fun stopListening() {
         sensorManager.unregisterListener(this)
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        locationManager.removeUpdates(locationListener)
         _uiState.update { it.copy(isTracking = false) }
     }
 

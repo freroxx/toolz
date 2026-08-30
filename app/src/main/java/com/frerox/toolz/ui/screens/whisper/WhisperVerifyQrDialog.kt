@@ -22,9 +22,15 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.mlkit.vision.MlKitAnalyzer
+import androidx.camera.core.ImageProxy
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -268,21 +274,11 @@ internal fun WhisperQrScanDialog(
 
     val cameraController = remember {
         LifecycleCameraController(context).apply {
-            val options = com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
-                .build()
-            val scanner = com.google.mlkit.vision.barcode.BarcodeScanning.getClient(options)
             setImageAnalysisAnalyzer(
                 ContextCompat.getMainExecutor(context),
-                MlKitAnalyzer(
-                    listOf(scanner),
-                    ImageAnalysis.COORDINATE_SYSTEM_VIEW_REFERENCED,
-                    ContextCompat.getMainExecutor(context)
-                ) { result ->
+                ZxingQrCodeAnalyzer { raw ->
                     if (!scanHandled.get()) {
-                        val barcodes = result.getValue(scanner)
-                        val raw = barcodes?.firstOrNull()?.rawValue
-                        if (!raw.isNullOrEmpty()) handleScan(raw)
+                        if (raw.isNotEmpty()) handleScan(raw)
                     }
                 }
             )
@@ -440,5 +436,87 @@ internal fun WhisperQrScanDialog(
                 }
             },
         )
+    }
+}
+
+private class ZxingQrCodeAnalyzer(
+    private val onQrDetected: (String) -> Unit
+) : ImageAnalysis.Analyzer {
+    private val reader = MultiFormatReader().apply {
+        val hints = mapOf(
+            DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+            DecodeHintType.TRY_HARDER to true
+        )
+        setHints(hints)
+    }
+
+    override fun analyze(image: ImageProxy) {
+        try {
+            val plane = image.planes[0]
+            val buffer = plane.buffer
+            val width = image.width
+            val height = image.height
+            val rowStride = plane.rowStride
+            val pixelStride = plane.pixelStride
+
+            val data: ByteArray
+            if (rowStride == width && pixelStride == 1) {
+                data = ByteArray(buffer.remaining())
+                buffer.get(data)
+            } else {
+                data = ByteArray(width * height)
+                val rowBuffer = ByteArray(rowStride)
+                for (row in 0 until height) {
+                    buffer.position(row * rowStride)
+                    buffer.get(rowBuffer, 0, minOf(rowStride, buffer.remaining()))
+                    for (col in 0 until width) {
+                        data[row * width + col] = rowBuffer[col * pixelStride]
+                    }
+                }
+            }
+
+            val rotationDegrees = image.imageInfo.rotationDegrees
+            val rotatedData = if (rotationDegrees == 90 || rotationDegrees == 270) {
+                val rotated = ByteArray(data.size)
+                if (rotationDegrees == 90) {
+                    for (y in 0 until height) {
+                        for (x in 0 until width) {
+                            rotated[x * height + (height - y - 1)] = data[x + y * width]
+                        }
+                    }
+                } else {
+                    for (y in 0 until height) {
+                        for (x in 0 until width) {
+                            rotated[(width - x - 1) * height + y] = data[x + y * width]
+                        }
+                    }
+                }
+                rotated
+            } else if (rotationDegrees == 180) {
+                val rotated = ByteArray(data.size)
+                for (i in data.indices) {
+                    rotated[data.size - 1 - i] = data[i]
+                }
+                rotated
+            } else {
+                data
+            }
+
+            val finalWidth = if (rotationDegrees == 90 || rotationDegrees == 270) height else width
+            val finalHeight = if (rotationDegrees == 90 || rotationDegrees == 270) width else height
+
+            val source = PlanarYUVLuminanceSource(
+                rotatedData, finalWidth, finalHeight, 0, 0, finalWidth, finalHeight, false
+            )
+            val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+
+            val result = reader.decodeWithState(binaryBitmap)
+            result?.text?.let { onQrDetected(it) }
+        } catch (_: Exception) {
+            // No QR detected in this frame
+        } finally {
+            reader.reset()
+            image.close()
+        }
     }
 }

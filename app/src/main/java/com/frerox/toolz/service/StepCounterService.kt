@@ -42,7 +42,8 @@ import com.frerox.toolz.data.steps.StepRepository
 import com.frerox.toolz.ui.navigation.Screen
 import com.frerox.toolz.util.NotificationHelper
 import com.frerox.toolz.util.StepTrackerUtils
-import com.google.android.gms.location.*
+import android.location.LocationListener
+import android.location.LocationManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -92,7 +93,7 @@ class StepCounterService : Service(), SensorEventListener {
     // ------------------------------------------------------------------
     // GPS
     // ------------------------------------------------------------------
-    private var fusedLocationClient: FusedLocationProviderClient? = null
+    private var locationManager: LocationManager? = null
     private val kalmanFilter = StepTrackerUtils.KalmanFilter()
     private var lastLocation: Location? = null
     private var gpsDistanceMeters: Double = 0.0
@@ -161,34 +162,31 @@ class StepCounterService : Service(), SensorEventListener {
     private var osStepsForwardedThisSession = 0L
 
     // ------------------------------------------------------------------
-    // Location callback
+    // Location listener
     // ------------------------------------------------------------------
-    private val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            if (!isCounterEnabled) return
-            val location = result.lastLocation ?: return
-            
-            // Speedometer Anti-Cheat — if speed > 10 m/s, user is likely driving
-            val driving = location.hasSpeed() && location.speed > 10.0f
-            dspEngine?.forceSuspend(driving)
-            simpleEngine?.setGpsSuspended(driving)
-            
-            lastLocation?.let { prev ->
-                val dist = prev.distanceTo(location).toDouble()
-                // Ignore noise < 2m and implausible GPS jumps > 50m in one update
-                val isSuspended = if (currentEngineMode == "STRICT") {
-                    dspEngine?.state == EngineState.SUSPENDED
-                } else {
-                    simpleEngine?.isSuspended ?: false
-                }
-                if (dist in 2.0..50.0 && !isSuspended) {
-                    val smoothed = kalmanFilter.filter(dist)
-                    gpsDistanceMeters += smoothed
-                    serviceScope.launch(Dispatchers.Main) { updateNotification() }
-                }
+    private val locationListener = LocationListener { location ->
+        if (!isCounterEnabled) return@LocationListener
+        
+        // Speedometer Anti-Cheat — if speed > 10 m/s, user is likely driving
+        val driving = location.hasSpeed() && location.speed > 10.0f
+        dspEngine?.forceSuspend(driving)
+        simpleEngine?.setGpsSuspended(driving)
+        
+        lastLocation?.let { prev ->
+            val dist = prev.distanceTo(location).toDouble()
+            // Ignore noise < 2m and implausible GPS jumps > 50m in one update
+            val isSuspended = if (currentEngineMode == "STRICT") {
+                dspEngine?.state == EngineState.SUSPENDED
+            } else {
+                simpleEngine?.isSuspended ?: false
             }
-            lastLocation = location
+            if (dist in 2.0..50.0 && !isSuspended) {
+                val smoothed = kalmanFilter.filter(dist)
+                gpsDistanceMeters += smoothed
+                serviceScope.launch(Dispatchers.Main) { updateNotification() }
+            }
         }
+        lastLocation = location
     }
 
     // ------------------------------------------------------------------
@@ -200,7 +198,7 @@ class StepCounterService : Service(), SensorEventListener {
         stepSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
         sensorThread = android.os.HandlerThread("SensorThread").apply { start() }
         sensorHandler = android.os.Handler(sensorThread!!.looper)
@@ -457,28 +455,40 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun startGpsTracking(highAccuracy: Boolean) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         if (gpsCurrentlyActive && gpsInLowPowerMode == !highAccuracy) return  // Already in this mode
 
-        val request = if (highAccuracy) {
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000L)
-                .setMinUpdateIntervalMillis(5_000L)
-                .build()
-        } else {
-            LocationRequest.Builder(Priority.PRIORITY_LOW_POWER, 30_000L)
-                .setMinUpdateIntervalMillis(20_000L)
-                .setMaxUpdateDelayMillis(60_000L)
-                .build()
-        }
+        val intervalMs = if (highAccuracy) 10_000L else 30_000L
+        val minDistanceM = if (highAccuracy) 2.0f else 5.0f
 
-        fusedLocationClient?.requestLocationUpdates(request, locationCallback, mainLooper)
-        gpsCurrentlyActive = true
-        gpsInLowPowerMode = !highAccuracy
+        locationManager?.removeUpdates(locationListener)
+        try {
+            if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
+                locationManager?.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    intervalMs,
+                    minDistanceM,
+                    locationListener,
+                    mainLooper
+                )
+            } else if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
+                locationManager?.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    intervalMs,
+                    minDistanceM,
+                    locationListener,
+                    mainLooper
+                )
+            }
+            gpsCurrentlyActive = true
+            gpsInLowPowerMode = !highAccuracy
+        } catch (_: Exception) {}
     }
 
     private fun stopGpsTracking() {
-        fusedLocationClient?.removeLocationUpdates(locationCallback)
+        locationManager?.removeUpdates(locationListener)
         lastLocation = null
         kalmanFilter.reset()
         gpsCurrentlyActive = false

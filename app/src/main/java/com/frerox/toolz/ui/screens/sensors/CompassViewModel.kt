@@ -17,17 +17,19 @@
 
 package com.frerox.toolz.ui.screens.sensors
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.GeomagneticField
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
+import android.location.LocationManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -60,7 +62,7 @@ class CompassViewModel @Inject constructor(
     private val rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+    private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     private val _uiState = MutableStateFlow(CompassState())
     val uiState: StateFlow<CompassState> = _uiState.asStateFlow()
@@ -81,22 +83,47 @@ class CompassViewModel @Inject constructor(
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun updateLocationAndQibla() {
         try {
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                .addOnSuccessListener { location ->
-                    location?.let {
-                        val qibla = calculateQibla(it.latitude, it.longitude)
-                        _uiState.update { state -> 
-                            state.copy(
-                                qiblaAngle = qibla,
-                                latitude = it.latitude,
-                                longitude = it.longitude
-                            )
-                        }
-                    }
-                }
-        } catch (e: SecurityException) {}
+            val lastKnown = try {
+                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    ?: locationManager.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            } catch (e: Exception) {
+                null
+            }
+
+            if (lastKnown != null) {
+                applyLocation(lastKnown)
+            }
+
+            val provider = when {
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                else -> LocationManager.PASSIVE_PROVIDER
+            }
+
+            locationManager.getCurrentLocation(
+                provider,
+                null,
+                ContextCompat.getMainExecutor(context)
+            ) { location ->
+                location?.let { applyLocation(it) }
+            }
+        } catch (e: SecurityException) {
+        } catch (e: Exception) {}
+    }
+
+    private fun applyLocation(location: Location) {
+        val qibla = calculateQibla(location.latitude, location.longitude)
+        _uiState.update { state -> 
+            state.copy(
+                qiblaAngle = qibla,
+                latitude = location.latitude,
+                longitude = location.longitude
+            )
+        }
     }
 
     private fun calculateQibla(lat: Double, lng: Double): Float {

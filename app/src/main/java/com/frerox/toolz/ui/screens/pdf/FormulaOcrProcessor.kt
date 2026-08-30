@@ -25,24 +25,14 @@ import com.frerox.toolz.data.ai.MessageContent
 import com.frerox.toolz.data.ai.OpenAiMessage
 import com.frerox.toolz.data.ai.OpenAiRequest
 import com.frerox.toolz.data.ai.OpenAiService
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.Text
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
-import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
-import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
-import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.googlecode.tesseract.android.TessBaseAPI
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import retrofit2.HttpException
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.abs
 
 private const val TAG         = "FormulaOcrProcessor"
 private const val GROQ_URL    = "https://api.groq.com/openai/v1/chat/completions"
@@ -58,22 +48,51 @@ class FormulaOcrProcessor @Inject constructor(
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 ) {
 
-    private val recognizers = mutableMapOf<OcrLanguage, TextRecognizer>()
+    private val apiCache = mutableMapOf<OcrLanguage, TessBaseAPI>()
 
-    private fun getRecognizer(language: OcrLanguage): TextRecognizer =
-        recognizers.getOrPut(language) {
-            TextRecognition.getClient(when (language) {
-                OcrLanguage.LATIN      -> TextRecognizerOptions.DEFAULT_OPTIONS
-                OcrLanguage.CHINESE    -> ChineseTextRecognizerOptions.Builder().build()
-                OcrLanguage.JAPANESE   -> JapaneseTextRecognizerOptions.Builder().build()
-                OcrLanguage.KOREAN     -> KoreanTextRecognizerOptions.Builder().build()
-                OcrLanguage.DEVANAGARI -> DevanagariTextRecognizerOptions.Builder().build()
-            })
+    private fun ensureTessData(language: OcrLanguage): File {
+        val baseDir = File(context.filesDir, "tesseract")
+        val tessDataDir = File(baseDir, "tessdata")
+        if (!tessDataDir.exists()) {
+            tessDataDir.mkdirs()
         }
+        val langCodes = language.tessCode.split("+")
+        for (code in langCodes) {
+            val targetFile = File(tessDataDir, "$code.traineddata")
+            if (!targetFile.exists() || targetFile.length() == 0L) {
+                try {
+                    context.assets.open("tessdata/$code.traineddata").use { input ->
+                        targetFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to copy traineddata for $code: ${e.message}")
+                }
+            }
+        }
+        return baseDir
+    }
+
+    private fun getTessApi(language: OcrLanguage): TessBaseAPI {
+        return apiCache.getOrPut(language) {
+            val baseDir = ensureTessData(language)
+            TessBaseAPI().apply {
+                init(baseDir.absolutePath, language.tessCode)
+                pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
+            }
+        }
+    }
 
     fun close() {
-        recognizers.values.forEach { it.close() }
-        recognizers.clear()
+        apiCache.values.forEach { 
+            try {
+                it.recycle()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error recycling TessBaseAPI: ${e.message}")
+            }
+        }
+        apiCache.clear()
     }
 
     suspend fun processImage(
@@ -102,12 +121,12 @@ class FormulaOcrProcessor @Inject constructor(
                     if (ownsPre) pre.recycle()
                 }
 
-                val p1conf  = pass1?.let { computeConfidence(it) } ?: 0f
+                val p1conf  = pass1?.second ?: 0f
                 val chosen  = if (p1conf < 0.60f) {
                     Log.d(TAG, "Pass 1 conf $p1conf — trying colour pass")
                     val pass2 = try { runOcr(scaled, options.language) }
                     catch (e: Exception) { null }
-                    val p2conf = pass2?.let { computeConfidence(it) } ?: 0f
+                    val p2conf = pass2?.second ?: 0f
                     when {
                         pass2 == null              -> pass1
                         pass1 == null              -> pass2
@@ -116,14 +135,14 @@ class FormulaOcrProcessor @Inject constructor(
                     }
                 } else pass1
 
-                if (chosen == null) {
-                    Log.e(TAG, "All passes failed")
+                if (chosen == null || chosen.first.isBlank()) {
+                    Log.w(TAG, "All OCR passes produced empty result")
                     return@withContext FormulaOcrResult.empty(options.language)
                 }
 
-                val confidence = computeConfidence(chosen)
-                val blocks     = buildOcrBlocks(chosen)
-                val rawText    = buildStructuredText(chosen, scaled.width)
+                val rawText    = chosen.first.trim()
+                val confidence = chosen.second
+                val blocks     = buildOcrBlocksFromText(rawText, scaled.width, scaled.height, confidence)
                 val latex      = normaliseToLatex(rawText)
 
                 val base = FormulaOcrResult(
@@ -213,42 +232,31 @@ class FormulaOcrProcessor @Inject constructor(
         return out
     }
 
-    private suspend fun runOcr(bitmap: Bitmap, language: OcrLanguage): Text =
-        getRecognizer(language).process(InputImage.fromBitmap(bitmap, 0)).await()
-
-    private fun computeConfidence(result: Text): Float {
-        if (result.textBlocks.isEmpty()) return 0f
-        var total = 0f; var n = 0
-        for (block in result.textBlocks)
-            for (line in block.lines)
-                for (el in line.elements) {
-                    val c = el.confidence
-                    if (c != null && c >= 0f) { total += c; n++ }
-                }
-        return if (n > 0) total / n else 0.5f
+    private fun runOcr(bitmap: Bitmap, language: OcrLanguage): Pair<String, Float> {
+        val tess = getTessApi(language)
+        tess.setImage(bitmap)
+        val text = tess.utF8Text ?: ""
+        val conf = (tess.meanConfidence().toFloat() / 100f).coerceIn(0f, 1f)
+        return Pair(text, conf)
     }
 
-    private fun buildOcrBlocks(result: Text): List<OcrBlock> =
-        result.textBlocks.map { block ->
-            val box = block.boundingBox
+    private fun buildOcrBlocksFromText(text: String, imageWidth: Int, imageHeight: Int, confidence: Float): List<OcrBlock> {
+        val lines = text.lines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) return emptyList()
+        val lineHeight = imageHeight / lines.size.coerceAtLeast(1)
+        return lines.mapIndexed { index, line ->
+            val boxTop = index * lineHeight
+            val boxBottom = (index + 1) * lineHeight
             OcrBlock(
-                text       = block.text,
-                left       = box?.left   ?: 0,
-                top        = box?.top    ?: 0,
-                right      = box?.right  ?: 0,
-                bottom     = box?.bottom ?: 0,
-                confidence = computeBlockConf(block),
-                type       = classifyBlock(block.text, box),
+                text       = line.trim(),
+                left       = 0,
+                top        = boxTop,
+                right      = imageWidth,
+                bottom     = boxBottom,
+                confidence = confidence,
+                type       = classifyBlock(line, null),
             )
         }
-
-    private fun computeBlockConf(block: Text.TextBlock): Float {
-        var t = 0f; var n = 0
-        for (l in block.lines) for (el in l.elements) {
-            val c = el.confidence
-            if (c != null && c >= 0f) { t += c; n++ }
-        }
-        return if (n > 0) t / n else -1f
     }
 
     private fun classifyBlock(text: String, box: Rect?): OcrBlockType {
@@ -258,59 +266,6 @@ class FormulaOcrProcessor @Inject constructor(
         if (t.startsWith("•") || t.startsWith("-") || t.matches(Regex("^\\d+[.)].*")))
             return OcrBlockType.LIST_ITEM
         return OcrBlockType.PARAGRAPH
-    }
-
-    /**
-     * Enhanced structured text extraction.
-     * Groups lines by vertical proximity and preserves basic horizontal layout (indents, columns).
-     */
-    private fun buildStructuredText(result: Text, imageWidth: Int): String {
-        if (result.textBlocks.isEmpty()) return ""
-        
-        // Flatten all lines across blocks for better global ordering
-        val allLines = result.textBlocks.flatMap { it.lines }
-            .filter { it.text.isNotBlank() }
-            .sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
-
-        if (allLines.isEmpty()) return ""
-
-        val sb = StringBuilder()
-        var lastLine: Text.Line? = null
-        val columnThreshold = imageWidth * 0.15f // Distance to consider as a significant horizontal gap
-
-        allLines.forEach { line ->
-            val box = line.boundingBox ?: return@forEach
-            val lastBox = lastLine?.boundingBox
-
-            if (lastBox != null) {
-                val verticalGap = box.top - lastBox.bottom
-                val horizontalGap = box.left - lastBox.right
-                val lineHeights = (box.height() + lastBox.height()) / 2
-                
-                // New paragraph if vertical gap is large
-                if (verticalGap > lineHeights * 1.2) {
-                    sb.append("\n\n")
-                } else if (verticalGap > lineHeights * 0.3) {
-                    sb.append("\n")
-                } else if (horizontalGap > columnThreshold) {
-                    sb.append("    ") // Column-like spacing
-                } else {
-                    sb.append(" ") // Continuation on same semantic line
-                }
-            }
-            
-            val trimmed = line.text.trim()
-            if (trimmed.startsWith("•") || trimmed.startsWith("-") || trimmed.matches(Regex("^\\d+[.)].*"))) {
-                if (sb.isNotEmpty() && !sb.endsWith("\n")) sb.append("\n")
-                sb.append(trimmed)
-            } else {
-                sb.append(trimmed)
-            }
-            
-            lastLine = line
-        }
-
-        return sb.toString().trim()
     }
 
     fun normaliseToLatex(rawText: String): String {
