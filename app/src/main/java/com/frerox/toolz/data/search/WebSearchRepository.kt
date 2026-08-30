@@ -194,8 +194,10 @@ class WebSearchRepository @Inject constructor(
         engineCooldowns[engine] = EngineCooldown(until = System.currentTimeMillis() + COOLDOWN_MS)
     }
 
-    // Privacy-ordered fallback chain — DDG first, Google last
-    private val FALLBACK_ORDER = listOf("DUCKDUCKGO", "BRAVE", "BING", "GOOGLE")
+    // Privacy-ordered fallback chain — Brave first (works with HTML), Bing second, Google last.
+    // DUCKDUCKGO is intentionally excluded: if it's blocked by CAPTCHA it will just return
+    // another CAPTCHA immediately, wasting a network round-trip.
+    private val FALLBACK_ORDER = listOf("BRAVE", "BING", "GOOGLE")
 
     // ─── Ad block — delegated to AdBlockList singleton ────────────────────────
 
@@ -504,7 +506,12 @@ class WebSearchRepository @Inject constructor(
                     html.contains("captcha", ignoreCase = true) ||
                     html.contains("cf-browser-verification") ||
                     html.contains("To continue, please type") ||
-                    html.contains("press and hold")
+                    html.contains("press and hold") ||
+                    // DDG anomaly / visual challenge page (as of 2025)
+                    html.contains("anomaly-modal") ||
+                    html.contains("bots use DuckDuckGo") ||
+                    html.contains("challenge-form") ||
+                    html.contains("anomaly.js")
                 ) {
                     setCooldown(eng)
                     continue
@@ -1106,30 +1113,42 @@ class WebSearchRepository @Inject constructor(
         }
 
         // ── Brave Web (ALL) ──────────────────────────────────────────────────
-        doc.select(".snippet, #results .snippet").forEachIndexed { rank, el ->
-            val titleEl   = el.select(".snippet-title, .title, h2").firstOrNull() ?: return@forEachIndexed
-            val linkEl    = el.select("a.url, a[href]").firstOrNull() ?: return@forEachIndexed
-            val snippetEl = el.select(".snippet-description, .description, .description-container").firstOrNull()
-
+        // Brave renders results as <div class="snippet svelte-XXX" data-type="web" data-pos="N">
+        // Each result contains:
+        //   - An <a> whose href is the result URL and whose child div has class containing "title"
+        //   - A <div class="snippet-url ..."> with the display URL
+        //   - A <div class="generic-snippet"> containing the description
+        // We use [data-type=web] to avoid matching sub-snippet cluster links.
+        val webSnippets = doc.select("div.snippet[data-type=web]")
+        webSnippets.forEachIndexed { rank, el ->
+            // First external link in the result is the canonical URL
+            val linkEl = el.select("a[href]").firstOrNull { a ->
+                a.attr("href").startsWith("http") && !a.attr("href").contains("search.brave.com")
+            } ?: return@forEachIndexed
             val cleanUrl = linkEl.attr("href")
-            if (!cleanUrl.startsWith("http")) return@forEachIndexed
             if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
 
+            // Title: child element with class containing "title" inside the link, or the link text itself
+            val titleEl = linkEl.select("[class*=title]").firstOrNull()
+            val title = (titleEl?.text() ?: linkEl.attr("title").ifBlank { linkEl.text() }).trim()
+            if (title.isBlank()) return@forEachIndexed
+
+            // Description: .generic-snippet or div with class containing "description"
+            val snippetEl = el.select(".generic-snippet, [class*=description]").firstOrNull()
             val snippetText = snippetEl?.text()?.trim() ?: ""
             val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
 
-            // Brave shows a URL breadcrumb under the title
-            val breadcrumb = el.select(".url, .result-url, cite").firstOrNull()
-                ?.text()?.trim()?.ifBlank { null }
+            // Display URL: element with class containing "snippet-url"
+            val displayUrl = el.select("[class*=snippet-url]").firstOrNull()
+                ?.text()?.trim()?.ifBlank { null } ?: safeHost(cleanUrl)
 
             results += SearchResult(
-                title      = titleEl.text().trim(),
+                title      = title,
                 snippet    = cleanSnippet,
                 url        = cleanUrl,
-                displayUrl = safeHost(cleanUrl),
+                displayUrl = displayUrl,
                 source     = "Brave",
                 date       = date,
-                breadcrumb = breadcrumb,
                 engineRank = rank,
             )
         }

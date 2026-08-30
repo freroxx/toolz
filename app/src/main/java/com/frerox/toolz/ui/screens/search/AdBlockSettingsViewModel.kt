@@ -124,18 +124,18 @@ class AdBlockSettingsViewModel @Inject constructor(
                 // Build a DoH client that actually routes through NextDNS so that
                 // test.nextdns.io resolves via our configured NextDNS profile and
                 // returns the correct "status":"ok" + "configuration":"<id>" payload.
+                val bootstrapClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
                 val bootstrapDns = okhttp3.dnsoverhttps.DnsOverHttps.Builder()
-                    .client(
-                        okhttp3.OkHttpClient.Builder()
-                            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                            .build()
-                    )
+                    .client(bootstrapClient)
                     .url("https://dns.nextdns.io/$id".toHttpUrl())
-                    .bootstrapDnsHosts(
+                    .bootstrapDnsHosts(listOf(
                         java.net.InetAddress.getByName("45.90.28.0"),
                         java.net.InetAddress.getByName("45.90.30.0")
-                    )
+                    ))
                     .build()
 
                 val client = okhttp3.OkHttpClient.Builder()
