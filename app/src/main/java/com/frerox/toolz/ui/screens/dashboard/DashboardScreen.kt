@@ -178,9 +178,10 @@ fun DashboardScreen(
     val userName     by settingsRepository.userName.collectAsState("")
     val pinnedTools  by settingsRepository.pinnedTools.collectAsState(emptySet())
     val recentTools  by settingsRepository.recentTools.collectAsState(emptyList())
+    val recentToolsRows by settingsRepository.recentToolsRows.collectAsState(1)
     val showRecent   by settingsRepository.showRecentTools.collectAsState(true)
     val showNotes    by settingsRepository.showQuickNotes.collectAsState(true)
-    val showStats    by settingsRepository.showDashboardStats.collectAsState(false)
+    val showStats    by settingsRepository.showDashboardStats.collectAsState(true)
     val savedView    by settingsRepository.dashboardView.collectAsState("DEFAULT")
 
     val searchQuery  by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -214,6 +215,7 @@ fun DashboardScreen(
             userName            = userName,
             pinnedTools         = pinnedTools,
             recentTools         = recentTools,
+            recentToolsRows     = recentToolsRows,
             showRecentTools     = showRecent,
             showQuickNotes      = showNotes,
             showDashboardStats  = showStats,
@@ -300,6 +302,7 @@ fun DashboardContent(
     userName: String,
     pinnedTools: Set<String>,
     recentTools: List<String>,
+    recentToolsRows: Int = 1,
     showRecentTools: Boolean,
     showQuickNotes: Boolean,
     showDashboardStats: Boolean,
@@ -393,6 +396,7 @@ fun DashboardContent(
                             userName = userName,
                             pinnedTools = pinnedTools,
                             recentTools = recentTools,
+                            recentToolsRows = recentToolsRows,
                             showRecentTools = showRecentTools,
                             showQuickNotes = showQuickNotes,
                             showDashboardStats = showDashboardStats,
@@ -459,6 +463,7 @@ fun HomeTabContent(
     userName: String,
     pinnedTools: Set<String>,
     recentTools: List<String>,
+    recentToolsRows: Int = 1,
     showRecentTools: Boolean,
     showQuickNotes: Boolean,
     showDashboardStats: Boolean,
@@ -500,6 +505,12 @@ fun HomeTabContent(
             DashboardHeader(userName, offlineState, onToggleOffline, onTogglePerformance) 
         }
 
+        if (showDashboardStats) {
+            item(key = "stats_row") {
+                StatsRow(stats, onNavigate)
+            }
+        }
+
         if (pinnedTools.isNotEmpty()) {
             item(key = "pinned_section_header") {
                 CollapsibleSectionHeader(
@@ -526,13 +537,7 @@ fun HomeTabContent(
 
         if (recentTools.isNotEmpty() && showRecentTools) {
             item(key = "recent_section") {
-                RecentSection(recentTools, categories, onNavigate)
-            }
-        }
-
-        if (showDashboardStats) {
-            item(key = "stats_row") {
-                StatsRow(stats, onNavigate)
+                RecentSection(recentTools, categories, onNavigate, recentToolsRows)
             }
         }
 
@@ -1386,21 +1391,38 @@ fun RecentSection(
     recentTools: List<String>,
     categories: List<ToolCategory>,
     onNavigate: (String) -> Unit,
+    rows: Int = 1,
 ) {
     val all = remember(categories) { categories.flatMap { it.items } }
-    val tools = remember(recentTools, all) {
-        recentTools.take(8).mapNotNull { route -> all.find { it.route == route } }
+    val maxItems = (rows * 4).coerceIn(4, 16)
+    val tools = remember(recentTools, all, maxItems) {
+        recentTools.take(maxItems).mapNotNull { route -> all.find { it.route == route } }
     }
     if (tools.isEmpty()) return
 
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         SectionHeader(stringResource(R.string.st_DashboardScreen_e1f2))
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding        = PaddingValues(horizontal = 2.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(tools, key = { it.route }) { tool ->
-                RecentCard(tool = tool, onNavigate = onNavigate)
+            tools.chunked(4).forEach { rowTools ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowTools.forEach { tool ->
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            RecentCard(tool = tool, onNavigate = onNavigate)
+                        }
+                    }
+                    repeat(4 - rowTools.size) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
     }
@@ -1411,13 +1433,13 @@ private fun RecentCard(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
     Column(
         modifier = Modifier
-            .width(72.dp)
+            .fillMaxWidth()
             .bouncyClick { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Surface(
-            modifier = Modifier.size(60.dp),
+            modifier = Modifier.size(56.dp),
             shape    = ExtraLargeExpressiveShape,
             color    = tool.color.copy(alpha = 0.12f),
         ) {
@@ -1426,7 +1448,7 @@ private fun RecentCard(tool: ToolItem, onNavigate: (String) -> Unit) {
                     tool.icon,
                     contentDescription = null,
                     tint     = tool.color,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(24.dp),
                 )
             }
         }
@@ -2105,6 +2127,7 @@ fun UniversalPill(
     val caffeinateMs     by caffeinateViewModel.elapsedTime.collectAsStateWithLifecycle()
 
     val focusScore by focusViewModel.productivityScore.collectAsStateWithLifecycle()
+    val isFocusAuthorized by focusViewModel.isFullyAuthorized.collectAsStateWithLifecycle()
     
     val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
     val isFlashlightOn by flashlightRepository?.isOn?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -2143,7 +2166,7 @@ fun UniversalPill(
         musicState, timerState, stopwatchState, pomodoroState, stepsState,
         recordingState, todoState.tasks, isCaffeinated,
         catalogState.downloadingTracks, fillThePill,
-        isFlashlightOn, focusScore, pillFocusEnabled, pillTodoEnabled,
+        isFlashlightOn, focusScore, isFocusAuthorized, pillFocusEnabled, pillTodoEnabled,
         pillMusicEnabled, pillTimerEnabled, pillStopwatchEnabled, pillPomodoroEnabled,
         pillStepsEnabled, pillRecorderEnabled, pillCaffeinateEnabled, pillFlashlightEnabled,
         pillCatalogDownloadEnabled, offlineState, appTips
@@ -2161,7 +2184,7 @@ fun UniversalPill(
             if (pillTodoEnabled && todoState.tasks.isNotEmpty())        add(PillPage.Todo)
             if (pillCaffeinateEnabled && isCaffeinated)                                          add(PillPage.Caffeinate)
             if (pillFlashlightEnabled && isFlashlightOn)                                         add(PillPage.Flashlight)
-            if (pillFocusEnabled && focusScore > 0)                     add(PillPage.Focus)
+            if (pillFocusEnabled && isFocusAuthorized && focusScore > 0)                         add(PillPage.Focus)
             if (pillStepsEnabled && stepsState.isSensorPresent && stepsState.isEnabledInSettings) add(PillPage.Steps)
             if (isEmpty() && fillThePill) {
                 appTips.forEach { add(PillPage.Tip(it)) }

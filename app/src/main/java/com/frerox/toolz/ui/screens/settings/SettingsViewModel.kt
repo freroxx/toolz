@@ -63,6 +63,7 @@ class SettingsViewModel @Inject constructor(
     
     val dashboardView = repository.dashboardView
     val showRecentTools = repository.showRecentTools
+    val recentToolsRows = repository.recentToolsRows
     val showQuickNotes = repository.showQuickNotes
     val showDashboardStats = repository.showDashboardStats
 
@@ -145,6 +146,7 @@ class SettingsViewModel @Inject constructor(
     
     fun setDashboardView(view: String) = viewModelScope.launch { repository.setDashboardView(view) }
     fun setShowRecentTools(enabled: Boolean) = viewModelScope.launch { repository.setShowRecentTools(enabled) }
+    fun setRecentToolsRows(rows: Int) = viewModelScope.launch { repository.setRecentToolsRows(rows) }
     fun setShowQuickNotes(enabled: Boolean) = viewModelScope.launch { repository.setShowQuickNotes(enabled) }
     fun setShowDashboardStats(enabled: Boolean) = viewModelScope.launch { repository.setShowDashboardStats(enabled) }
 

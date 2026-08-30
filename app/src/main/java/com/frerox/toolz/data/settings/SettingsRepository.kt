@@ -65,6 +65,7 @@ class SettingsRepository @Inject constructor(
     private val PINNED_TOOLS = stringSetPreferencesKey("pinned_tools")
     private val RECENT_TOOLS = stringSetPreferencesKey("recent_tools") // Stored as "timestamp:route"
     private val SHOW_RECENT_TOOLS = booleanPreferencesKey("show_recent_tools")
+    private val RECENT_TOOLS_ROWS = intPreferencesKey("recent_tools_rows")
     private val SHOW_QUICK_NOTES = booleanPreferencesKey("show_quick_notes")
     private val SHOW_DASHBOARD_STATS = booleanPreferencesKey("show_dashboard_stats")
 
@@ -536,10 +537,11 @@ class SettingsRepository @Inject constructor(
             .sortedByDescending { it[0].toLongOrNull() ?: 0L }
             .map { it[1] }
             .distinct()
-            .take(5)
+            .take(20)
             .toList()
     }
     val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
+    val recentToolsRows: Flow<Int> = dataStore.data.map { it[RECENT_TOOLS_ROWS] ?: 1 }
     val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
     val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: true }
 
@@ -910,6 +912,7 @@ class SettingsRepository @Inject constructor(
     }
     
     suspend fun setShowRecentTools(enabled: Boolean) { dataStore.edit { it[SHOW_RECENT_TOOLS] = enabled } }
+    suspend fun setRecentToolsRows(rows: Int) { dataStore.edit { it[RECENT_TOOLS_ROWS] = rows.coerceIn(1, 4) } }
     suspend fun setShowQuickNotes(enabled: Boolean) { dataStore.edit { it[SHOW_QUICK_NOTES] = enabled } }
     suspend fun setShowDashboardStats(enabled: Boolean) { dataStore.edit { it[SHOW_DASHBOARD_STATS] = enabled } }
 

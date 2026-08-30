@@ -128,7 +128,8 @@ fun SettingsScreen(
     val pillFlashlightEnabled by viewModel.pillFlashlightEnabled.collectAsState(initial = true)
     val pillCatalogDownloadEnabled by viewModel.pillCatalogDownloadEnabled.collectAsState(initial = true)
 
-    val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = false)
+    val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = true)
+    val recentToolsRows by viewModel.recentToolsRows.collectAsState(initial = 1)
     val appLanguage by viewModel.appLanguage.collectAsState(initial = "en")
 
     var showPillTweaksPopup by remember { mutableStateOf(false) }
@@ -191,7 +192,7 @@ fun SettingsScreen(
 
     val autoUpdateEnabled by viewModel.autoUpdateEnabled.collectAsState(initial = false)
     val aiSearchEnabled by viewModel.aiSearchEnabled.collectAsState(initial = false)
-    val aiSearchChatEnabled by viewModel.aiSearchChatEnabled.collectAsState(initial = true)
+    val aiSearchChatEnabled by viewModel.aiSearchChatEnabled.collectAsState(initial = false)
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
 
     val musicShakeToSkip by viewModel.musicShakeToSkip.collectAsState(initial = false)
@@ -656,6 +657,42 @@ fun SettingsScreen(
                                             showPillTweaksPopup = true
                                         }
                                     )
+                                }
+                            }
+
+                            if (matches(searchQuery, "recent", "tools", "rows", "hud", "interaction", "dashboard")) {
+                                SettingsItem(
+                                    title = "Recent Tools Rows",
+                                    subtitle = "Display $recentToolsRows ${if (recentToolsRows == 1) "row" else "rows"} (up to ${recentToolsRows * 4} tools, 4 per row)",
+                                    icon = Icons.Rounded.History
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        (1..4).forEach { rows ->
+                                            val isSelected = recentToolsRows == rows
+                                            Surface(
+                                                onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setRecentToolsRows(rows)
+                                                },
+                                                modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = "$rows ${if (rows == 1) "Row" else "Rows"}",
+                                                        fontWeight = FontWeight.Black,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 

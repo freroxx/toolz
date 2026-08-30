@@ -251,10 +251,12 @@ class DashboardViewModel @Inject constructor(
                     }
                     
                     performLocalSearch(query)
-                    if (query.length > 2 && offlineState.value != OfflineState.OFFLINE) {
+                    val aiChatEnabled = settingsRepository.aiSearchChatEnabled.first()
+                    if (aiChatEnabled && query.length > 2 && offlineState.value != OfflineState.OFFLINE) {
                         performPowerfulSmartSearch(query)
                     } else {
                         _aiSuggestedRoutes.value = emptyList()
+                        _aiResponse.value = null
                         _isAiSearching.value = false
                         _isAiThinking.value = false
                     }
