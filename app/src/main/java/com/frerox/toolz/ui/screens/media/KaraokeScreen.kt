@@ -136,7 +136,7 @@ fun KaraokeView(
 
     // ── State ─────────────────────────────────────────────────────────────────
     var phase               by remember(track.uri) { mutableStateOf(KaraokePhase.SPLASH) }
-    var countdownTick       by remember { mutableIntStateOf(3) }
+    var countdownTick       by remember(track.uri) { mutableIntStateOf(3) }
     var showSettings        by remember { mutableStateOf(false) }
     var showSingConfidentlyDialog by remember { mutableStateOf(false) }
     var showManualPickSheet by remember { mutableStateOf(false) }
@@ -144,7 +144,9 @@ fun KaraokeView(
     var mediaRecorder       by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile       by remember { mutableStateOf<File?>(null) }
     var isRecorderStarting  by remember { mutableStateOf(false) }
-    var hasStartedOnce      by remember { mutableStateOf(false) }
+    // Per-track so auto-play/next-track goes through full splash→countdown flow each song.
+    // Previous global hasStartedOnce caused 2nd track to skip countdown & SingConfidently dialog.
+    var hasStartedOnce      by remember(track.uri) { mutableStateOf(false) }
     
     // Track if the user wants to save their audio. Disabled if Speech Correction is enabled.
     var isAudioSavingEnabled by remember { mutableStateOf(!aiState.karaokeSpeechCorrectionEnabled) }
@@ -160,6 +162,8 @@ fun KaraokeView(
     var minSplashTimeElapsed by remember { mutableStateOf(false) }
     var isSkipRequested      by remember { mutableStateOf(false) }
     var wasSingConfidentlyHandled by remember(track.uri) { mutableStateOf(false) }
+    // Timeout so a slow instrumental search doesn't deadlock splash forever (8s fallback).
+    var searchTimeoutElapsed by remember(track.uri) { mutableStateOf(false) }
 
     var pendingSpeechCorrectionToggle by remember { mutableStateOf<Boolean?>(null) }
     var pendingSingConfidentlyMode by remember { mutableStateOf<com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode?>(null) }
@@ -265,7 +269,18 @@ fun KaraokeView(
     }
 
     val togglePause: () -> Unit = {
-        if (isLogicalPlaying) onPause() else onPlay()
+        if (isLogicalPlaying) {
+            onPause()
+            // When Sing Confidently is active the instrumental ExoPlayer is the
+            // audible source; pausing only the main player leaves music playing.
+            if (aiState.isSingConfidentlyActive) {
+                aiViewModel.pauseInstrumental()
+            }
+        } else {
+            onPlay()
+            // onPlay lambda in FullPlayerSection restarts instrumental if needed,
+            // but ensure mic resumes via isLogicalPlayIntent flip.
+        }
     }
 
     val skipWithEvaluation: () -> Unit = {
@@ -291,9 +306,19 @@ fun KaraokeView(
         }
     }
 
+    // Search timeout fallback — don't let slow network deadlock splash
+    LaunchedEffect(track.uri, aiState.isSearchingInstrumental) {
+        searchTimeoutElapsed = false
+        if (aiState.isSearchingInstrumental) {
+            delay(8000)
+            searchTimeoutElapsed = true
+        }
+    }
+
     LaunchedEffect(
         minSplashTimeElapsed,
         aiState.isSearchingInstrumental,
+        searchTimeoutElapsed,
         showSingConfidentlyDialog,
         showManualPickSheet,
         phase,
@@ -318,7 +343,9 @@ fun KaraokeView(
                 return@LaunchedEffect
             }
 
-            if (!aiState.isSearchingInstrumental) {
+            // Proceed if search finished OR timeout elapsed (fallback to original without instrumental)
+            val canProceed = !aiState.isSearchingInstrumental || searchTimeoutElapsed
+            if (canProceed) {
                 // Auto-Proceed Mode: silently switch to instrumental as soon as a match is found
                 if (aiState.instrumentalMatch != null
                     && aiState.singConfidentlyMode == com.frerox.toolz.ui.screens.media.ai.SingConfidentlyMode.AUTO_PROCEED

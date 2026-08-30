@@ -207,6 +207,7 @@ class NowPlayingAiViewModel @Inject constructor(
 
     private var busyRetryCount     : Int                = 0
     private var lastCallbackAtMs   : Long                = 0L
+    private var lastSpeechEventAtMs: Long                = 0L // meaningful events only (not RMS), for watchdog
     private var lastMissedCheckMs  : Long                = 0L  // throttle for checkMissedWords
     private var pauseRequestedAtMs : Long                = 0L
 
@@ -328,7 +329,7 @@ class NowPlayingAiViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.karaokeSingConfidentlyMode.collect { modeStr ->
-                val mode = try { SingConfidentlyMode.valueOf(modeStr) } catch (_: Exception) { SingConfidentlyMode.AUTO }
+                val mode = try { SingConfidentlyMode.valueOf(modeStr) } catch (_: Exception) { SingConfidentlyMode.MANUAL }
                 _uiState.update { it.copy(singConfidentlyMode = mode) }
             }
         }
@@ -398,6 +399,9 @@ class NowPlayingAiViewModel @Inject constructor(
         // from the previous track must never bleed into the new track's timeline).
         stopSingConfidently()
         stopKaraokeRecording()
+        // Ensure any pending delayed destroy is cancelled and pre-warmed instance is torn down.
+        destroyJob?.cancel()
+        destroyJob = null
         // stopKaraokeRecording() is a no-op if a recognizer was only ever
         // pre-warmed (see searchInstrumental) but never actually started —
         // isKaraokeRecording would still be false in that case, so it would
@@ -448,7 +452,8 @@ class NowPlayingAiViewModel @Inject constructor(
         if (_uiState.value.lyricsState.lyrics.isEmpty()) fetchLyrics()
         loadDataForTab(_uiState.value.selectedTab, forceRefresh = false)
 
-        if (_uiState.value.karaokeSingConfidentlyEnabled) {
+        // Trigger instrumental search when mode is not OFF (MANUAL/AUTO/AUTO_PROCEED) OR legacy flag true.
+        if (_uiState.value.singConfidentlyMode != SingConfidentlyMode.OFF || _uiState.value.karaokeSingConfidentlyEnabled) {
             searchInstrumental(track)
         }
     }
@@ -1180,6 +1185,7 @@ class NowPlayingAiViewModel @Inject constructor(
     }
 
     fun setSingConfidentlyMode(mode: SingConfidentlyMode) {
+        Log.d(TAG, "setSingConfidentlyMode: $mode (prev=${_uiState.value.singConfidentlyMode})")
         viewModelScope.launch {
             settingsRepository.setKaraokeSingConfidentlyMode(mode.name)
             if (mode == SingConfidentlyMode.OFF) {
@@ -1190,7 +1196,7 @@ class NowPlayingAiViewModel @Inject constructor(
 
     // Legacy method for older UI components
     fun setSingConfidentlyEnabled(enabled: Boolean) {
-        setSingConfidentlyMode(if (enabled) SingConfidentlyMode.AUTO else SingConfidentlyMode.OFF)
+        setSingConfidentlyMode(if (enabled) SingConfidentlyMode.MANUAL else SingConfidentlyMode.OFF)
     }
 
     /**
@@ -1496,6 +1502,10 @@ class NowPlayingAiViewModel @Inject constructor(
         consecutiveFailures = 0
         busyRetryCount = 0
         lastMissedCheckMs = 0L
+        lastSpeechEventAtMs = System.currentTimeMillis()
+        lastCallbackAtMs = System.currentTimeMillis()
+        destroyJob?.cancel()
+        destroyJob = null
         _uiState.update {
             it.copy(
                 isKaraokeRecording      = true,
@@ -1696,6 +1706,7 @@ class NowPlayingAiViewModel @Inject constructor(
             recognizer.startListening(intent)
             sessionActive = true
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
             _uiState.update { it.copy(isReconnecting = false) }
         }.onFailure {
             Log.e(TAG, "beginListening: startListening threw", it)
@@ -1798,22 +1809,26 @@ class NowPlayingAiViewModel @Inject constructor(
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
             consecutiveFailures = 0
             busyRetryCount = 0
             Log.v(TAG, "Recognizer ready")
         }
         override fun onBeginningOfSpeech() {
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
             Log.v(TAG, "Speech beginning")
         }
         override fun onEndOfSpeech() {
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
         }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEvent(eventType: Int, params: Bundle?) {}
 
         override fun onRmsChanged(rmsdB: Float) {
             if (_uiState.value.isKaraokeRecording) {
+                // Do NOT update lastSpeechEventAtMs — RMS alone must not mask watchdog
                 lastCallbackAtMs = System.currentTimeMillis()
                 _uiState.update { it.copy(micRms = rmsdB) }
             }
@@ -1822,6 +1837,7 @@ class NowPlayingAiViewModel @Inject constructor(
         override fun onError(error: Int) {
             sessionActive = false
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
 
             if (!_uiState.value.isKaraokeRecording) return
 
@@ -1845,10 +1861,11 @@ class NowPlayingAiViewModel @Inject constructor(
                 }
                 SpeechRecognizer.ERROR_AUDIO -> {
                     // Mic access conflict. Rebuild the recognizer to re-acquire the mic.
+                    // Raised threshold 5→10 so a brief mic reconnect (bluetooth) doesn't
+                    // permanently kill correction; transient blips recover within 1-2 retries.
                     consecutiveFailures++
-                    if (consecutiveFailures >= 5) {
-                        // Circuit breaker: give up after 5 consecutive audio errors
-                        Log.e(TAG, "Circuit breaker: 5 consecutive ERROR_AUDIO — stopping karaoke recognition")
+                    if (consecutiveFailures >= 10) {
+                        Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_AUDIO — stopping karaoke recognition")
                         runCatching {
                             android.widget.Toast.makeText(
                                 context,
@@ -1858,17 +1875,14 @@ class NowPlayingAiViewModel @Inject constructor(
                         }
                         stopKaraokeRecording()
                     } else {
-                        rebuildAndRestart(preDelayMs = (500L * consecutiveFailures))
+                        rebuildAndRestart(preDelayMs = (500L * consecutiveFailures.coerceAtMost(6)))
                     }
                 }
                 SpeechRecognizer.ERROR_CLIENT -> {
                     // ERROR_CLIENT (5): The speech recognition service disconnected.
-                    // This happens when the recognizer service crashes or the session
-                    // is initiated incorrectly. Always do a full destroy+rebuild.
                     consecutiveFailures++
-                    if (consecutiveFailures >= 5) {
-                        // Circuit breaker: give up after 5 consecutive client errors
-                        Log.e(TAG, "Circuit breaker: 5 consecutive ERROR_CLIENT — stopping karaoke recognition")
+                    if (consecutiveFailures >= 10) {
+                        Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_CLIENT — stopping karaoke recognition")
                         runCatching {
                             android.widget.Toast.makeText(
                                 context,
@@ -1878,7 +1892,7 @@ class NowPlayingAiViewModel @Inject constructor(
                         }
                         stopKaraokeRecording()
                     } else {
-                        val backoffMs = (1000L * consecutiveFailures).coerceAtMost(5000L)
+                        val backoffMs = (1000L * consecutiveFailures.coerceAtMost(5)).coerceAtMost(5000L)
                         Log.w(TAG, "ERROR_CLIENT: rebuild attempt $consecutiveFailures, delay=${backoffMs}ms")
                         rebuildAndRestart(preDelayMs = backoffMs)
                     }
@@ -1911,6 +1925,7 @@ class NowPlayingAiViewModel @Inject constructor(
         override fun onResults(results: Bundle?) {
             sessionActive = false
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
             // Successful result: fully reset all failure counters
             consecutiveFailures = 0
             busyRetryCount = 0
@@ -1938,6 +1953,7 @@ class NowPlayingAiViewModel @Inject constructor(
 
         override fun onPartialResults(partialResults: Bundle?) {
             lastCallbackAtMs = System.currentTimeMillis()
+            lastSpeechEventAtMs = System.currentTimeMillis()
             val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (!texts.isNullOrEmpty()) {
                 processRecognizedTexts(texts, isPartial = true)
