@@ -68,11 +68,11 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
                 // Restart the observer + JobScheduler content trigger if enabled — this is what
                 // gives outside-Toolz detection back after a reboot or app update.
                 try {
-                    // CRITICAL FIX: default to true on DataStore read failure (fail open).
+                    // CRITICAL FIX: default to false on DataStore read failure (fail closed).
                     // On boot/update, the process is cold-started and DataStore may not be
-                    // fully initialized when we read. Defaulting to false left PurgeShot
-                    // silently disabled after every reboot.
-                    val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+                    // fully initialized when we read. Defaulting to true previously forced
+                    // PurgeShot on for everyone — now we fail closed to respect the default.
+                    val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
                     if (enabled) {
                         val svc = Intent(context, PurgeShotService::class.java).apply {
                             action = PurgeShotService.ACTION_START

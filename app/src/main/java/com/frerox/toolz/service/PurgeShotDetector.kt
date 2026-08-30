@@ -309,11 +309,11 @@ object PurgeShotDetector {
         awaitSettle: Boolean = true,
         isPoll: Boolean = false
     ): Boolean {
-        // CRITICAL FIX: default to true on DataStore read failure (fail open).
+        // CRITICAL FIX: default to false on DataStore read failure (fail closed).
         // When JobScheduler/Accessibility cold-starts the process, DataStore may
-        // throw before initialization completes. Defaulting to false silently dropped
-        // every outside-Toolz screenshot. Fail open — the user explicitly enabled PurgeShot.
-        val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+        // throw before initialization completes. Defaulting to true previously forced
+        // detection on for everyone — now we fail closed to respect the default.
+        val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
         if (!enabled) {
             Log.d(TAG, "disabled, skip")
             return false

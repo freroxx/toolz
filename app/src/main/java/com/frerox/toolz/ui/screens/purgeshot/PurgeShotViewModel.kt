@@ -45,7 +45,7 @@ class PurgeShotViewModel @Inject constructor(
     private val _shizukuAuthorized = MutableStateFlow(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized())
     val shizukuAuthorized: StateFlow<Boolean> = _shizukuAuthorized
 
-    val enabled = settingsRepository.purgeShotEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val enabled = settingsRepository.purgeShotEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val smartAuto = settingsRepository.purgeShotSmartAuto.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val autoDurationMs = settingsRepository.purgeShotAutoDuration.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 15 * 60_000L)
     val notificationsEnabled = settingsRepository.purgeShotNotificationsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)

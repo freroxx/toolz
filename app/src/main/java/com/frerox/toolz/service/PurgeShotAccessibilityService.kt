@@ -209,13 +209,12 @@ class PurgeShotAccessibilityService : AccessibilityService() {
 
         scope.launch {
             try {
-                // CRITICAL FIX: default to true on DataStore read failure.
+                // CRITICAL FIX: default to false on DataStore read failure (fail closed).
                 // When the accessibility framework cold-starts this process after Toolz was killed,
                 // purgeShotEnabled.first() may throw before DataStore is fully initialized.
-                // Defaulting to false silently dropped every screenshot taken outside Toolz.
-                // The user already explicitly enabled PurgeShot — if we can't read the setting,
-                // assume enabled (fail open).
-                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+                // Defaulting to true previously forced PurgeShot on for everyone — now we
+                // fail closed to respect the default.
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
                 if (!enabled) {
                     Log.d(TAG, "purgeShot disabled, ignore a11y trigger")
                     return@launch
