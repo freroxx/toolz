@@ -43,10 +43,13 @@ object PurgeShotDetector {
     const val SETTLE_DELAY_MS = 550L
 
     /** A candidate must be newer than "now - this" and not further than 2s in the future (clock skew).
-     *  60s tolerates JobScheduler batching, Doze, OEM killers and MediaStore indexing delay
+     *  90s tolerates JobScheduler batching, Doze, OEM killers and MediaStore indexing delay
      *  when Toolz isn't in foreground; previously 20s was too tight and missed delayed dispatches
-     *  on low-RAM / battery-saver devices where the Job can be deferred 10-30s. */
-    const val MAX_AGE_MS = 60_000L
+     *  on low-RAM / battery-saver devices where the Job can be deferred 10-30s.
+     *  BEST fix: keep real-time window at 90s, but allow poll fallback to scan up to 16min (covers
+     *  WorkManager 15min interval + Doze buffer) so missed events are never lost. */
+    const val MAX_AGE_MS = 90_000L
+    const val MAX_AGE_POLL_MS = 16 * 60_000L
     const val MAX_FUTURE_SKEW_MS = -2_000L
 
     private val projection = arrayOf(
@@ -60,9 +63,14 @@ object PurgeShotDetector {
         MediaStore.Images.Media.DATA
     )
 
-    // DATE_TAKEN is set at capture time and is the most accurate signal for "just now";
-    // DATE_ADDED is the fallback for OEMs that leave DATE_TAKEN at 0 for screenshots.
-    private const val SORT = "${MediaStore.Images.Media.DATE_TAKEN} DESC, ${MediaStore.Images.Media.DATE_ADDED} DESC"
+    // BEST fix: DATE_ADDED is the only reliably set column at insert time on all OEMs.
+    // DATE_TAKEN is often 0 for screenshots (e.g., Samsung, Xiaomi leave it empty), so sorting
+    // by DATE_TAKEN first pushes those screenshots to the bottom of the result and they fall
+    // outside the top-8 window when the user has many recent photos — the core "doesn't work at all"
+    // bug. Sort by DATE_ADDED primary (always set by MediaStore at insertion) and use DATE_TAKEN
+    // only as secondary for devices where it is valid.
+    private const val SORT = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media.DATE_TAKEN} DESC"
+    private const val SORT_FILES = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
 
     /** Queries MediaStore for the most recently inserted images (up to limit). Used to scan for screenshot among recent inserts. */
     fun queryRecent(resolver: ContentResolver, limit: Int = 8): List<PurgeShotService.ScreenshotCandidate> {
@@ -159,7 +167,76 @@ object PurgeShotDetector {
                 Log.w(TAG, "query Files fallback failed", e)
             }
         }
+        // BEST fix — File system fallback when MediaStore is empty or permission denied (SecurityException).
+        // If hasMediaPermission is false, queryRecent will have returned empty (MediaStore query threw).
+        // Fall back to direct File listing which works with MANAGE_EXTERNAL_STORAGE or when MediaStore
+        // indexing is delayed by OEM. This guarantees detection even when MediaStore is not yet indexed.
+        if (results.isEmpty()) {
+            try {
+                val fileCandidates = queryViaFileFallback()
+                // Deduplicate and add
+                for (fc in fileCandidates) {
+                    if (results.none { it.filePath == fc.filePath }) results.add(fc)
+                }
+                if (fileCandidates.isNotEmpty()) Log.d(TAG, "File fallback found ${fileCandidates.size} candidates")
+            } catch (e: Exception) {
+                Log.w(TAG, "File fallback failed", e)
+            }
+        }
         return results.sortedByDescending { it.dateAddedMs }
+    }
+
+    /** File system fallback: directly list Screenshots directories via File API.
+     *  Works even when READ_MEDIA_IMAGES is denied but MANAGE_EXTERNAL_STORAGE is granted,
+     *  or when MediaStore hasn't indexed the new screenshot yet (OEM delays). */
+    private fun queryViaFileFallback(): List<PurgeShotService.ScreenshotCandidate> {
+        val out = mutableListOf<PurgeShotService.ScreenshotCandidate>()
+        try {
+            val candidates = mutableListOf<java.io.File>()
+            val dcimScreens = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM), "Screenshots")
+            val picturesScreens = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), "Screenshots")
+            val dcimRoot = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM)
+            val picturesRoot = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+            for (dir in listOf(dcimScreens, picturesScreens, dcimRoot, picturesRoot)) {
+                if (dir.exists() && dir.isDirectory && dir.canRead()) {
+                    dir.listFiles()?.forEach { f ->
+                        if (f.isFile && looksLikeScreenshotName(f.name, f.parent, f.absolutePath)) {
+                            candidates.add(f)
+                        }
+                    }
+                }
+            }
+            // Also check generic /sdcard/Screenshots if exists
+            val generic = java.io.File(android.os.Environment.getExternalStorageDirectory(), "Screenshots")
+            if (generic.exists() && generic.isDirectory) {
+                generic.listFiles()?.forEach { f ->
+                    if (f.isFile && looksLikeScreenshotName(f.name, f.parent, f.absolutePath)) candidates.add(f)
+                }
+            }
+            candidates.sortByDescending { it.lastModified() }
+            for (file in candidates.take(3)) {
+                val ts = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis()
+                val uri = android.net.Uri.fromFile(file)
+                val rel = when {
+                    file.absolutePath.contains("DCIM/Screenshots") -> "DCIM/Screenshots"
+                    file.absolutePath.contains("Pictures/Screenshots") -> "Pictures/Screenshots"
+                    else -> file.parent
+                }
+                out.add(
+                    PurgeShotService.ScreenshotCandidate(
+                        uri = uri,
+                        displayName = file.name,
+                        dateAddedMs = ts,
+                        relativePath = rel,
+                        filePath = file.absolutePath,
+                        bucketName = "Screenshots"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "queryViaFileFallback exception", e)
+        }
+        return out
     }
 
     private fun looksLikeScreenshotName(name: String?, rel: String?, path: String?): Boolean {
@@ -197,10 +274,12 @@ object PurgeShotDetector {
             rel.equals("Pictures/Screenshots", ignoreCase = true)
     }
 
-    /** True if the candidate's timestamp is within the acceptable freshness window. */
-    fun isFreshEnough(candidate: PurgeShotService.ScreenshotCandidate): Boolean {
+    /** True if the candidate's timestamp is within the acceptable freshness window.
+     *  @param isPoll true for WorkManager poll (allows 16min window to catch missed events) */
+    fun isFreshEnough(candidate: PurgeShotService.ScreenshotCandidate, isPoll: Boolean = false): Boolean {
         val age = System.currentTimeMillis() - candidate.dateAddedMs
-        return age in MAX_FUTURE_SKEW_MS..MAX_AGE_MS
+        val max = if (isPoll) MAX_AGE_POLL_MS else MAX_AGE_MS
+        return age in MAX_FUTURE_SKEW_MS..max
     }
 
     fun hasMediaPermission(context: Context): Boolean {
@@ -257,7 +336,8 @@ object PurgeShotDetector {
         context: Context,
         repository: PurgeShotRepository,
         settingsRepository: SettingsRepository,
-        awaitSettle: Boolean = true
+        awaitSettle: Boolean = true,
+        isPoll: Boolean = false
     ): Boolean {
         if (!settingsRepository.purgeShotEnabled.first()) {
             Log.d(TAG, "disabled, skip")
@@ -295,8 +375,8 @@ object PurgeShotDetector {
         var chosen: PurgeShotService.ScreenshotCandidate? = null
         var staleReason: String? = null
         for (c in recent) {
-            if (!isFreshEnough(c)) {
-                if (staleReason == null) staleReason = "age=${System.currentTimeMillis() - c.dateAddedMs}ms uri=${c.uri}"
+            if (!isFreshEnough(c, isPoll)) {
+                if (staleReason == null) staleReason = "age=${System.currentTimeMillis() - c.dateAddedMs}ms uri=${c.uri} isPoll=$isPoll"
                 continue
             }
             if (!looksLikeScreenshot(c)) continue
@@ -306,7 +386,7 @@ object PurgeShotDetector {
         if (chosen == null) {
             // Log why: either all stale or none looked like screenshot. Check top candidate for debug.
             val top = recent.firstOrNull()
-            if (top != null && !isFreshEnough(top) && staleReason != null) {
+            if (top != null && !isFreshEnough(top, isPoll) && staleReason != null) {
                 Log.d(TAG, "candidate stale, $staleReason")
             } else if (top != null) {
                 Log.d(TAG, "no screenshot among recent ${recent.size}: ${recent.joinToString { it.displayName }}")

@@ -17,11 +17,13 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.PurgeShotService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -73,15 +75,16 @@ class PurgeShotViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // Approximate storage (avg 2.8 MB per screenshot) + live size query for accuracy when possible
+    // Fixed: run MediaStore query on IO dispatcher, not Main (was blocking UI via WhileSubscribed map)
     val estimatedPendingBytes: StateFlow<Long> = pendingQueue.map { list ->
-        // Try to query real sizes in IO, fallback to estimate
         var sum = 0L
         for (e in list) {
             val sz = queryMediaSize(e.fileUriString) ?: 2_800_000L
             sum += sz
         }
         sum
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+    }.flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     val estimatedSavedBytes: StateFlow<Long> = allQueue.map { list ->
         val deleted = list.filter { it.status == PurgeShotEntity.STATUS_DELETED }
@@ -91,7 +94,8 @@ class PurgeShotViewModel @Inject constructor(
             sum += sz
         }
         sum
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+    }.flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
 
     // Undo stack — last cancelled item within 5s window
     private var lastUndone: PurgeShotEntity? = null
@@ -189,8 +193,9 @@ class PurgeShotViewModel @Inject constructor(
         }
     }
 
-    // Called from UI queue testing: manually add a dummy for preview (debug)
+    // Debug only — gated behind BuildConfig.DEBUG to avoid leaking dummy queue entries in release
     fun debugEnqueueDummy() {
+        if (!com.frerox.toolz.BuildConfig.DEBUG) return
         viewModelScope.launch {
             val uri = Uri.parse("content://media/external/images/media/999999")
             repository.enqueue(uri, "Screenshot_debug_${System.currentTimeMillis()}.jpg", 60_000L, "1 min", null)

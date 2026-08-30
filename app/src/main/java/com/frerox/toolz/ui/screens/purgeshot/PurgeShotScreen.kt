@@ -307,10 +307,12 @@ fun PurgeShotScreen(
                                     }
                                     Text("No queued shots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
                                     Text("Take a screenshot — pick a timer or let Smart Auto handle it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                                    ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
-                                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Demo shot", fontWeight = FontWeight.Bold)
+                                    if (com.frerox.toolz.BuildConfig.DEBUG) {
+                                        ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
+                                            Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Demo shot", fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }

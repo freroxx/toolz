@@ -27,7 +27,8 @@ class PurgeShotDetectWorker @AssistedInject constructor(
                 context = applicationContext,
                 repository = repository,
                 settingsRepository = settingsRepository,
-                awaitSettle = false
+                awaitSettle = false,
+                isPoll = true
             )
             Log.d("PurgeShotDetect", "poll handled=$handled")
             Result.success()

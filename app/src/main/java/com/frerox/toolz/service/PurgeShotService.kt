@@ -120,16 +120,14 @@ class PurgeShotService : Service() {
         }
         try {
             val cr = contentResolver
-            // Scoped to Images only. The previous version also observed MediaStore.Files
-            // ("outside Toolz fallback" for OEMs that insert via Files first), but that meant
-            // every non-image file write anywhere in shared storage — downloads, WhatsApp
-            // media, app caches — woke this observer, debounced, and triggered a MediaStore
-            // query for no benefit, since screenshots are always indexed under Images too.
-            // The JobScheduler fallback in PurgeShotObserverJobService already exists
-            // specifically to catch what this live observer misses; duplicating its coverage
-            // here just burned battery.
+            // BEST fix: observe BOTH Images and Files. Previous Images-only missed OEMs that
+            // insert screenshot via Files first (MediaStore.Files) and only index to Images after
+            // 1-3s. Without Files observer, handleTrigger never fired for those screenshots and
+            // we relied solely on JobScheduler (which has 900ms batch delay). Watching both
+            // guarantees first-trigger detection anywhere, with debounce to avoid battery drain.
             cr.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer!!)
-            Log.d(TAG, "ContentObserver registered (Images)")
+            cr.registerContentObserver(MediaStore.Files.getContentUri("external"), true, observer!!)
+            Log.d(TAG, "ContentObserver registered (Images+Files)")
         } catch (e: Exception) {
             Log.w(TAG, "register observer failed", e)
         }
@@ -180,17 +178,20 @@ class PurgeShotService : Service() {
 
     private suspend fun handleTrigger() {
         try {
+            // BEST fix: don't hard-return on missing permission — let detector try File fallback
+            // (MANAGE_EXTERNAL_STORAGE) and post permission notification itself. Service's old
+            // early-return prevented detector's File fallback from ever running.
             if (!PurgeShotDetector.hasMediaPermission(this)) {
-                Log.w(TAG, "Missing media permission — cannot query screenshots outside Toolz")
-                postMediaPermissionNotification()
-                return
+                Log.w(TAG, "Missing media permission — will still attempt detection via File fallback")
+                // Don't return; detector will post notification and try File listing
             }
             delay(PurgeShotDetector.SETTLE_DELAY_MS)
             PurgeShotDetector.detectAndHandle(
                 context = this,
                 repository = repository,
                 settingsRepository = settingsRepository,
-                awaitSettle = false // already settled above
+                awaitSettle = false, // already settled above
+                isPoll = false
             )
         } catch (e: Exception) {
             Log.w(TAG, "handleTrigger failed", e)
