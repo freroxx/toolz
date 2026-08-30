@@ -372,7 +372,7 @@ class SettingsRepository @Inject constructor(
     val accessibilityBridgeWasActive: Flow<Boolean> = dataStore.data.map { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] ?: false }
 
     // PurgeShot flows
-    val purgeShotEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_ENABLED] ?: true }
+    val purgeShotEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_ENABLED] ?: false }
     val purgeShotSmartAuto: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_SMART_AUTO] ?: false }
     val purgeShotAutoDuration: Flow<Long> = dataStore.data.map { it[PURGESHOT_AUTO_DURATION] ?: 15 * 60_000L } // default 15 min
     val purgeShotCustomPresets: Flow<String?> = dataStore.data.map { it[PURGESHOT_CUSTOM_PRESETS] }
