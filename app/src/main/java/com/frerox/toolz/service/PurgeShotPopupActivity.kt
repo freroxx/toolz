@@ -143,14 +143,26 @@ class PurgeShotPopupActivity : ComponentActivity() {
                         finish()
                     },
                     onDismiss = {
+                        val currentItems = activeBatch.ifEmpty {
+                            listOfNotNull(intent.getStringExtra("uri")?.let { Uri.parse(it) })
+                        }
+                        PurgeShotHandler.markAllHandled(currentItems.map { it.toString() })
                         PurgeShotHandler.clearActiveBatch()
                         finish()
                     },
                     onKeepForever = {
+                        val currentItems = activeBatch.ifEmpty {
+                            listOfNotNull(intent.getStringExtra("uri")?.let { Uri.parse(it) })
+                        }
+                        PurgeShotHandler.markAllHandled(currentItems.map { it.toString() })
                         PurgeShotHandler.clearActiveBatch()
                         finish()
                     },
                     onOpenSettings = {
+                        val currentItems = activeBatch.ifEmpty {
+                            listOfNotNull(intent.getStringExtra("uri")?.let { Uri.parse(it) })
+                        }
+                        PurgeShotHandler.markAllHandled(currentItems.map { it.toString() })
                         startActivity(
                             android.content.Intent(this@PurgeShotPopupActivity, MainActivity::class.java).apply {
                                 putExtra("navigate_to", "purgeshot")

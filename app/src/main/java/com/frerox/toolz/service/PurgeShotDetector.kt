@@ -344,6 +344,12 @@ object PurgeShotDetector {
                 continue
             }
             if (!looksLikeScreenshot(c)) continue
+            val uriStr = c.uri.toString()
+            if (PurgeShotHandler.isUriHandled(uriStr)) continue
+            if (repository.hasEntry(uriStr)) {
+                PurgeShotHandler.markUriHandled(uriStr)
+                continue
+            }
             freshScreenshots.add(c)
         }
         if (freshScreenshots.isEmpty()) {

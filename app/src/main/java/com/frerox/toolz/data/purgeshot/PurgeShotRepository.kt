@@ -149,6 +149,7 @@ class PurgeShotRepository @Inject constructor(
         }
         val ids = dao.insertAll(entities)
         val created = entities.mapIndexed { idx, e ->
+            PurgeShotHandler.markUriHandled(e.fileUriString)
             val id = ids.getOrElse(idx) { 0L }
             e.copy(id = id).also {
                 scheduleDeletionWork(it)
@@ -174,11 +175,20 @@ class PurgeShotRepository @Inject constructor(
         }
     }
 
+    suspend fun getEntryByUri(uriString: String): PurgeShotEntity? = withContext(Dispatchers.IO) {
+        dao.getByUri(uriString)
+    }
+
+    suspend fun hasEntry(uriString: String): Boolean = withContext(Dispatchers.IO) {
+        dao.getByUri(uriString) != null
+    }
+
     suspend fun deleteMultipleFiles(
         items: List<Pair<Uri, String?>>
     ): Int = withContext(Dispatchers.IO) {
         var count = 0
         for ((uri, path) in items) {
+            PurgeShotHandler.markUriHandled(uri.toString())
             val entity = PurgeShotEntity(
                 fileUriString = uri.toString(),
                 displayName = "Screenshot",

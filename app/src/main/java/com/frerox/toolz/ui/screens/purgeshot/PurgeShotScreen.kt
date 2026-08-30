@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.frerox.toolz.R
 import com.frerox.toolz.data.purgeshot.PurgeShotEntity
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
 import com.frerox.toolz.ui.components.*
@@ -92,13 +94,14 @@ fun PurgeShotScreen(
     var showPresetSheet by remember { mutableStateOf(false) }
     var showAutoPicker by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showPermissionsSheet by remember { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
     LaunchedEffect(undoItem) {
         undoItem?.let {
             val res = snackbarHost.showSnackbar(
-                message = "${it.displayName} kept",
-                actionLabel = "Undo",
+                message = context.getString(R.string.st_PurgeShot_Kept, it.displayName),
+                actionLabel = context.getString(R.string.st_PurgeShot_Undo),
                 duration = SnackbarDuration.Short
             )
             if (res == SnackbarResult.ActionPerformed) viewModel.undoCancel()
@@ -158,11 +161,11 @@ fun PurgeShotScreen(
     Scaffold(
         topBar = {
             ExpressiveTopAppBar(
-                title = "PurgeShot",
+                title = stringResource(R.string.st_PurgeShot_Title),
                 subtitle = when {
-                    !enabled -> "Paused"
-                    pending.isEmpty() -> if (totalDeleted > 0) "$totalDeleted deleted" else "Ready to save space"
-                    else -> "${pending.size} queued • next ${nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—"}"
+                    !enabled -> stringResource(R.string.st_PurgeShot_Subtitle_Paused)
+                    pending.isEmpty() -> if (totalDeleted > 0) stringResource(R.string.st_PurgeShot_Subtitle_Deleted, totalDeleted) else stringResource(R.string.st_PurgeShot_Subtitle_Ready)
+                    else -> stringResource(R.string.st_PurgeShot_Subtitle_Queued, pending.size, nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—")
                 },
                 navigationIcon = {
                     IconButton(
@@ -175,7 +178,7 @@ fun PurgeShotScreen(
                         IconButton(
                             onClick = { showClearConfirm = true },
                             modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.28f))
-                        ) { Icon(Icons.Rounded.DeleteSweep, "Clear all", tint = MaterialTheme.colorScheme.error) }
+                        ) { Icon(Icons.Rounded.DeleteSweep, stringResource(R.string.st_PurgeShot_ClearAll), tint = MaterialTheme.colorScheme.error) }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -204,277 +207,75 @@ fun PurgeShotScreen(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // Shizuku 1-tap master grant button — when Shizuku is authorized and any permission is missing
-                val anyPermMissing = !hasMediaState || !hasNotifState || !hasOverlayState || !hasA11yState || !hasAllFilesState
-                if (shizukuAuthorized && anyPermMissing) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        viewModel.forceGrantAllPermissionsViaShizuku { ok ->
-                                            refreshAllStates()
-                                            coroutineScope.launch {
-                                                snackbarHost.showSnackbar(
-                                                    if (ok) "⚡ All permissions force-granted via Shizuku!" else "Shizuku grant failed"
-                                                )
-                                            }
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                // Unified Permissions & Setup Card (Replaces individual banners and status cards)
+                item {
+                    StaggeredEntrance(index = 0) {
+                        val allCoreGranted = hasMediaState && hasAllFilesState && hasOverlayState
+                        val isFullySetup = allCoreGranted && hasA11yState
+                        ExpressiveCard(
+                            onClick = { showPermissionsSheet = true },
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (isFullySetup) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimaryContainer
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("⚡ Force Grant All Permissions", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("1-tap auto-setup with Shizuku: Media, Notifications, Overlay Popup, Silent Delete & Accessibility.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Media permission card — required for detection outside Toolz
-                if (!hasMediaState && !shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-                                    permissionLauncher.launch(arrayOf(perm))
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.PhotoLibrary, null, tint = MaterialTheme.colorScheme.error) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Grant photo access", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("PurgeShot needs to see screenshots anywhere — grant Media access.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Notification permission card — required for outside-Toolz heads-up
-                if (!hasNotifState && !shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                        permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                                    } else {
-                                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        runCatching { context.startActivity(intent) }
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.NotificationsActive, null, tint = MaterialTheme.colorScheme.error) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Allow notifications", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Outside Toolz, PurgeShot uses high-priority heads-up alerts — tap to allow.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Overlay permission card — required for instant popup dialog over other apps
-                if (!hasOverlayState && !shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    runCatching {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                Surface(
+                                    modifier = Modifier.size(44.dp),
+                                    shape = CircleShape,
+                                    color = if (isFullySetup) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            if (isFullySetup) Icons.Rounded.VerifiedUser else Icons.Rounded.Shield,
+                                            null,
+                                            tint = if (isFullySetup) MaterialTheme.colorScheme.primary else Color.White,
+                                            modifier = Modifier.size(22.dp)
                                         )
                                     }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Layers, null, tint = MaterialTheme.colorScheme.error) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Allow display over other apps", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Enables instant PurgeShot popup dialog outside Toolz — tap to grant.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
                                 }
-                            }
-                        }
-                    }
-                }
-
-                // All Files Permission card — required for silent delete
-                if (!hasAllFilesState && !shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                        data = Uri.parse("package:${context.packageName}")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    runCatching { context.startActivity(intent) }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.ShieldMoon, null, tint = MaterialTheme.colorScheme.error) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Allow deleting screenshots", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("One-time All-files access — enables silent permanent auto-delete.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        stringResource(R.string.st_PurgeShot_Permissions_Title),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        when {
+                                            isFullySetup && shizukuAuthorized -> stringResource(R.string.st_PurgeShot_Permissions_AllActiveShizuku)
+                                            isFullySetup -> stringResource(R.string.st_PurgeShot_Permissions_AllActive)
+                                            allCoreGranted -> stringResource(R.string.st_PurgeShot_Permissions_CoreActive)
+                                            else -> stringResource(R.string.st_PurgeShot_Permissions_SetupNeeded)
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isFullySetup) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                    )
                                 }
-                            }
-                        }
-                    }
-                }
-
-                // Outside-Toolz reliable detection: Accessibility + Shizuku cards
-                if (!hasA11yState && !shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    runCatching {
-                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            if (isFullySetup) stringResource(R.string.st_PurgeShot_Permissions_AllSet) else stringResource(R.string.st_PurgeShot_Permissions_Configure),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        Icon(
+                                            Icons.Rounded.ChevronRight,
+                                            null,
+                                            tint = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(14.dp)
+                                        )
                                     }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AccessibilityNew, null, tint = MaterialTheme.colorScheme.secondary) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Enable Accessibility for PurgeShot", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Detects screenshots even when Toolz is killed — system-level, no battery drain.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
-                                }
-                            }
-                        }
-                    }
-                } else if (hasA11yState) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {},
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Accessibility active", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Screenshots detected outside Toolz via system UI.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.Verified, null, tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (!shizukuAuthorized) {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    if (shizukuAvailable) {
-                                        com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(1001)
-                                    } else {
-                                        runCatching {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/guide/setup/")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Terminal, null, tint = MaterialTheme.colorScheme.tertiary) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text(if (shizukuAvailable) "Grant Shizuku for PurgeShot" else "Install Shizuku for best reliability", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text(if (shizukuAvailable) "Tap to authorize Shizuku & auto-grant all permissions." else "Shizuku gives instant file-system detection outside Toolz.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.ChevronRight, null)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    item {
-                        StaggeredEntrance(index = 0) {
-                            ExpressiveCard(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        viewModel.forceGrantAllPermissionsViaShizuku { ok ->
-                                            refreshAllStates()
-                                            coroutineScope.launch {
-                                                snackbarHost.showSnackbar(if (ok) "Permissions re-applied via Shizuku" else "Shizuku sync failed")
-                                            }
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                            ) {
-                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Shizuku privileged watch active", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("File-system inotify active — tap to re-sync permissions.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
-                                    }
-                                    Icon(Icons.Rounded.Verified, null, tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
@@ -495,14 +296,14 @@ fun PurgeShotScreen(
                                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("Self-destructing screenshots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text("Save storage without thinking.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
+                                        Text(stringResource(R.string.st_PurgeShot_Hero_Title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text(stringResource(R.string.st_PurgeShot_Hero_Subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
                                     }
                                 }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    HeroStat(label = "Queued", value = "${pending.size}", modifier = Modifier.weight(1f))
-                                    HeroStat(label = "Deleted", value = "$totalDeleted", modifier = Modifier.weight(1f))
-                                    HeroStat(label = "Next", value = nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—", modifier = Modifier.weight(1f))
+                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Queued), value = "${pending.size}", modifier = Modifier.weight(1f))
+                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Deleted), value = "$totalDeleted", modifier = Modifier.weight(1f))
+                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Next), value = nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—", modifier = Modifier.weight(1f))
                                 }
                                 if (pending.isNotEmpty()) {
                                     ToolzWavyLinearProgressIndicator(
@@ -524,8 +325,8 @@ fun PurgeShotScreen(
                     StaggeredEntrance(index = 2) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             ToggleRow(
-                                title = "PurgeShot",
-                                subtitle = if (enabled) "Watching Screenshots" else "Paused",
+                                title = stringResource(R.string.st_PurgeShot_EnablePurgeShot),
+                                subtitle = if (enabled) stringResource(R.string.st_PurgeShot_EnablePurgeShot_Desc) else stringResource(R.string.st_PurgeShot_Subtitle_Paused),
                                 icon = Icons.Rounded.ScreenshotMonitor,
                                 checked = enabled,
                                 onCheckedChange = { viewModel.setEnabled(it) }
@@ -537,8 +338,8 @@ fun PurgeShotScreen(
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     ToggleRow(
-                                        title = "Smart Auto",
-                                        subtitle = if (smartAuto) "No popup — auto ${durationLabel(autoDuration)}" else "Show popup each time",
+                                        title = stringResource(R.string.st_PurgeShot_SmartAuto),
+                                        subtitle = stringResource(R.string.st_PurgeShot_SmartAuto_Desc, durationLabel(autoDuration)),
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = smartAuto,
                                         onCheckedChange = { viewModel.setSmartAuto(it) }
@@ -549,8 +350,8 @@ fun PurgeShotScreen(
                                         onClick = { showAutoPicker = true }
                                     )
                                     ToggleRow(
-                                        title = "Notifications",
-                                        subtitle = if (notificationsEnabled) "Show notification when deletion is scheduled" else "Silent (no notifications)",
+                                        title = stringResource(R.string.st_PurgeShot_Notifications),
+                                        subtitle = if (notificationsEnabled) stringResource(R.string.st_PurgeShot_Notifications_Enabled) else stringResource(R.string.st_PurgeShot_Notifications_Disabled),
                                         icon = Icons.Rounded.NotificationsActive,
                                         checked = notificationsEnabled,
                                         onCheckedChange = { viewModel.setNotificationsEnabled(it) }
@@ -567,11 +368,11 @@ fun PurgeShotScreen(
                         ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Timers", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                                    Text(stringResource(R.string.st_PurgeShot_Timers), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
                                     TextButton(onClick = { showPresetSheet = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
                                         Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
-                                        Text("Edit", fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.st_PurgeShot_Edit), fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 // Simple 3-column flow without nested LazyVerticalGrid bug — stable measurement inside LazyColumn
@@ -588,7 +389,7 @@ fun PurgeShotScreen(
                                         }
                                     }
                                 }
-                                Text("Tap Edit to choose up to 6. Auto follows Smart Auto.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.st_PurgeShot_Timers_Hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -597,9 +398,9 @@ fun PurgeShotScreen(
                 // Queue header
                 item {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text(stringResource(R.string.st_PurgeShot_Queue), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                         if (pending.isNotEmpty()) {
-                            ExpressiveStatePill(text = "${pending.size} pending", icon = Icons.Rounded.HourglassEmpty, color = MaterialTheme.colorScheme.primary)
+                            ExpressiveStatePill(text = stringResource(R.string.st_PurgeShot_PendingCount, pending.size), icon = Icons.Rounded.HourglassEmpty, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -612,13 +413,13 @@ fun PurgeShotScreen(
                                     Surface(modifier = Modifier.size(64.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
                                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoDelete, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
                                     }
-                                    Text("No queued shots", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-                                    Text("Take a screenshot — pick a timer or let Smart Auto handle it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                                    Text(stringResource(R.string.st_PurgeShot_NoQueuedShots), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                                    Text(stringResource(R.string.st_PurgeShot_NoQueuedShots_Desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                                     if (com.frerox.toolz.BuildConfig.DEBUG) {
                                         ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
                                             Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
                                             Spacer(Modifier.width(6.dp))
-                                            Text("Demo shot", fontWeight = FontWeight.Bold)
+                                            Text(stringResource(R.string.st_PurgeShot_DemoShot), fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -673,6 +474,61 @@ fun PurgeShotScreen(
                 ) { Text("Clear", fontWeight = FontWeight.Black) }
             },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showPermissionsSheet) {
+        PermissionsSheet(
+            hasMedia = hasMediaState,
+            hasAllFiles = hasAllFilesState,
+            hasOverlay = hasOverlayState,
+            hasA11y = hasA11yState,
+            shizukuAvailable = shizukuAvailable,
+            shizukuAuthorized = shizukuAuthorized,
+            onRequestMedia = {
+                val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+                permissionLauncher.launch(arrayOf(perm))
+            },
+            onRequestAllFiles = {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { context.startActivity(intent) }
+            },
+            onRequestOverlay = {
+                runCatching {
+                    context.startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            },
+            onRequestA11y = {
+                runCatching {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            },
+            onRequestShizuku = {
+                if (shizukuAvailable) {
+                    com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(1001)
+                } else {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/guide/setup/")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+            },
+            onForceGrantAll = {
+                coroutineScope.launch {
+                    viewModel.forceGrantAllPermissionsViaShizuku { ok ->
+                        refreshAllStates()
+                        coroutineScope.launch {
+                            snackbarHost.showSnackbar(if (ok) "⚡ All permissions force-granted via Shizuku!" else "Shizuku grant failed")
+                        }
+                    }
+                }
+            },
+            onDismiss = { showPermissionsSheet = false }
         )
     }
 }
@@ -1377,4 +1233,355 @@ private fun iconFor(name: String): ImageVector = when (name.lowercase()) {
     "calendar_month" -> Icons.Rounded.CalendarMonth
     "auto_awesome" -> Icons.Rounded.AutoAwesome
     else -> Icons.Rounded.Timer
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PermissionsSheet(
+    hasMedia: Boolean,
+    hasAllFiles: Boolean,
+    hasOverlay: Boolean,
+    hasA11y: Boolean,
+    shizukuAvailable: Boolean,
+    shizukuAuthorized: Boolean,
+    onRequestMedia: () -> Unit,
+    onRequestAllFiles: () -> Unit,
+    onRequestOverlay: () -> Unit,
+    onRequestA11y: () -> Unit,
+    onRequestShizuku: () -> Unit,
+    onForceGrantAll: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val haptic = rememberToolzHapticFeedback()
+    val scrollState = rememberScrollState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        dragHandle = { BottomSheetDefaults.DragHandle(width = 40.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp)
+                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 320f)),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(46.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.Shield,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Permissions & Setup",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "Configure permissions for reliable screenshot purging",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Shizuku 1-tap master grant banner (if Shizuku is authorized)
+            if (shizukuAuthorized) {
+                Surface(
+                    onClick = {
+                        haptic.success()
+                        onForceGrantAll()
+                    },
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(38.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Bolt, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "⚡ Force Grant All Permissions",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                "1-tap auto-setup with Shizuku for all permissions",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Required Permissions
+            Text(
+                "PERMISSIONS",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.6.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // 1. Media
+                PermissionRow(
+                    title = "Photo & Media Access",
+                    description = "Required to detect screenshots",
+                    icon = Icons.Rounded.PhotoLibrary,
+                    isGranted = hasMedia,
+                    onAction = {
+                        haptic.tick()
+                        onRequestMedia()
+                    }
+                )
+
+                // 2. All Files
+                PermissionRow(
+                    title = "All Files Access",
+                    description = "Allows silent permanent screenshot deletion",
+                    icon = Icons.Rounded.DeleteForever,
+                    isGranted = hasAllFiles,
+                    onAction = {
+                        haptic.tick()
+                        onRequestAllFiles()
+                    }
+                )
+
+                // 3. Overlay
+                PermissionRow(
+                    title = "Display over other apps",
+                    description = "Shows the PurgeShot popup over other apps",
+                    icon = Icons.Rounded.Layers,
+                    isGranted = hasOverlay,
+                    onAction = {
+                        haptic.tick()
+                        onRequestOverlay()
+                    }
+                )
+
+                // 4. Accessibility
+                PermissionRow(
+                    title = "Accessibility Service",
+                    description = "Background detection when Toolz is closed",
+                    icon = Icons.Rounded.AccessibilityNew,
+                    isGranted = hasA11y,
+                    onAction = {
+                        haptic.tick()
+                        onRequestA11y()
+                    }
+                )
+            }
+
+            // Optional Services Section (Shizuku)
+            Text(
+                "OPTIONAL SERVICES",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.6.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.1f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(38.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (shizukuAuthorized) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Rounded.Terminal,
+                                null,
+                                tint = if (shizukuAuthorized) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Shizuku Watch",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest
+                            ) {
+                                Text(
+                                    "Optional",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Text(
+                            if (shizukuAuthorized) "Privileged inotify file system watcher is running" else "Privileged instant file-system detection & 1-tap permission setup",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                    }
+
+                    if (shizukuAuthorized) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Text("Active", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                haptic.tick()
+                                onRequestShizuku()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(if (shizukuAvailable) "Authorize" else "Setup", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // Close button
+            ToolzExpressiveButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                shape = RoundedCornerShape(20.dp),
+                contentPadding = PaddingValues(vertical = 16.dp)
+            ) {
+                Text("Done", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+            }
+
+            Spacer(Modifier.navigationBarsPadding().height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun PermissionRow(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    isGranted: Boolean,
+    onAction: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = if (isGranted) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon,
+                        null,
+                        tint = if (isGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    description,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
+            }
+
+            if (isGranted) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Rounded.CheckCircle, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("Granted", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            } else {
+                Button(
+                    onClick = onAction,
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text("Grant", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }

@@ -37,6 +37,30 @@ object PurgeShotHandler {
     private val _isPopupActive = MutableStateFlow(false)
     val isPopupActive: StateFlow<Boolean> = _isPopupActive.asStateFlow()
 
+    // Thread-safe set of recently handled URIs to prevent duplicate popups / duplicate enqueues
+    private val handledUris = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+
+    fun isUriHandled(uriStr: String): Boolean {
+        return handledUris.contains(uriStr)
+    }
+
+    fun markUriHandled(uriStr: String) {
+        synchronized(handledUris) {
+            handledUris.add(uriStr)
+            if (handledUris.size > 200) {
+                val it = handledUris.iterator()
+                if (it.hasNext()) {
+                    it.next()
+                    it.remove()
+                }
+            }
+        }
+    }
+
+    fun markAllHandled(uris: Collection<String>) {
+        for (u in uris) markUriHandled(u)
+    }
+
     fun setPopupActive(active: Boolean) {
         _isPopupActive.value = active
         if (!active) {
@@ -63,14 +87,28 @@ object PurgeShotHandler {
     ) {
         val uriStr = candidate.uri.toString()
 
-        // 1. Dedup check within currently active batch
+        // 1. Memory check: already handled recently?
+        if (isUriHandled(uriStr)) {
+            Log.d(TAG, "skip already handled uri $uriStr")
+            return
+        }
+
+        // 2. Database check: is this URI already in the database (PENDING, DELETED, CANCELLED)?
+        val existingInDb = repository.getEntryByUri(uriStr)
+        if (existingInDb != null) {
+            Log.d(TAG, "skip uri already in database (status=${existingInDb.status}) $uriStr")
+            markUriHandled(uriStr)
+            return
+        }
+
+        // 3. Dedup check within currently active batch
         val currentBatch = _activeBatchFlow.value
         if (currentBatch.any { it.uri.toString() == uriStr }) {
             Log.d(TAG, "dedup within activeBatch $uriStr")
             return
         }
 
-        // 2. Dedup against stored last screenshot if batch is empty
+        // 4. Stored last screenshot dedup
         val storedLast = try { settingsRepository.purgeShotLastScreenshotUri.first() } catch (_: Exception) { null }
         if (uriStr == storedLast && currentBatch.isEmpty()) {
             Log.d(TAG, "dedup storedLast $uriStr")
@@ -83,7 +121,7 @@ object PurgeShotHandler {
         val label = formatDurationLabel(autoDuration)
 
         if (smartAuto) {
-            // Smart Auto: queue immediately with auto time and show the single scheduled notification
+            markUriHandled(uriStr)
             repository.enqueue(candidate.uri, candidate.displayName, autoDuration, label, candidate.filePath)
             Log.i(TAG, "SmartAuto queued $uriStr for $label")
             showScheduledNotification(context, settingsRepository, 1, label)
@@ -186,8 +224,12 @@ object PurgeShotHandler {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val title = if (count > 1) "Screenshots scheduled ($count)" else "Screenshot scheduled"
-            val text = "Will be deleted in $label"
+            val title = if (count > 1) {
+                context.getString(R.string.st_PurgeShot_Notif_Scheduled_Multiple, count)
+            } else {
+                context.getString(R.string.st_PurgeShot_Notif_Scheduled_Single)
+            }
+            val text = context.getString(R.string.st_PurgeShot_Notif_Scheduled_Desc, label)
 
             val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle(title)

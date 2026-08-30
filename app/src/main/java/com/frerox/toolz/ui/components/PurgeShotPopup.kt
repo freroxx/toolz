@@ -39,6 +39,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.frerox.toolz.R
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
@@ -146,7 +148,7 @@ fun PurgeShotPopup(
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    "PurgeShot",
+                                    stringResource(R.string.st_PurgeShot_Title),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Black,
                                     maxLines = 1
@@ -157,7 +159,7 @@ fun PurgeShotPopup(
                                     label = "popupTitleMorph"
                                 ) { count ->
                                     Text(
-                                        if (count > 1) "Delete these $count screenshots?" else "Delete this screenshot?",
+                                        if (count > 1) stringResource(R.string.st_PurgeShot_DeleteTheseScreenshots, count) else stringResource(R.string.st_PurgeShot_DeleteThisScreenshot),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 2
@@ -194,7 +196,7 @@ fun PurgeShotPopup(
 
                         // ── Timer preset grid ────────────────────────────────────
                         Text(
-                            "Choose when to delete",
+                            stringResource(R.string.st_PurgeShot_ChooseWhenToDelete),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -235,13 +237,13 @@ fun PurgeShotPopup(
                         ) {
                             ToolzOutlinedExpressiveButton(
                                 onClick = { haptic.tick(); onKeepForever() },
-                                modifier = Modifier.weight(1f).semantics { contentDescription = "Keep forever, don't delete" },
+                                modifier = Modifier.weight(1f).semantics { contentDescription = "Keep forever" },
                                 shape = RoundedCornerShape(20.dp),
                                 contentPadding = PaddingValues(vertical = 14.dp)
                             ) {
                                 Icon(Icons.Rounded.Block, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Keep", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
+                                Text(stringResource(R.string.st_PurgeShot_Keep), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelLarge)
                             }
 
                             // Auto button
@@ -254,7 +256,7 @@ fun PurgeShotPopup(
                                 },
                                 shape = RoundedCornerShape(20.dp),
                                 color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.weight(1f).semantics { contentDescription = "Use auto time ${presetLabelFor(autoDurationMillis)}" }
+                                modifier = Modifier.weight(1f).semantics { contentDescription = "Auto time" }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -264,7 +266,7 @@ fun PurgeShotPopup(
                                     Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Auto: ${presetLabelFor(autoDurationMillis)}",
+                                        stringResource(R.string.st_PurgeShot_AutoWithTime, presetLabelFor(autoDurationMillis)),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Black,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -291,7 +293,7 @@ fun PurgeShotPopup(
                                 Icon(Icons.Rounded.DeleteForever, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (isMultiple) "Delete all now" else "Delete now",
+                                    if (isMultiple) stringResource(R.string.st_PurgeShot_DeleteAllNow) else stringResource(R.string.st_PurgeShot_DeleteNow),
                                     fontWeight = FontWeight.Black,
                                     style = MaterialTheme.typography.labelLarge
                                 )
@@ -305,7 +307,7 @@ fun PurgeShotPopup(
                                 horizontalArrangement = Arrangement.Center
                             ) {
                                 Text(
-                                    "Smart Auto skips this popup",
+                                    stringResource(R.string.st_PurgeShot_SmartAutoSkipsPopup),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                                     fontWeight = FontWeight.SemiBold,
@@ -340,7 +342,7 @@ private fun SingleThumbnail(uri: Uri?, displayName: String) {
             if (imageState is AsyncImagePainter.State.Error) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Rounded.BrokenImage, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                    Text("Preview unavailable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.st_PurgeShot_PreviewUnavailable), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             // Bottom scrim label
@@ -428,7 +430,7 @@ private fun MultiScreenshotGrid(uris: List<Uri>, count: Int) {
             ) {
                 Icon(Icons.Rounded.PhotoLibrary, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    "$count screenshots",
+                    stringResource(R.string.st_PurgeShot_ScreenshotsCount, count),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

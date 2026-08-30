@@ -210,6 +210,7 @@ class NowPlayingAiViewModel @Inject constructor(
     private var lastSpeechEventAtMs: Long                = 0L // meaningful events only (not RMS), for watchdog
     private var lastMissedCheckMs  : Long                = 0L  // throttle for checkMissedWords
     private var pauseRequestedAtMs : Long                = 0L
+    private var sessionStartMs     : Long                = 0L
 
     // Mutex that serializes all lyrics-state mutations (checkMissedWords AND
     // processRecognizedTexts both update the same list). Using a Mutex
@@ -1504,6 +1505,8 @@ class NowPlayingAiViewModel @Inject constructor(
         lastMissedCheckMs = 0L
         lastSpeechEventAtMs = System.currentTimeMillis()
         lastCallbackAtMs = System.currentTimeMillis()
+        pauseRequestedAtMs = 0L
+        sessionStartMs = System.currentTimeMillis()
         destroyJob?.cancel()
         destroyJob = null
         _uiState.update {
@@ -1572,25 +1575,40 @@ class NowPlayingAiViewModel @Inject constructor(
         }
         
         // Delayed full destruction (unbind service) to prevent flickering on fast resume
+        // Capture sessionId so 5s timer from old pause cannot kill new ACTIVE recognizer
+        val pauseSessionId = _uiState.value.karaokeSessionId
         destroyJob?.cancel()
         destroyJob = viewModelScope.launch {
             delay(5_000)
+            if (_uiState.value.karaokeSessionId != pauseSessionId) return@launch
+            // If already resumed to listening in new session, don't destroy
+            if (_uiState.value.isKaraokeRecording && _uiState.value.isListening) return@launch
             withContext(Dispatchers.Main) {
-                destroyRecognizer()
+                if (_uiState.value.karaokeSessionId == pauseSessionId) destroyRecognizer()
             }
         }
     }
 
     fun resumeKaraokeListening() {
         if (!_uiState.value.isKaraokeRecording || sessionActive) return
-        
-        // If we're resuming within the settle window of a just-issued pause,
-        // this is churn (buffering flapping / duplicate LaunchedEffect fire),
-        // not a genuine pause→resume. Debounce it rather than restarting the
-        // recognizer.
         val sincePause = System.currentTimeMillis() - pauseRequestedAtMs
-        if (sincePause < 300L) return
-
+        if (sincePause < 300L) {
+            // Queue delayed resume instead of dropping — fixes one-time disconnect
+            // where pause (COUNTDOWN) → resume (ACTIVE) within 300ms was dropped
+            val remaining = 300L - sincePause
+            restartJob?.cancel()
+            restartJob = viewModelScope.launch(Dispatchers.Main) {
+                delay(remaining)
+                if (!_uiState.value.isKaraokeRecording || sessionActive) return@launch
+                destroyJob?.cancel()
+                destroyJob = null
+                _uiState.update { it.copy(isListening = true) }
+                if (speechRecognizer == null) buildRecognizer()
+                beginListening()
+                startWatchdog()
+            }
+            return
+        }
         destroyJob?.cancel()
         destroyJob = null
         _uiState.update { it.copy(isListening = true) }
@@ -1671,6 +1689,8 @@ class NowPlayingAiViewModel @Inject constructor(
      */
     private suspend fun beginListening() {
         if (!_uiState.value.isKaraokeRecording || !_uiState.value.isListening) return
+        destroyJob?.cancel()
+        destroyJob = null
 
         if (speechRecognizer == null) {
             Log.d(TAG, "beginListening: re-building destroyed recognizer")
@@ -1742,6 +1762,8 @@ class NowPlayingAiViewModel @Inject constructor(
      *  beginListening() is now suspend — called inline in the launched coroutine. */
     private fun rebuildAndRestart(preDelayMs: Long) {
         if (!_uiState.value.isKaraokeRecording) return
+        destroyJob?.cancel()
+        destroyJob = null
         restartJob?.cancel()
         restartJob = viewModelScope.launch(Dispatchers.Main) {
             _uiState.update { it.copy(isReconnecting = true) }
@@ -1795,11 +1817,12 @@ class NowPlayingAiViewModel @Inject constructor(
         watchdogJob = viewModelScope.launch(Dispatchers.Main) {
             while (_uiState.value.isKaraokeRecording && _uiState.value.isListening) {
                 delay(2_000L)
-                val silentFor = System.currentTimeMillis() - lastCallbackAtMs
+                val silentFor = System.currentTimeMillis() - lastSpeechEventAtMs
                 if (_uiState.value.isKaraokeRecording && _uiState.value.isListening && silentFor > WATCHDOG_SILENCE_TIMEOUT_MS) {
-                    Log.w(TAG, "Watchdog: recognizer silent for ${silentFor}ms, forcing rebuild")
+                    Log.w(TAG, "Watchdog: recognizer silent for ${silentFor}ms (meaningful), forcing rebuild")
                     sessionActive = false
                     rebuildAndRestart(preDelayMs = 100L)
+                    lastSpeechEventAtMs = System.currentTimeMillis()
                     lastCallbackAtMs = System.currentTimeMillis()
                 }
             }
@@ -1860,41 +1883,49 @@ class NowPlayingAiViewModel @Inject constructor(
                     requeueListening(ROUTINE_GAP_RESTART_DELAY_MS)
                 }
                 SpeechRecognizer.ERROR_AUDIO -> {
-                    // Mic access conflict. Rebuild the recognizer to re-acquire the mic.
-                    // Raised threshold 5→10 so a brief mic reconnect (bluetooth) doesn't
-                    // permanently kill correction; transient blips recover within 1-2 retries.
-                    consecutiveFailures++
-                    if (consecutiveFailures >= 10) {
-                        Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_AUDIO — stopping karaoke recognition")
-                        runCatching {
-                            android.widget.Toast.makeText(
-                                context,
-                                "Microphone unavailable for speech correction",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                        stopKaraokeRecording()
+                    val isEarly = System.currentTimeMillis() - sessionStartMs < 2000L
+                    if (isEarly) {
+                        Log.d(TAG, "ERROR_AUDIO within 2s of start — transient, not counting toward hard-stop")
+                        rebuildAndRestart(preDelayMs = 500L)
                     } else {
-                        rebuildAndRestart(preDelayMs = (500L * consecutiveFailures.coerceAtMost(6)))
+                        consecutiveFailures++
+                        if (consecutiveFailures >= 10) {
+                            Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_AUDIO — stopping karaoke recognition")
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Microphone unavailable for speech correction",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            stopKaraokeRecording()
+                        } else {
+                            rebuildAndRestart(preDelayMs = (500L * consecutiveFailures.coerceAtMost(6)))
+                        }
                     }
                 }
                 SpeechRecognizer.ERROR_CLIENT -> {
-                    // ERROR_CLIENT (5): The speech recognition service disconnected.
-                    consecutiveFailures++
-                    if (consecutiveFailures >= 10) {
-                        Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_CLIENT — stopping karaoke recognition")
-                        runCatching {
-                            android.widget.Toast.makeText(
-                                context,
-                                "Speech service unavailable. Try restarting the app.",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                        stopKaraokeRecording()
+                    val isEarly = System.currentTimeMillis() - sessionStartMs < 2000L
+                    if (isEarly) {
+                        Log.d(TAG, "ERROR_CLIENT within 2s of start — transient, not counting toward hard-stop")
+                        rebuildAndRestart(preDelayMs = 500L)
                     } else {
-                        val backoffMs = (1000L * consecutiveFailures.coerceAtMost(5)).coerceAtMost(5000L)
-                        Log.w(TAG, "ERROR_CLIENT: rebuild attempt $consecutiveFailures, delay=${backoffMs}ms")
-                        rebuildAndRestart(preDelayMs = backoffMs)
+                        consecutiveFailures++
+                        if (consecutiveFailures >= 10) {
+                            Log.e(TAG, "Circuit breaker: 10 consecutive ERROR_CLIENT — stopping karaoke recognition")
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Speech service unavailable. Try restarting the app.",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            stopKaraokeRecording()
+                        } else {
+                            val backoffMs = (1000L * consecutiveFailures.coerceAtMost(5)).coerceAtMost(5000L)
+                            Log.w(TAG, "ERROR_CLIENT: rebuild attempt $consecutiveFailures, delay=${backoffMs}ms")
+                            rebuildAndRestart(preDelayMs = backoffMs)
+                        }
                     }
                 }
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
