@@ -25,6 +25,8 @@ class PurgeShotRescheduleWorker @AssistedInject constructor(
     override suspend fun doWork(): Result = try {
         repository.ensureRestoredAndRescheduled()
         repository.processDue()
+        // Keep JobScheduler alive even when app is killed — re-arm content trigger every 6h as safety net
+        try { com.frerox.toolz.service.PurgeShotObserverJobService.schedule(applicationContext) } catch (_: Exception) {}
         Result.success()
     } catch (e: Exception) {
         Result.retry()

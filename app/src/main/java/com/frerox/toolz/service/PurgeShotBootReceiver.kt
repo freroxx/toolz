@@ -42,6 +42,7 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
 
     @Inject lateinit var repository: PurgeShotRepository
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var shizukuWatcher: PurgeShotShizukuWatcher
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -84,6 +85,7 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
                         // this boot-time call is what actually re-arms outside-app detection —
                         // it isn't optional redundancy.
                         PurgeShotObserverJobService.schedule(context)
+                        try { shizukuWatcher.start() } catch (_: Exception) {}
                         // Periodic WorkManager sweep as a last-resort net for any screenshot
                         // that both the live observer and the content-trigger job miss.
                         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -98,6 +100,7 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
                         )
                     } else {
                         PurgeShotObserverJobService.cancel(context)
+                        try { shizukuWatcher.stop() } catch (_: Exception) {}
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "start service failed", e)

@@ -63,6 +63,9 @@ class ToolzApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var purgeShotRepository: com.frerox.toolz.data.purgeshot.PurgeShotRepository
 
+    @Inject
+    lateinit var shizukuWatcher: com.frerox.toolz.service.PurgeShotShizukuWatcher
+
     private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     override fun onCreate() {
@@ -91,7 +94,7 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
-        // PurgeShot: ensure it works outside Toolz — start observer service + JobScheduler trigger
+        // PurgeShot: ensure it works outside Toolz — start observer service + JobScheduler trigger + Shizuku watcher
         appScope.launch {
             try {
                 purgeShotRepository.ensureRestoredAndRescheduled()
@@ -102,8 +105,11 @@ class ToolzApplication : Application(), Configuration.Provider {
                     }
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
                     com.frerox.toolz.service.PurgeShotObserverJobService.schedule(this@ToolzApplication)
+                    // Shizuku privileged watcher — survives even when app process observer dies
+                    try { shizukuWatcher.start() } catch (_: Exception) {}
                 } else {
                     com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
+                    try { shizukuWatcher.stop() } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
                 android.util.Log.w("ToolzApplication", "PurgeShot init failed", e)
@@ -120,6 +126,7 @@ class ToolzApplication : Application(), Configuration.Provider {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
                     } catch (_: Exception) {}
                     com.frerox.toolz.service.PurgeShotObserverJobService.schedule(this@ToolzApplication)
+                    try { shizukuWatcher.start() } catch (_: Exception) {}
                 } else {
                     try {
                         val svc = android.content.Intent(this@ToolzApplication, com.frerox.toolz.service.PurgeShotService::class.java).apply {
@@ -128,6 +135,7 @@ class ToolzApplication : Application(), Configuration.Provider {
                         startService(svc)
                     } catch (_: Exception) {}
                     com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
+                    try { shizukuWatcher.stop() } catch (_: Exception) {}
                 }
             }
         }

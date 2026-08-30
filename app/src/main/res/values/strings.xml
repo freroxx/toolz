@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">Toolz</string>
     <string name="accessibility_description">Enables Focus Flow to monitor app usage and apply hard locks when limits are reached.</string>
+    <string name="accessibility_purgeshot_description">Monitors system screenshot notifications to offer timed deletion, even when Toolz is in background. No content is read.</string>
 
     <!-- OnboardingScreen -->
     <string name="st_OnboardingScreen_4f2d">Back</string>
