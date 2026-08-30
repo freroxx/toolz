@@ -110,6 +110,9 @@ class ToolzApplication : Application(), Configuration.Provider {
                 } else {
                     com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
                     try { shizukuWatcher.stop() } catch (_: Exception) {}
+                    // Also cancel periodic maintenance workers if disabled
+                    WorkManager.getInstance(this@ToolzApplication).cancelUniqueWork("PurgeShotReschedule")
+                    WorkManager.getInstance(this@ToolzApplication).cancelUniqueWork("PurgeShotDetect")
                 }
             } catch (e: Exception) {
                 android.util.Log.w("ToolzApplication", "PurgeShot init failed", e)
@@ -136,6 +139,8 @@ class ToolzApplication : Application(), Configuration.Provider {
                     } catch (_: Exception) {}
                     com.frerox.toolz.service.PurgeShotObserverJobService.cancel(this@ToolzApplication)
                     try { shizukuWatcher.stop() } catch (_: Exception) {}
+                    WorkManager.getInstance(this@ToolzApplication).cancelUniqueWork("PurgeShotReschedule")
+                    WorkManager.getInstance(this@ToolzApplication).cancelUniqueWork("PurgeShotDetect")
                 }
             }
         }

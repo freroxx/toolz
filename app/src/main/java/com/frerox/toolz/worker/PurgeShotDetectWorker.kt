@@ -10,6 +10,7 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.PurgeShotDetector
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 
 @HiltWorker
 class PurgeShotDetectWorker @AssistedInject constructor(
@@ -31,8 +32,10 @@ class PurgeShotDetectWorker @AssistedInject constructor(
                 isPoll = true
             )
             Log.d("PurgeShotDetect", "poll handled=$handled")
-            // Keep JobScheduler alive — re-arm content trigger each poll (outside Toolz lifeline)
-            try { com.frerox.toolz.service.PurgeShotObserverJobService.schedule(applicationContext) } catch (_: Exception) {}
+            // Keep JobScheduler alive — re-arm content trigger each poll if still enabled
+            if (settingsRepository.purgeShotEnabled.first()) {
+                try { com.frerox.toolz.service.PurgeShotObserverJobService.schedule(applicationContext) } catch (_: Exception) {}
+            }
             Result.success()
         } catch (e: Exception) {
             Log.w("PurgeShotDetect", "poll failed", e)
