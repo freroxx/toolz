@@ -32,7 +32,7 @@ Toolz is designed to be a real daily driver, not a demo shelf. Instead of juggli
 
 ## 📦 Complete Tool Catalog
 
-Toolz includes **47+ precision instruments** organized across 9 categories:
+Toolz includes **48+ precision instruments** organized across 9 categories:
 
 ### ⏱️ Time & Productivity
 - **Timer** — Precise countdown engine with background persistence and physics-based alarms
@@ -89,6 +89,7 @@ Toolz includes **47+ precision instruments** organized across 9 categories:
 - **Clipboard History** — Local archive for managing and retrieving past clipboard segments
 - **Notification Vault** — Searchable local log of system notifications for privacy auditing
 - **Smart Encrypter** — AES-256 text and file encryption utility for secure data transfer
+- **Purge Shot** — Auto-expiring screenshot manager with 30 sec to 1 month presets, system-level detection via Accessibility/Shizuku/observer, triple-redundant queue, and one-tap undo
 
 ### 📊 Device & System
 - **Device Info** — Deep hardware diagnostics and system property inspection
