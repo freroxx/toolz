@@ -938,20 +938,42 @@ fun FullPlayerView(
                                         },
                                         label = "trackTitle"
                                     ) { title ->
-                                        // Fading edges + marquee only when title actually overflows.
-                                        // Heuristic: >24 chars ≈ overflows on most phones at headlineSmall.
-                                        // This avoids always-on fades on short titles while keeping
-                                        // long titles smoothly scrolling with soft edges.
-                                        val isLongTitle = title.length > 24
-                                        Text(
-                                            text = title,
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = if (isLongTitle) Modifier.basicMarquee(iterations = Int.MAX_VALUE).horizontalFadingEdges(left = 24.dp, right = 24.dp) else Modifier
-                                        )
+                                        // Marquee A/B fading edges: when title is long it loops
+                                        // horizontally (disappears at A, reappears at B). The
+                                        // fading edges must be on the *viewport* (the Box that
+                                        // clips the scrolling text), not on the Text itself, so
+                                        // the text softly fades out/in at the container's left
+                                        // and right edges (points A & B) on every loop.
+                                        val isLongTitle = title.length > 22
+                                        if (isLongTitle) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .horizontalFadingEdges(left = 28.dp, right = 28.dp)
+                                            ) {
+                                                Text(
+                                                    text = title,
+                                                    style = MaterialTheme.typography.headlineSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.basicMarquee(
+                                                        iterations = Int.MAX_VALUE,
+                                                        velocity = 30.dp
+                                                    )
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = title,
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
                                     }
                                     AnimatedContent(
                                         targetState = track.artist?.takeIf { it.isNotBlank() && it != "<unknown>" }
@@ -1069,25 +1091,22 @@ fun FullPlayerView(
                             Spacer(Modifier.height(18.dp))
                             val currentPos = sliderPos ?: playbackPosition
                             // Track-switched slider: snap to 0 on new track (no cross-track glide),
-                            // then smooth/fast glide (320ms) for normal progress updates.
-                            // While scrubbing (sliderPos != null) or in performanceMode, snap 1:1.
+                            // then fast smooth glide for normal progress. While scrubbing/tapping
+                            // (sliderPos != null) drive 1:1 with no delay; after finger lifts,
+                            // snap then fast 180ms glide to seek target.
                             val sliderAnim = remember(track.uri) { Animatable(currentPos.toFloat()) }
-                            // Keep the anim in sync with currentPos; on track switch the
-                            // remember(track.uri) above already snapped to the new 0, so the
-                            // first LaunchedEffect here won't animate across tracks.
-                            LaunchedEffect(currentPos, state.performanceMode) {
+                            LaunchedEffect(currentPos, state.performanceMode, sliderPos) {
                                 val target = currentPos.toFloat()
                                 if (state.performanceMode || sliderPos != null) {
+                                    // Direct finger tracking — no tween, feels instant on tap/drag.
                                     sliderAnim.snapTo(target)
                                 } else {
-                                    // Fast smooth glide — no teleport to end. The Animatable
-                                    // was already at 0 for a fresh track (remember key), so a
-                                    // skip at 0s stays at 0; normal progress glides 320ms.
-                                    sliderAnim.animateTo(target, tween(320, easing = FastOutSlowInEasing))
+                                    // Fast smooth glide for playback progress (180ms). The
+                                    // Animatable was already at 0 for a fresh track via
+                                    // remember(track.uri), so a skip at 0s stays at 0.
+                                    sliderAnim.animateTo(target, tween(180, easing = FastOutSlowInEasing))
                                 }
                             }
-                            // While actively dragging, drive directly from finger; otherwise
-                            // use the gliding anim (which was snapped on track switch).
                             val sliderValue = if (sliderPos != null) currentPos.toFloat() else sliderAnim.value
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 SquigglySlider(

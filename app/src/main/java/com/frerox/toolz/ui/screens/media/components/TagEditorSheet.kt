@@ -84,8 +84,26 @@ fun TagEditorSheet(
     var isSaving by remember { mutableStateOf(false) }
 
     val thumbPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let {
-            pickedThumbUri = it.toString()
+        uri?.let { picked ->
+            // GetContent grants transient permission to the Activity only; the
+            // Repository runs on ApplicationContext and would lose it after the
+            // sheet closes, causing the cover to revert. Copy immediately via
+            // the Activity's resolver to a private file and pass file:// onward.
+            try {
+                val tempFile = java.io.File(context.cacheDir, "tag_pick_${System.currentTimeMillis()}.jpg")
+                context.contentResolver.openInputStream(picked)?.use { ins ->
+                    java.io.FileOutputStream(tempFile).use { outs -> ins.copyTo(outs) }
+                }
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    pickedThumbUri = Uri.fromFile(tempFile).toString()
+                } else {
+                    // Fallback to original content:// if copy somehow failed — still try
+                    pickedThumbUri = picked.toString()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TagEditorSheet", "pick copy failed", e)
+                pickedThumbUri = picked.toString()
+            }
             haptic.tick()
         }
     }

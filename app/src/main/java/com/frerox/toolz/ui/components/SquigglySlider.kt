@@ -106,20 +106,20 @@ fun SquigglySlider(
         remember { mutableFloatStateOf(0f) }
     }
 
-    // Slow, eased amplitude so play/pause transitions feel deliberate and fluid.
+    // Fast, snappy amplitude/thumb so tap/drag feels immediate, not sluggish.
     val currentAmplitude by animateFloatAsState(
         targetValue = when {
             isDragged -> 8f
             isPlaying && !performanceMode -> 6f
             else -> 0f
         },
-        animationSpec = tween(durationMillis = if (isPlaying) 800 else 650, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = if (isDragged) 180 else if (isPlaying) 400 else 300, easing = FastOutSlowInEasing),
         label = "amplitude_state"
     )
 
     val thumbScale by animateFloatAsState(
         targetValue = if (isDragged) 1.2f else 1f,
-        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
         label = "thumb_scale"
     )
 

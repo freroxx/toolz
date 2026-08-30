@@ -137,12 +137,14 @@ fun AlbumArtImage(
     val base = if (shape != null) Modifier.fillMaxSize().clip(shape) else Modifier.fillMaxSize()
 
     Box(modifier = modifier) {
-        // Placeholder — always beneath the AsyncImage layer.
+        // Placeholder — always beneath the AsyncImage layer. Slightly stronger
+        // tint (0.18) so the icon pops on both light and dark surfaces, and
+        // matches the tracks-tab placeholder exactly (same seed → same color/icon).
         Box(
-            modifier = base.background(color.copy(alpha = 0.15f)),
+            modifier = base.background(color.copy(alpha = 0.18f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, modifier = Modifier.size(iconSize), tint = color)
+            Icon(icon, null, modifier = Modifier.size(iconSize), tint = color.copy(alpha = 0.95f))
         }
 
         if (!url.isNullOrBlank()) {

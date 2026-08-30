@@ -94,7 +94,7 @@ fun ScreenBottomBar(
 ) {
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
 
-    Column(modifier = Modifier.navigationBarsPadding().animateContentSize(animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))) {
+    Column(modifier = Modifier.navigationBarsPadding().animateContentSize(animationSpec = tween(260, easing = FastOutSlowInEasing))) {
         // MiniPlayer
         AnimatedVisibility(
             visible = state.currentTrack != null || isResolving,

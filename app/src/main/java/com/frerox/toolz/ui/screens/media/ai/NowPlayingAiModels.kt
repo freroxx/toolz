@@ -136,8 +136,8 @@ data class NowPlayingAiUiState(
     // carries the session ID it was spawned in so stale results from a prior
     // session can never land on the current UI state.
     val karaokeSessionId: Int = 0,
-    // Sing Confidently
-    val singConfidentlyMode: SingConfidentlyMode = SingConfidentlyMode.AUTO,
+    // Sing Confidently — default MANUAL so user explicitly opts into AUTO behaviours
+    val singConfidentlyMode: SingConfidentlyMode = SingConfidentlyMode.MANUAL,
     val karaokeSingConfidentlyEnabled: Boolean = true, // Legacy boolean for backward compat
     val isSearchingInstrumental: Boolean = false,
     val instrumentalMatch: CatalogTrack? = null,
