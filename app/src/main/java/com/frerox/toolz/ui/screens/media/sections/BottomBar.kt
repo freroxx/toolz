@@ -94,7 +94,7 @@ fun ScreenBottomBar(
 ) {
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
 
-    Column(modifier = Modifier.navigationBarsPadding()) {
+    Column(modifier = Modifier.navigationBarsPadding().animateContentSize(animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))) {
         // MiniPlayer
         AnimatedVisibility(
             visible = state.currentTrack != null || isResolving,
@@ -523,7 +523,7 @@ fun MiniPlayer(
                             ) { pair ->
                                 AlbumArtImage(
                                     url = pair.second,
-                                    seed = track.title,
+                                    seed = track.uri,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop,
                                     iconSize = 24.dp

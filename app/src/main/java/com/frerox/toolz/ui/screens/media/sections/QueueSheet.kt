@@ -416,7 +416,7 @@ private fun NowPlayingHeroCard(
                     ) {
                         AlbumArtImage(
                             url = track.thumbnailUri,
-                            seed = track.title,
+                            seed = track.uri,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
                             iconSize = 26.dp
@@ -670,7 +670,7 @@ fun QueueItem(
             ) {
                 AlbumArtImage(
                     url = qTrack.thumbnailUri,
-                    seed = qTrack.title,
+                    seed = qTrack.uri,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
                     iconSize = 22.dp

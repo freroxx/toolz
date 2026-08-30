@@ -784,12 +784,13 @@ class MusicRepository @Inject constructor(
                 android.util.Log.w("MusicRepository", "writeId3Tags failed (non-fatal)", e)
                 false
             }
-            // Re-extract embedded art ONLY when this save actually rewrote the file
-            // AND a new cover was embedded. Guarding on writeOk keeps a failed FFmpeg
-            // attempt (or a stale cached extraction) from clobbering the freshly picked
-            // custom thumb with the OLD embedded art; forceRefresh invalidates the
-            // per-path artwork cache so it reflects the file as rewritten just now.
-            if (writeOk && hadThumbChange) {
+            // Re-extract embedded art ONLY when this save rewrote the file
+            // WITHOUT a new cover pick (metadata-only edit). When a new cover was
+            // picked (hadThumbChange), thumbToPersist already points at the persisted
+            // custom file and must not be clobbered by a re-extraction that would
+            // write to a different thumb_<hash>.jpg and return a different URI for
+            // the same image. Guarding on !hadThumbChange keeps the custom thumb stable.
+            if (writeOk && !hadThumbChange) {
                 val refreshedThumb = runCatching {
                     getEmbeddedArtworkUri(Uri.fromFile(File(path)), path, updated.albumId, forceRefresh = true)
                 }.getOrNull()
@@ -800,18 +801,53 @@ class MusicRepository @Inject constructor(
                 }
             }
         } else if (!path.isNullOrBlank() && path.startsWith("content://")) {
-            // For SAF content URIs, try content resolver edit via FFmpeg temp file -> write back
-            // Best-effort: copy content to temp, edit, then write back (requires write permission)
+            // Content URI (MediaStore on Android 10+ with scoped storage): copy to temp,
+            // FFmpeg-edit the temp, then write back via ContentResolver. This is the
+            // path most real device tracks hit (path is content://media/external/audio/...),
+            // while the File() branch above only fires for raw file paths.
             try {
                 val inputUri = Uri.parse(path)
-                val needsWrite = newTitle != null || newArtist != null || newAlbum != null || embeddedLyrics != null
+                val needsWrite = hadThumbChange || newTitle != null || newArtist != null || newAlbum != null || embeddedLyrics != null
                 if (needsWrite) {
-                    context.contentResolver.openFileDescriptor(inputUri, "r")?.use { pfd ->
-                        // Just log — full SAF tag rewrite requires SAF persist + FFmpeg temp; skip for now but DB already updated
-                        android.util.Log.d("MusicRepository", "SAF content tag edit requested for $path — DB updated, file write deferred (requires MediaStore write request)")
+                    val tmpIn = File.createTempFile("toolz_saf_in_", ".tmp", context.cacheDir)
+                    val tmpThumbPath = if (hadThumbChange) thumbToPersist?.let { Uri.parse(it).path }?.let { File(it) }?.takeIf { it.exists() }?.absolutePath else null
+                    try {
+                        context.contentResolver.openInputStream(inputUri)?.use { ins ->
+                            FileOutputStream(tmpIn).use { out -> ins.copyTo(out) }
+                        }
+                        if (tmpIn.exists() && tmpIn.length() > 0) {
+                            val writeOkSaf = try {
+                                writeId3TagsToFile(
+                                    filePath = tmpIn.absolutePath,
+                                    title = updated.title,
+                                    artist = updated.artist,
+                                    album = updated.album,
+                                    thumbnailPath = tmpThumbPath,
+                                    lyrics = embeddedLyrics
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.w("MusicRepository", "writeId3 SAF temp failed", e)
+                                false
+                            }
+                            if (writeOkSaf && tmpIn.exists() && tmpIn.length() > 0) {
+                                // Write back to the ContentProvider. "wt" truncates as required by MediaStore.
+                                try {
+                                    context.contentResolver.openOutputStream(inputUri, "wt")?.use { outs ->
+                                        tmpIn.inputStream().use { ins -> ins.copyTo(outs) }
+                                    }
+                                    android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+                                } catch (e: Exception) {
+                                    android.util.Log.w("MusicRepository", "SAF write-back failed (permission?) for $path", e)
+                                }
+                            }
+                        }
+                    } finally {
+                        tmpIn.delete()
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.w("MusicRepository", "SAF content tag edit failed for $path", e)
+            }
         }
 
         updated

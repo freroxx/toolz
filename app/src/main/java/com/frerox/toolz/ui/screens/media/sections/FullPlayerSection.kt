@@ -832,7 +832,7 @@ fun FullPlayerView(
                                     ) {
                                         AlbumArtImage(
                                             url = nextArt.thumbnailUri,
-                                            seed = nextArt.title,
+                                            seed = nextArt.uri,
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop,
                                             iconSize = 48.dp
@@ -859,7 +859,7 @@ fun FullPlayerView(
                                     ) {
                                         AlbumArtImage(
                                             url = prevArt.thumbnailUri,
-                                            seed = prevArt.title,
+                                            seed = prevArt.uri,
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop,
                                             iconSize = 48.dp
@@ -895,7 +895,7 @@ fun FullPlayerView(
                                 ) {
                                     AlbumArtImage(
                                         url = track.thumbnailUri,
-                                        seed = track.title,
+                                        seed = track.uri,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop,
                                         iconSize = 48.dp
@@ -938,6 +938,11 @@ fun FullPlayerView(
                                         },
                                         label = "trackTitle"
                                     ) { title ->
+                                        // Fading edges + marquee only when title actually overflows.
+                                        // Heuristic: >24 chars ≈ overflows on most phones at headlineSmall.
+                                        // This avoids always-on fades on short titles while keeping
+                                        // long titles smoothly scrolling with soft edges.
+                                        val isLongTitle = title.length > 24
                                         Text(
                                             text = title,
                                             style = MaterialTheme.typography.headlineSmall,
@@ -945,9 +950,7 @@ fun FullPlayerView(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier
-                                                .basicMarquee()
-                                                .horizontalFadingEdges(left = 24.dp, right = 24.dp)
+                                            modifier = if (isLongTitle) Modifier.basicMarquee(iterations = Int.MAX_VALUE).horizontalFadingEdges(left = 24.dp, right = 24.dp) else Modifier
                                         )
                                     }
                                     AnimatedContent(
@@ -1065,18 +1068,27 @@ fun FullPlayerView(
                             // ── 4. Slider ──
                             Spacer(Modifier.height(18.dp))
                             val currentPos = sliderPos ?: playbackPosition
-                            // Glide the slider thumb back to its resting place when a new
-                            // track drops the position to a small value: pass the RAW target
-                            // while scrubbing (sliderPos != null) so the thumb tracks the
-                            // finger 1:1, and smoothly tween short of that (e.g. a track
-                            // switch resetting to 0) otherwise. snap() in performance mode.
-                            val sliderGlide by animateFloatAsState(
-                                targetValue = currentPos.toFloat(),
-                                animationSpec = if (state.performanceMode || sliderPos != null) snap() else
-                                    tween(450, easing = FastOutSlowInEasing),
-                                label = "sliderGlide"
-                            )
-                            val sliderValue = if (sliderPos != null || state.performanceMode) currentPos.toFloat() else sliderGlide
+                            // Track-switched slider: snap to 0 on new track (no cross-track glide),
+                            // then smooth/fast glide (320ms) for normal progress updates.
+                            // While scrubbing (sliderPos != null) or in performanceMode, snap 1:1.
+                            val sliderAnim = remember(track.uri) { Animatable(currentPos.toFloat()) }
+                            // Keep the anim in sync with currentPos; on track switch the
+                            // remember(track.uri) above already snapped to the new 0, so the
+                            // first LaunchedEffect here won't animate across tracks.
+                            LaunchedEffect(currentPos, state.performanceMode) {
+                                val target = currentPos.toFloat()
+                                if (state.performanceMode || sliderPos != null) {
+                                    sliderAnim.snapTo(target)
+                                } else {
+                                    // Fast smooth glide — no teleport to end. The Animatable
+                                    // was already at 0 for a fresh track (remember key), so a
+                                    // skip at 0s stays at 0; normal progress glides 320ms.
+                                    sliderAnim.animateTo(target, tween(320, easing = FastOutSlowInEasing))
+                                }
+                            }
+                            // While actively dragging, drive directly from finger; otherwise
+                            // use the gliding anim (which was snapped on track switch).
+                            val sliderValue = if (sliderPos != null) currentPos.toFloat() else sliderAnim.value
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 SquigglySlider(
                                     value = sliderValue,

@@ -390,7 +390,8 @@ fun MusicPlayerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .fadingEdges(top = 20.dp, bottom = 20.dp)
+                .fadingEdges(top = 20.dp, bottom = 36.dp)
+                .animateContentSize(animationSpec = tween(300, easing = FastOutSlowInEasing))
         ) {
             when {
                 // P1-09 fix: music only needs READ_MEDIA_AUDIO; MANAGE_ALL_FILES is optional

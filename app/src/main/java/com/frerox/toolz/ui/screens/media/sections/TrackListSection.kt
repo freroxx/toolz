@@ -563,7 +563,7 @@ fun TrackItem(
             Box(modifier = Modifier.size(52.dp)) {
                 AlbumArtImage(
                     url = track.thumbnailUri,
-                    seed = track.title,
+                    seed = track.uri,
                     modifier = Modifier.fillMaxSize().clip(artShape),
                     iconSize = 22.dp
                 )
@@ -789,7 +789,7 @@ fun TrackCard(track: MusicTrack, onClick: () -> Unit, cardWidth: Dp = 152.dp) {
         // this card width a 12dp radius eats visibly into the square art.
         AlbumArtImage(
             url = track.thumbnailUri,
-            seed = track.title,
+            seed = track.uri,
             modifier = Modifier
                 .size(artSize)
                 .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 10.dp, bottomStart = 10.dp, bottomEnd = 6.dp)),
@@ -888,7 +888,7 @@ fun TrackCarouselRow(
         ) {
             AlbumArtImage(
                 url = track.thumbnailUri,
-                seed = track.title,
+                seed = track.uri,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
