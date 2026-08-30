@@ -1326,14 +1326,14 @@ private fun SearchEngineSheet(
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "DUCKDUCKGO" to (stringResource(R.string.st_SearchScreen_d5u6) to stringResource(R.string.st_SearchScreen_p7f8)),
-                "BRAVE"      to (stringResource(R.string.st_SearchScreen_b9r0) to stringResource(R.string.st_SearchScreen_f1p2)),
-                "GOOGLE"     to (stringResource(R.string.st_SearchScreen_g3o4) to stringResource(R.string.st_SearchScreen_w5m6)),
+                "META"       to ("Meta Search (Recommended)" to "Aggregates Bing, Brave & Yahoo in parallel with consensus ranking"),
                 "BING"       to (stringResource(R.string.st_SearchScreen_b7i8) to stringResource(R.string.st_SearchScreen_m9s0)),
+                "BRAVE"      to (stringResource(R.string.st_SearchScreen_b9r0) to stringResource(R.string.st_SearchScreen_f1p2)),
+                "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results powered by Yahoo"),
+                "DUCKDUCKGO" to (stringResource(R.string.st_SearchScreen_d5u6) to stringResource(R.string.st_SearchScreen_p7f8)),
+                "GOOGLE"     to (stringResource(R.string.st_SearchScreen_g3o4) to stringResource(R.string.st_SearchScreen_w5m6)),
                 "STARTPAGE"  to (stringResource(R.string.st_SearchScreen_s1t2) to stringResource(R.string.st_SearchScreen_g3r4)),
-                "SWISSCOWS"  to (stringResource(R.string.st_SearchScreen_s5w6) to stringResource(R.string.st_SearchScreen_f7p8)),
                 "ECOSIA"     to (stringResource(R.string.st_SearchScreen_e9c0) to stringResource(R.string.st_SearchScreen_p1t2)),
-                "META"       to (stringResource(R.string.st_SearchScreen_a3e4) to stringResource(R.string.st_SearchScreen_c5r6)),
             )
 
             engines.forEach { entry ->
@@ -1363,11 +1363,13 @@ private fun SearchEngineSheet(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     when(key) {
-                                        "GOOGLE" -> Icons.Rounded.Search
+                                        "META" -> Icons.Rounded.Hub
+                                        "BING" -> Icons.Rounded.TravelExplore
                                         "BRAVE" -> Icons.Rounded.Shield
+                                        "YAHOO" -> Icons.Rounded.Language
+                                        "GOOGLE" -> Icons.Rounded.Search
                                         "DUCKDUCKGO" -> Icons.Rounded.VisibilityOff
                                         "ECOSIA" -> Icons.Rounded.Park
-                                        "SWISSCOWS" -> Icons.Rounded.FamilyRestroom
                                         "STARTPAGE" -> Icons.Rounded.Lock
                                         else -> Icons.Rounded.Language
                                     },

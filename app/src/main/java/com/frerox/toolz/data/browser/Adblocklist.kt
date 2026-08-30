@@ -29,58 +29,44 @@ object AdBlockList {
 
     // ────────────────────────────────────────────────────────── Static built-in rules
     private val staticRules: HashSet<String> = hashSetOf(
-        // GOOGLE
+        // GOOGLE AD & TRACKING SERVICES (pure ad-serving hosts only)
         "doubleclick.net", "google-analytics.com", "googletagmanager.com",
         "googletagservices.com", "googlesyndication.com", "pagead2.googlesyndication.com",
         "analytics.google.com", "app-measurement.com", "adservice.google.com",
         "ad.doubleclick.net", "stats.g.doubleclick.net", "pagead.l.google.com",
         "partnerad.l.google.com", "googleadservices.com", "googleads.g.doubleclick.net",
-        "ad.plus.google.com", "google-analytics.l.google.com", "googleadsserving.cn",
-        "googleadservices.com", "googleads4.com", "googletagmanager.cn", "googletagmanager.org",
-        "google-analytics.biz", "google-analytics.cn", "gtm.digital", "gtmserver.com",
-        "googleoptimize.com", "optimize.google.com", "region1.analytics.google.com",
-        "region2.analytics.google.com", "region3.analytics.google.com",
-        "clients2.google.com", "clients4.google.com", "clients6.google.com",
-        "pagead-googlehosted.com", "pagead46.googlesyndication.com",
-        "googleadservices.com", "googleads.com", "googleadsserving.cn",
+        "googleads.com", "googleadsserving.cn", "pagead-googlehosted.com",
 
-        // META / FACEBOOK
-        "connect.facebook.net", "pixel.facebook.com", "fbsbx.com",
-        "facebook.com/tr", "fbcdn.net", "instagram.com/pixel",
-        "an.facebook.com", "graph.facebook.com/tr", "facebook.net",
-        "fbcdn-profile.com", "fbcdn-sphotos.com", "fbstatic.com",
-        "fbevents.com", "facebookbrand.com/tr", "facebook.com/insights",
-        "facebook.com/impression", "facebook.com/activity", "facebook.com/convert",
-        "facebook.com/log", "facebook.com/events", "facebook.com/ads",
-        "fb.com/tr", "instagram.com/tr", "cdninstagram.com/tr",
-        "whatsapp.com/tr", "messenger.com/tr",
+        // META / FACEBOOK TRACKING PIXELS & ADS ONLY (never block CDN/static/app domains)
+        "connect.facebook.net", "pixel.facebook.com", "an.facebook.com",
+        "graph.facebook.com/tr", "fbevents.com",
 
-        // AMAZON / OTHERS
+        // AMAZON / CRITEO / TABOOLA / OUTBRAIN / ADS NETWORKS
         "amazon-adsystem.com", "aaxads.com", "mads.amazon.com", "assoc-amazon.com",
         "aax-eu.amazon-adsystem.com", "aax-us-east.amazon-adsystem.com",
         "amazon-adsystem.net", "amazonadvertising.com", "amazoncpm.com",
-        "amazon-adsystem.co.uk", "dsp.amazon.com", "ads.pinterest.com",
-        "log.pinterest.com", "static.ads-twitter.com", "ads-api.twitter.com", "ads.tiktok.com",
-        "analytics.tiktok.com", "app.getsentry.com", "api.bugsnag.com", "adm.hotjar.com",
-        "script.hotjar.com", "surveys.hotjar.com", "insights.hotjar.com", "identify.hotjar.com",
-        "luckyorange.com", "mouseflow.com", "clarity.ms", "vortex.data.microsoft.com",
-        
-        // D3WARD TEST SPECIFIC (Ensures score > 0 immediately)
-        "google-analytics.com", "googletagmanager.com", "sentry.io", "mixpanel.com", 
-        "amplitude.com", "hotjar.com", "clarity.ms", "crashlytics.com", "optimizely.com"
+        "criteo.com", "criteo.net", "taboola.com", "outbrain.com", "scorecardresearch.com",
+        "adroll.com", "rubiconproject.com", "pubmatic.com", "openx.net", "appnexus.com",
+        "ads.pinterest.com", "static.ads-twitter.com", "ads-api.twitter.com",
+        "ads.tiktok.com", "analytics.tiktok.com", "clarity.ms",
+
+        // TELEMETRY & USER TRACKING
+        "mixpanel.com", "amplitude.com", "hotjar.com", "luckyorange.com",
+        "mouseflow.com", "optimizely.com", "crashlytics.com"
     )
 
     // ────────────────────────────────────────────────────────── Default Allowlist (Search & Core Infra)
     private val defaultAllowlist: Set<String> = setOf(
         // SEARCH ENGINES & SUGGESTIONS
-        "duckduckgo.com", "html.duckduckgo.com", "links.duckduckgo.com",
+        "duckduckgo.com", "html.duckduckgo.com", "links.duckduckgo.com", "lite.duckduckgo.com",
         "google.com", "www.google.com", "encrypted.google.com", "gstatic.com", "apis.google.com",
         "brave.com", "search.brave.com", "cdn.search.brave.com",
         "bing.com", "www.bing.com", "api.bing.com", "ssl.bing.com",
+        "yahoo.com", "search.yahoo.com", "r.search.yahoo.com",
         "ecosia.org", "www.ecosia.org",
         "startpage.com", "www.startpage.com",
         "swisscows.com", "www.swisscows.com",
-        "yandex.com", "yandex.ru", "yahoo.com", "search.yahoo.com",
+        "yandex.com", "yandex.ru",
 
         // DNS & DoH PROVIDERS
         "dns.adguard-dns.com", "dns-family.adguard-dns.com",
@@ -89,10 +75,12 @@ object AdBlockList {
         "dns.nextdns.io", "test.nextdns.io",
         "freedns.controld.com", "doh.cleanbrowsing.org",
 
-        // ESSENTIAL INFRASTRUCTURE & CDNs FOR EMBEDDED WEBVIEWS
+        // ESSENTIAL INFRASTRUCTURE, CDNs & SOCIAL PLATFORMS FOR WEBVIEWS
         "github.com", "raw.githubusercontent.com", "github.io",
         "jsdelivr.net", "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
-        "wikipedia.org", "wikimedia.org"
+        "wikipedia.org", "wikimedia.org", "cloudflare.com", "fastly.net", "akamaihd.net",
+        "fbcdn.net", "facebook.com", "web.facebook.com", "instagram.com", "cdninstagram.com",
+        "twimg.com", "twitter.com", "x.com", "reddit.com", "redditmedia.com"
     )
 
     // ────────────────────────────────────────────────────────── Dynamic Indexes
@@ -320,20 +308,26 @@ object AdBlockList {
             if (allowlist.get().any { host == it || host.endsWith(".$it") }) return false
             if (exceptionRules.get().any { host == it || host.endsWith(".$it") }) return false
             if (exceptionPatterns.get().any { it.containsMatchIn(cleanUrl) }) return false
-
-            // 3. Domain Blocking (with deep subdomain support)
-            if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
 
-        // 4. Stylesheet & Font Protection: Never block .css or font files unless the host is a known ad domain or URL has explicit ad keywords
+        // 3. STYLESHEET & FONT PROTECTION (Critical: Never break page layout/fonts)
+        // Stylesheets (.css) and web fonts (.woff2, .ttf, etc.) must NEVER be blocked
+        // unless the host is an explicit dedicated ad server (doubleclick, pagead, adservice).
         val isCssOrFont = fullUrlLower.endsWith(".css") || fullUrlLower.contains(".css?") ||
                           fullUrlLower.endsWith(".woff") || fullUrlLower.endsWith(".woff2") ||
-                          fullUrlLower.endsWith(".ttf") || fullUrlLower.endsWith(".eot")
+                          fullUrlLower.endsWith(".ttf") || fullUrlLower.endsWith(".eot") ||
+                          fullUrlLower.contains("/fonts/") || fullUrlLower.contains("/css/")
         if (isCssOrFont) {
-            val hasExplicitAdPath = blockedPaths.any { fullUrlLower.contains(it) } ||
-                                   fullUrlLower.contains("doubleclick") || fullUrlLower.contains("pagead") ||
-                                   fullUrlLower.contains("adservice") || fullUrlLower.contains("google-analytics")
-            if (!hasExplicitAdPath) return false
+            val isDedicatedAdServer = host.contains("doubleclick.net") || 
+                                     host.contains("pagead2.googlesyndication.com") ||
+                                     host.contains("googleadservices.com") ||
+                                     host.contains("adservice.google.com")
+            if (!isDedicatedAdServer) return false
+        }
+
+        if (host.isNotBlank()) {
+            // 4. Domain Blocking (with deep subdomain support)
+            if (deepDomainMatch(host, activeDomains.get())) return hit("Domain", host)
         }
         
         // 5. Pattern Matching (contains path/segments/wildcards)

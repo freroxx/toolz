@@ -204,13 +204,13 @@ class AdBlockSettingsViewModel @Inject constructor(
 
     companion object {
         val POPULAR_LISTS = mapOf(
-            "OISD_BASIC" to "https://small.oisd.nl/domains",
+            "OISD_BASIC" to "https://small.oisd.nl",
             "ADGUARD_BASE" to "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
             "STEVENBLACK" to "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
             "EASYLIST" to "https://easylist.to/easylist/easylist.txt",
             "FANBOY_ANNOYANCE" to "https://secure.fanboy.co.nz/fanboy-annoyance.txt",
-            "LIGHTSWITCH" to "https://raw.githubusercontent.com/the-asf/lightswitch/master/blocklist.txt",
-            "NOTRACK" to "https://raw.githubusercontent.com/quidsup/notrack/master/trackers.txt"
+            "PETER_LOWE" to "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
+            "UBLOCK_ORIGIN" to "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"
         )
     }
 

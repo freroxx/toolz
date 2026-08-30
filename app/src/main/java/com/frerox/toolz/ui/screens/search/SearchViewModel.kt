@@ -156,14 +156,6 @@ class SearchViewModel @Inject constructor(
     private val offlineManager:    com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
 
-    // ─── Search LRU Cache (Last 5 searches) ───────────────────────────────────
-
-    private val searchCache = object : java.util.LinkedHashMap<Pair<String, SearchCategory>, List<SearchResult>>(5, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, SearchCategory>, List<SearchResult>>?): Boolean {
-            return size > 5
-        }
-    }
-
     // ─── Offline state (cached as StateFlow for synchronous .value access) ───
 
     private val _isOffline = MutableStateFlow(false)
@@ -350,28 +342,7 @@ class SearchViewModel @Inject constructor(
         suggestionJob?.cancel()
         searchJob?.cancel()
 
-        // 1. Instant Cache Lookup
-        val cacheKey = trimmed to category
-        val cachedResults = synchronized(searchCache) { searchCache[cacheKey] }
-        if (cachedResults != null && cachedResults.isNotEmpty()) {
-            _query.update {
-                it.copy(
-                    query       = trimmed,
-                    category    = category,
-                    phase       = SearchPhase.Results,
-                    isActive    = false,
-                    error       = null,
-                    results     = cachedResults,
-                    suggestions = emptyList(),
-                    canLoadMore = category != SearchCategory.IMAGES && 
-                                 category != SearchCategory.VIDEOS && 
-                                 cachedResults.isNotEmpty(),
-                )
-            }
-            return
-        }
-
-        // 2. Real-time Offline Check
+        // 1. Real-time Offline Check
         if (_isOffline.value) {
             _query.update {
                 it.copy(
@@ -408,9 +379,6 @@ class SearchViewModel @Inject constructor(
 
             runCatching { repository.search(trimmed, 0, category) }
                 .onSuccess { results ->
-                    if (results.isNotEmpty()) {
-                        synchronized(searchCache) { searchCache[cacheKey] = results }
-                    }
                     _query.update {
                         it.copy(
                             results     = results,

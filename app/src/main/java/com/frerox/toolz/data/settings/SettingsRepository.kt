@@ -133,7 +133,7 @@ class SettingsRepository @Inject constructor(
     val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
     val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
-    val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "DUCKDUCKGO" }
+    val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "META" }
     val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: true }
     val searchRegion: Flow<String> = dataStore.data.map { it[SEARCH_REGION] ?: "wt-wt" } // default: no region
     val searchCustomEngineUrl: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_ENGINE_URL] ?: "" }

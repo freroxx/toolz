@@ -109,9 +109,8 @@ open class AdBlockWebViewClient(
     }
 
     /**
-     * Injects a small JS snippet that hides common ad/tracker/overlay elements
-     * that survived network-level blocking because they are served from the page's
-     * own origin or hard-coded into the HTML.
+     * Injects a targeted JS snippet that hides common ad/tracker/cookie-consent elements
+     * that survived network-level blocking because they are served inline in HTML.
      *
      * Uses display:none on matched elements and sets up a MutationObserver so that
      * dynamically-inserted elements are hidden as well.
@@ -124,36 +123,52 @@ open class AdBlockWebViewClient(
   window.__adblockInjected = true;
 
   var adSelectors = [
-    /* Common ad wrappers */
-    '[id*="google_ads"]','[id*="googead"]','[id*="dfp-ad"]','[id*="dfp_ad"]',
-    '[class*="google-ads"]','[class*="googlead"]','[class*="googletag"]',
-    '[class*="adsbygoogle"]','ins.adsbygoogle',
-    /* Generic ad id/class patterns */
-    '[id^="ad-"]','[id^="ad_"]','[id*="-ad-"]','[id*="_ad_"]',
-    '[class^="ad-"]','[class^="ad_"]','[class*="-ad-"]','[class*="_ad_"]',
-    '[id*="banner-ad"]','[id*="ad-banner"]','[class*="banner-ad"]','[class*="ad-banner"]',
-    '[id*="sponsor"]','[class*="sponsor"]',
-    /* Cookie consent / GDPR banners */
-    '[id*="cookie-banner"]','[id*="cookiebanner"]','[id*="cookie-consent"]',
-    '[class*="cookie-banner"]','[class*="cookiebanner"]','[class*="cookie-consent"]',
-    '[id*="gdpr"]','[class*="gdpr"]','[id*="ccpa"]','[class*="ccpa"]',
-    '#onetrust-banner-sdk','#onetrust-consent-sdk','.qc-cmp2-container',
-    '#CybotCookiebotDialog','#cookielaw-icon','#cookie-law-info-bar',
-    /* Sticky/overlay ad elements */
-    '[id*="sticky-ad"]','[class*="sticky-ad"]',
-    '[id*="adhesion"]','[class*="adhesion"]',
-    '[id*="floating-ad"]','[class*="floating-ad"]',
-    /* Outbrain / Taboola / similar content widgets */
-    '[data-widget-id*="outbrain"]','.OUTBRAIN','[id*="outbrain"]',
-    '.trc_rbox_container','[id*="taboola"]','[class*="taboola"]',
-    '[id*="revcontent"]','[class*="revcontent"]',
-    '[id*="mgid"]','[class*="mgid"]'
+    /* Standard Google / DFP ad elements */
+    'ins.adsbygoogle',
+    'iframe[id^="google_ads_iframe"]',
+    'div[id^="google_ads_iframe"]',
+    'div[id*="google_ads_"]',
+    'div[id*="dfp-ad-"]',
+    'div[id*="gpt-ad-"]',
+    
+    /* Standard dedicated ad containers */
+    '.ad-container',
+    '.ad-wrapper',
+    '.ad-banner',
+    '.ad-slot',
+    '.ad_slot',
+    '.advertisement',
+    '.banner-ad',
+    '.banner_ad',
+    '.sponsored-post',
+    '.sponsored-ad',
+    '.native-ad',
+    
+    /* Content discovery widgets (Taboola, Outbrain, Revcontent, MGID) */
+    '.OUTBRAIN',
+    '[data-widget-id*="outbrain"]',
+    '.trc_rbox_container',
+    '.taboola',
+    '[id*="taboola-"]',
+    '.revcontent',
+    '[id*="rc-widget-"]',
+    '.mgid',
+    
+    /* Intrusive Cookie / GDPR Overlays */
+    '#onetrust-banner-sdk',
+    '#onetrust-consent-sdk',
+    '#CybotCookiebotDialog',
+    '.qc-cmp2-container',
+    '#cookie-law-info-bar'
   ];
 
   function hideAds() {
     adSelectors.forEach(function(sel) {
       try {
         document.querySelectorAll(sel).forEach(function(el) {
+          /* Safeguard: Never hide body, main, article, header, nav, or section */
+          var tag = el.tagName ? el.tagName.toLowerCase() : '';
+          if (tag === 'body' || tag === 'html' || tag === 'main' || tag === 'article' || tag === 'header' || tag === 'nav') return;
           if (el.style.display !== 'none') {
             el.style.setProperty('display', 'none', 'important');
           }
@@ -168,7 +183,9 @@ open class AdBlockWebViewClient(
   var observer = new MutationObserver(function(mutations) {
     hideAds();
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  if (document.documentElement) {
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
 })();
 """.trimIndent()
         view.evaluateJavascript(js, null)

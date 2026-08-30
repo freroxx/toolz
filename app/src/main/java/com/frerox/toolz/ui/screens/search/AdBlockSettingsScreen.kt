@@ -136,8 +136,8 @@ fun AdBlockSettingsScreen(
                                     "STEVENBLACK" -> "StevenBlack Unified"
                                     "EASYLIST" -> "EasyList"
                                     "FANBOY_ANNOYANCE" -> "Fanboy's Annoyance"
-                                    "LIGHTSWITCH" -> "Lightswitch"
-                                    "NOTRACK" -> "NoTrack Tracking"
+                                    "PETER_LOWE" -> "Peter Lowe's Ad Server List"
+                                    "UBLOCK_ORIGIN" -> "uBlock Origin Filters"
                                     else -> id.lowercase().replaceFirstChar(Char::uppercase)
                                 }
                                 
@@ -147,8 +147,8 @@ fun AdBlockSettingsScreen(
                                     "STEVENBLACK" -> "Adware + malware + telemetry"
                                     "EASYLIST" -> "Primary web ad filter"
                                     "FANBOY_ANNOYANCE" -> "Blocks popups, cookie banners & widgets"
-                                    "LIGHTSWITCH" -> "Aggressive telemetry & tracking blocker"
-                                    "NOTRACK" -> "Focus on privacy and telemetry"
+                                    "PETER_LOWE" -> "Curated ad-server list with zero breakages"
+                                    "UBLOCK_ORIGIN" -> "Essential privacy & ad filter rules"
                                     else -> ""
                                 }
                                 

@@ -194,10 +194,8 @@ class WebSearchRepository @Inject constructor(
         engineCooldowns[engine] = EngineCooldown(until = System.currentTimeMillis() + COOLDOWN_MS)
     }
 
-    // Privacy-ordered fallback chain — Brave first (works with HTML), Bing second, Google last.
-    // DUCKDUCKGO is intentionally excluded: if it's blocked by CAPTCHA it will just return
-    // another CAPTCHA immediately, wasting a network round-trip.
-    private val FALLBACK_ORDER = listOf("BRAVE", "BING", "GOOGLE")
+    // Privacy-ordered fallback chain — Bing, Brave, Yahoo
+    private val FALLBACK_ORDER = listOf("BING", "BRAVE", "YAHOO")
 
     // ─── Ad block — delegated to AdBlockList singleton ────────────────────────
 
@@ -308,7 +306,7 @@ class WebSearchRepository @Inject constructor(
         val regionParam      = if (region.isNotBlank() && region != "wt-wt") "&kl=$region" else ""
 
         val mainEngines = when (engine) {
-            "META"   -> listOf("GOOGLE", "DUCKDUCKGO", "BRAVE")
+            "META"   -> listOf("BING", "BRAVE", "YAHOO")
             "CUSTOM" -> listOf("CUSTOM")
             else     -> listOf(engine)
         }
@@ -316,7 +314,7 @@ class WebSearchRepository @Inject constructor(
         // For image/video categories, return a synthetic result immediately
         // (all engines use JS-heavy rendering for images/videos that Jsoup cannot parse)
         if (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) {
-            val eng = if (engine == "META") "DUCKDUCKGO" else engine
+            val eng = if (engine == "META") "BING" else engine
             return@withContext syntheticCategoryResult(
                 eng, query, category,
                 safeSearchDDG, safeSearchGoogle, safeSearchBing, safeSearchBrave,
@@ -374,6 +372,7 @@ class WebSearchRepository @Inject constructor(
                         "GOOGLE" -> "Google"
                         "BRAVE" -> "Brave"
                         "BING" -> "Bing"
+                        "YAHOO" -> "Yahoo"
                         else -> eng.lowercase().replaceFirstChar { it.uppercase() }
                     }
                     urlToAppearances.getOrPut(result.url) { mutableListOf() }.add(canonicalEng to rank)
@@ -457,6 +456,10 @@ class WebSearchRepository @Inject constructor(
                 SearchCategory.VIDEOS -> listOf("https://www.bing.com/videos/search?q=$encodedQuery&first=$offset$safeSearchBing")
                 else -> listOf("https://www.bing.com/search?q=$encodedQuery&first=$offset$safeSearchBing")
             }
+            "YAHOO" -> {
+                val bParam = if (offset > 0) "&b=${offset + 1}" else ""
+                listOf("https://search.yahoo.com/search?p=$encodedQuery$bParam")
+            }
             "ECOSIA" -> when(category) {
                 SearchCategory.NEWS -> listOf("https://www.ecosia.org/news?q=$encodedQuery")
                 else -> listOf("https://www.ecosia.org/search?q=$encodedQuery$safeSearchEcosia")
@@ -522,6 +525,7 @@ class WebSearchRepository @Inject constructor(
                     "GOOGLE"    -> parseGoogleResults(doc, adBlockEnabled, category)
                     "BRAVE"     -> parseBraveResults(doc, adBlockEnabled, category)
                     "BING"      -> parseBingResults(doc, adBlockEnabled, category)
+                    "YAHOO"     -> parseYahooResults(doc, adBlockEnabled)
                     "ECOSIA"    -> parseEcosiaResults(doc, adBlockEnabled, category)
                     "SWISSCOWS" -> parseSwisscowsResults(doc, adBlockEnabled)
                     "STARTPAGE" -> parseStartpageResults(doc, adBlockEnabled)
@@ -1252,6 +1256,53 @@ class WebSearchRepository @Inject constructor(
                 date       = date,
                 breadcrumb = breadcrumb,
                 engineRank = rank,
+            )
+        }
+        return results
+    }
+
+    // ─── Yahoo parser ────────────────────────────────────────────────────────
+
+    private fun parseYahooResults(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean
+    ): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        val h3s = doc.select("h3")
+        var rank = 0
+
+        for (h3 in h3s) {
+            val a = h3.parent()?.takeIf { it.tagName().equals("a", ignoreCase = true) }
+                ?: h3.select("a").firstOrNull() ?: continue
+            val rawHref = a.attr("href")
+            if (rawHref.isBlank() || !rawHref.startsWith("http")) continue
+
+            // Yahoo search uses redirect links: https://r.search.yahoo.com/.../RU=https%3a%2f%2f.../RK=...
+            val cleanUrl = if (rawHref.contains("RU=")) {
+                try {
+                    val encoded = rawHref.substringAfter("RU=").substringBefore("/RK=").substringBefore("&")
+                    java.net.URLDecoder.decode(encoded, StandardCharsets.UTF_8.name())
+                } catch (_: Exception) { rawHref }
+            } else rawHref
+
+            if (cleanUrl.contains("yahoo.com/search") || cleanUrl.contains("r.search.yahoo.com")) continue
+
+            val title = h3.text().trim().takeIf { it.isNotBlank() } ?: continue
+
+            // Find description snippet from parent container
+            val parentContainer = h3.parents().firstOrNull { it.tagName().equals("li", ignoreCase = true) || it.hasClass("algo") || it.hasClass("dd") }
+            val descEl = parentContainer?.select(".compText, .fz-m, p, .fc-falcon, .compText p")?.firstOrNull()
+            val snippetText = descEl?.text()?.trim() ?: ""
+            val (date, cleanSnippet) = extractDateFromSnippet(snippetText)
+
+            results += SearchResult(
+                title      = title,
+                snippet    = cleanSnippet,
+                url        = cleanUrl,
+                displayUrl = safeHost(cleanUrl),
+                source     = "Yahoo",
+                date       = date,
+                engineRank = rank++,
             )
         }
         return results
