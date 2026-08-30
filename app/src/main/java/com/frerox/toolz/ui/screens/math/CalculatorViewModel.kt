@@ -154,23 +154,8 @@ class CalculatorViewModel @Inject constructor(
         _uiState.update { state ->
             if (state.display == "0" && state.formula.isEmpty()) return@update state
             try {
-                // Auto-close parentheses
-                val openParentheses = state.display.count { it == '(' }
-                val closeParentheses = state.display.count { it == ')' }
-                val balancedDisplay = state.display + ")".repeat((openParentheses - closeParentheses).coerceAtLeast(0))
-
-                var expressionStr = balancedDisplay
-                    .replace("×", "*")
-                    .replace("÷", "/")
-                    .replace("π", "pi")
-                    .replace("ln(", "log(")
-                    .replace("inv(", "1/(")
-                
-                if (state.isDegreeMode) {
-                    expressionStr = transformTrig(expressionStr)
-                }
-                
-                val expression = ExpressionBuilder(expressionStr).build()
+                val prepared = prepareExpression(state.display, state.isDegreeMode)
+                val expression = ExpressionBuilder(prepared).build()
                 val result = expression.evaluate()
                 
                 val formattedResult = formatResult(result)
@@ -180,10 +165,14 @@ class CalculatorViewModel @Inject constructor(
                     mathHistoryDao.insert(MathHistory(expression = sourceExpr, result = formattedResult))
                 }
                 
+                val openCount = state.display.count { it == '(' }
+                val closeCount = state.display.count { it == ')' }
+                val balancedFormula = state.display + ")".repeat((openCount - closeCount).coerceAtLeast(0)) + " ="
+
                 isNewExpression = true
                 state.copy(
                     display = formattedResult, 
-                    formula = balancedDisplay + " =", 
+                    formula = balancedFormula, 
                     liveResult = null,
                     error = null,
                 )
@@ -209,9 +198,9 @@ class CalculatorViewModel @Inject constructor(
 
     fun onCopyResult() {
         val textToCopy = _uiState.value.display
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
         val clip = android.content.ClipData.newPlainText("Calculator Result", textToCopy)
-        cm.setPrimaryClip(clip)
+        cm?.setPrimaryClip(clip)
     }
 
     fun clearHistory() {
@@ -257,6 +246,39 @@ class CalculatorViewModel @Inject constructor(
         }
     }
 
+    private fun prepareExpression(rawDisplay: String, isDegreeMode: Boolean): String {
+        // Auto-close open parentheses
+        val openCount = rawDisplay.count { it == '(' }
+        val closeCount = rawDisplay.count { it == ')' }
+        val balanced = rawDisplay + ")".repeat((openCount - closeCount).coerceAtLeast(0))
+
+        var s = balanced
+            .replace("×", "*")
+            .replace("÷", "/")
+            .replace("π", "pi")
+            .replace("ln(", "log(")
+            .replace("inv(", "1/(")
+
+        // Insert implicit multiplication:
+        // 1) digit or constant or ')' followed by '('
+        s = s.replace(Regex("(\\d|pi|e|\\))\\s*\\("), "$1*(")
+        // 2) ')' followed by digit or constant or function
+        s = s.replace(Regex("\\)\\s*(\\d|pi|e)"), ")*$1")
+        s = s.replace(Regex("\\)\\s*([a-zA-Z]+)\\("), ")*$1(")
+        // 3) digit followed by pi or e
+        s = s.replace(Regex("(\\d)\\s*(pi|e)"), "$1*$2")
+        // 4) digit followed by function (e.g. 5sqrt, 2sin)
+        s = s.replace(Regex("(\\d)\\s*([a-zA-Z]+)\\("), "$1*$2(")
+        // 5) percentage: e.g. 50% -> (50*0.01)
+        s = s.replace(Regex("(\\d+(?:\\.\\d+)?)\\s*%"), "($1*0.01)")
+
+        if (isDegreeMode) {
+            s = transformTrig(s)
+        }
+
+        return s
+    }
+
     private fun transformTrig(expr: String): String {
         var res = expr
         val funcs = listOf("sin", "cos", "tan", "asin", "acos", "atan")
@@ -281,22 +303,8 @@ class CalculatorViewModel @Inject constructor(
         if (state.display.last() in "+×÷-^(") return null
         
         return try {
-            val openParentheses = state.display.count { it == '(' }
-            val closeParentheses = state.display.count { it == ')' }
-            val balancedDisplay = state.display + ")".repeat((openParentheses - closeParentheses).coerceAtLeast(0))
-
-            var expressionStr = balancedDisplay
-                .replace("×", "*")
-                .replace("÷", "/")
-                .replace("π", "pi")
-                .replace("ln(", "log(")
-                .replace("inv(", "1/(")
-            
-            if (state.isDegreeMode) {
-                expressionStr = transformTrig(expressionStr)
-            }
-            
-            val expression = ExpressionBuilder(expressionStr).build()
+            val prepared = prepareExpression(state.display, state.isDegreeMode)
+            val expression = ExpressionBuilder(prepared).build()
             val result = expression.evaluate()
             
             if (result.isNaN() || result.isInfinite()) null 

@@ -132,6 +132,65 @@ class CalculatorViewModelTest {
     }
 
     @Test
+    fun testLongCompoundOperation() = runTest {
+        val viewModel = CalculatorViewModel(context, fakeDao)
+        advanceUntilIdle()
+
+        // (150 + 25) × 400 - (300 ÷ 12) + 100
+        viewModel.onDigit("(")
+        viewModel.onDigit("150")
+        viewModel.onOperator("+")
+        viewModel.onDigit("25")
+        viewModel.onDigit(")")
+        viewModel.onOperator("×")
+        viewModel.onDigit("400")
+        viewModel.onOperator("-")
+        viewModel.onDigit("(")
+        viewModel.onDigit("300")
+        viewModel.onOperator("÷")
+        viewModel.onDigit("12")
+        viewModel.onDigit(")")
+        viewModel.onOperator("+")
+        viewModel.onDigit("100")
+
+        assertEquals("70075", viewModel.uiState.value.liveResult)
+
+        viewModel.onEquals()
+        advanceUntilIdle()
+
+        assertEquals("70075", viewModel.uiState.value.display)
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun testImplicitMultiplicationAndPercentages() = runTest {
+        val viewModel = CalculatorViewModel(context, fakeDao)
+        advanceUntilIdle()
+
+        // 5(2+3) -> 25
+        viewModel.onDigit("5")
+        viewModel.onDigit("(")
+        viewModel.onDigit("2")
+        viewModel.onOperator("+")
+        viewModel.onDigit("3")
+        viewModel.onDigit(")")
+        viewModel.onEquals()
+        advanceUntilIdle()
+
+        assertEquals("25", viewModel.uiState.value.display)
+
+        // 500 * 20% -> 100
+        viewModel.onDigit("500")
+        viewModel.onOperator("×")
+        viewModel.onDigit("20")
+        viewModel.onDigit("%")
+        viewModel.onEquals()
+        advanceUntilIdle()
+
+        assertEquals("100", viewModel.uiState.value.display)
+    }
+
+    @Test
     fun testClearHistoryRemovesFromDao() = runTest {
         val viewModel = CalculatorViewModel(context, fakeDao)
         advanceUntilIdle()

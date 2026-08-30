@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -306,66 +307,49 @@ fun CalculatorDisplay(
 
             Spacer(Modifier.height(6.dp))
 
-            // ── Main display number — spring-physics slide on change with dynamic zoom-out ───────────
+            // ── Main display number / long operation ─────────────────────────
             val displayLength = state.display.length
             val displayFontSp = when {
-                displayLength > 36 -> 18.sp
-                displayLength > 28 -> 22.sp
-                displayLength > 22 -> 28.sp
-                displayLength > 17 -> 34.sp
-                displayLength > 13 -> 44.sp
-                displayLength > 10 -> 54.sp
-                displayLength > 7  -> 64.sp
-                else               -> 76.sp
+                displayLength > 35 -> 20.sp
+                displayLength > 24 -> 26.sp
+                displayLength > 16 -> 34.sp
+                displayLength > 10 -> 46.sp
+                displayLength > 6  -> 56.sp
+                else               -> 66.sp
             }
             val letterSpacingSp = when {
-                displayLength > 22 -> 0.sp
-                displayLength > 13 -> (-1).sp
-                else               -> (-2).sp
+                displayLength > 16 -> 0.sp
+                displayLength > 10 -> (-0.5).sp
+                else               -> (-1.5).sp
             }
             val displayScrollState = rememberScrollState()
             LaunchedEffect(state.display) {
                 displayScrollState.animateScrollTo(displayScrollState.maxValue)
             }
 
-            AnimatedContent(
-                targetState = state.display,
-                transitionSpec = {
-                    val enter = slideInVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
-                    ) { it / 4 } + fadeIn(tween(180))
-                    val exit = slideOutVertically(tween(140)) { -it / 4 } + fadeOut(tween(140))
-                    enter togetherWith exit
-                },
-                label = "display_value",
-                modifier = Modifier.fillMaxWidth(),
-            ) { display ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(displayScrollState),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    Text(
-                        text = display,
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = displayFontSp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = letterSpacingSp,
-                        ),
-                        color = when {
-                            state.error != null -> MaterialTheme.colorScheme.error
-                            else               -> MaterialTheme.colorScheme.onSurface
-                        },
-                        textAlign = TextAlign.End,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip,
-                    )
-                }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(displayScrollState),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Text(
+                    text = state.display,
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = displayFontSp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = letterSpacingSp,
+                        lineHeight = (displayFontSp.value * 1.15f).sp,
+                    ),
+                    color = when {
+                        state.error != null -> MaterialTheme.colorScheme.error
+                        else               -> MaterialTheme.colorScheme.onSurface
+                    },
+                    textAlign = TextAlign.End,
+                    maxLines = 3,
+                    softWrap = true,
+                    overflow = TextOverflow.Clip,
+                )
             }
 
             // ── Live "preview" result ─────────────────────────────────────────
@@ -1044,7 +1028,7 @@ private fun dispatchCalcAction(label: String, viewModel: CalculatorViewModel) {
         "DEL"                 -> viewModel.onBackspace()
         "="                   -> viewModel.onEquals()
         "+", "-", "×", "÷"   -> viewModel.onOperator(label)
-        "%"                   -> viewModel.onOperator("/100")
+        "%"                   -> viewModel.onDigit("%")
         "!"                   -> viewModel.onFunction("!")
         else                  -> viewModel.onDigit(label)
     }
