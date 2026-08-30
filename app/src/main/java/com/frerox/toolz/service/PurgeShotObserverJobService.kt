@@ -19,6 +19,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -93,32 +94,39 @@ class PurgeShotObserverJobService : JobService() {
     override fun onStartJob(params: JobParameters?): Boolean {
         Log.d(TAG, "onStartJob triggered=${params?.triggeredContentUris?.joinToString()}")
 
-        // Re-arm the trigger immediately. The OS consumes the content trigger the moment this
-        // job is dispatched, so if we wait until the coroutine's finally block to reschedule,
-        // a job killed mid-flight (low memory, Doze edge cases, OEM task killers) leaves us with
-        // zero registered triggers and no more wakeups until the next content change happens to
-        // be caught by something else.
-        schedule(applicationContext)
-
-        // Restart the Shizuku watcher if this is a cold process start (watcher coroutine died
-        // when the process was killed). This is a lightweight no-op if already running.
-        try {
-            (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.restartIfNeeded()
-        } catch (_: Exception) {}
-
         scope.launch {
-            var handled = false
             try {
-                handled = PurgeShotDetector.detectAndHandle(
-                    context = applicationContext,
-                    repository = repository,
-                    settingsRepository = settingsRepository,
-                    awaitSettle = true
-                )
+                val enabled = settingsRepository.purgeShotEnabled.first()
+                if (!enabled) {
+                    cancel(applicationContext)
+                    jobFinished(params, false)
+                    return@launch
+                }
+
+                // Re-arm the trigger immediately if still enabled.
+                schedule(applicationContext)
+
+                // Restart the Shizuku watcher ...
+                try {
+                    (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.restartIfNeeded()
+                } catch (_: Exception) {}
+
+                var handled = false
+                try {
+                    handled = PurgeShotDetector.detectAndHandle(
+                        context = applicationContext,
+                        repository = repository,
+                        settingsRepository = settingsRepository,
+                        awaitSettle = true
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "job detection failed", e)
+                } finally {
+                    Log.d(TAG, "handled=$handled")
+                    jobFinished(params, false)
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "job detection failed", e)
-            } finally {
-                Log.d(TAG, "handled=$handled")
+                Log.w(TAG, "onStartJob failed", e)
                 jobFinished(params, false)
             }
         }

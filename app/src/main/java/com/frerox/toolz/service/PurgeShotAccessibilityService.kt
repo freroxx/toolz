@@ -134,15 +134,15 @@ class PurgeShotAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "PurgeShotAccessibilityService connected")
-        // Re-arm the outside-Toolz detection stack on every (re)connection.
-        // When the process was dead and the accessibility framework woke it, the
-        // Shizuku watcher and JobScheduler trigger are not running yet. Restart them
-        // here so the first event after a cold start doesn't fall through.
+        // Re-arm the outside-Toolz detection stack on every (re)connection IF enabled.
         scope.launch {
             try {
-                PurgeShotObserverJobService.schedule(applicationContext)
-                if (ShizukuHelper.isAuthorized()) {
-                    (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.start()
+                val enabled = settingsRepository.purgeShotEnabled.first()
+                if (enabled) {
+                    PurgeShotObserverJobService.schedule(applicationContext)
+                    if (ShizukuHelper.isAuthorized()) {
+                        (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.start()
+                    }
                 }
             } catch (_: Exception) {}
         }
