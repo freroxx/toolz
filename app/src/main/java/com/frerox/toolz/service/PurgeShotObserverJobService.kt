@@ -100,6 +100,12 @@ class PurgeShotObserverJobService : JobService() {
         // be caught by something else.
         schedule(applicationContext)
 
+        // Restart the Shizuku watcher if this is a cold process start (watcher coroutine died
+        // when the process was killed). This is a lightweight no-op if already running.
+        try {
+            (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.restartIfNeeded()
+        } catch (_: Exception) {}
+
         scope.launch {
             var handled = false
             try {

@@ -29,14 +29,12 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "PurgeShotBoot"
         private val TRIGGER_ACTIONS = setOf(
-            Intent.ACTION_BOOT_COMPLETED,
-            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            Intent.ACTION_BOOT_COMPLETED,           // "android.intent.action.BOOT_COMPLETED"
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,    // "android.intent.action.LOCKED_BOOT_COMPLETED"
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_PACKAGE_REPLACED,
-            "android.intent.action.QUICKBOOT_POWERON",
             Intent.ACTION_USER_PRESENT,
-            "android.intent.action.BOOT_COMPLETED",
-            "android.intent.action.LOCKED_BOOT_COMPLETED"
+            "android.intent.action.QUICKBOOT_POWERON" // HTC / some OEM fast-boot
         )
     }
 
@@ -70,7 +68,11 @@ class PurgeShotBootReceiver : BroadcastReceiver() {
                 // Restart the observer + JobScheduler content trigger if enabled — this is what
                 // gives outside-Toolz detection back after a reboot or app update.
                 try {
-                    val enabled = settingsRepository.purgeShotEnabled.first()
+                    // CRITICAL FIX: default to true on DataStore read failure (fail open).
+                    // On boot/update, the process is cold-started and DataStore may not be
+                    // fully initialized when we read. Defaulting to false left PurgeShot
+                    // silently disabled after every reboot.
+                    val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
                     if (enabled) {
                         val svc = Intent(context, PurgeShotService::class.java).apply {
                             action = PurgeShotService.ACTION_START

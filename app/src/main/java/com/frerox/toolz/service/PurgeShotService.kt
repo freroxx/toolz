@@ -49,7 +49,9 @@ class PurgeShotService : Service() {
         const val ACTION_HANDLE_FALLBACK = "com.frerox.toolz.PURGESHOT_HANDLE_FALLBACK"
         private const val NOTIF_ID = 4100
         const val CHANNEL_ID = "purgeshot_channel"
-        const val CHANNEL_NAME = "PurgeShot"
+        const val CHANNEL_NAME = "PurgeShot Service"
+        const val ALERTS_CHANNEL_ID = "purgeshot_alerts_v2"
+        const val ALERTS_CHANNEL_NAME = "PurgeShot Prompts"
         private const val OBSERVER_DEBOUNCE_MS = 800L
     }
 
@@ -86,6 +88,7 @@ class PurgeShotService : Service() {
     private fun createChannelIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+            // 1. Silent low-importance channel for ongoing foreground service
             if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
                 val ch = android.app.NotificationChannel(
                     CHANNEL_ID, CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_LOW
@@ -94,6 +97,18 @@ class PurgeShotService : Service() {
                     setShowBadge(false)
                 }
                 mgr.createNotificationChannel(ch)
+            }
+            // 2. High-importance channel for screenshot prompts, heads-up notifications & popup alerts
+            if (mgr.getNotificationChannel(ALERTS_CHANNEL_ID) == null) {
+                val alertCh = android.app.NotificationChannel(
+                    ALERTS_CHANNEL_ID, ALERTS_CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Shows actions and popup when a new screenshot is taken"
+                    enableVibration(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                    setShowBadge(true)
+                }
+                mgr.createNotificationChannel(alertCh)
             }
         }
     }
@@ -155,26 +170,6 @@ class PurgeShotService : Service() {
         }
     }
 
-    private fun postMediaPermissionNotification() {
-        try {
-            val intent = Intent(this, com.frerox.toolz.MainActivity::class.java).apply {
-                putExtra("navigate_to", "purgeshot")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            val pi = android.app.PendingIntent.getActivity(this, 4101, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            val notif = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("PurgeShot needs photo access")
-                .setContentText("Tap to grant access so screenshots can be detected outside Toolz")
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentIntent(pi)
-                .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .build()
-            val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-            mgr?.notify(4101, notif)
-        } catch (_: Exception) {
-        }
-    }
 
     private suspend fun handleTrigger() {
         try {

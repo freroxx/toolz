@@ -154,13 +154,32 @@ class PurgeShotRepository @Inject constructor(
      */
     suspend fun deleteFile(entity: PurgeShotEntity): Boolean = withContext(Dispatchers.IO) {
         try {
-            val uri = Uri.parse(entity.fileUriString)
+            var uri = Uri.parse(entity.fileUriString)
             val resolver = context.contentResolver
+            val resolvedPath = entity.filePath ?: (if (uri.scheme == "file") uri.path else queryPathFromUri(uri))
+
+            // If uri is file://, resolve to content:// URI via MediaStore if indexed
+            if (uri.scheme == "file" && resolvedPath != null) {
+                try {
+                    resolver.query(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        arrayOf(MediaStore.Images.Media._ID),
+                        "${MediaStore.MediaColumns.DATA}=?",
+                        arrayOf(resolvedPath),
+                        null
+                    )?.use { c ->
+                        if (c.moveToFirst()) {
+                            val id = c.getLong(0)
+                            uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
 
             // 0) Shizuku privileged path (instant, no consent needed) — rm via shell executor
             if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
                 try {
-                    val path = entity.filePath ?: queryPathFromUri(uri)
+                    val path = resolvedPath
                     if (path != null) {
                         val executor = com.frerox.toolz.util.shizuku.ShizukuShellExecutor(context)
                         if (executor.ensureService()) {
@@ -188,24 +207,11 @@ class PurgeShotRepository @Inject constructor(
                     return@withContext true
                 }
             } catch (e: SecurityException) {
-                // Android Q+ RecoverableSecurityException handling
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    val isRecoverable = e.javaClass.simpleName == "RecoverableSecurityException"
-                    if (isRecoverable) {
-                        Log.w(TAG, "RecoverableSecurityException — need user consent for $uri")
-                        // Extract IntentSender via reflection and post notification to trigger consent
-                        try {
-                            val sender = e.javaClass.getMethod("getUserAction").invoke(e) as? android.app.PendingIntent
-                                ?: e.javaClass.getMethod("getUserAction").invoke(e) as? android.content.IntentSender
-                            // Persist need-consent state so UI can show "Tap to allow"
-                            // We mark lastError specially so PurgeShotScreen can render consent CTA
-                            // (dao increment will store it)
-                        } catch (_: Exception) {}
-                        // Post consent notification
-                        postDeleteConsentNotification(entity)
-                        // Don't treat as gone — will retry after consent
-                        return@withContext false
-                    }
+                // Android Q+ RecoverableSecurityException handling (type-safe check, minSdk 31)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && e is android.app.RecoverableSecurityException) {
+                    Log.w(TAG, "RecoverableSecurityException — need user consent for $uri")
+                    postDeleteConsentNotification(entity, e.userAction.actionIntent)
+                    return@withContext false
                 }
                 Log.w(TAG, "Direct delete SecurityException, trying fallbacks", e)
             } catch (e: Exception) {
@@ -231,8 +237,8 @@ class PurgeShotRepository @Inject constructor(
                         }
                     } catch (se: SecurityException) {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
-                            se.javaClass.simpleName == "RecoverableSecurityException") {
-                            postDeleteConsentNotification(entity)
+                            se is android.app.RecoverableSecurityException) {
+                            postDeleteConsentNotification(entity, se.userAction.actionIntent)
                             return@withContext false
                         }
                     }
@@ -317,24 +323,30 @@ class PurgeShotRepository @Inject constructor(
     }
 
     private fun queryPathFromUri(uri: Uri): String? = try {
-        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
+        if (uri.scheme == "file") {
+            uri.path
+        } else {
+            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
         }
     } catch (_: Exception) { null }
 
-    private fun postDeleteConsentNotification(entity: PurgeShotEntity) {
+    private fun postDeleteConsentNotification(entity: PurgeShotEntity, consentIntent: PendingIntent? = null) {
         try {
-            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                data = Uri.parse("package:${context.packageName}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val pi = consentIntent ?: run {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                PendingIntent.getActivity(
+                    context, entity.id.toInt() + 7000, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
             }
-            val pi = PendingIntent.getActivity(
-                context, entity.id.toInt() + 7000, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val notif = androidx.core.app.NotificationCompat.Builder(context, PurgeShotService.CHANNEL_ID)
+            val notif = androidx.core.app.NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle("PurgeShot needs permission")
-                .setContentText("Tap to allow deleting screenshots automatically")
+                .setContentText("Tap to allow deleting ${entity.displayName}")
                 .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
                 .setContentIntent(pi)
                 .setAutoCancel(true)

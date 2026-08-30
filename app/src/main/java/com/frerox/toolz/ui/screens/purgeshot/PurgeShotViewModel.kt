@@ -11,8 +11,10 @@ import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.purgeshot.PurgeShotEntity
+import com.frerox.toolz.data.purgeshot.PurgeShotPermissionHelper
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
 import com.frerox.toolz.data.purgeshot.PurgeShotRepository
+import com.frerox.toolz.data.purgeshot.PurgeShotUtils
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.PurgeShotService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -36,8 +38,12 @@ class PurgeShotViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: PurgeShotRepository,
     private val settingsRepository: SettingsRepository,
-    private val dao: com.frerox.toolz.data.purgeshot.PurgeShotDao
+    private val dao: com.frerox.toolz.data.purgeshot.PurgeShotDao,
+    private val shizukuExecutor: com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 ) : ViewModel() {
+
+    private val _shizukuAuthorized = MutableStateFlow(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized())
+    val shizukuAuthorized: StateFlow<Boolean> = _shizukuAuthorized
 
     val enabled = settingsRepository.purgeShotEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val smartAuto = settingsRepository.purgeShotSmartAuto.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -106,11 +112,38 @@ class PurgeShotViewModel @Inject constructor(
         viewModelScope.launch {
             repository.ensureRestoredAndRescheduled()
         }
+        // If Shizuku is authorized on start, automatically force all permissions
+        if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+            forceGrantAllPermissionsViaShizuku()
+        }
         // Auto-start/stop service based on enabled
         viewModelScope.launch {
             enabled.collect { isEnabled ->
-                if (isEnabled) startService() else stopService()
+                if (isEnabled) {
+                    if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+                        forceGrantAllPermissionsViaShizuku()
+                    }
+                    startService()
+                } else stopService()
             }
+        }
+    }
+
+    fun refreshShizukuStatus(onComplete: (Boolean) -> Unit = {}) {
+        val authorized = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
+        _shizukuAuthorized.value = authorized
+        if (authorized) {
+            forceGrantAllPermissionsViaShizuku(onComplete)
+        } else {
+            onComplete(false)
+        }
+    }
+
+    fun forceGrantAllPermissionsViaShizuku(onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = PurgeShotPermissionHelper.forceAllPermissionsViaShizuku(context, shizukuExecutor)
+            _shizukuAuthorized.value = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
+            onResult(ok)
         }
     }
 
@@ -121,7 +154,12 @@ class PurgeShotViewModel @Inject constructor(
     fun setEnabled(value: Boolean) {
         viewModelScope.launch {
             settingsRepository.setPurgeShotEnabled(value)
-            if (value) startService() else stopService()
+            if (value) {
+                if (com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) {
+                    forceGrantAllPermissionsViaShizuku()
+                }
+                startService()
+            } else stopService()
         }
     }
 
@@ -226,22 +264,7 @@ class PurgeShotViewModel @Inject constructor(
         }
     } catch (_: Exception) { null }
 
-    private fun formatDurationLabel(millis: Long): String = when (millis) {
-        30_000L -> "30 sec"
-        60_000L -> "1 min"
-        5 * 60_000L -> "5 min"
-        15 * 60_000L -> "15 min"
-        30 * 60_000L -> "30 min"
-        60 * 60_000L -> "1 hour"
-        6 * 60 * 60_000L -> "6 hours"
-        12 * 60 * 60_000L -> "12 hours"
-        24 * 60 * 60_000L -> "1 day"
-        3 * 24 * 60 * 60_000L -> "3 days"
-        7 * 24 * 60 * 60_000L -> "1 week"
-        14 * 24 * 60 * 60_000L -> "2 weeks"
-        30L * 24 * 60 * 60_000L -> "1 month"
-        else -> "${millis / 60_000} min"
-    }
+    private fun formatDurationLabel(millis: Long): String = PurgeShotUtils.formatDurationLabel(millis)
 
     // --- JSON helpers for presets (max 6 buttons, entirely customizable) ---
     private fun presetsToJson(presets: List<PurgeShotPreset>): String {

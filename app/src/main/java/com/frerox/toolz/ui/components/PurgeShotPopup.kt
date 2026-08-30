@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.frerox.toolz.data.purgeshot.PurgeShotPreset
+import com.frerox.toolz.data.purgeshot.PurgeShotUtils
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import kotlinx.coroutines.delay
 
@@ -554,19 +555,4 @@ private fun iconFor(name: String): ImageVector = when (name.lowercase()) {
     else -> Icons.Rounded.Timer
 }
 
-private fun presetLabelFor(duration: Long): String = when (duration) {
-    30_000L -> "30 sec"
-    60_000L -> "1 min"
-    5 * 60_000L -> "5 min"
-    15 * 60_000L -> "15 min"
-    30 * 60_000L -> "30 min"
-    60 * 60_000L -> "1 hour"
-    6 * 60 * 60_000L -> "6 hours"
-    12 * 60 * 60_000L -> "12 hours"
-    24 * 60 * 60_000L -> "1 day"
-    3 * 24 * 60 * 60_000L -> "3 days"
-    7 * 24 * 60 * 60_000L -> "1 week"
-    14 * 24 * 60 * 60_000L -> "2 weeks"
-    30L * 24 * 60 * 60_000L -> "1 month"
-    else -> "${duration / 60_000} min"
-}
+private fun presetLabelFor(duration: Long): String = PurgeShotUtils.formatDurationLabel(duration)

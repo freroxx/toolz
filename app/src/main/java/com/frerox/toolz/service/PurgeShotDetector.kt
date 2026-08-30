@@ -70,7 +70,6 @@ object PurgeShotDetector {
     // bug. Sort by DATE_ADDED primary (always set by MediaStore at insertion) and use DATE_TAKEN
     // only as secondary for devices where it is valid.
     private const val SORT = "${MediaStore.Images.Media.DATE_ADDED} DESC, ${MediaStore.Images.Media.DATE_TAKEN} DESC"
-    private const val SORT_FILES = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
 
     /** Queries MediaStore for the most recently inserted images (up to limit). Used to scan for screenshot among recent inserts. */
     fun queryRecent(resolver: ContentResolver, limit: Int = 8): List<PurgeShotService.ScreenshotCandidate> {
@@ -310,17 +309,21 @@ object PurgeShotDetector {
             }
             val pi = android.app.PendingIntent.getActivity(context, 4101, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
-            // Ensure channel exists — use PurgeShotService channel id
+            // Ensure channel exists — use PurgeShotService alert channel id
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                if (nm.getNotificationChannel(com.frerox.toolz.service.PurgeShotService.CHANNEL_ID) == null) {
-                    val ch = android.app.NotificationChannel(com.frerox.toolz.service.PurgeShotService.CHANNEL_ID, com.frerox.toolz.service.PurgeShotService.CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_HIGH).apply {
-                        description = "PurgeShot screenshot controls"
-                        setShowBadge(false)
+                if (nm.getNotificationChannel(com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID) == null) {
+                    val ch = android.app.NotificationChannel(
+                        com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID,
+                        com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_NAME,
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "PurgeShot screenshot alerts and permissions"
+                        setShowBadge(true)
                     }
                     nm.createNotificationChannel(ch)
                 }
             }
-            val notif = androidx.core.app.NotificationCompat.Builder(context, com.frerox.toolz.service.PurgeShotService.CHANNEL_ID)
+            val notif = androidx.core.app.NotificationCompat.Builder(context, com.frerox.toolz.service.PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle("PurgeShot needs photo access")
                 .setContentText("Tap to grant access so screenshots can be detected everywhere")
                 .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
@@ -339,7 +342,12 @@ object PurgeShotDetector {
         awaitSettle: Boolean = true,
         isPoll: Boolean = false
     ): Boolean {
-        if (!settingsRepository.purgeShotEnabled.first()) {
+        // CRITICAL FIX: default to true on DataStore read failure (fail open).
+        // When JobScheduler/Accessibility cold-starts the process, DataStore may
+        // throw before initialization completes. Defaulting to false silently dropped
+        // every outside-Toolz screenshot. Fail open — the user explicitly enabled PurgeShot.
+        val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
+        if (!enabled) {
             Log.d(TAG, "disabled, skip")
             return false
         }

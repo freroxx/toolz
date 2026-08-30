@@ -54,6 +54,7 @@ import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -71,11 +72,17 @@ fun PurgeShotScreen(
     val undoItem by viewModel.undoAvailable.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val performanceMode = LocalPerformanceMode.current
+    val coroutineScope = rememberCoroutineScope()
+    val shizukuAuthFlow by viewModel.shizukuAuthorized.collectAsStateWithLifecycle()
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     LaunchedEffect(Unit) {
         val perms = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.READ_MEDIA_IMAGES)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.READ_MEDIA_IMAGES)
+            } else {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         }
         if (perms.isNotEmpty()) permissionLauncher.launch(perms.toTypedArray())
@@ -97,11 +104,6 @@ fun PurgeShotScreen(
         }
     }
 
-    val hasAllFiles = remember { viewModel.hasAllFilesAccess() }
-    var hasAllFilesState by remember { mutableStateOf(hasAllFiles) }
-    LaunchedEffect(pending.size) { hasAllFilesState = viewModel.hasAllFilesAccess() }
-
-    // Outside detection needs Media + Notifications — show cards when denied (inside works via popup, outside needs notification)
     fun hasMediaPerm(): Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         context.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == android.content.pm.PackageManager.PERMISSION_GRANTED
     } else {
@@ -112,31 +114,39 @@ fun PurgeShotScreen(
     } else {
         androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
-    var hasMediaState by remember { mutableStateOf(hasMediaPerm()) }
-    var hasNotifState by remember { mutableStateOf(hasNotifPerm()) }
-    var hasOverlayState by remember { mutableStateOf(if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else android.provider.Settings.canDrawOverlays(context)) }
-    var hasA11yState by remember { mutableStateOf(com.frerox.toolz.service.PurgeShotAccessibilityService.isEnabled(context)) }
-    var shizukuAvailable by remember { mutableStateOf(com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()) }
-    var shizukuAuthorized by remember { mutableStateOf(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) }
-    LaunchedEffect(Unit) {
+    var hasMediaState: Boolean by remember { mutableStateOf(hasMediaPerm()) }
+    var hasNotifState: Boolean by remember { mutableStateOf(hasNotifPerm()) }
+    var hasOverlayState: Boolean by remember { mutableStateOf(if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else android.provider.Settings.canDrawOverlays(context)) }
+    var hasA11yState: Boolean by remember { mutableStateOf(com.frerox.toolz.service.PurgeShotAccessibilityService.isEnabled(context)) }
+    var hasAllFilesState: Boolean by remember { mutableStateOf(viewModel.hasAllFilesAccess()) }
+    var shizukuAvailable: Boolean by remember { mutableStateOf(com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()) }
+    var shizukuAuthorized: Boolean by remember { mutableStateOf(com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()) }
+
+    fun refreshAllStates() {
         hasMediaState = hasMediaPerm()
         hasNotifState = hasNotifPerm()
         hasOverlayState = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else android.provider.Settings.canDrawOverlays(context)
+        hasAllFilesState = viewModel.hasAllFilesAccess()
         hasA11yState = com.frerox.toolz.service.PurgeShotAccessibilityService.isEnabled(context)
         shizukuAvailable = com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()
         shizukuAuthorized = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
+    }
+
+    LaunchedEffect(pending.size) { hasAllFilesState = viewModel.hasAllFilesAccess() }
+    LaunchedEffect(Unit) {
+        refreshAllStates()
+    }
+    LaunchedEffect(shizukuAuthFlow) {
+        refreshAllStates()
     }
     // Refresh on resume — when user returns from Settings
     androidx.compose.runtime.DisposableEffect(Unit) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                hasMediaState = hasMediaPerm()
-                hasNotifState = hasNotifPerm()
-                hasOverlayState = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else android.provider.Settings.canDrawOverlays(context)
-                hasAllFilesState = viewModel.hasAllFilesAccess()
-                hasA11yState = com.frerox.toolz.service.PurgeShotAccessibilityService.isEnabled(context)
-                shizukuAvailable = com.frerox.toolz.util.shizuku.ShizukuHelper.isAvailable()
-                shizukuAuthorized = com.frerox.toolz.util.shizuku.ShizukuHelper.isAuthorized()
+                refreshAllStates()
+                viewModel.refreshShizukuStatus {
+                    refreshAllStates()
+                }
             }
         }
         val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
@@ -193,8 +203,45 @@ fun PurgeShotScreen(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // Media permission card — required for detection outside Toolz (inside works via File fallback, outside needs MediaStore)
-                if (!hasMediaState) {
+                // Shizuku 1-tap master grant button — when Shizuku is authorized and any permission is missing
+                val anyPermMissing = !hasMediaState || !hasNotifState || !hasOverlayState || !hasA11yState || !hasAllFilesState
+                if (shizukuAuthorized && anyPermMissing) {
+                    item {
+                        StaggeredEntrance(index = 0) {
+                            ExpressiveCard(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        viewModel.forceGrantAllPermissionsViaShizuku { ok ->
+                                            refreshAllStates()
+                                            coroutineScope.launch {
+                                                snackbarHost.showSnackbar(
+                                                    if (ok) "⚡ All permissions force-granted via Shizuku!" else "Shizuku grant failed"
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(24.dp),
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White) }
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("⚡ Force Grant All Permissions", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                                        Text("1-tap auto-setup with Shizuku: Media, Notifications, Overlay Popup, Silent Delete & Accessibility.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
+                                    }
+                                    Icon(Icons.Rounded.ChevronRight, null)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Media permission card — required for detection outside Toolz
+                if (!hasMediaState && !shizukuAuthorized) {
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
@@ -220,8 +267,9 @@ fun PurgeShotScreen(
                         }
                     }
                 }
-                // Notification permission card — required for outside-Toolz heads-up (inside uses popup)
-                if (!hasNotifState) {
+
+                // Notification permission card — required for outside-Toolz heads-up
+                if (!hasNotifState && !shizukuAuthorized) {
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
@@ -246,7 +294,7 @@ fun PurgeShotScreen(
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text("Allow notifications", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("Outside Toolz, PurgeShot uses a notification — tap to allow.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
+                                        Text("Outside Toolz, PurgeShot uses high-priority heads-up alerts — tap to allow.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
                                     }
                                     Icon(Icons.Rounded.ChevronRight, null)
                                 }
@@ -254,8 +302,41 @@ fun PurgeShotScreen(
                         }
                     }
                 }
-                // Permission card — fluid, only when needed
-                if (!hasAllFilesState && pending.isNotEmpty()) {
+
+                // Overlay permission card — required for instant popup dialog over other apps
+                if (!hasOverlayState && !shizukuAuthorized) {
+                    item {
+                        StaggeredEntrance(index = 0) {
+                            ExpressiveCard(
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(24.dp),
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            ) {
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.error.copy(alpha = 0.14f)) {
+                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Layers, null, tint = MaterialTheme.colorScheme.error) }
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Allow display over other apps", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                                        Text("Enables instant PurgeShot popup dialog outside Toolz — tap to grant.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
+                                    }
+                                    Icon(Icons.Rounded.ChevronRight, null)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // All Files Permission card — required for silent delete
+                if (!hasAllFilesState && !shizukuAuthorized) {
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
@@ -276,7 +357,7 @@ fun PurgeShotScreen(
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text("Allow deleting screenshots", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("One-time All-files access — then silent auto-delete.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
+                                        Text("One-time All-files access — enables silent permanent auto-delete.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f))
                                     }
                                     Icon(Icons.Rounded.ChevronRight, null)
                                 }
@@ -286,8 +367,7 @@ fun PurgeShotScreen(
                 }
 
                 // Outside-Toolz reliable detection: Accessibility + Shizuku cards
-                // Show until user enables for best reliability outside Toolz
-                if (!hasA11yState) {
+                if (!hasA11yState && !shizukuAuthorized) {
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
@@ -313,7 +393,7 @@ fun PurgeShotScreen(
                             }
                         }
                     }
-                } else {
+                } else if (hasA11yState) {
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
@@ -336,6 +416,7 @@ fun PurgeShotScreen(
                         }
                     }
                 }
+
                 if (!shizukuAuthorized) {
                     item {
                         StaggeredEntrance(index = 0) {
@@ -359,7 +440,7 @@ fun PurgeShotScreen(
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text(if (shizukuAvailable) "Grant Shizuku for PurgeShot" else "Install Shizuku for best reliability", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text(if (shizukuAvailable) "Privileged file watch — instant, survives app kill." else "Shizuku gives instant file-system detection outside Toolz.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
+                                        Text(if (shizukuAvailable) "Tap to authorize Shizuku & auto-grant all permissions." else "Shizuku gives instant file-system detection outside Toolz.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
                                     }
                                     Icon(Icons.Rounded.ChevronRight, null)
                                 }
@@ -370,7 +451,16 @@ fun PurgeShotScreen(
                     item {
                         StaggeredEntrance(index = 0) {
                             ExpressiveCard(
-                                onClick = {},
+                                onClick = {
+                                    coroutineScope.launch {
+                                        viewModel.forceGrantAllPermissionsViaShizuku { ok ->
+                                            refreshAllStates()
+                                            coroutineScope.launch {
+                                                snackbarHost.showSnackbar(if (ok) "Permissions re-applied via Shizuku" else "Shizuku sync failed")
+                                            }
+                                        }
+                                    }
+                                },
                                 shape = RoundedCornerShape(24.dp),
                                 containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
                                 contentColor = MaterialTheme.colorScheme.onTertiaryContainer
@@ -381,7 +471,7 @@ fun PurgeShotScreen(
                                     }
                                     Column(Modifier.weight(1f)) {
                                         Text("Shizuku privileged watch active", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                        Text("File-system inotify — instant, even when Toolz is dead.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
+                                        Text("File-system inotify active — tap to re-sync permissions.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f))
                                     }
                                     Icon(Icons.Rounded.Verified, null, tint = MaterialTheme.colorScheme.primary)
                                 }

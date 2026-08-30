@@ -161,22 +161,8 @@ object PurgeShotHandler {
         }
     }
 
-    private fun formatDurationLabel(duration: Long): String = when (duration) {
-        30_000L -> "30 sec"
-        60_000L -> "1 min"
-        5 * 60_000L -> "5 min"
-        15 * 60_000L -> "15 min"
-        30 * 60_000L -> "30 min"
-        60 * 60_000L -> "1 hour"
-        6 * 60 * 60_000L -> "6 hours"
-        12 * 60 * 60_000L -> "12 hours"
-        24 * 60 * 60_000L -> "1 day"
-        3 * 24 * 60 * 60_000L -> "3 days"
-        7 * 24 * 60 * 60_000L -> "1 week"
-        14 * 24 * 60 * 60_000L -> "2 weeks"
-        30L * 24 * 60 * 60_000L -> "1 month"
-        else -> "${duration / 60_000} min"
-    }
+    /** @see PurgeShotUtils.formatDurationLabel */
+    internal fun formatDurationLabel(duration: Long): String = PurgeShotUtils.formatDurationLabel(duration)
 
     private fun showAutoNotification(context: Context, displayName: String, label: String, sizeLabel: String?) {
         try {
@@ -187,13 +173,13 @@ object PurgeShotHandler {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
             val pi = PendingIntent.getActivity(context, (System.currentTimeMillis() % 10000).toInt(), openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            val notif = NotificationCompat.Builder(context, PurgeShotService.CHANNEL_ID)
+            val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle("PurgeShot • auto-queued")
                 .setContentText("$displayName • $label${sizeLabel?.let { " • $it" } ?: ""}")
                 .setStyle(NotificationCompat.BigTextStyle().bigText("$displayName will be deleted in $label. Tap to undo."))
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .addAction(R.drawable.ic_launcher_foreground, "Undo", pi)
                 .setContentIntent(pi)
                 .build()
@@ -207,16 +193,16 @@ object PurgeShotHandler {
             ensureChannel(context)
 
             // Build 6 timer actions as notification buttons (first 3 as actions, rest via open)
-            val presets = PurgeShotPreset.defaults() // will be resolved with live autoDuration elsewhere, but use static for fallback
-            val builder = NotificationCompat.Builder(context, PurgeShotService.CHANNEL_ID)
+            val builder = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle("Delete this screenshot?")
                 .setContentText("${candidate.displayName}${sizeLabel?.let { " • $it" } ?: ""} • tap to choose")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
-            // Full-screen popup intent (when user taps body)
+            // Full-screen popup intent (when user taps body or heads-up popdown)
             val popupIntent = Intent(context, PurgeShotPopupActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra("uri", candidate.uri.toString())
@@ -262,10 +248,16 @@ object PurgeShotHandler {
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
-            if (mgr.getNotificationChannel(PurgeShotService.CHANNEL_ID) == null) {
-                val ch = android.app.NotificationChannel(PurgeShotService.CHANNEL_ID, PurgeShotService.CHANNEL_NAME, android.app.NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "PurgeShot screenshot controls"
-                    setShowBadge(false)
+            if (mgr.getNotificationChannel(PurgeShotService.ALERTS_CHANNEL_ID) == null) {
+                val ch = android.app.NotificationChannel(
+                    PurgeShotService.ALERTS_CHANNEL_ID,
+                    PurgeShotService.ALERTS_CHANNEL_NAME,
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Shows actions and popup when a new screenshot is taken"
+                    enableVibration(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                    setShowBadge(true)
                 }
                 mgr.createNotificationChannel(ch)
             }

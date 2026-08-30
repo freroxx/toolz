@@ -67,7 +67,7 @@ class PurgeShotActionReceiver : BroadcastReceiver() {
 
                 try {
                     notifMgr?.cancel(uri.hashCode())
-                    val notif = NotificationCompat.Builder(context, PurgeShotService.CHANNEL_ID)
+                    val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                         .setContentTitle("PurgeShot queued")
                         .setContentText("$displayName • $label")
                         .setSmallIcon(R.drawable.ic_launcher_foreground)

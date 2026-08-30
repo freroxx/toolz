@@ -217,8 +217,10 @@ class PurgeShotExternalBackupHelper @Inject constructor(
 
     private fun jsonToEntities(json: String): List<PurgeShotEntity> {
         val root = JSONObject(json)
-        val arr: JSONArray = if (root.has("queue")) root.getJSONArray("queue") else root.getJSONArray("queue")
-        // fallback: if root itself is array
+        // Extract queue array from wrapper object. The else branch previously was identical
+        // to the if branch (dead code) — removed. getJSONArray throws if key missing, which
+        // is caught by the caller.
+        val arr: JSONArray = root.getJSONArray("queue")
         val list = mutableListOf<PurgeShotEntity>()
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)

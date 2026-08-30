@@ -22,12 +22,14 @@ import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import com.frerox.toolz.data.purgeshot.PurgeShotRepository
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,9 +74,49 @@ class PurgeShotAccessibilityService : AccessibilityService() {
             "screen captured", "screen capture", "screen shot",
             "captured", "capture",
             "screencap",
-            "截屏", "截图", // Chinese
-            "capture d'écran", // French
-            "captura de pantalla" // Spanish
+            "截屏", "截图",              // Chinese (MIUI, EMUI, ColorOS)
+            "capture d'écran",          // French
+            "captura de pantalla",      // Spanish
+            "schermata",                // Italian
+            "bildschirmfoto",           // German
+            "schermafbeelding"          // Dutch
+        )
+
+        /**
+         * Packages that post screenshot-related notifications on various OEM skins.
+         * Pixel/AOSP = com.android.systemui
+         * Samsung = com.samsung.android.app.smartcapture / com.samsung.android.screenshot
+         * Xiaomi/MIUI = com.miui.screenshot / com.miui.screenrecorder
+         * OnePlus/OxygenOS = com.oneplus.screenshot
+         * OPPO/ColorOS = com.oppo.screenshot / com.coloros.screenshot
+         * Vivo/FunTouchOS = com.vivo.screenshot
+         * Huawei/EMUI = com.huawei.screenshot
+         * Realme = com.realme.screenshot / com.oppo.screenshot
+         * We also match any package whose notification text matches SCREENSHOT_KEYWORDS —
+         * this covers unknown/future OEMs automatically.
+         */
+        private val SCREENSHOT_PACKAGES = setOf(
+            "com.android.systemui",
+            "android",
+            "com.google.android.systemui",
+            // Samsung
+            "com.samsung.android.app.smartcapture",
+            "com.samsung.android.screenshot",
+            "com.samsung.android.galaxyfinder",
+            // Xiaomi / MIUI
+            "com.miui.screenshot",
+            "com.miui.screenrecorder",
+            // OnePlus / OxygenOS
+            "com.oneplus.screenshot",
+            // OPPO / ColorOS
+            "com.oppo.screenshot",
+            "com.coloros.screenshot",
+            // Vivo / FunTouchOS
+            "com.vivo.screenshot",
+            // Huawei / EMUI
+            "com.huawei.screenshot",
+            // Realme
+            "com.realme.screenshot"
         )
 
         fun isEnabled(context: Context): Boolean {
@@ -85,7 +127,6 @@ class PurgeShotAccessibilityService : AccessibilityService() {
             while (colonSplitter.hasNext()) {
                 if (colonSplitter.next().equals(expected, ignoreCase = true)) return true
             }
-            // Samsung etc may use flattened with package/class check
             return enabled.contains(context.packageName) && enabled.contains(PurgeShotAccessibilityService::class.java.simpleName)
         }
     }
@@ -93,6 +134,18 @@ class PurgeShotAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "PurgeShotAccessibilityService connected")
+        // Re-arm the outside-Toolz detection stack on every (re)connection.
+        // When the process was dead and the accessibility framework woke it, the
+        // Shizuku watcher and JobScheduler trigger are not running yet. Restart them
+        // here so the first event after a cold start doesn't fall through.
+        scope.launch {
+            try {
+                PurgeShotObserverJobService.schedule(applicationContext)
+                if (ShizukuHelper.isAuthorized()) {
+                    (applicationContext as? com.frerox.toolz.ToolzApplication)?.shizukuWatcher?.start()
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -100,7 +153,6 @@ class PurgeShotAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastTriggerMs < DEBOUNCE_MS) return
 
-        // Fast filter: only systemui notifications or screenshot-related windows
         val pkg = event.packageName?.toString()
         val type = event.eventType
 
@@ -109,35 +161,44 @@ class PurgeShotAccessibilityService : AccessibilityService() {
 
         when (type) {
             AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
-                if (pkg == "com.android.systemui" || pkg == "android" || pkg == "com.google.android.systemui") {
-                    val texts = mutableListOf<String>()
-                    event.text?.forEach { texts.add(it.toString()) }
-                    val parcel = event.parcelableData
-                    if (parcel is Notification) {
-                        val extras = parcel.extras
-                        extras.getCharSequence(Notification.EXTRA_TITLE)?.let { texts.add(it.toString()) }
-                        extras.getCharSequence(Notification.EXTRA_TEXT)?.let { texts.add(it.toString()) }
-                        extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.let { texts.add(it.toString()) }
-                        extras.getCharSequence("android.subText")?.let { texts.add(it.toString()) }
-                    }
-                    val combined = texts.joinToString(" ").lowercase()
-                    if (combined.isNotBlank() && SCREENSHOT_KEYWORDS.any { kw -> combined.contains(kw) }) {
-                        shouldTrigger = true
-                        reason = "notification:$combined"
-                    }
+                // Match known OEM screenshot packages explicitly, but ALSO match any package
+                // whose notification text contains screenshot keywords — this covers OEMs
+                // we haven't listed yet without needing another release.
+                val isScreenshotPkg = pkg != null && pkg in SCREENSHOT_PACKAGES
+                val texts = mutableListOf<String>()
+                event.text.forEach { texts.add(it.toString()) }
+                val parcel = event.parcelableData
+                if (parcel is Notification) {
+                    val extras = parcel.extras
+                    extras.getCharSequence(Notification.EXTRA_TITLE)?.let { texts.add(it.toString()) }
+                    extras.getCharSequence(Notification.EXTRA_TEXT)?.let { texts.add(it.toString()) }
+                    extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.let { texts.add(it.toString()) }
+                    extras.getCharSequence("android.subText")?.let { texts.add(it.toString()) }
+                }
+                val combined = texts.joinToString(" ").lowercase()
+                val keywordMatch = combined.isNotBlank() && SCREENSHOT_KEYWORDS.any { kw -> combined.contains(kw) }
+                if (isScreenshotPkg && keywordMatch) {
+                    shouldTrigger = true
+                    reason = "notification:known_pkg:$pkg"
+                } else if (keywordMatch) {
+                    // Unknown OEM: keyword match alone is enough — the cost of a false positive
+                    // (detectAndHandle runs, finds no fresh screenshot, returns false) is tiny.
+                    shouldTrigger = true
+                    reason = "notification:keyword_only:$pkg"
                 }
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 val cls = event.className?.toString() ?: ""
-                val txt = event.text?.joinToString(" ") ?: ""
+                val txt = event.text.joinToString(" ")
                 val combined = "$cls $txt".lowercase()
                 if (combined.contains("screenshot") || combined.contains("screen capture") || combined.contains("screencap")) {
                     shouldTrigger = true
                     reason = "window:$cls"
-                } else if (pkg == "com.android.systemui" && (cls.contains("Screenshot", ignoreCase = true) || txt.contains("Screenshot", ignoreCase = true))) {
+                } else if (pkg != null && pkg in SCREENSHOT_PACKAGES &&
+                    (cls.contains("Screenshot", ignoreCase = true) || txt.contains("Screenshot", ignoreCase = true))) {
                     shouldTrigger = true
-                    reason = "systemui window:$cls"
+                    reason = "oem_window:$pkg:$cls"
                 }
             }
         }
@@ -148,13 +209,20 @@ class PurgeShotAccessibilityService : AccessibilityService() {
 
         scope.launch {
             try {
-                // Check enabled without blocking too long
-                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
+                // CRITICAL FIX: default to true on DataStore read failure.
+                // When the accessibility framework cold-starts this process after Toolz was killed,
+                // purgeShotEnabled.first() may throw before DataStore is fully initialized.
+                // Defaulting to false silently dropped every screenshot taken outside Toolz.
+                // The user already explicitly enabled PurgeShot — if we can't read the setting,
+                // assume enabled (fail open).
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
                 if (!enabled) {
                     Log.d(TAG, "purgeShot disabled, ignore a11y trigger")
                     return@launch
                 }
-                // Let MediaStore settle then run shared detector (same as Service/Job)
+                // Re-arm JobScheduler so it stays alive for future screenshots
+                try { PurgeShotObserverJobService.schedule(applicationContext) } catch (_: Exception) {}
+
                 val ok = PurgeShotDetector.detectAndHandle(
                     context = applicationContext,
                     repository = repository,

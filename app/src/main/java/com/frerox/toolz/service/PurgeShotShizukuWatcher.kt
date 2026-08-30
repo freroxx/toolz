@@ -67,10 +67,16 @@ class PurgeShotShizukuWatcher @Inject constructor(
         private const val TAG = "PurgeShotShizuku"
         private const val DEBOUNCE_MS = 700L
         private val DIRS = listOf(
+            // Standard paths (Pixel, AOSP)
             "/sdcard/Pictures/Screenshots",
             "/sdcard/DCIM/Screenshots",
             "/storage/emulated/0/Pictures/Screenshots",
             "/storage/emulated/0/DCIM/Screenshots",
+            // Samsung (Galaxy): stores under DCIM/Pictures or DCIM/Screenshots
+            "/storage/emulated/0/DCIM/Pictures",
+            "/sdcard/DCIM/Pictures",
+            // Xiaomi / MIUI: sometimes stores under Pictures or DCIM directly
+            "/storage/emulated/0/Pictures",
             "/sdcard/Pictures",
             "/sdcard/DCIM"
         )
@@ -93,9 +99,26 @@ class PurgeShotShizukuWatcher @Inject constructor(
         Log.i(TAG, "stopped")
     }
 
+    /**
+     * Restarts the watcher if it is not currently active.
+     * Called by [PurgeShotAccessibilityService] and [PurgeShotObserverJobService] when they
+     * wake due to a cold process start — the watcher's coroutine died with the previous
+     * process instance and must be re-launched before Shizuku file events flow again.
+     */
+    fun restartIfNeeded() {
+        if (watcherJob?.isActive != true) {
+            Log.i(TAG, "restartIfNeeded: starting watcher")
+            start()
+        }
+    }
+
     private suspend fun runWatcherLoop() {
         try {
-            val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
+            // CRITICAL FIX: default to true on DataStore read failure (fail open).
+            // When the process is cold-started by an accessibility event or JobScheduler,
+            // DataStore may not be initialized yet and first() throws. Defaulting to false
+            // caused the watcher to silently abort on every cold start.
+            val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
             if (!enabled) {
                 Log.d(TAG, "purgeShot disabled, not starting shizuku watcher")
                 _isWatching.value = false
@@ -130,7 +153,7 @@ class PurgeShotShizukuWatcher @Inject constructor(
             delay(5000)
             if (watcherJob?.isActive == true) {
                 try {
-                    val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
                     if (enabled) runWatcherLoop()
                 } catch (_: Exception) {}
             }
@@ -187,7 +210,7 @@ class PurgeShotShizukuWatcher @Inject constructor(
         Log.i(TAG, "starting polling fallback every 2s")
         while (watcherJob?.isActive == true) {
             try {
-                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { false }
+                val enabled = try { settingsRepository.purgeShotEnabled.first() } catch (_: Exception) { true }
                 if (!enabled) {
                     Log.d(TAG, "polling: disabled, stopping")
                     break
@@ -241,6 +264,14 @@ class PurgeShotShizukuWatcher @Inject constructor(
 
     private fun looksLikeScreenshotName(name: String): Boolean {
         val lower = name.lowercase()
-        return lower.contains("screenshot") || lower.contains("screen") && lower.contains("shot") || lower.contains("screencap") || lower.startsWith("screenshot_") || lower.matches(Regex(".*screenshot.*\\.(png|jpg|jpeg|webp)"))
+        // Explicit parentheses to avoid the && vs || precedence trap:
+        // previously `contains("screen") && contains("shot")` was OR'd without parens,
+        // which Kotlin evaluates differently from the intended grouping.
+        return lower.contains("screenshot") ||
+            lower.contains("screencap") ||
+            lower.contains("screen_capture") ||
+            lower.contains("screengrab") ||
+            (lower.contains("screen") && lower.contains("shot")) ||
+            lower.matches(Regex(".*screenshot.*\\.(png|jpg|jpeg|webp)"))
     }
 }
