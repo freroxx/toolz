@@ -1393,49 +1393,53 @@ fun RecentSection(
     }
     if (tools.isEmpty()) return
 
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         SectionHeader(stringResource(R.string.st_DashboardScreen_e1f2))
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding        = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding        = PaddingValues(horizontal = 2.dp),
         ) {
             items(tools, key = { it.route }) { tool ->
-                RecentChip(tool = tool, onNavigate = onNavigate)
+                RecentCard(tool = tool, onNavigate = onNavigate)
             }
         }
     }
 }
 
 @Composable
-private fun RecentChip(tool: ToolItem, onNavigate: (String) -> Unit) {
+private fun RecentCard(tool: ToolItem, onNavigate: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
-    Surface(
-        onClick = { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
-        shape = CircleShape,
-        color = tool.color.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, tool.color.copy(alpha = 0.18f)),
-        modifier = Modifier.height(44.dp),
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .bouncyClick { vibrationManager?.vibrateClick(); onNavigate(tool.route) },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
-            modifier            = Modifier.padding(horizontal = 14.dp),
-            verticalAlignment   = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Surface(
+            modifier = Modifier.size(60.dp),
+            shape    = ExtraLargeExpressiveShape,
+            color    = tool.color.copy(alpha = 0.12f),
         ) {
-            Icon(
-                tool.icon,
-                contentDescription = null,
-                tint     = tool.color,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                stringResource(tool.titleRes),
-                style      = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Black,
-                maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis,
-                color      = MaterialTheme.colorScheme.onSurface,
-            )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    tool.icon,
+                    contentDescription = null,
+                    tint     = tool.color,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
         }
+        Text(
+            stringResource(tool.titleRes),
+            style         = MaterialTheme.typography.labelSmall,
+            fontWeight    = FontWeight.Black,
+            maxLines      = 1,
+            overflow      = TextOverflow.Ellipsis,
+            textAlign     = TextAlign.Center,
+            color         = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            modifier      = Modifier.fillMaxWidth(),
+        )
     }
 }
 
