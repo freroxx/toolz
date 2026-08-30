@@ -1,0 +1,20 @@
+# Toolz — local.properties example
+# Copy to local.properties and fill in your own values. This file is gitignored.
+# All keys are injected as BuildConfig fields.
+
+# --- Supabase (Whisper) ---
+# Create a project at https://supabase.com
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+
+# --- InnerTube (YouTube Music catalog) ---
+# Public web API key used by the YouTube Music InnerTube client.
+# This is the same public key used by NewPipe/yt-dlp (browser key), not a private secret.
+# For open-source hygiene it is NOT hardcoded in the repo — set it here to enable InnerTube.
+# If blank/missing, the app gracefully falls back to NewPipeExtractor (search + stream resolve
+# still work, just a bit slower). Get the current key from a fresh YouTube Music web request
+# or reuse the well-known public key: AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI
+INNER_TUBE_API_KEY=
+
+# --- Optional: signing ---
+# See keystore.properties for release signing
