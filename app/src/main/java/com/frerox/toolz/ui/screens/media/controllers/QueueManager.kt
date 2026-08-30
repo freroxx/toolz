@@ -91,7 +91,8 @@ class QueueManager(
             val missingCount = uris.count { uri ->
                 trackMap[uri] == null && uri.startsWith("content://")
             }
-            val warning = if (missingCount > 0) {
+            // P0-01 fix: suppress warning if library is still scanning (isLoading=true)
+            val warning = if (missingCount > 0 && !uiState.value.isLoading) {
                 android.util.Log.w("MusicPlayerVM", "Queue pruned $missingCount missing tracks (deleted/moved)")
                 "$missingCount track(s) unavailable — removed from queue"
             } else null

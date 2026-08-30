@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -99,17 +100,16 @@ fun PurgeShotPopup(
                     ) { _, dragAmount -> dragOffsetY += dragAmount * 0.55f }
                 }
         ) {
-            StaggeredEntrance(index = 0) {
-                ExpressiveCard(
-                    onClick = {},
-                    modifier = Modifier
-                        .widthIn(max = 420.dp)
-                        .padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(36.dp),
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    elevation = 0.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
-                ) {
+            ExpressiveCard(
+                onClick = {},
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(36.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                elevation = 0.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f))
+            ) {
                     val scrollState = rememberScrollState()
                     Column(
                         modifier = Modifier
@@ -205,20 +205,18 @@ fun PurgeShotPopup(
                         Spacer(Modifier.height(14.dp))
 
                         val visiblePresets = presets.take(6)
-                        val columns = if (visiblePresets.size <= 3) 3 else 3
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(columns),
+                            columns = GridCells.Fixed(3),
                             modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             userScrollEnabled = false
                         ) {
-                            itemsIndexed(visiblePresets) { idx, preset ->
+                            items(visiblePresets) { preset ->
                                 val isAuto = preset.label.equals("Auto", ignoreCase = true)
                                 PurgePresetChip(
                                     preset = preset,
                                     isAuto = isAuto,
-                                    index = idx,
                                     onClick = {
                                         haptic.success()
                                         onSelectDuration(preset)
@@ -313,7 +311,6 @@ fun PurgeShotPopup(
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.clickable { onOpenSettings.invoke() }
                                 )
-                            }
                         }
                     }
                 }
@@ -444,33 +441,31 @@ private fun MultiScreenshotGrid(uris: List<Uri>, count: Int) {
 private fun PurgePresetChip(
     preset: PurgeShotPreset,
     isAuto: Boolean,
-    index: Int,
     onClick: () -> Unit
 ) {
     val icon = iconFor(preset.iconName)
-    StaggeredEntrance(index = index + 1, spatialOffset = androidx.compose.ui.unit.IntOffset(0, 18)) {
-        val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-        val isPressed by interaction.collectIsPressedAsState()
-        val scale by animateFloatAsState(
-            targetValue = if (isPressed) 0.93f else 1f,
-            animationSpec = spring(dampingRatio = 0.5f, stiffness = 420f),
-            label = "chipScale"
-        )
-        Surface(
-            onClick = onClick,
-            shape = RoundedCornerShape(22.dp),
-            color = if (isAuto) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(86.dp)
-                .graphicsLayer { scaleX = scale; scaleY = scale }
-                .then(
-                    if (isAuto) Modifier.border(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.34f), RoundedCornerShape(22.dp)) else Modifier
-                )
-                .semantics { contentDescription = "${preset.label}${if (isAuto) ", auto" else ""}" },
-            tonalElevation = if (isAuto) 1.dp else 0.dp,
-            interactionSource = interaction
-        ) {
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.93f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = 420f),
+        label = "chipScale"
+    )
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        color = if (isAuto) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(86.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(
+                if (isAuto) Modifier.border(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.34f), RoundedCornerShape(22.dp)) else Modifier
+            )
+            .semantics { contentDescription = "${preset.label}${if (isAuto) ", auto" else ""}" },
+        tonalElevation = if (isAuto) 1.dp else 0.dp,
+        interactionSource = interaction
+    ) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -515,7 +510,6 @@ private fun PurgePresetChip(
                 }
             }
         }
-    }
 }
 
 private fun durationToHumane(millis: Long): String {

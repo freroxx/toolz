@@ -175,10 +175,16 @@ class PlaybackTransport(
 
     private suspend fun executePlay(track: MusicTrack, tracks: List<MusicTrack>) {
         scope.launch(Dispatchers.Default) {
-            val trackUris = tracks.map { it.uri }
+            // P0-01 fix: if tracks is empty (library not yet loaded), ensure at least the clicked track is played
+            val effectiveTracks = if (tracks.isEmpty() || tracks.none { it.uri == track.uri }) {
+                listOf(track)
+            } else {
+                tracks
+            }
+            val trackUris = effectiveTracks.map { it.uri }
             val isSameQueue = trackUris == queueManager.currentQueueUris
-            val mediaItems = tracks.map { t -> t.toMediaItem() }
-            val startIndex = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+            val mediaItems = effectiveTracks.map { t -> t.toMediaItem() }
+            val startIndex = effectiveTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
 
             withContext(Dispatchers.Main) {
                 val p: Player = playerOrController()

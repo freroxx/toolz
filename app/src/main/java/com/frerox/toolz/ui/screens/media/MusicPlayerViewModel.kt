@@ -124,6 +124,7 @@ class MusicPlayerViewModel @Inject constructor(
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
+    private var isConnecting = false
     private var pendingAction: (() -> Unit)? = null
 
     private fun hapticClick() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateClick() }
@@ -323,7 +324,7 @@ class MusicPlayerViewModel @Inject constructor(
             .build()
         player.setAudioAttributes(audioAttributes, false)
         player.setHandleAudioBecomingNoisy(true)
-        player.addListener(playerListener)
+        // P0-02 fix: listener added in connectToMediaController logic instead of here to prevent duplication
         player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onAudioSessionIdChanged(
                 eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
@@ -334,6 +335,9 @@ class MusicPlayerViewModel @Inject constructor(
                 }
             }
         })
+
+        // Initial listener on local player until controller connects
+        player.addListener(playerListener)
 
         connectToMediaController()
 
@@ -521,11 +525,18 @@ class MusicPlayerViewModel @Inject constructor(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun connectToMediaController() {
+        if (isConnecting || controller != null) return
+        isConnecting = true
         val token = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
         controllerFuture = MediaController.Builder(context, token).buildAsync()
         controllerFuture?.addListener({
             runCatching {
+                isConnecting = false
                 controller = controllerFuture?.get()
+                
+                // P0-02 fix: media controller acts as the single source of truth for UI events
+                // to prevent double listener execution when controller is available.
+                player.removeListener(playerListener)
                 controller?.addListener(playerListener)
 
                 val dur = controller?.duration?.coerceAtLeast(0L) ?: 0L
@@ -675,13 +686,14 @@ class MusicPlayerViewModel @Inject constructor(
         _uiState.update { it.copy(selectedTracks = emptySet(), isSelectionMode = false) }
     }
 
-    fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = _uiState.value.tracks) {
+    fun playTrack(track: MusicTrack, tracks: List<MusicTrack>? = null) {
+        val effectiveTracks = tracks ?: _uiState.value.tracks
         if (controller == null) {
             pendingAction = { playTrack(track, tracks) }
             connectToMediaController()
             return
         }
-        playbackTransport.playTrack(track, tracks)
+        playbackTransport.playTrack(track, effectiveTracks)
     }
 
     fun playUri(

@@ -209,73 +209,71 @@ fun PurgeShotScreen(
             ) {
                 // Unified Permissions & Setup Card (Replaces individual banners and status cards)
                 item {
-                    StaggeredEntrance(index = 0) {
-                        val allCoreGranted = hasMediaState && hasAllFilesState && hasOverlayState
-                        val isFullySetup = allCoreGranted && hasA11yState
-                        ExpressiveCard(
-                            onClick = { showPermissionsSheet = true },
-                            shape = RoundedCornerShape(24.dp),
-                            containerColor = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = if (isFullySetup) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimaryContainer
+                    val allCoreGranted = hasMediaState && hasAllFilesState && hasOverlayState
+                    val isFullySetup = allCoreGranted && hasA11yState
+                    ExpressiveCard(
+                        onClick = { showPermissionsSheet = true },
+                        shape = RoundedCornerShape(24.dp),
+                        containerColor = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = if (isFullySetup) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            Surface(
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape,
+                                color = if (isFullySetup) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary
                             ) {
-                                Surface(
-                                    modifier = Modifier.size(44.dp),
-                                    shape = CircleShape,
-                                    color = if (isFullySetup) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            if (isFullySetup) Icons.Rounded.VerifiedUser else Icons.Rounded.Shield,
-                                            null,
-                                            tint = if (isFullySetup) MaterialTheme.colorScheme.primary else Color.White,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    }
-                                }
-                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        stringResource(R.string.st_PurgeShot_Permissions_Title),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                    Text(
-                                        when {
-                                            isFullySetup && shizukuAuthorized -> stringResource(R.string.st_PurgeShot_Permissions_AllActiveShizuku)
-                                            isFullySetup -> stringResource(R.string.st_PurgeShot_Permissions_AllActive)
-                                            allCoreGranted -> stringResource(R.string.st_PurgeShot_Permissions_CoreActive)
-                                            else -> stringResource(R.string.st_PurgeShot_Permissions_SetupNeeded)
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (isFullySetup) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        if (isFullySetup) Icons.Rounded.VerifiedUser else Icons.Rounded.Shield,
+                                        null,
+                                        tint = if (isFullySetup) MaterialTheme.colorScheme.primary else Color.White,
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    stringResource(R.string.st_PurgeShot_Permissions_Title),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    when {
+                                        isFullySetup && shizukuAuthorized -> stringResource(R.string.st_PurgeShot_Permissions_AllActiveShizuku)
+                                        isFullySetup -> stringResource(R.string.st_PurgeShot_Permissions_AllActive)
+                                        allCoreGranted -> stringResource(R.string.st_PurgeShot_Permissions_CoreActive)
+                                        else -> stringResource(R.string.st_PurgeShot_Permissions_SetupNeeded)
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isFullySetup) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isFullySetup) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(
-                                            if (isFullySetup) stringResource(R.string.st_PurgeShot_Permissions_AllSet) else stringResource(R.string.st_PurgeShot_Permissions_Configure),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        Icon(
-                                            Icons.Rounded.ChevronRight,
-                                            null,
-                                            tint = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
+                                    Text(
+                                        if (isFullySetup) stringResource(R.string.st_PurgeShot_Permissions_AllSet) else stringResource(R.string.st_PurgeShot_Permissions_Configure),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Icon(
+                                        Icons.Rounded.ChevronRight,
+                                        null,
+                                        tint = if (isFullySetup) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                 }
                             }
                         }
@@ -284,37 +282,35 @@ fun PurgeShotScreen(
 
                 // Hero — fluid, simple, expressive
                 item {
-                    StaggeredEntrance(index = 1) {
-                        ExpressiveCard(
-                            onClick = {},
-                            shape = RoundedCornerShape(28.dp),
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primary) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
-                                    }
-                                    Column(Modifier.weight(1f)) {
-                                        Text(stringResource(R.string.st_PurgeShot_Hero_Title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text(stringResource(R.string.st_PurgeShot_Hero_Subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
-                                    }
+                    ExpressiveCard(
+                        onClick = {},
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Surface(modifier = Modifier.size(48.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primary) {
+                                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = Color.White, modifier = Modifier.size(24.dp)) }
                                 }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Queued), value = "${pending.size}", modifier = Modifier.weight(1f))
-                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Deleted), value = "$totalDeleted", modifier = Modifier.weight(1f))
-                                    HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Next), value = nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—", modifier = Modifier.weight(1f))
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.st_PurgeShot_Hero_Title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Text(stringResource(R.string.st_PurgeShot_Hero_Subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f))
                                 }
-                                if (pending.isNotEmpty()) {
-                                    ToolzWavyLinearProgressIndicator(
-                                        progress = {
-                                            nextPurge?.let { 1f - ((it.scheduledDeleteAtMs - System.currentTimeMillis()).toFloat() / it.durationMillis.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } ?: 0f
-                                        },
-                                        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(8.dp)),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
-                                    )
-                                }
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Queued), value = "${pending.size}", modifier = Modifier.weight(1f))
+                                HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Deleted), value = "$totalDeleted", modifier = Modifier.weight(1f))
+                                HeroStat(label = stringResource(R.string.st_PurgeShot_Hero_Next), value = nextPurge?.let { formatRemaining(it.scheduledDeleteAtMs - System.currentTimeMillis()) } ?: "—", modifier = Modifier.weight(1f))
+                            }
+                            if (pending.isNotEmpty()) {
+                                ToolzWavyLinearProgressIndicator(
+                                    progress = {
+                                        nextPurge?.let { 1f - ((it.scheduledDeleteAtMs - System.currentTimeMillis()).toFloat() / it.durationMillis.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) } ?: 0f
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(8.dp)),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f)
+                                )
                             }
                         }
                     }
@@ -322,41 +318,39 @@ fun PurgeShotScreen(
 
                 // Controls — fluid toggle with spring
                 item {
-                    StaggeredEntrance(index = 2) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            ToggleRow(
-                                title = stringResource(R.string.st_PurgeShot_EnablePurgeShot),
-                                subtitle = if (enabled) stringResource(R.string.st_PurgeShot_EnablePurgeShot_Desc) else stringResource(R.string.st_PurgeShot_Subtitle_Paused),
-                                icon = Icons.Rounded.ScreenshotMonitor,
-                                checked = enabled,
-                                onCheckedChange = { viewModel.setEnabled(it) }
-                            )
-                            AnimatedVisibility(
-                                visible = enabled,
-                                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
-                                exit = shrinkVertically() + fadeOut()
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    ToggleRow(
-                                        title = stringResource(R.string.st_PurgeShot_SmartAuto),
-                                        subtitle = stringResource(R.string.st_PurgeShot_SmartAuto_Desc, durationLabel(autoDuration)),
-                                        icon = Icons.Rounded.AutoAwesome,
-                                        checked = smartAuto,
-                                        onCheckedChange = { viewModel.setSmartAuto(it) }
-                                    )
-                                    AutoTimeExpressiveCard(
-                                        durationMillis = autoDuration,
-                                        durationLabel = durationLabel(autoDuration),
-                                        onClick = { showAutoPicker = true }
-                                    )
-                                    ToggleRow(
-                                        title = stringResource(R.string.st_PurgeShot_Notifications),
-                                        subtitle = if (notificationsEnabled) stringResource(R.string.st_PurgeShot_Notifications_Enabled) else stringResource(R.string.st_PurgeShot_Notifications_Disabled),
-                                        icon = Icons.Rounded.NotificationsActive,
-                                        checked = notificationsEnabled,
-                                        onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                                    )
-                                }
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ToggleRow(
+                            title = stringResource(R.string.st_PurgeShot_EnablePurgeShot),
+                            subtitle = if (enabled) stringResource(R.string.st_PurgeShot_EnablePurgeShot_Desc) else stringResource(R.string.st_PurgeShot_Subtitle_Paused),
+                            icon = Icons.Rounded.ScreenshotMonitor,
+                            checked = enabled,
+                            onCheckedChange = { viewModel.setEnabled(it) }
+                        )
+                        AnimatedVisibility(
+                            visible = enabled,
+                            enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                ToggleRow(
+                                    title = stringResource(R.string.st_PurgeShot_SmartAuto),
+                                    subtitle = stringResource(R.string.st_PurgeShot_SmartAuto_Desc, durationLabel(autoDuration)),
+                                    icon = Icons.Rounded.AutoAwesome,
+                                    checked = smartAuto,
+                                    onCheckedChange = { viewModel.setSmartAuto(it) }
+                                )
+                                AutoTimeExpressiveCard(
+                                    durationMillis = autoDuration,
+                                    durationLabel = durationLabel(autoDuration),
+                                    onClick = { showAutoPicker = true }
+                                )
+                                ToggleRow(
+                                    title = stringResource(R.string.st_PurgeShot_Notifications),
+                                    subtitle = if (notificationsEnabled) stringResource(R.string.st_PurgeShot_Notifications_Enabled) else stringResource(R.string.st_PurgeShot_Notifications_Disabled),
+                                    icon = Icons.Rounded.NotificationsActive,
+                                    checked = notificationsEnabled,
+                                    onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                                )
                             }
                         }
                     }
@@ -364,33 +358,31 @@ fun PurgeShotScreen(
 
                 // Timers — clear M3 Expressive grid, fixed (no bugged sheet height)
                 item {
-                    StaggeredEntrance(index = 3) {
-                        ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text(stringResource(R.string.st_PurgeShot_Timers), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
-                                    TextButton(onClick = { showPresetSheet = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
-                                        Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(stringResource(R.string.st_PurgeShot_Edit), fontWeight = FontWeight.Bold)
-                                    }
+                    ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.st_PurgeShot_Timers), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black)
+                                TextButton(onClick = { showPresetSheet = true }, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                                    Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(stringResource(R.string.st_PurgeShot_Edit), fontWeight = FontWeight.Bold)
                                 }
-                                // Simple 3-column flow without nested LazyVerticalGrid bug — stable measurement inside LazyColumn
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    presets.chunked(3).forEachIndexed { rowIdx, row ->
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                            row.forEach { p ->
-                                                Box(modifier = Modifier.weight(1f)) {
-                                                    TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
-                                                }
-                                            }
-                                            // Fill empty cells to keep 3-col alignment
-                                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                                        }
-                                    }
-                                }
-                                Text(stringResource(R.string.st_PurgeShot_Timers_Hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                            // Simple 3-column flow without nested LazyVerticalGrid bug — stable measurement inside LazyColumn
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                presets.chunked(3).forEachIndexed { rowIdx, row ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        row.forEach { p ->
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                TimerChip(preset = p, isAuto = p.label.equals("Auto", ignoreCase = true))
+                                            }
+                                        }
+                                        // Fill empty cells to keep 3-col alignment
+                                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                                    }
+                                }
+                            }
+                            Text(stringResource(R.string.st_PurgeShot_Timers_Hint), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -407,20 +399,18 @@ fun PurgeShotScreen(
 
                 if (pending.isEmpty()) {
                     item {
-                        StaggeredEntrance(index = 5) {
-                            ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                                Column(Modifier.padding(28.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Surface(modifier = Modifier.size(64.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
-                                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoDelete, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
-                                    }
-                                    Text(stringResource(R.string.st_PurgeShot_NoQueuedShots), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
-                                    Text(stringResource(R.string.st_PurgeShot_NoQueuedShots_Desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                                    if (com.frerox.toolz.BuildConfig.DEBUG) {
-                                        ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
-                                            Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(stringResource(R.string.st_PurgeShot_DemoShot), fontWeight = FontWeight.Bold)
-                                        }
+                        ExpressiveCard(onClick = {}, shape = RoundedCornerShape(24.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                            Column(Modifier.padding(28.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Surface(modifier = Modifier.size(64.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)) {
+                                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.AutoDelete, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer) }
+                                }
+                                Text(stringResource(R.string.st_PurgeShot_NoQueuedShots), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+                                Text(stringResource(R.string.st_PurgeShot_NoQueuedShots_Desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                                if (com.frerox.toolz.BuildConfig.DEBUG) {
+                                    ToolzTonalExpressiveButton(onClick = { viewModel.debugEnqueueDummy() }) {
+                                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(stringResource(R.string.st_PurgeShot_DemoShot), fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -428,14 +418,12 @@ fun PurgeShotScreen(
                     }
                 } else {
                     items(pending, key = { it.id }) { entry ->
-                        StaggeredEntrance(index = 0) {
-                            QueueCard(
-                                entry = entry,
-                                onKeep = { viewModel.cancelEntry(entry.id) },
-                                onDeleteNow = { viewModel.deleteNow(entry.id) },
-                                onExtend = { viewModel.extendEntry(entry.id, 15 * 60_000L) }
-                            )
-                        }
+                        QueueCard(
+                            entry = entry,
+                            onKeep = { viewModel.cancelEntry(entry.id) },
+                            onDeleteNow = { viewModel.deleteNow(entry.id) },
+                            onExtend = { viewModel.extendEntry(entry.id, 15 * 60_000L) }
+                        )
                     }
                 }
 
@@ -1116,59 +1104,57 @@ private fun AutoPickerSheet(
 
             // Options — clear selectable cards
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                options.forEachIndexed { idx, opt ->
+                options.forEach { opt ->
                     val selected = opt.durationMillis == currentDuration
-                    StaggeredEntrance(index = idx) {
-                        val interaction = remember { MutableInteractionSource() }
-                        val pressed by interaction.collectIsPressedAsState()
-                        val scale by animateFloatAsState(
-                            targetValue = if (pressed) 0.98f else 1f,
-                            animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
-                            label = "autoOptScale"
-                        )
-                        Surface(
-                            onClick = {
-                                haptic.tick()
-                                onSelect(opt.durationMillis)
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            tonalElevation = if (selected) 1.dp else 0.dp,
-                            border = if (selected) androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .graphicsLayer { scaleX = scale; scaleY = scale },
-                            interactionSource = interaction
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    val scale by animateFloatAsState(
+                        targetValue = if (pressed) 0.98f else 1f,
+                        animationSpec = spring(dampingRatio = 0.6f, stiffness = 380f),
+                        label = "autoOptScale"
+                    )
+                    Surface(
+                        onClick = {
+                            haptic.tick()
+                            onSelect(opt.durationMillis)
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = if (selected) 1.dp else 0.dp,
+                        border = if (selected) androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.08f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { scaleX = scale; scaleY = scale },
+                        interactionSource = interaction
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.weight(1f)) {
-                                    Surface(
-                                        modifier = Modifier.size(42.dp),
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(iconFor(opt.iconName), null, modifier = Modifier.size(20.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer)
-                                        }
-                                    }
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text(opt.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.Black else FontWeight.SemiBold, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
-                                        Text(durationToHumane(opt.durationMillis) + " • ${opt.label}", style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.weight(1f)) {
+                                Surface(
+                                    modifier = Modifier.size(42.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(iconFor(opt.iconName), null, modifier = Modifier.size(20.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer)
                                     }
                                 }
-                                AnimatedContent(targetState = selected, label = "check") { isSel ->
-                                    if (isSel) {
-                                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                                            Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.padding(6.dp).size(18.dp))
-                                        }
-                                    } else {
-                                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))) {
-                                            Box(modifier = Modifier.size(30.dp)) {}
-                                        }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(opt.label, style = MaterialTheme.typography.titleSmall, fontWeight = if (selected) FontWeight.Black else FontWeight.SemiBold, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface)
+                                    Text(durationToHumane(opt.durationMillis) + " • ${opt.label}", style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            AnimatedContent(targetState = selected, label = "check") { isSel ->
+                                if (isSel) {
+                                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                                        Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.padding(6.dp).size(18.dp))
+                                    }
+                                } else {
+                                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))) {
+                                        Box(modifier = Modifier.size(30.dp)) {}
                                     }
                                 }
                             }
