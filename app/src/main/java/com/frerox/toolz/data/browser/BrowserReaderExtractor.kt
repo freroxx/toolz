@@ -26,9 +26,9 @@ object BrowserReaderExtractor {
         // string containing it. Accept both without trusting malformed page data.
         val decoded = runCatching { JSONTokener(raw).nextValue() }.getOrNull()
         val candidates = listOfNotNull(
-            decoded as? String,
+            (decoded as? String)?.let(::normalisePayload),
             raw.takeIf { it.trimStart().startsWith("{") },
-            raw.removeSurrounding("\"").replace("\\\"", "\"").takeIf { it.startsWith("{") },
+            normalisePayload(raw).takeIf { it.startsWith("{") },
         )
         val json = candidates.firstNotNullOfOrNull { candidate ->
             runCatching { JSONObject(candidate) }.getOrNull()
@@ -42,4 +42,9 @@ object BrowserReaderExtractor {
             text = text,
         )
     }
+
+    private fun normalisePayload(value: String): String = value
+        .removeSurrounding("\"")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
