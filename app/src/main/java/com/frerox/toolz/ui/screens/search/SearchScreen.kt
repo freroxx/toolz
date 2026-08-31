@@ -48,6 +48,7 @@ import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchCategory
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
+import com.frerox.toolz.data.browser.BrowserAddressResolver
 import com.frerox.toolz.ui.screens.search.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.Calendar
@@ -330,11 +331,13 @@ fun SearchScreen(
                             onSearch      = { raw ->
                                 val q = raw.trim()
                                 if (q.isEmpty()) return@SearchPill
-                                val looksLikeUrl = (q.contains(".") || q.startsWith("http")) && !q.contains(" ")
+                                val target = BrowserAddressResolver.resolve(
+                                    q, uiState.searchEngine, uiState.customEngineUrl
+                                )
+                                val looksLikeUrl = q.startsWith("http", true) || BrowserAddressResolver.isAddress(q)
                                 if (looksLikeUrl) {
-                                    val url = if (q.startsWith("http")) q else "https://$q"
-                                    viewModel.openTab(url)
-                                    onResultClick(url)
+                                    viewModel.openTab(target)
+                                    onResultClick(target)
                                 } else {
                                     viewModel.onSearch(q)
                                 }
@@ -382,6 +385,7 @@ fun SearchScreen(
                     onLoadMore      = viewModel::loadMore,
                     onBackClick     = onBackClick,
                     onUrlOpen       = { url -> vibrationManager?.vibrateNavigation(); viewModel.openTab(url); onResultClick(url) },
+                    onResumeTab     = { id, url -> vibrationManager?.vibrateNavigation(); viewModel.switchTab(id); onResultClick(url) },
                     onAddQuickLink  = { showAddQuickLink = true },
                     onEditQuickLink = { editingQuickLink = it },
                     onEditBookmark  = { editingBookmark = it },
@@ -538,6 +542,7 @@ private fun PageContent(
     onLoadMore: () -> Unit,
     onBackClick: () -> Unit,
     onUrlOpen: (String) -> Unit,
+    onResumeTab: (String, String) -> Unit = { _, _ -> },
     onAddQuickLink: () -> Unit,
     onEditQuickLink: (QuickLinkEntry) -> Unit,
     onEditBookmark: (BookmarkEntry) -> Unit,
@@ -631,6 +636,7 @@ private fun PageContent(
                 bookmarks           = bookmarks,
                 quickLinks          = quickLinks,
                 onUrlOpen           = onUrlOpen,
+                onResumeTab          = onResumeTab,
                 onAddQuickLink      = onAddQuickLink,
                 onEditQuickLink     = onEditQuickLink,
                 onEditBookmark      = onEditBookmark,
@@ -655,6 +661,7 @@ private fun HomePage(
     bookmarks: List<BookmarkEntry>,
     quickLinks: List<QuickLinkEntry>,
     onUrlOpen: (String) -> Unit,
+    onResumeTab: (String, String) -> Unit,
     onAddQuickLink: () -> Unit,
     onEditQuickLink: (QuickLinkEntry) -> Unit,
     onEditBookmark: (BookmarkEntry) -> Unit,
@@ -678,7 +685,23 @@ private fun HomePage(
     ) {
         // ── Greeting ─────────────────────────────────────
         item(key = "greeting") {
-            GreetingHeader(userName = uiState.userName)
+            BrowserPulseCard(
+                userName = uiState.userName,
+                engine = uiState.searchEngine,
+                tabCount = uiState.tabs.size,
+                isPrivate = uiState.isIncognito,
+                bookmarkCount = bookmarks.size,
+            )
+        }
+
+        // ── Resume session ───────────────────────────────
+        if (uiState.tabs.isNotEmpty()) {
+            item(key = "continueBrowsing") {
+                ContinueBrowsingSection(
+                    tabs = uiState.tabs,
+                    onOpen = { onResumeTab(it.id, it.url) },
+                )
+            }
         }
 
         // ── Quick access ─────────────────────────────────
@@ -726,6 +749,118 @@ private fun HomePage(
                 onClearAll = onClearHistory,
                 filterQuery = uiState.query
             )
+        }
+    }
+}
+
+@Composable
+private fun BrowserPulseCard(
+    userName: String,
+    engine: String,
+    tabCount: Int,
+    isPrivate: Boolean,
+    bookmarkCount: Int,
+) {
+    val greeting = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+        in 0..4 -> "Good night"
+        in 5..11 -> "Good morning"
+        in 12..17 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    val name = userName.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
+    val palette = MaterialTheme.colorScheme
+
+    Surface(
+        shape = RoundedCornerShape(32.dp),
+        color = if (isPrivate) palette.inverseSurface else palette.primaryContainer,
+        contentColor = if (isPrivate) palette.inverseOnSurface else palette.onPrimaryContainer,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = CircleShape,
+                    color = if (isPrivate) palette.inversePrimary.copy(alpha = .18f) else palette.primary.copy(alpha = .14f),
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            if (isPrivate) Icons.Rounded.VisibilityOff else Icons.Rounded.Public,
+                            contentDescription = null,
+                            tint = if (isPrivate) palette.inversePrimary else palette.primary,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("$greeting$name", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(
+                        if (isPrivate) "Private browsing is on" else "Your private web, ready when you are",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = LocalContentColor.current.copy(alpha = .72f),
+                    )
+                }
+                Icon(Icons.Rounded.Shield, null, tint = LocalContentColor.current.copy(alpha = .8f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                BrowserMetric("$tabCount", if (tabCount == 1) "tab" else "tabs", Modifier.weight(1f))
+                BrowserMetric("$bookmarkCount", "saved", Modifier.weight(1f))
+                BrowserMetric(engine.lowercase().replaceFirstChar { it.titlecase() }, "search", Modifier.weight(1.25f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserMetric(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(LocalContentColor.current.copy(alpha = .09f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = .68f))
+    }
+}
+
+@Composable
+private fun ContinueBrowsingSection(tabs: List<com.frerox.toolz.data.browser.TabEntry>, onOpen: (com.frerox.toolz.data.browser.TabEntry) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeader(title = "Continue browsing")
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 4.dp)) {
+            items(tabs.sortedByDescending { it.lastAccessed }.take(8), key = { it.id }) { tab ->
+                Surface(
+                    onClick = { onOpen(tab) },
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
+                    modifier = Modifier.width(190.dp).height(112.dp),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PrivacyFaviconImage(url = tab.url, size = 20.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                BrowserAddressResolver.displayHost(tab.url),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (tab.isPrivate) {
+                                Spacer(Modifier.weight(1f))
+                                Icon(Icons.Rounded.VisibilityOff, null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Text(tab.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
         }
     }
 }

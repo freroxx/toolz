@@ -42,6 +42,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 
 import com.frerox.toolz.data.browser.BrowserDownloadManager
+import com.frerox.toolz.data.browser.BrowserAddressResolver
+import com.frerox.toolz.data.browser.BrowserTabStateStore
 import com.frerox.toolz.data.browser.DownloadItem
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
@@ -55,7 +57,8 @@ class WebViewViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val tabManager: TabManager,
     private val passwordDao: PasswordDao,
-    private val downloadManager: BrowserDownloadManager
+    private val downloadManager: BrowserDownloadManager,
+    private val tabStateStore: BrowserTabStateStore,
 ) : ViewModel() {
 
     private val _isBookmarked = MutableStateFlow(false)
@@ -79,6 +82,8 @@ class WebViewViewModel @Inject constructor(
     val tabs = tabManager.tabs
     val activeTabId = tabManager.activeTabId
     val autofillEnabled = settingsRepository.searchAutofillEnabled
+    val searchEngine = settingsRepository.searchEngine
+    val customSearchEngineUrl = settingsRepository.searchCustomEngineUrl
 
     val downloads = downloadManager.downloads
 
@@ -242,12 +247,36 @@ class WebViewViewModel @Inject constructor(
     }
 
     fun closeTab(id: String) {
+        tabStateStore.remove(id)
         tabManager.removeTab(id)
     }
 
-    fun addTab(url: String) {
-        tabManager.addTab(url)
+    fun addTab(url: String, isPrivate: Boolean = false) {
+        tabManager.addTab(url, isPrivate = isPrivate)
     }
+
+    /** Resolves omnibox text using the user's selected search provider. */
+    fun resolveAddress(input: String, onResolved: (String) -> Unit) {
+        viewModelScope.launch {
+            onResolved(BrowserAddressResolver.resolve(
+                raw = input,
+                engine = settingsRepository.searchEngine.first(),
+                customTemplate = settingsRepository.searchCustomEngineUrl.first(),
+            ))
+        }
+    }
+
+    fun clearPrivateTabs() {
+        val privateIds = tabManager.tabs.value.filter { it.isPrivate }.mapTo(linkedSetOf()) { it.id }
+        tabStateStore.removeAll(privateIds)
+        tabManager.clearPrivateTabs()
+    }
+
+    fun captureTabState(tabId: String, webView: android.webkit.WebView) =
+        tabStateStore.capture(tabId, webView)
+
+    fun restoreTabState(tabId: String, webView: android.webkit.WebView): Boolean =
+        tabStateStore.restore(tabId, webView)
 
     fun checkBookmark(url: String) {
         viewModelScope.launch {

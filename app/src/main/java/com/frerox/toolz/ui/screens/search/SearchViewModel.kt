@@ -554,7 +554,8 @@ class SearchViewModel @Inject constructor(
 
     // ─── Tab actions ──────────────────────────────────────────────────────────
 
-    fun openTab(url: String)  { tabManager.addTab(url) }
+    /** Search results inherit the current privacy context instead of leaking out of it. */
+    fun openTab(url: String)  { tabManager.addTab(url, isPrivate = _settings.value.isIncognito) }
     fun closeTab(id: String)  { tabManager.removeTab(id) }
     fun switchTab(id: String) { tabManager.switchTab(id) }
 

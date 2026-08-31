@@ -24,17 +24,24 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class TabManager @Inject constructor() {
-    private val _tabs = MutableStateFlow<List<TabEntry>>(emptyList())
+class TabManager @Inject constructor(
+    private val sessionStore: BrowserSessionStore,
+) {
+    private val _tabs = MutableStateFlow(sessionStore.restore())
     val tabs: StateFlow<List<TabEntry>> = _tabs.asStateFlow()
 
-    private val _activeTabId = MutableStateFlow<String?>(null)
+    private val _activeTabId = MutableStateFlow(sessionStore.restoreActiveTabId())
     val activeTabId: StateFlow<String?> = _activeTabId.asStateFlow()
 
-    fun addTab(url: String, title: String = "New Tab") {
-        val newTab = TabEntry(url = url, title = title)
+    init {
+        if (_activeTabId.value !in _tabs.value.map { it.id }) _activeTabId.value = _tabs.value.lastOrNull()?.id
+    }
+
+    fun addTab(url: String, title: String = "New Tab", isPrivate: Boolean = false) {
+        val newTab = TabEntry(url = url, title = title, isPrivate = isPrivate)
         _tabs.value = _tabs.value + newTab
         _activeTabId.value = newTab.id
+        persist()
     }
 
     fun removeTab(tabId: String) {
@@ -43,6 +50,7 @@ class TabManager @Inject constructor() {
             // Keep at least one tab or handle empty state
             _tabs.value = emptyList()
             _activeTabId.value = null
+            persist()
             return
         }
         
@@ -52,6 +60,7 @@ class TabManager @Inject constructor() {
         if (_activeTabId.value == tabId) {
             _activeTabId.value = newTabs.lastOrNull()?.id
         }
+        persist()
     }
 
     fun switchTab(tabId: String) {
@@ -61,6 +70,7 @@ class TabManager @Inject constructor() {
             _tabs.value = _tabs.value.map {
                 if (it.id == tabId) it.copy(lastAccessed = System.currentTimeMillis()) else it
             }
+            persist()
         }
     }
 
@@ -76,6 +86,7 @@ class TabManager @Inject constructor() {
                 )
             } else it
         }
+        persist()
     }
 
     fun removeTabs(tabIds: Set<String>) {
@@ -86,5 +97,10 @@ class TabManager @Inject constructor() {
         if (_activeTabId.value in tabIds) {
             _activeTabId.value = newTabs.lastOrNull()?.id
         }
+        persist()
     }
+
+    fun clearPrivateTabs() = removeTabs(_tabs.value.filter { it.isPrivate }.mapTo(linkedSetOf()) { it.id })
+
+    private fun persist() = sessionStore.save(_tabs.value, _activeTabId.value)
 }

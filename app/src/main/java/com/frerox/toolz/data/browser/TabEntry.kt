@@ -26,5 +26,8 @@ data class TabEntry(
     val faviconUrl: String? = null,
     val previewPath: String? = null,
     val isDesktopMode: Boolean = false,
+    /** Private tabs are memory-only and excluded from session restore. */
+    val isPrivate: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
     val lastAccessed: Long = System.currentTimeMillis()
 )

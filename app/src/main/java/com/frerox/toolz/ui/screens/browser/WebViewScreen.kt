@@ -77,12 +77,15 @@ import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.browser.AdBlockList
 import com.frerox.toolz.data.browser.TabEntry
+import com.frerox.toolz.data.browser.BrowserReaderArticle
+import com.frerox.toolz.data.browser.BrowserReaderExtractor
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.browser.components.AutofillBottomSheet
 import com.frerox.toolz.ui.screens.browser.components.AutofillSuccessOverlay
 import com.frerox.toolz.ui.screens.browser.components.DownloadsSheet
 import com.frerox.toolz.ui.screens.browser.components.ManualPasswordBottomSheet
+import com.frerox.toolz.ui.screens.browser.components.ReaderViewSheet
 import com.frerox.toolz.ui.screens.search.components.FloatingSearchDock
 import com.frerox.toolz.ui.screens.search.components.PrivacyFaviconImage
 import com.frerox.toolz.ui.screens.search.components.SearchPill
@@ -119,6 +122,7 @@ fun WebViewScreen(
     var progress     by remember { mutableFloatStateOf(0f) }
     var isLoading    by remember { mutableStateOf(true) }
     var currentUrl   by remember { mutableStateOf(url) }
+    var renderedTabId by remember { mutableStateOf<String?>(null) }
     var pageTitle    by remember { mutableStateOf("") }
     var canGoBack    by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
@@ -131,6 +135,7 @@ fun WebViewScreen(
     var searchOverlayQuery by remember { mutableStateOf("") }
     var showDownloadsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
+    var readerArticle by remember { mutableStateOf<BrowserReaderArticle?>(null) }
 
     // Pull to refresh
     val refreshState = rememberPullToRefreshState()
@@ -163,9 +168,18 @@ fun WebViewScreen(
     }
 
     // Handle Tab change
-    LaunchedEffect(activeTabId) {
+    LaunchedEffect(activeTabId, webView) {
         activeTab?.let { tab ->
-            if (tab.url != currentUrl) {
+            val oldTabId = renderedTabId
+            if (oldTabId != null && oldTabId != tab.id) {
+                webView?.let { viewModel.captureTabState(oldTabId, it) }
+            }
+            renderedTabId = tab.id
+            val restored = webView?.let { viewModel.restoreTabState(tab.id, it) } == true
+            if (restored) {
+                currentUrl = webView?.url ?: tab.url
+                pageTitle = webView?.title.orEmpty()
+            } else if (tab.url != currentUrl) {
                 webView?.loadUrl(tab.url)
             }
         }
@@ -191,6 +205,7 @@ fun WebViewScreen(
                 tabs             = tabs,
                 activeTabId      = activeTabId,
                 isDesktopMode    = isDesktopMode,
+                isPrivate        = activeTab?.isPrivate == true,
                 adBlockEnabled   = adBlockEnabled,
                 floatingToolbarVisible = floatingToolbarVisible,
                 onTabClick       = { tab -> viewModel.switchTab(tab.id) },
@@ -214,7 +229,11 @@ fun WebViewScreen(
                     viewModel.toggleBookmark(pageTitle, currentUrl)
                 },
                 onUrlBarClick    = { showSearchOverlay = true },
-                onUrlGo = { target -> webView?.loadUrl(target); currentUrl = target; viewModel.updateTab(url = target) },
+                onUrlGo = { input -> viewModel.resolveAddress(input) { target ->
+                    webView?.loadUrl(target)
+                    currentUrl = target
+                    viewModel.updateTab(url = target)
+                } },
                 downloads = downloads,
                 onShare = {
                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -245,7 +264,18 @@ fun WebViewScreen(
                         viewModel.findManualPasswords(currentUrl)
                         showPasswordsSheet = true
                     }
-                }
+                },
+                onNewPrivateTab = {
+                    viewModel.addTab("about:blank", isPrivate = true)
+                    searchOverlayQuery = ""
+                    showSearchOverlay = true
+                },
+                onClosePrivateTabs = { viewModel.clearPrivateTabs() },
+                onOpenReader = {
+                    webView?.evaluateJavascript(BrowserReaderExtractor.script) { raw ->
+                        readerArticle = BrowserReaderExtractor.parseJavascriptResult(raw)
+                    }
+                },
             )
 
             // WebView with Pull-to-Refresh
@@ -279,10 +309,16 @@ fun WebViewScreen(
                                 displayZoomControls     = false
                                 setSupportZoom(true)
                                 cacheMode               = WebSettings.LOAD_DEFAULT
-                                mixedContentMode        = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                // A browser should never silently downgrade an HTTPS page by
+                                // allowing insecure subresources.
+                                mixedContentMode        = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                 allowContentAccess      = true
                                 allowFileAccess         = false
                                 databaseEnabled         = true
+                                setSupportMultipleWindows(false)
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    safeBrowsingEnabled = true
+                                }
                             }
 
                             // Force dark mode in WebView when system is dark
@@ -320,6 +356,7 @@ fun WebViewScreen(
                                         pageTitle = t
                                         viewModel.updateTab(title = t)
                                     }
+                                    activeTabId?.let { viewModel.captureTabState(it, this@apply) }
                                     // Autofill detection logic
                                     u?.let { finishedUrl ->
                                         scope.launch {
@@ -452,6 +489,11 @@ fun WebViewScreen(
                                 setSupportZoom(true)
                                 wv.reload()
                             }
+                            cacheMode = if (activeTab?.isPrivate == true) {
+                                WebSettings.LOAD_NO_CACHE
+                            } else {
+                                WebSettings.LOAD_DEFAULT
+                            }
                         }
 
                         // Re-apply force-dark on recomposition (theme changes)
@@ -480,7 +522,11 @@ fun WebViewScreen(
                 activeTabId   = activeTabId,
                 onTabClick    = { tab -> viewModel.switchTab(tab.id) },
                 onManageTabs  = onManageTabs,
-                onNewTab      = onBack,
+                onNewTab      = {
+                    viewModel.addTab("about:blank")
+                    searchOverlayQuery = ""
+                    showSearchOverlay = true
+                },
                 currentUrl    = currentUrl,
                 onSearchClick = { showSearchOverlay = true },
                 onSwipeDown   = { isDockVisible = false },
@@ -544,7 +590,11 @@ fun WebViewScreen(
                         onQueryChange = { searchOverlayQuery = it },
                         onSearch = { q ->
                             showSearchOverlay = false
-                            webView?.loadUrl(if (q.contains(".")) q else "https://www.google.com/search?q=$q")
+                            viewModel.resolveAddress(q) { target ->
+                                webView?.loadUrl(target)
+                                currentUrl = target
+                                viewModel.updateTab(url = target)
+                            }
                         },
                         active = true,
                         onActiveChange = { if (!it) showSearchOverlay = false },
@@ -594,6 +644,10 @@ fun WebViewScreen(
                     viewModel.deleteDownload(item)
                 }
             )
+        }
+
+        readerArticle?.let { article ->
+            ReaderViewSheet(article = article, onDismiss = { readerArticle = null })
         }
 
         if (autofillSuggestions.isNotEmpty()) {
@@ -648,6 +702,7 @@ private fun TopChrome(
     tabs: List<TabEntry>,
     activeTabId: String?,
     isDesktopMode: Boolean,
+    isPrivate: Boolean,
     adBlockEnabled: Boolean,
     floatingToolbarVisible: Boolean,
     onTabClick: (TabEntry) -> Unit,
@@ -670,6 +725,9 @@ private fun TopChrome(
     onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
+    onNewPrivateTab: () -> Unit,
+    onClosePrivateTabs: () -> Unit,
+    onOpenReader: () -> Unit,
     onUrlGo: ((String) -> Unit)? = null,
     downloads: List<com.frerox.toolz.data.browser.DownloadItem> = emptyList(),
 ) {
@@ -687,25 +745,6 @@ private fun TopChrome(
     }
     // Back closes edit first
     androidx.activity.compose.BackHandler(enabled = isEditingUrl) { isEditingUrl = false }
-    fun isValidUrl(s: String): Boolean {
-        val t = s.trim()
-        if (t.contains(" ")) return false
-        if (t.startsWith("localhost") || t.startsWith("127.") || t.startsWith("192.168.") || t.startsWith("10.")) return true
-        // Require dot and no spaces, or scheme present
-        if (t.startsWith("http://") || t.startsWith("https://")) return true
-        val uri = try { Uri.parse(if (t.contains("://")) t else "https://$t") } catch (_: Exception) { null }
-        val host = uri?.host ?: return false
-        return host.contains(".") && host.length >= 3 && !host.startsWith(".") && !host.endsWith(".")
-    }
-    fun resolveInput(input: String): String {
-        val t = input.trim()
-        if (t.isBlank()) return currentUrl
-        return when {
-            t.startsWith("http://") || t.startsWith("https://") -> t
-            isValidUrl(t) -> if (t.contains("://")) t else "https://$t"
-            else -> "https://www.google.com/search?q=" + java.net.URLEncoder.encode(t, "UTF-8")
-        }
-    }
 
     val progressAlpha by animateFloatAsState(
         targetValue   = if (isLoading) 1f else 0f,
@@ -760,9 +799,8 @@ private fun TopChrome(
                             textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                             keyboardActions = KeyboardActions(onGo = {
-                                val target = resolveInput(editUrlText)
                                 isEditingUrl = false
-                                if (onUrlGo != null) onUrlGo(target) else onUrlBarClick()
+                                if (onUrlGo != null) onUrlGo(editUrlText) else onUrlBarClick()
                             }),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -784,9 +822,8 @@ private fun TopChrome(
                             Icon(Icons.Rounded.Close, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         IconButton(onClick = {
-                            val target = resolveInput(editUrlText)
                             isEditingUrl = false
-                            if (onUrlGo != null) onUrlGo(target)
+                            if (onUrlGo != null) onUrlGo(editUrlText)
                         }, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Rounded.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
@@ -827,6 +864,14 @@ private fun TopChrome(
                             )
                         }
                         val isSecure = currentUrl.startsWith("https://")
+                        if (isPrivate) {
+                            Icon(
+                                Icons.Rounded.VisibilityOff,
+                                contentDescription = "Private tab",
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         Icon(
                             imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
                             contentDescription = null,
@@ -984,7 +1029,10 @@ private fun TopChrome(
             onToggleAdBlock = onToggleAdBlock,
             onToggleFloatingToolbar = onToggleFloatingToolbar,
             onShowDownloads = onShowDownloads,
-            onShowPasswords = onShowPasswords
+            onShowPasswords = onShowPasswords,
+            onNewPrivateTab = onNewPrivateTab,
+            onClosePrivateTabs = onClosePrivateTabs,
+            onOpenReader = onOpenReader,
         )
     }
 }
@@ -1088,6 +1136,9 @@ private fun BrowserOptionsSheet(
     onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
+    onNewPrivateTab: () -> Unit,
+    onClosePrivateTabs: () -> Unit,
+    onOpenReader: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1178,6 +1229,9 @@ private fun BrowserOptionsSheet(
 
             // Actions list
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OptionActionRow("New private tab", Icons.Rounded.VisibilityOff, onNewPrivateTab, onDismiss)
+                OptionActionRow("Close private tabs", Icons.Rounded.DeleteSweep, onClosePrivateTabs, onDismiss)
+                OptionActionRow("Reader view", Icons.Rounded.AutoStories, onOpenReader, onDismiss)
                 OptionActionRow(stringResource(R.string.st_AiAssistantScreen_9f0a), Icons.Rounded.Search, onToggleFind, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_7e8f), Icons.Rounded.Download, onShowDownloads, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_9f0a), Icons.Rounded.Share, onShare, onDismiss)
