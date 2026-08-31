@@ -311,14 +311,11 @@ class WebSearchRepository @Inject constructor(
             else     -> listOf(engine)
         }
 
-        // For image/video categories, return a synthetic result immediately
-        // (all engines use JS-heavy rendering for images/videos that Jsoup cannot parse)
-        if (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) {
-            val eng = if (engine == "META") "BING" else engine
-            return@withContext syntheticCategoryResult(
-                eng, query, category,
-                safeSearchDDG, safeSearchGoogle, safeSearchBing, safeSearchBrave,
-            )
+        // Pagination & safeSearch fix: images/videos now attempt real HTML parsing before synthetic fallback; synthetic only when offset==0 and parsing yields empty (prevents blocking loadMore)
+        if ((category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) && offset == 0) {
+            // Try real fetch first via fetchFromEngine later; if empty, synthetic will be used as fallback below
+        } else if (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) {
+            // offset>0 -> allow real pagination, skip synthetic
         }
 
         val client = getDnsClient()
@@ -407,7 +404,13 @@ class WebSearchRepository @Inject constructor(
             resultsByEngine.values.forEach { final.addAll(it) }
         }
 
-        final.distinctBy { it.url }.take(500)
+        val deduped = final.distinctBy { canonicalUrl(it.url) }.take(500)
+        // Synthetic fallback for media categories only when real results empty on first page (fixes limited results / loadMore blocked)
+        if (deduped.isEmpty() && (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) && offset == 0) {
+            val eng = if (engine == "META") "BING" else engine
+            return@withContext syntheticCategoryResult(eng, query, category, safeSearchDDG, safeSearchGoogle, safeSearchBing, safeSearchBrave)
+        }
+        deduped
     }
 
     // ─── Engine fetcher ───────────────────────────────────────────────────────
@@ -540,6 +543,12 @@ class WebSearchRepository @Inject constructor(
         }
         return emptyList()
     }
+
+    private fun canonicalUrl(url: String): String = try {
+        var u = url.trim().removeSuffix("/").lowercase()
+        u = u.replace(Regex("[?&]utm_[^&]+"), "").replace("?&","?").trimEnd('?','&')
+        u
+    } catch(_:Exception){ url }
 
     /**
      * Builds a synthetic "open in search engine" result for image/video categories.

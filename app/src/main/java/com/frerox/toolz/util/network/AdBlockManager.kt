@@ -45,7 +45,7 @@ class AdBlockManager @Inject constructor(
          * is treated as stale and a fresh network sync is performed.
          * v3 — comprehensive hosts (IPv4/v6, multi-domain lines) & ABP rule parser.
          */
-        private const val CACHE_VERSION = 3
+        private const val CACHE_VERSION = 4
         private const val VERSION_HEADER = "#cache-version=$CACHE_VERSION"
         private const val CACHE_FILE = "imported_blocklist.txt"
     }

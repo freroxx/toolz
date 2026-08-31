@@ -717,13 +717,14 @@ private fun HomePage(
             }
         }
 
-        // ── Recent history ────────────────────────────────
-        item(key = "history") {
-            RecentSearchSection(
+        // ── Recent history — REVAMPED timeline grouped by Today/Yesterday/This week
+        item(key = "history_revamped") {
+            com.frerox.toolz.ui.screens.search.components.RecentSearchTimeline(
                 history = history,
                 onSearch = onSearch,
                 onDelete = onDeleteHistory,
-                onClearAll = onClearHistory
+                onClearAll = onClearHistory,
+                filterQuery = uiState.query
             )
         }
     }

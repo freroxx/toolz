@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.ui.screens.browser
 
+import com.frerox.toolz.data.browser.autofill.AutofillJsBridge
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -287,6 +288,14 @@ fun WebViewScreen(
                                     settings, WebSettingsCompat.FORCE_DARK_ON
                                 )
                             }
+                            // Autofill JS bridge — enables MutationObserver callback for dynamic SPA forms
+                            addJavascriptInterface(object {
+                                @android.webkit.JavascriptInterface
+                                fun onAuthFieldsDetected() {
+                                    // Must trigger autofill even on non-login URLs
+                                    scope.launch { viewModel.findAutofillSuggestions(currentUrl, force = true) }
+                                }
+                            }, "AndroidAutofill")
 
                             setDownloadListener { d_url, userAgent, contentDisposition, mimetype, _ ->
                                 viewModel.startDownload(d_url, userAgent, contentDisposition, mimetype)
@@ -590,54 +599,7 @@ fun WebViewScreen(
                 onDismiss = { viewModel.clearAutofillSuggestions() },
                 onSelect = { pwd ->
                     viewModel.onCredentialSelected(activity, pwd) { user, pass ->
-                        webView?.evaluateJavascript(
-                            """
-                            (function(){
-                              function fill(selectors, value) {
-                                for (var i = 0; i < selectors.length; i++) {
-                                  var elements = document.querySelectorAll(selectors[i]);
-                                  for (var j = 0; j < elements.length; j++) {
-                                    var el = elements[j];
-                                    if (el && el.offsetParent !== null) {
-                                      el.value = value;
-                                      el.dispatchEvent(new Event('input', { bubbles: true }));
-                                      el.dispatchEvent(new Event('change', { bubbles: true }));
-                                      return true;
-                                    }
-                                  }
-                                }
-                                return false;
-                              }
-
-                              fill([
-                                'input[type="email"]',
-                                'input[name*="email"]',
-                                'input[name="identifier"]',
-                                'input[name*="user"]',
-                                'input[name*="login"]',
-                                'input[id*="user"]',
-                                'input[id*="email"]',
-                                'input[id*="login"]',
-                                'input[autocomplete*="username"]',
-                                'input[autocomplete*="email"]',
-                                'input[aria-label*="Email"]',
-                                'input[aria-label*="user"]',
-                                'input[type="text"]'
-                              ], '${user.replace("'", "\\'")}');
-
-                              fill([
-                                'input[type="password"]',
-                                'input[name*="pass"]',
-                                'input[name="password"]',
-                                'input[id*="pass"]',
-                                'input[autocomplete*="password"]',
-                                'input[autocomplete*="current-password"]',
-                                'input[aria-label*="Pass"]'
-                              ], '${pass.replace("'", "\\'")}');
-                            })();
-                            """.trimIndent(),
-                            null,
-                        )
+                        webView?.evaluateJavascript(AutofillJsBridge.fillJs(user, pass), null)
                     }
                 }
             )
@@ -660,42 +622,7 @@ fun WebViewScreen(
                     viewModel.clearManualPasswords()
                 },
                 onFill = { pwd ->
-                    webView?.evaluateJavascript(
-                        """
-                        (function(){
-                          function fill(selectors, value) {
-                            for (var i = 0; i < selectors.length; i++) {
-                              var elements = document.querySelectorAll(selectors[i]);
-                              for (var j = 0; j < elements.length; j++) {
-                                var el = elements[j];
-                                if (el && el.offsetParent !== null) {
-                                  el.value = value;
-                                  el.dispatchEvent(new Event('input', { bubbles: true }));
-                                  el.dispatchEvent(new Event('change', { bubbles: true }));
-                                  return true;
-                                }
-                              }
-                            }
-                            return false;
-                          }
-
-                          fill([
-                            'input[type="email"]', 'input[name*="email"]', 'input[name="identifier"]',
-                            'input[name*="user"]', 'input[name*="login"]', 'input[id*="user"]',
-                            'input[id*="email"]', 'input[id*="login"]', 'input[autocomplete*="username"]',
-                            'input[autocomplete*="email"]', 'input[aria-label*="Email"]',
-                            'input[aria-label*="user"]', 'input[type="text"]'
-                          ], '${pwd.username.replace("'", "\\'")}');
-
-                          fill([
-                            'input[type="password"]', 'input[name*="pass"]', 'input[name="password"]',
-                            'input[id*="pass"]', 'input[autocomplete*="password"]',
-                            'input[autocomplete*="current-password"]', 'input[aria-label*="Pass"]'
-                          ], '${pwd.password.replace("'", "\\'")}');
-                        })();
-                        """.trimIndent(),
-                        null
-                    )
+                    webView?.evaluateJavascript(AutofillJsBridge.fillJs(pwd.username, pwd.password), null)
                 }
             )
         }
@@ -752,7 +679,7 @@ private fun TopChrome(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(ExtraLargeExpressiveShape)
+            .clip(RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomStart = 20.dp, bottomEnd = 20.dp))
             .background(MaterialTheme.colorScheme.surface)
             .statusBarsPadding(),
     ) {
@@ -779,11 +706,11 @@ private fun TopChrome(
                 onClick        = onUrlBarClick,
                 modifier       = Modifier
                     .weight(1f)
-                    .height(48.dp),
-                shape          = CircleShape,
+                    .height(40.dp),
+                shape          = RoundedCornerShape(14.dp),
                 color          = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 2.dp,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                tonalElevation = 1.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
                 Row(
                     modifier = Modifier
@@ -985,7 +912,7 @@ private fun TabStrip(
         state = listState,
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(40.dp)
             .background(MaterialTheme.colorScheme.surface),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1004,11 +931,11 @@ private fun TabStrip(
 
             Surface(
                 onClick = { onTabClick(tab) },
-                shape = SmallExpressiveShape,
+                shape = RoundedCornerShape(12.dp),
                 color = backgroundColor,
                 modifier = Modifier
                     .widthIn(max = 180.dp)
-                    .height(42.dp)
+                    .height(36.dp)
                     .animateContentSize()
             ) {
                 Row(

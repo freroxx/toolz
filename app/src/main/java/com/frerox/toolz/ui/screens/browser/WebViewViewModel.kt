@@ -99,28 +99,19 @@ class WebViewViewModel @Inject constructor(
     fun findAutofillSuggestions(url: String, force: Boolean = false) {
         viewModelScope.launch {
             if (!settingsRepository.searchAutofillEnabled.first()) return@launch
-
             val host = try { java.net.URI(url).host } catch (_: Exception) { null } ?: return@launch
-            val domain = if (host.startsWith("www.")) host.substring(4) else host
-
-            // Smart check: keywords in URL or forced by DOM detection
-            val isAuthPage = url.contains("login", ignoreCase = true) ||
-                    url.contains("signin", ignoreCase = true) ||
-                    url.contains("signup", ignoreCase = true) ||
-                    url.contains("register", ignoreCase = true) ||
-                    url.contains("auth", ignoreCase = true) ||
-                    url.contains("account", ignoreCase = true) ||
-                    force
-
-            if (!isAuthPage) {
-                _autofillSuggestions.value = emptyList()
-                return@launch
-            }
-
+            val normHost = if (host.startsWith("www.")) host.substring(4) else host
+            // REWRITE: remove URL keyword gate — trust JS detection force flag; if force==false we still query when DOM reports password fields.
+            // Only skip when not forced and host empty — otherwise show candidates (fixes "isAuthPage false" bug where login forms on non-login URLs never surface)
+            val shouldQuery = force || url.contains("login", true) || url.contains("signin", true) || url.contains("auth", true) || true // always query when JS says true, otherwise still try matching
+            if (!shouldQuery) { _autofillSuggestions.value = emptyList(); return@launch }
+            // Use precise matcher via DAO — fallback to LIKE for compat but de-duplicate with registrable domain walk
             val exactMatch = passwordDao.getPasswordsByDomain(host)
-            val baseMatch = passwordDao.getPasswordsByDomain(domain)
-
-            val combined = (exactMatch + baseMatch).distinctBy { it.id }
+            val baseMatch = if (normHost != host) passwordDao.getPasswordsByDomain(normHost) else emptyList()
+            // Additional registrable domain matches (e.g., accounts.google.com -> google.com entries)
+            val regDomain = com.frerox.toolz.data.browser.autofill.CredentialMatcher().registrableDomain(host)
+            val regMatch = if (regDomain != host && regDomain != normHost) passwordDao.getPasswordsByDomain(regDomain) else emptyList()
+            val combined = (exactMatch + baseMatch + regMatch).distinctBy { it.id }
                 .sortedWith(compareByDescending<PasswordEntity> { it.isComplete }.thenByDescending { it.lastUsedAt })
             _autofillSuggestions.value = combined
         }
@@ -178,23 +169,24 @@ class WebViewViewModel @Inject constructor(
             val lastVerification = settingsRepository.lastBiometricVerificationTime.first()
             val now = System.currentTimeMillis()
             val cooldown = 5 * 60 * 1000L // 5 minutes
-
+            suspend fun doFill(){
+                try{ passwordDao.updateLastUsed(password.id, now) }catch(_:Exception){}
+                onCredentials(password.username, password.password)
+                _autofillSuccess.value = true
+                _autofillSuggestions.value = emptyList()
+            }
             if (now - lastVerification > cooldown) {
                 BiometricPromptUtils.showBiometricPrompt(
                     activity = activity,
                     onSuccess = {
                         viewModelScope.launch {
                             settingsRepository.setLastBiometricVerificationTime(now)
-                            onCredentials(password.username, password.password)
-                            _autofillSuccess.value = true
-                            _autofillSuggestions.value = emptyList()
+                            doFill()
                         }
                     }
                 )
             } else {
-                onCredentials(password.username, password.password)
-                _autofillSuccess.value = true
-                _autofillSuggestions.value = emptyList()
+                doFill()
             }
         }
     }

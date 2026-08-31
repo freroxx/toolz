@@ -31,6 +31,15 @@ interface PasswordDao {
     @Query("SELECT * FROM passwords WHERE url LIKE '%' || :domain || '%' OR name LIKE '%' || :domain || '%'")
     suspend fun getPasswordsByDomain(domain: String): List<PasswordEntity>
 
+    @Query("SELECT * FROM passwords WHERE lower(url) = lower(:host) OR lower(url) LIKE '%://' || lower(:host) || '/%' OR lower(url) LIKE '%://' || lower(:host)")
+    suspend fun getPasswordsByExactHost(host: String): List<PasswordEntity>
+
+    @Query("SELECT * FROM passwords WHERE lower(url) LIKE '%://' || lower(:registrable) || '/%' OR lower(url) LIKE '%://' || lower(:registrable) ")
+    suspend fun getByRegistrableDomain(registrable: String): List<PasswordEntity>
+
+    @Query("UPDATE passwords SET lastUsedAt = :ts WHERE id = :id")
+    suspend fun updateLastUsed(id: Int, ts: Long)
+
     @Query("SELECT * FROM passwords WHERE name LIKE '%' || :query || '%' OR username LIKE '%' || :query || '%' OR url LIKE '%' || :query || '%'")
     suspend fun searchPasswords(query: String): List<PasswordEntity>
 

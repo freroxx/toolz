@@ -79,17 +79,7 @@ fun PurgeShotScreen(
     val shizukuAuthFlow by viewModel.shizukuAuthorized.collectAsStateWithLifecycle()
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-    LaunchedEffect(Unit) {
-        val perms = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.READ_MEDIA_IMAGES)
-            } else {
-                add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (perms.isNotEmpty()) permissionLauncher.launch(perms.toTypedArray())
-    }
+    // No auto-request on entry — permissions are granted manually via PermissionsSheet (deferred).
 
     var showPresetSheet by remember { mutableStateOf(false) }
     var showAutoPicker by remember { mutableStateOf(false) }

@@ -383,11 +383,8 @@ class SearchViewModel @Inject constructor(
                         it.copy(
                             results     = results,
                             phase       = SearchPhase.Results,
-                            // Always allow load-more when we have results — engines always have more pages
-                            // Except for media categories which are currently synthetic single-page
-                            canLoadMore = category != SearchCategory.IMAGES && 
-                                         category != SearchCategory.VIDEOS && 
-                                         results.isNotEmpty(),
+                            // Pagination revamp: allow load-more for ALL categories including images/videos now that real HTML parsing is enabled with proper offset handling
+                            canLoadMore = results.isNotEmpty() && results.size < 500,
                             error       = if (results.isEmpty()) SearchError.NoResults else null,
                         )
                     }

@@ -116,6 +116,10 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_RECENT_DNS = stringSetPreferencesKey("search_recent_dns")
     private val SEARCH_ENGINE = stringPreferencesKey("search_engine") // "GOOGLE", "BING", "DUCKDUCKGO"
     private val SEARCH_SAFE_SEARCH = booleanPreferencesKey("search_safe_search")
+    // Appearance customization revamp
+    private val SEARCH_RESULTS_DENSITY = stringPreferencesKey("search_results_density") // COMPACT/COMFY
+    private val SEARCH_CARD_RADIUS = intPreferencesKey("search_card_radius")
+    private val SEARCH_ACCENT_PER_ENGINE = booleanPreferencesKey("search_accent_per_engine")
     private val SEARCH_REGION = stringPreferencesKey("search_region")
     private val SEARCH_CUSTOM_ENGINE_URL = stringPreferencesKey("search_custom_engine_url")
     private val SEARCH_INCOGNITO_ENABLED = booleanPreferencesKey("search_incognito_enabled")
@@ -135,6 +139,9 @@ class SettingsRepository @Inject constructor(
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
     val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "META" }
     val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: true }
+    val searchResultsDensity: Flow<String> = dataStore.data.map { it[SEARCH_RESULTS_DENSITY] ?: "COMFY" }
+    val searchCardRadius: Flow<Int> = dataStore.data.map { it[SEARCH_CARD_RADIUS] ?: 16 }
+    val searchAccentPerEngine: Flow<Boolean> = dataStore.data.map { it[SEARCH_ACCENT_PER_ENGINE] ?: true }
     val searchRegion: Flow<String> = dataStore.data.map { it[SEARCH_REGION] ?: "wt-wt" } // default: no region
     val searchCustomEngineUrl: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_ENGINE_URL] ?: "" }
     val searchIncognitoEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_INCOGNITO_ENABLED] ?: false }
@@ -242,6 +249,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setSearchIncognitoEnabled(enabled: Boolean) {
         dataStore.edit { it[SEARCH_INCOGNITO_ENABLED] = enabled }
     }
+    suspend fun setSearchResultsDensity(v: String){ dataStore.edit{ it[SEARCH_RESULTS_DENSITY]=v } }
+    suspend fun setSearchCardRadius(v: Int){ dataStore.edit{ it[SEARCH_CARD_RADIUS]=v } }
+    suspend fun setSearchAccentPerEngine(v: Boolean){ dataStore.edit{ it[SEARCH_ACCENT_PER_ENGINE]=v } }
 
     suspend fun setCustomDns(dns: String) {
         dataStore.edit { it[SEARCH_CUSTOM_DNS] = dns }

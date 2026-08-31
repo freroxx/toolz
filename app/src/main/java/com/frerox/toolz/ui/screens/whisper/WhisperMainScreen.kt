@@ -20,11 +20,16 @@ package com.frerox.toolz.ui.screens.whisper
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.os.Build
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -118,6 +123,29 @@ fun WhisperMainScreen(
     // V2-FIX (verify in-flight guard): track password verification locally so the dialog
     // stays open, locks its buttons and shows progress until the verdict arrives.
     var isVerifyingBypass by remember { mutableStateOf(false) }
+
+    // Whisper notification permission banner (slides down from top app bar on Chats tab)
+    var hasNotificationPermission by remember { mutableStateOf(hasWhisperNotificationPermission(context)) }
+    var bannerDismissed by rememberSaveable { mutableStateOf(false) }
+    fun refreshNotificationPermission() {
+        hasNotificationPermission = hasWhisperNotificationPermission(context)
+        if (hasNotificationPermission) bannerDismissed = false
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        refreshNotificationPermission()
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                refreshNotificationPermission()
+            }
+        }
+        val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
 
     // Conversation previews contain decrypted content — never allow screenshots/recents capture.
     SecureWindow(bypassEnabled = screenshotBypassEnabled)
@@ -325,7 +353,14 @@ fun WhisperMainScreen(
                             onNavigateToProfile = onNavigateToProfile,
                             onLongClickConvo = { selectedConvoForOptions = it },
                             onLongClickFriend = { selectedFriendForOptions = it },
-                            onViewAvatarFull = { profileForFullView = it }
+                            onViewAvatarFull = { profileForFullView = it },
+                            showPermissionBanner = !hasNotificationPermission && !bannerDismissed,
+                            onGrantPermission = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            },
+                            onDismissBanner = { bannerDismissed = true }
                         )
                         1 -> DiscoverTab(
                             uiState = uiState,
@@ -786,6 +821,9 @@ private fun MergedChatsAndFriendsTab(
     onLongClickConvo: (WhisperConversation) -> Unit,
     onLongClickFriend: (WhisperProfile) -> Unit,
     onViewAvatarFull: (WhisperProfile) -> Unit,
+    showPermissionBanner: Boolean = false,
+    onGrantPermission: () -> Unit = {},
+    onDismissBanner: () -> Unit = {},
 ) {
     val haptic = rememberToolzHapticFeedback()
 
@@ -825,7 +863,14 @@ private fun MergedChatsAndFriendsTab(
     }
 
     if (listsEmpty) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (showPermissionBanner) {
+                WhisperPermissionBanner(
+                    onGrant = onGrantPermission,
+                    onDismiss = onDismissBanner,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             // V2-FIX M-M4: modest retry banner above the empty state after a failure.
             if (sawErrorWhileEmpty) {
                 InitialLoadRetryBanner(onRetry = { haptic.click(); viewModel.loadAll() })
@@ -846,6 +891,16 @@ private fun MergedChatsAndFriendsTab(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // Whisper notification permission banner — slides down from top app bar, below it, friends below
+        if (showPermissionBanner) {
+            item {
+                WhisperPermissionBanner(
+                    onGrant = onGrantPermission,
+                    onDismiss = onDismissBanner,
+                    modifier = Modifier.padding(bottom = 2.dp)
+                )
+            }
+        }
         // Incoming Friend Requests Banner — pendingIncomingRequests is the single source
         // of truth (L-2: duplicate mirror list removed).
         if (uiState.pendingIncomingRequests.isNotEmpty()) {

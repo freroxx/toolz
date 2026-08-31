@@ -211,24 +211,8 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         scheduleUpdateCheck()
         scheduleFocusUsageSnapshot()
 
-        // Request notification + media permissions for PurgeShot (BEST fix: must work everywhere)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val needed = mutableListOf<String>()
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                needed.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (needed.isNotEmpty()) {
-                requestPermissions(needed.toTypedArray(), 101)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 102)
-            }
-        }
-
+        // Permissions are now deferred to feature sheets (PurgeShot / Whisper) and onboarding.
+        // No auto-request on launch — prevents system dialogs before onboarding.
         setContent {
             val themeMode by settingsRepository.themeMode.collectAsState(initial = "SYSTEM")
             val dynamicColor by settingsRepository.dynamicColor.collectAsState(initial = true)
