@@ -28,8 +28,7 @@ class EngineRegistry @Inject constructor(
     }
 
     fun resolve(engineSetting: String): List<EngineId> = when (engineSetting.uppercase()) {
-        "META" -> listOf(EngineId.YAHOO, EngineId.QWANT, EngineId.MARGINALIA, EngineId.BING)
-        "CUSTOM" -> listOf(EngineId.CUSTOM)
+        "META" -> listOf(EngineId.YAHOO, EngineId.QWANT, EngineId.MARGINALIA)
         else -> listOf(EngineId.fromString(engineSetting))
     }
 

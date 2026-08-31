@@ -310,7 +310,7 @@ fun SearchScreen(
                     ) {
                         // Back button when in results
                         AnimatedVisibility(
-                            visible = (uiState.results.isNotEmpty() || uiState.phase == SearchPhase.Loading) && !uiState.isActive,
+                            visible = (uiState.query.isNotBlank() || uiState.results.isNotEmpty() || uiState.phase != SearchPhase.Idle) && !uiState.isActive,
                             enter   = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
                             exit    = scaleOut() + fadeOut(),
                         ) {
@@ -593,18 +593,30 @@ private fun PageContent(
         label         = "pageState",
     ) { state ->
         when (state) {
-            "loading" -> Box(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                SearchShimmer()
+            "loading" -> Column(Modifier.fillMaxSize()) {
+                SearchCategoryChips(
+                    selectedCategory = uiState.category,
+                    onCategorySelected = onCategorySelected,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+                Box(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    SearchShimmer()
+                }
             }
 
-            "error" -> {
+            "error" -> Column(Modifier.fillMaxSize()) {
+                SearchCategoryChips(
+                    selectedCategory = uiState.category,
+                    onCategorySelected = onCategorySelected,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
                 val errorType = when (uiState.error) {
-                    is SearchError.Offline     -> ErrorType.OFFLINE
-                    is SearchError.DnsError    -> ErrorType.DNS_ERROR
+                    is SearchError.Offline      -> ErrorType.OFFLINE
+                    is SearchError.DnsError     -> ErrorType.DNS_ERROR
                     is SearchError.NetworkError -> ErrorType.NETWORK_ERROR
-                    is SearchError.RateLimited -> ErrorType.RATE_LIMITED
-                    is SearchError.NoResults   -> ErrorType.NO_RESULTS
-                    else                       -> ErrorType.GENERIC
+                    is SearchError.RateLimited  -> ErrorType.RATE_LIMITED
+                    is SearchError.NoResults    -> ErrorType.NO_RESULTS
+                    else                        -> ErrorType.GENERIC
                 }
                 val errorTitle = when (uiState.error) {
                     is SearchError.Offline      -> stringResource(R.string.st_SearchScreen_y3o4)
@@ -698,7 +710,7 @@ private fun HomePage(
         ),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        // ── Greeting ─────────────────────────────────────
+        // ── 1. Greeting & Stats Card ─────────────────────
         if (uiState.showGreetingCard) {
             item(key = "greeting") {
                 BrowserPulseCard(
@@ -711,7 +723,7 @@ private fun HomePage(
             }
         }
 
-        // ── Resume session ───────────────────────────────
+        // ── 2. Continue Browsing (Open Tabs) ─────────────
         if (uiState.tabs.isNotEmpty()) {
             item(key = "continueBrowsing") {
                 ContinueBrowsingSection(
@@ -721,18 +733,7 @@ private fun HomePage(
             }
         }
 
-        if (browserHistory.isNotEmpty()) {
-            item(key = "browserHistory") {
-                BrowserHistorySection(
-                    items = browserHistory,
-                    onOpen = onUrlOpen,
-                    onRemove = onDeleteBrowserHistory,
-                    onClear = onClearBrowserHistory,
-                )
-            }
-        }
-
-        // ── Quick access ─────────────────────────────────
+        // ── 3. Quick Links (Top Sites) ───────────────────
         item(key = "quickLinks") {
             QuickLinksSection(
                 quickLinks     = quickLinks,
@@ -742,7 +743,7 @@ private fun HomePage(
             )
         }
 
-        // ── Bookmarks ────────────────────────────────────
+        // ── 4. Bookmarks ─────────────────────────────────
         if (bookmarks.isNotEmpty()) {
             item(key = "bookmarks") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -765,6 +766,18 @@ private fun HomePage(
                         }
                     }
                 }
+            }
+        }
+
+        // ── 5. Recently Viewed (Browser History) under Bookmarks ───
+        if (browserHistory.isNotEmpty()) {
+            item(key = "browserHistory") {
+                BrowserHistorySection(
+                    items = browserHistory,
+                    onOpen = onUrlOpen,
+                    onRemove = onDeleteBrowserHistory,
+                    onClear = onClearBrowserHistory,
+                )
             }
         }
 
@@ -1565,12 +1578,11 @@ private fun SearchEngineSheet(
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant, Marginalia & Bing with consensus ranking"),
+                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant & Marginalia with consensus ranking"),
                 "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results"),
                 "QWANT"      to ("Qwant" to "Privacy-first European search engine with independent web & media indexing"),
                 "MARGINALIA" to ("Marginalia" to "Independent search engine focusing on non-commercial and text-rich web"),
                 "BING"       to (stringResource(R.string.st_SearchScreen_b7i8) to stringResource(R.string.st_SearchScreen_m9s0)),
-                "CUSTOM"     to ("Custom Engine" to "User-configured search engine template URL"),
             )
 
             engines.forEach { entry ->
@@ -1605,7 +1617,6 @@ private fun SearchEngineSheet(
                                         "QWANT" -> Icons.Rounded.Shield
                                         "MARGINALIA" -> Icons.Rounded.AutoStories
                                         "BING" -> Icons.Rounded.TravelExplore
-                                        "CUSTOM" -> Icons.Rounded.Tune
                                         else -> Icons.Rounded.Search
                                     },
                                     null,

@@ -1,18 +1,6 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ * GPL-3.0 License
  */
 
 package com.frerox.toolz.ui.screens.browser
@@ -30,24 +18,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.*
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
-import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
+import com.frerox.toolz.data.browser.BrowserAddressResolver
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.ui.components.*
-import com.frerox.toolz.ui.screens.search.components.FaviconDisplay
-
-// ─── Screen ───────────────────────────────────────────────────────────────────
+import com.frerox.toolz.ui.screens.search.components.PrivacyFaviconImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,241 +44,293 @@ fun TabManagementScreen(
 ) {
     val tabs        by viewModel.tabs.collectAsState(initial = emptyList())
     val activeTabId by viewModel.activeTabId.collectAsState(initial = null)
-    val openNormalTab = {
-        val tab = viewModel.addTab("about:blank")
-        onTabClick(tab.id, tab.url)
-    }
-    
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val haptic = LocalHapticFeedback.current
 
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var showPrivateTabs by remember { mutableStateOf(false) }
+    var showCloseAllDialog by remember { mutableStateOf(false) }
     val isMultiSelect by remember { derivedStateOf { selectedIds.isNotEmpty() } }
-    val visibleTabs by remember(tabs, showPrivateTabs) {
-        derivedStateOf { tabs.filter { it.isPrivate == showPrivateTabs } }
+
+    val visibleTabs = remember(tabs, showPrivateTabs) {
+        tabs.filter { it.isPrivate == showPrivateTabs }
+    }
+    val normalCount = remember(tabs) { tabs.count { !it.isPrivate } }
+    val privateCount = remember(tabs) { tabs.count { it.isPrivate } }
+
+    val openNewTab = {
+        val tab = viewModel.addTab("about:blank", isPrivate = showPrivateTabs)
+        onTabClick(tab.id, tab.url)
     }
 
-    // Animate header background on multi-select
-    val topBarColor by animateColorAsState(
-        targetValue   = if (isMultiSelect)
-            MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp)
-        else
-            MaterialTheme.colorScheme.surface,
-        animationSpec = tween(250),
-        label         = "topBarColor",
-    )
+    if (showCloseAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showCloseAllDialog = false },
+            title = { Text("Close all ${if (showPrivateTabs) "private " else ""}tabs?") },
+            text = { Text("This will close all ${visibleTabs.size} open tabs.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCloseAllDialog = false
+                        val idsToClose = visibleTabs.map { it.id }.toSet()
+                        viewModel.closeTabs(idsToClose)
+                    }
+                ) {
+                    Text("Close all", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCloseAllDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            Box(
-                modifier = Modifier
-                    .clip(ExtraLargeExpressiveShape)
-                    .background(topBarColor)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                color = if (isMultiSelect) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+                tonalElevation = 1.dp
             ) {
-                Column {
-                    ExpressiveTopAppBar(
-                        title = {
-                            AnimatedContent(
-                                targetState  = isMultiSelect,
-                                transitionSpec = {
-                                    (fadeIn() + slideInVertically { -it / 2 }) togetherWith
-                                            (fadeOut() + slideOutVertically { it / 2 })
-                                },
-                                label = "tabTitle",
-                            ) { multiSelect ->
-                                if (multiSelect) {
-                                    Text(
-                                        "${selectedIds.size} " + stringResource(R.string.st_TabManagementScreen_8f1a),
-                                        fontWeight = FontWeight.Black,
-                                        color      = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.headlineMedium
-                                    )
-                                } else {
-                                    Row(
-                                        verticalAlignment     = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        Text(
-                                            stringResource(R.string.st_TabManagementScreen_3d5b),
-                                            fontWeight = FontWeight.Black,
-                                            style      = MaterialTheme.typography.headlineLarge,
-                                            letterSpacing = (-1).sp
-                                        )
-                                        if (tabs.isNotEmpty()) {
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = MaterialTheme.colorScheme.primaryContainer,
-                                            ) {
-                                                Text(
-                                                    "${tabs.size}",
-                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                    style      = MaterialTheme.typography.labelLarge,
-                                                    color      = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                    fontWeight = FontWeight.Black,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack
-                            ) {
-                                AnimatedContent(
-                                    targetState = isMultiSelect,
-                                    transitionSpec = {
-                                        (scaleIn(initialScale = 0.7f) + fadeIn()) togetherWith
-                                                (scaleOut(targetScale = 0.7f) + fadeOut())
-                                    },
-                                    label = "navIcon",
-                                ) { multiSelect ->
-                                    Icon(
-                                        if (multiSelect) Icons.Rounded.Close else Icons.Rounded.Close,
-                                        contentDescription = if (multiSelect) stringResource(R.string.st_TabManagementScreen_9e2c) else stringResource(R.string.st_TabManagementScreen_1a2b),
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            AnimatedContent(
-                                targetState  = isMultiSelect,
-                                transitionSpec = { fadeIn() togetherWith fadeOut() },
-                                label        = "topActions",
-                            ) { multiSelect ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (multiSelect) {
-                                        IconButton(onClick = {
-                                            selectedIds = if (selectedIds.size == tabs.size)
-                                                emptySet()
-                                            else
-                                                tabs.map { it.id }.toSet()
-                                        }) {
-                                            Icon(
-                                                Icons.Rounded.DoneAll,
-                                                contentDescription = stringResource(R.string.st_TabManagementScreen_7c4d),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(26.dp)
-                                            )
-                                        }
-                                        IconButton(onClick = {
-                                            viewModel.closeTabs(selectedIds)
-                                            selectedIds = emptySet()
-                                        }) {
-                                            Icon(
-                                                Icons.Rounded.DeleteSweep,
-                                                contentDescription = stringResource(R.string.st_TabManagementScreen_5f6e),
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(26.dp)
-                                            )
-                                        }
-                                    } else {
-                                        IconButton(onClick = {
-                                            val tab = viewModel.addTab("about:blank", isPrivate = true)
-                                            onTabClick(tab.id, tab.url)
-                                        }) {
-                                            Icon(Icons.Rounded.VisibilityOff, contentDescription = "New private tab", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                                        }
-                                        IconButton(onClick = openNormalTab) {
-                                            Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_TabManagementScreen_2b8a), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        scrollBehavior = scrollBehavior,
-                        largeFlexible = true,
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            scrolledContainerColor = Color.Transparent,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        )
-                    )
-
-                    // Multi-select progress bar
-                    AnimatedVisibility(
-                        visible = isMultiSelect,
-                        enter   = expandVertically(),
-                        exit    = shrinkVertically(),
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Top Bar Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        ExpressiveLinearProgressIndicator(
-                            progress = { if (tabs.isEmpty()) 0f else selectedIds.size.toFloat() / tabs.size },
-                            modifier  = Modifier.fillMaxWidth().height(4.dp),
-                            color     = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.primaryContainer,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            IconButton(
+                                onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    if (isMultiSelect) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = "Back",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            if (isMultiSelect) {
+                                Text(
+                                    "${selectedIds.size} selected",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Text(
+                                    "Open Tabs",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {
+                                    Text(
+                                        "${tabs.size}",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+
+                        // Top Actions
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isMultiSelect) {
+                                IconButton(
+                                    onClick = {
+                                        selectedIds = if (selectedIds.size == visibleTabs.size) emptySet() else visibleTabs.map { it.id }.toSet()
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.DoneAll, "Select all", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(
+                                    onClick = {
+                                        viewModel.closeTabs(selectedIds)
+                                        selectedIds = emptySet()
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.DeleteOutline, "Delete selected", tint = MaterialTheme.colorScheme.error)
+                                }
+                            } else {
+                                if (visibleTabs.isNotEmpty()) {
+                                    IconButton(onClick = { showCloseAllDialog = true }) {
+                                        Icon(Icons.Rounded.DeleteSweep, "Close all tabs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                IconButton(onClick = openNewTab) {
+                                    Icon(Icons.Rounded.Add, "New tab", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // Segmented Normal vs Private Tabs Switcher
+                    if (!isMultiSelect) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            Row(modifier = Modifier.fillMaxSize().padding(3.dp)) {
+                                // Normal Tabs
+                                Surface(
+                                    onClick = { showPrivateTabs = false },
+                                    shape = RoundedCornerShape(19.dp),
+                                    color = if (!showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                    shadowElevation = if (!showPrivateTabs) 1.dp else 0.dp,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Public,
+                                            null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (!showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "Tabs ($normalCount)",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (!showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (!showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                // Private Tabs
+                                Surface(
+                                    onClick = { showPrivateTabs = true },
+                                    shape = RoundedCornerShape(19.dp),
+                                    color = if (showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                    shadowElevation = if (showPrivateTabs) 1.dp else 0.dp,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.VisibilityOff,
+                                            null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "Private ($privateCount)",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
         floatingActionButton = {
-            AnimatedVisibility(
-                visible = !isMultiSelect,
-                enter   = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
-                exit    = scaleOut() + fadeOut(),
-            ) {
+            if (!isMultiSelect) {
                 ExtendedFloatingActionButton(
-                    onClick        = openNormalTab,
-                    icon           = { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp)) },
-                    text           = { Text(stringResource(R.string.st_TabManagementScreen_2b8a), fontWeight = FontWeight.Black) },
-                    shape          = RoundedCornerShape(20.dp),
+                    onClick = openNewTab,
+                    shape = RoundedCornerShape(20.dp),
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor   = MaterialTheme.colorScheme.onPrimaryContainer,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp)
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp),
+                    icon = { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(24.dp)) },
+                    text = { Text("New Tab", fontWeight = FontWeight.Bold) }
                 )
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) { padding ->
         if (visibleTabs.isEmpty()) {
-            EmptyTabsView(
-                onNewTab = if (showPrivateTabs) {
-                    {
-                        val tab = viewModel.addTab("about:blank", isPrivate = true)
-                        onTabClick(tab.id, tab.url)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.size(72.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (showPrivateTabs) Icons.Rounded.VisibilityOff else Icons.Rounded.Tab,
+                                null,
+                                modifier = Modifier.size(36.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
-                } else openNormalTab,
-                modifier = Modifier.padding(padding),
-            )
+                    Text(
+                        if (showPrivateTabs) "No private tabs" else "No open tabs",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Button(
+                        onClick = openNewTab,
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (showPrivateTabs) "Open Private Tab" else "Open New Tab")
+                    }
+                }
+            }
         } else {
             LazyVerticalGrid(
-                columns             = GridCells.Fixed(2),
-                contentPadding      = PaddingValues(
-                    start  = 16.dp, end = 16.dp,
-                    top    = 16.dp,
-                    bottom = padding.calculateBottomPadding() + 100.dp,
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = padding.calculateTopPadding() + 16.dp,
+                    bottom = padding.calculateBottomPadding() + 88.dp
                 ),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement   = Arrangement.spacedBy(12.dp),
-                modifier              = Modifier
-                    .padding(top = padding.calculateTopPadding())
-                    .fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize()
             ) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    TabScopePicker(
-                        showPrivateTabs = showPrivateTabs,
-                        normalCount = tabs.count { !it.isPrivate },
-                        privateCount = tabs.count { it.isPrivate },
-                        onSelect = { private ->
-                            showPrivateTabs = private
-                            selectedIds = emptySet()
-                        },
-                    )
-                }
-                itemsIndexed(visibleTabs, key = { _, tab -> tab.id }) { index, tab ->
+                items(visibleTabs, key = { it.id }) { tab ->
                     val isSelected = selectedIds.contains(tab.id)
-                    val isActive   = tab.id == activeTabId
+                    val isActive = tab.id == activeTabId
 
-                    PremiumTabCard(
-                        tab           = tab,
-                        index         = index,
-                        isSelected    = isSelected,
-                        isActive      = isActive,
+                    TabCard(
+                        tab = tab,
+                        isSelected = isSelected,
+                        isActive = isActive,
                         isMultiSelect = isMultiSelect,
-                        onClick       = {
+                        onClick = {
                             if (isMultiSelect) {
                                 selectedIds = if (isSelected) selectedIds - tab.id else selectedIds + tab.id
                             } else {
@@ -300,10 +338,14 @@ fun TabManagementScreen(
                                 onTabClick(tab.id, tab.url)
                             }
                         },
-                        onLongClick   = {
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             if (!isMultiSelect) selectedIds = setOf(tab.id)
                         },
-                        onClose       = { viewModel.closeTab(tab.id) },
+                        onClose = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.closeTab(tab.id)
+                        }
                     )
                 }
             }
@@ -311,36 +353,10 @@ fun TabManagementScreen(
     }
 }
 
-@Composable
-private fun TabScopePicker(
-    showPrivateTabs: Boolean,
-    normalCount: Int,
-    privateCount: Int,
-    onSelect: (Boolean) -> Unit,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        FilterChip(
-            selected = !showPrivateTabs,
-            onClick = { onSelect(false) },
-            label = { Text("Tabs · $normalCount") },
-            leadingIcon = { Icon(Icons.Rounded.Public, null, modifier = Modifier.size(16.dp)) },
-        )
-        FilterChip(
-            selected = showPrivateTabs,
-            onClick = { onSelect(true) },
-            label = { Text("Private · $privateCount") },
-            leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null, modifier = Modifier.size(16.dp)) },
-        )
-    }
-}
-
-// ─── Premium Tab Card ─────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PremiumTabCard(
+private fun TabCard(
     tab: TabEntry,
-    index: Int,
     isSelected: Boolean,
     isActive: Boolean,
     isMultiSelect: Boolean,
@@ -348,311 +364,124 @@ private fun PremiumTabCard(
     onLongClick: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val haptic = rememberToolzHapticFeedback()
-    val interactionSource = remember { MutableInteractionSource() }
+    val borderColor = when {
+        isSelected -> MaterialTheme.colorScheme.primary
+        isActive -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    }
+    val containerColor = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        isActive -> MaterialTheme.colorScheme.surfaceContainerHighest
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
 
-    // Card visual states
-    val borderColor by animateColorAsState(
-        targetValue   = when {
-            isSelected -> MaterialTheme.colorScheme.primary
-            isActive   -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-            else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-        },
-        animationSpec = tween(300),
-        label         = "tabBorderColor",
-    )
-
-    val cardColor by animateColorAsState(
-        targetValue   = when {
-            isSelected -> MaterialTheme.colorScheme.primaryContainer
-            isActive   -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
-            else       -> MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        animationSpec = tween(300),
-        label         = "tabCardColor",
-    )
-
-    StaggeredEntrance(index = index) {
-        Box(
-            modifier = Modifier
-                .height(260.dp)
-                .fillMaxWidth()
-        ) {
-            ExpressiveCard(
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = containerColor,
+        border = BorderStroke(if (isActive || isSelected) 2.dp else 1.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp)
+            .combinedClickable(
                 onClick = onClick,
-                onLongClick = {
-                    haptic.longClick()
-                    onLongClick()
-                },
-                shape = LargeExpressiveShape,
-                containerColor = cardColor,
-                border = BorderStroke(if (isSelected || isActive) 2.dp else 1.dp, borderColor),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .expressiveMorphing(interactionSource)
+                onLongClick = onLongClick
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp)
+        ) {
+            // Header Row: Favicon, Domain, Close Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-
-                    // ── Header row ────────────────────────────────────────────────
-                    Row(
-                        modifier              = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 10.dp, top = 14.dp, bottom = 10.dp),
-                        verticalAlignment     = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                PrivacyFaviconImage(url = tab.url, size = 18.dp)
+                Text(
+                    text = BrowserAddressResolver.displayHost(tab.url),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (tab.isPrivate) {
+                    Icon(
+                        Icons.Rounded.VisibilityOff,
+                        contentDescription = "Private",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (!isMultiSelect) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(24.dp)
                     ) {
-                        FaviconDisplay(
-                            url      = tab.url,
-                            modifier = Modifier.size(24.dp),
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Close tab",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            tab.title,
-                            style      = MaterialTheme.typography.titleSmall,
-                            fontWeight = if (isActive) FontWeight.Black else FontWeight.ExtraBold,
-                            maxLines   = 1,
-                            overflow   = TextOverflow.Ellipsis,
-                            modifier   = Modifier.weight(1f),
-                            color      = if (isActive) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f),
-                        )
-                        if (tab.isPrivate) {
-                            Icon(
-                                Icons.Rounded.VisibilityOff,
-                                contentDescription = "Private tab",
-                                modifier = Modifier.size(17.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        if (!isMultiSelect) {
-                            IconButton(
-                                onClick  = { haptic.tick(); onClose() },
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Close,
-                                    null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                )
-                            }
-                        }
                     }
+                }
+            }
 
-                    // ── Preview area ──────────────────────────────────────────────
+            Spacer(Modifier.height(6.dp))
+
+            // Body Area: Thumbnail preview or title card
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                    .padding(8.dp),
+                contentAlignment = Alignment.TopStart
+            ) {
+                if (tab.previewPath != null) {
+                    AsyncImage(
+                        model = tab.previewPath,
+                        contentDescription = tab.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(
+                        text = tab.title.ifBlank { "New Tab" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Bottom active indicator
+            if (isActive) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
-                            .clip(MediumExpressiveShape)
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
-                    ) {
-                        if (tab.previewPath != null) {
-                            AsyncImage(
-                                model              = tab.previewPath,
-                                contentDescription = null,
-                                modifier           = Modifier.fillMaxSize(),
-                                contentScale       = ContentScale.Crop,
-                            )
-                            // Gradient overlay on preview for readability
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(64.dp)
-                                    .align(Alignment.BottomCenter)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
-                                        )
-                                    )
-                            )
-                        } else {
-                            // URL text fallback
-                            Column(
-                                modifier            = Modifier
-                                    .fillMaxSize()
-                                    .padding(16.dp),
-                                verticalArrangement = Arrangement.Center,
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Public,
-                                    null,
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .alpha(0.3f),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    tab.url,
-                                    style    = MaterialTheme.typography.labelSmall,
-                                    color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                    fontSize  = 11.sp,
-                                    lineHeight = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Active indicator dot (bottom-end) ─────────────────────────────
-            AnimatedVisibility(
-                visible = isActive && !isMultiSelect,
-                enter   = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
-                exit    = scaleOut() + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp),
-            ) {
-                ActiveDot()
-            }
-
-            // ── Multi-select checkbox (top-end) ───────────────────────────────
-            AnimatedVisibility(
-                visible  = isMultiSelect,
-                enter    = scaleIn(spring(Spring.DampingRatioMediumBouncy)) + fadeIn(),
-                exit     = scaleOut() + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(14.dp),
-            ) {
-                MultiSelectIndicator(isSelected = isSelected)
-            }
-        }
-    }
-}
-
-// ─── Active Dot ───────────────────────────────────────────────────────────────
-
-@Composable
-private fun ActiveDot() {
-    Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.size(10.dp),
-    ) {}
-}
-
-// ─── Multi-select Checkbox ────────────────────────────────────────────────────
-
-@Composable
-private fun MultiSelectIndicator(isSelected: Boolean) {
-    val scale by animateFloatAsState(
-        targetValue   = if (isSelected) 1f else 0.9f,
-        animationSpec = spring(Spring.DampingRatioMediumBouncy),
-        label         = "checkScale",
-    )
-
-    Box(
-        modifier = Modifier
-            .size(22.dp)
-            .scale(scale)
-            .clip(CircleShape)
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
-            )
-            .border(
-                BorderStroke(
-                    width = 1.5.dp,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                ),
-                CircleShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        AnimatedVisibility(
-            visible = isSelected,
-            enter   = scaleIn(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
-            exit    = scaleOut() + fadeOut(),
-        ) {
-            Icon(
-                Icons.Rounded.Check,
-                null,
-                modifier = Modifier.size(14.dp),
-                tint     = Color.White,
-            )
-        }
-    }
-}
-
-// ─── Empty State ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptyTabsView(
-    onNewTab: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-
-    Box(
-        modifier        = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        AnimatedVisibility(
-            visible = visible,
-            enter   = fadeIn(tween(500)) + scaleIn(initialScale = 0.92f, animationSpec = spring(Spring.DampingRatioMediumBouncy)),
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier            = Modifier.padding(40.dp),
-            ) {
-                // Icon container
-                Surface(
-                    modifier = Modifier.size(120.dp),
-                    shape    = ExtraLargeExpressiveShape,
-                    color    = MaterialTheme.colorScheme.primaryContainer,
-                    border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Rounded.Layers,
-                            null,
-                            modifier = Modifier.size(56.dp),
-                            tint     = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier            = Modifier.padding(top = 8.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.st_TabManagementScreen_4d9c),
-                        style      = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                        color      = MaterialTheme.colorScheme.onSurface,
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
                     )
                     Text(
-                        stringResource(R.string.st_TabManagementScreen_6a1b),
-                        style    = MaterialTheme.typography.bodyLarge,
-                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Medium
+                        "Active",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
                     )
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = onNewTab,
-                    shape   = LargeExpressiveShape,
-                    colors  = ButtonDefaults.buttonColors(),
-                    modifier = Modifier.height(56.dp).padding(horizontal = 24.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-                ) {
-                    Icon(Icons.Rounded.Add, null, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.st_TabManagementScreen_1b2c), fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

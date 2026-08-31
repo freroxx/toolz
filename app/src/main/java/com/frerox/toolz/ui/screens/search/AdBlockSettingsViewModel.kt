@@ -51,6 +51,7 @@ class AdBlockSettingsViewModel @Inject constructor(
     private val repository: com.frerox.toolz.data.search.WebSearchRepository,
     private val dnsEngine: com.frerox.toolz.util.network.DnsEngine,
     private val adBlockManager: com.frerox.toolz.util.network.AdBlockManager,
+    private val nextDnsClient: com.frerox.toolz.data.browser.nextdns.NextDnsClient,
 ) : ViewModel() {
 
     private val _isFetching = MutableStateFlow(false)
@@ -61,54 +62,42 @@ class AdBlockSettingsViewModel @Inject constructor(
     private val _nextDnsUrlInput = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<AdBlockSettingsUiState> = combine(
-        settingsRepository.searchAdBlockBlocklists,
-        settingsRepository.searchAdBlockAllowlists,
-        settingsRepository.searchEnabledImportedLists,
-        settingsRepository.searchAdBlockImportedCount,
-        settingsRepository.searchDnsProvider,
         settingsRepository.searchNextDnsId,
         settingsRepository.searchNextDnsDnsUrl,
-        _isFetching,
+        settingsRepository.searchEnabledImportedLists,
         _nextDnsHealth,
+        _isFetching,
         _nextDnsIdInput,
         _nextDnsUrlInput
     ) { args: Array<Any?> ->
-        val blocked = args[0] as Set<String>
-        val allowed = args[1] as Set<String>
+        val repoId   = args[0] as String
+        val repoUrl  = args[1] as String
+        @Suppress("UNCHECKED_CAST")
         val imported = args[2] as Set<String>
-        val count = args[3] as Int
-        val dnsProvider = args[4] as String
-        val id = args[5] as String
-        val url = args[6] as String
-        val fetching = args[7] as Boolean
-        val health = args[8] as NextDnsHealth
-        val idInput = args[9] as? String
-        val urlInput = args[10] as? String
-
+        val health   = args[3] as NextDnsHealth
+        val fetching = args[4] as Boolean
+        val inputId  = args[5] as? String
+        val inputUrl = args[6] as? String
         AdBlockSettingsUiState(
-            blocklists = blocked,
-            allowlists = allowed,
-            enabledImportedLists = imported,
-            importedDomainCount = count,
-            nextDnsId = idInput ?: id,
-            nextDnsUrl = urlInput ?: url,
-            isFetching = fetching,
-            nextDnsHealth = health,
-            isNextDnsEnabled = dnsProvider == "NEXTDNS"
+            blocklists            = AdBlockList.getBlockedDomains(),
+            allowlists            = AdBlockList.getAllowlistedDomains(),
+            enabledImportedLists  = imported,
+            importedDomainCount   = adBlockManager.getImportedDomainCount(),
+            nextDnsId             = inputId ?: repoId,
+            nextDnsUrl            = inputUrl ?: repoUrl,
+            isFetching            = fetching,
+            nextDnsHealth         = health,
+            isNextDnsEnabled      = (inputId ?: repoId).isNotBlank()
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AdBlockSettingsUiState())
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = AdBlockSettingsUiState()
+    )
 
     init {
         viewModelScope.launch {
             checkDnsHealth()
-        }
-        
-        // Background health monitor
-        viewModelScope.launch {
-            while (true) {
-                delay(30_000)
-                checkDnsHealth()
-            }
         }
     }
 
@@ -120,56 +109,7 @@ class AdBlockSettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                // Build a DoH client that actually routes through NextDNS so that
-                // test.nextdns.io resolves via our configured NextDNS profile and
-                // returns the correct "status":"ok" + "configuration":"<id>" payload.
-                val bootstrapClient = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                val bootstrapDns = okhttp3.dnsoverhttps.DnsOverHttps.Builder()
-                    .client(bootstrapClient)
-                    .url("https://dns.nextdns.io/$id".toHttpUrl())
-                    .bootstrapDnsHosts(listOf(
-                        java.net.InetAddress.getByName("45.90.28.0"),
-                        java.net.InetAddress.getByName("45.90.30.0")
-                    ))
-                    .build()
-
-                val client = okhttp3.OkHttpClient.Builder()
-                    .dns(bootstrapDns)
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                val timestamp = System.currentTimeMillis()
-                val request = okhttp3.Request.Builder()
-                    .url("https://test.nextdns.io/?_=$timestamp")
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
-                    .header("Cache-Control", "no-cache")
-                    .build()
-
-                val response = client.newCall(request).execute()
-                val content = response.body.string()
-
-                // NextDNS probe JSON can be compact (no spaces after colons) or pretty-printed.
-                // Match both variants: "status":"ok" and "status": "ok"
-                val isOk = content.contains("\"status\":\"ok\"") || content.contains("\"status\": \"ok\"")
-                val isUnconfigured = content.contains("\"status\":\"unconfigured\"") || content.contains("\"status\": \"unconfigured\"")
-                val hasConfig = content.contains("\"configuration\":\"$id\"") || content.contains("\"configuration\": \"$id\"")
-
-                when {
-                    isOk && hasConfig -> _nextDnsHealth.value = NextDnsHealth.CONNECTED
-                    isOk && !hasConfig -> _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
-                    isUnconfigured -> _nextDnsHealth.value = NextDnsHealth.NOT_LINKED
-                    else -> _nextDnsHealth.value = NextDnsHealth.ERROR
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _nextDnsHealth.value = NextDnsHealth.ERROR
-            }
+            _nextDnsHealth.value = nextDnsClient.checkHealth(id)
         }
     }
 

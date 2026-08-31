@@ -41,26 +41,17 @@ class MetaMerger @Inject constructor() {
             // Base rank score: sum of 1 / (rank + 1)
             val rankScore = appearances.sumOf { (_, rank) -> 1.0 / (rank + 1) }
 
-            // Multi-engine consensus bonus
+            // Multi-engine consensus bonus across Yahoo, Qwant, Marginalia
             val consensusBonus = when {
-                engineNames.size >= 3 -> 2.5
-                engineNames.size >= 2 -> 1.8
+                engineNames.size >= 3 -> 3.0
+                engineNames.size >= 2 -> 2.0
                 else -> 1.0
             }
 
-            // Consensus from Yahoo / Qwant / Marginalia ranked above Bing-only
-            val sourceWeight = when {
-                nonBingCount >= 2 -> 1.6
-                nonBingCount == 1 && engineNames.size >= 2 -> 1.3
-                hasNonBing -> 1.15
-                isBingOnly -> 0.75
-                else -> 1.0
-            }
-
-            val snippetBonus = if (r.snippet.isNotBlank()) 1.1 else 1.0
+            val snippetBonus = if (r.snippet.isNotBlank()) 1.15 else 1.0
             val freshnessBonus = if (r.date != null) 1.05 else 1.0
 
-            val totalScore = rankScore * consensusBonus * sourceWeight * snippetBonus * freshnessBonus
+            val totalScore = rankScore * consensusBonus * snippetBonus * freshnessBonus
             Scored(r.copy(engines = engineNames), totalScore)
         }
 

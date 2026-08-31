@@ -9,7 +9,6 @@ enum class EngineId(val label: String) {
     QWANT("Qwant"),
     MARGINALIA("Marginalia"),
     BING("Bing"),
-    CUSTOM("Custom"),
     META("Meta");
 
     companion object {
@@ -20,10 +19,9 @@ enum class EngineId(val label: String) {
                 "QWANT" -> QWANT
                 "MARGINALIA" -> MARGINALIA
                 "BING" -> BING
-                "CUSTOM" -> CUSTOM
                 "META" -> META
                 // Explicit migrations from removed engines to META
-                "DUCKDUCKGO", "BRAVE", "GOOGLE", "STARTPAGE",
+                "CUSTOM", "DUCKDUCKGO", "BRAVE", "GOOGLE", "STARTPAGE",
                 "ECOSIA", "SWISSCOWS", "MOJEEK", "PRESEARCH" -> META
                 else -> entries.find { it.name == normalized } ?: META
             }

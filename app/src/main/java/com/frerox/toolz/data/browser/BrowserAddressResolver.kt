@@ -34,7 +34,7 @@ object BrowserAddressResolver {
         return AddressDestination.SearchQuery(input)
     }
 
-    fun resolve(raw: String, engine: String, customTemplate: String = ""): String {
+    fun resolve(raw: String, engine: String): String {
         return when (val dest = resolveDestination(raw)) {
             is AddressDestination.DirectUrl -> dest.url
             is AddressDestination.SearchQuery -> {
@@ -44,12 +44,7 @@ object BrowserAddressResolver {
                     "QWANT" -> "https://www.qwant.com/?q=$encoded&t=web"
                     "MARGINALIA" -> "https://search.marginalia.nu/search?query=$encoded"
                     "BING" -> "https://www.bing.com/search?q=$encoded"
-                    "CUSTOM" -> {
-                        if (customTemplate.contains("{query}")) customTemplate.replace("{query}", encoded)
-                        else if (customTemplate.contains("%s")) customTemplate.replace("%s", encoded)
-                        else "https://www.bing.com/search?q=$encoded"
-                    }
-                    else -> "https://www.bing.com/search?q=$encoded"
+                    else -> "https://search.yahoo.com/search?p=$encoded"
                 }
             }
         }

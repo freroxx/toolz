@@ -239,6 +239,26 @@ fun WebViewScreen(
         viewModel.checkReadingList(currentUrl)
     }
 
+    // Dynamic Desktop Mode toggle handler
+    LaunchedEffect(isDesktopMode) {
+        webView?.let { wv ->
+            val targetUa = if (isDesktopMode) {
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            } else {
+                defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(wv.context)
+            }
+            wv.settings.apply {
+                userAgentString = targetUa
+                useWideViewPort = isDesktopMode
+                loadWithOverviewMode = isDesktopMode
+                setSupportZoom(true)
+                builtInZoomControls = true
+                displayZoomControls = false
+            }
+            wv.reload()
+        }
+    }
+
     // ── Root layout ───────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
 
@@ -288,7 +308,10 @@ fun WebViewScreen(
                 },
                 isSavedForLater = isSavedForLater,
                 onReadingListToggle = { viewModel.toggleReadingList(pageTitle, currentUrl) },
-                onUrlBarClick    = { showSearchOverlay = true },
+                onUrlBarClick    = {
+                    searchOverlayQuery = if (currentUrl == "about:blank") "" else currentUrl
+                    showSearchOverlay = true
+                },
                 downloads = downloads,
                 onShare = {
                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -786,7 +809,45 @@ fun WebViewScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        AssistChip(
+                            onClick = {
+                                val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = cm?.primaryClip?.getItemAt(0)?.text?.toString()
+                                if (!clip.isNullOrBlank()) {
+                                    searchOverlayQuery = clip
+                                }
+                            },
+                            label = { Text("Paste") },
+                            leadingIcon = { Icon(Icons.Rounded.ContentPaste, null, modifier = Modifier.size(16.dp)) },
+                            colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                        )
+                        if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
+                            AssistChip(
+                                onClick = {
+                                    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cm?.setPrimaryClip(ClipData.newPlainText("URL", currentUrl))
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                label = { Text("Copy URL") },
+                                leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                            )
+                        }
+                        if (searchOverlayQuery.isNotBlank()) {
+                            AssistChip(
+                                onClick = { searchOverlayQuery = "" },
+                                label = { Text("Clear") },
+                                leadingIcon = { Icon(Icons.Rounded.Clear, null, modifier = Modifier.size(16.dp)) },
+                                colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
 
                     val normalizedQuery = searchOverlayQuery.trim()
                     val suggestions = remember(normalizedQuery, bookmarks, browserHistory) {
