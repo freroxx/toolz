@@ -75,6 +75,8 @@ import com.frerox.toolz.data.network.ScanSnapshotDao
 import com.frerox.toolz.data.network.ScanSnapshotEntity
 import com.frerox.toolz.data.network.SpeedHistoryEntity
 import com.frerox.toolz.data.network.SpeedHistoryDao
+import com.frerox.toolz.data.cleaner.trash.CleanerTrashDao
+import com.frerox.toolz.data.cleaner.trash.CleanerTrashEntity
 import com.frerox.toolz.data.purgeshot.PurgeShotDao
 import com.frerox.toolz.data.purgeshot.PurgeShotEntity
 
@@ -109,7 +111,8 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
         SpeedHistoryEntity::class,
         DeviceInventoryEntity::class,
         ScanSnapshotEntity::class,
-        PurgeShotEntity::class
+        PurgeShotEntity::class,
+        CleanerTrashEntity::class
     ],
     // V3-FIX: 49 adds passwords.isToken (nullable Boolean, DEFAULT NULL) so Whisper
     // account type (anon token vs password) is stored metadata instead of a vault
@@ -117,8 +120,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // P3: 52 adds whisper_outbox + whisper_local_tombstones (see MIGRATION_51_52).
     // Music P1: 53 adds music_tracks.stableId + indexes for lastPlayed/playCount/sourceUrl/path (see MIGRATION_52_53).
     // Music Polished 54 adds music_tracks.lrcOffsetMs + dedup unique stability (see MIGRATION_53_54).
+    // Cleaner v2 56 adds cleaner_trash (see MIGRATION_55_56).
     // PurgeShot 55 adds purge_shot_queue (see MIGRATION_54_55).
-    version = 55,
+    version = 56,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -151,4 +155,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun deviceInventoryDao(): DeviceInventoryDao
     abstract fun scanSnapshotDao(): ScanSnapshotDao
     abstract fun purgeShotDao(): PurgeShotDao
+    abstract fun cleanerTrashDao(): CleanerTrashDao
 }

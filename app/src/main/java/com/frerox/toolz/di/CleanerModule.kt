@@ -19,6 +19,7 @@ package com.frerox.toolz.di
 
 import android.content.Context
 import com.frerox.toolz.data.cleaner.CleanerRepository
+import com.frerox.toolz.data.cleaner.engine.CleanerExclusionStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -35,4 +36,11 @@ object CleanerModule {
     fun provideCleanerRepository(
         @ApplicationContext context: Context
     ): CleanerRepository = CleanerRepository(context)
+
+    @Provides
+    @Singleton
+    fun provideCleanerExclusionStore(
+        @ApplicationContext context: Context,
+        dataStore: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>
+    ): CleanerExclusionStore = CleanerExclusionStore(context, dataStore)
 }

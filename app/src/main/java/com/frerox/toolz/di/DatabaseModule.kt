@@ -186,6 +186,19 @@ object DatabaseModule {
         }
     }
 
+    // Cleaner v2 55->56: trash queue for file cleaner undo
+    private val MIGRATION_55_56 = object : Migration(55, 56) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `cleaner_trash` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`originalPath` TEXT NOT NULL, `trashPath` TEXT, `sizeBytes` INTEGER NOT NULL, " +
+                    "`deletedAt` INTEGER NOT NULL, `expiresAt` INTEGER NOT NULL, `type` TEXT NOT NULL)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_cleaner_trash_deletedAt` ON `cleaner_trash` (`deletedAt`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_cleaner_trash_expiresAt` ON `cleaner_trash` (`expiresAt`)")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -251,7 +264,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -303,7 +316,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55)
+                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -431,5 +444,10 @@ object DatabaseModule {
     @Provides
     fun providePurgeShotDao(database: AppDatabase): com.frerox.toolz.data.purgeshot.PurgeShotDao {
         return database.purgeShotDao()
+    }
+
+    @Provides
+    fun provideCleanerTrashDao(database: AppDatabase): com.frerox.toolz.data.cleaner.trash.CleanerTrashDao {
+        return database.cleanerTrashDao()
     }
 }
