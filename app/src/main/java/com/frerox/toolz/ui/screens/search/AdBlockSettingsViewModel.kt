@@ -43,9 +43,7 @@ data class AdBlockSettingsUiState(
     val isFetching: Boolean = false,
     val nextDnsHealth: NextDnsHealth = NextDnsHealth.UNKNOWN,
     val isNextDnsEnabled: Boolean = false
-)
-
-@HiltViewModel
+)@HiltViewModel
 class AdBlockSettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val repository: com.frerox.toolz.data.search.WebSearchRepository,
@@ -65,29 +63,40 @@ class AdBlockSettingsViewModel @Inject constructor(
         settingsRepository.searchNextDnsId,
         settingsRepository.searchNextDnsDnsUrl,
         settingsRepository.searchEnabledImportedLists,
+        settingsRepository.searchAdBlockBlocklists,
+        settingsRepository.searchAdBlockAllowlists,
+        settingsRepository.searchAdBlockImportedCount,
+        settingsRepository.searchDnsProvider,
         _nextDnsHealth,
         _isFetching,
         _nextDnsIdInput,
         _nextDnsUrlInput
     ) { args: Array<Any?> ->
-        val repoId   = args[0] as String
-        val repoUrl  = args[1] as String
+        val repoId    = args[0] as String
+        val repoUrl   = args[1] as String
         @Suppress("UNCHECKED_CAST")
-        val imported = args[2] as Set<String>
-        val health   = args[3] as NextDnsHealth
-        val fetching = args[4] as Boolean
-        val inputId  = args[5] as? String
-        val inputUrl = args[6] as? String
+        val imported  = args[2] as Set<String>
+        @Suppress("UNCHECKED_CAST")
+        val blocked   = args[3] as Set<String>
+        @Suppress("UNCHECKED_CAST")
+        val allowed   = args[4] as Set<String>
+        val domCount  = args[5] as Int
+        val provider  = args[6] as String
+        val health    = args[7] as NextDnsHealth
+        val fetching  = args[8] as Boolean
+        val inputId   = args[9] as? String
+        val inputUrl  = args[10] as? String
         AdBlockSettingsUiState(
-            blocklists            = AdBlockList.getBlockedDomains(),
-            allowlists            = AdBlockList.getAllowlistedDomains(),
+            blocklists            = blocked,
+            allowlists            = allowed,
             enabledImportedLists  = imported,
-            importedDomainCount   = adBlockManager.getImportedDomainCount(),
+            importedDomainCount   = domCount,
             nextDnsId             = inputId ?: repoId,
             nextDnsUrl            = inputUrl ?: repoUrl,
             isFetching            = fetching,
             nextDnsHealth         = health,
-            isNextDnsEnabled      = (inputId ?: repoId).isNotBlank()
+            // Enabled means NextDNS is the ACTIVE provider, not just that an ID was typed
+            isNextDnsEnabled      = provider.equals("NEXTDNS", ignoreCase = true)
         )
     }.stateIn(
         scope = viewModelScope,
@@ -98,6 +107,13 @@ class AdBlockSettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             checkDnsHealth()
+        }
+        // AI's choice: keep the status chip fresh while the screen is open
+        viewModelScope.launch {
+            while (true) {
+                delay(60_000)
+                checkDnsHealth()
+            }
         }
     }
 
@@ -158,13 +174,15 @@ class AdBlockSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             if (enabled) {
                 settingsRepository.setDnsProvider("NEXTDNS")
+                // Refresh the health badge now that the provider actually changed
+                checkDnsHealth()
             } else {
                 // If disabling NextDNS, switch to the fastest alternative
                 _isFetching.value = true // Show loading while benchmarking
                 val providers = dnsEngine.providerLibrary().filter { it.id != "nextdns" }
                 var fastestId = "CLOUDFLARE"
                 var minLatency = Long.MAX_VALUE
-                
+
                 providers.forEach { p ->
                     val lat = dnsEngine.checkSingleLatency(p.addresses.first())
                     if (lat != null && lat < minLatency) {
@@ -174,6 +192,7 @@ class AdBlockSettingsViewModel @Inject constructor(
                 }
                 settingsRepository.setDnsProvider(fastestId)
                 _isFetching.value = false
+                checkDnsHealth()
             }
         }
     }

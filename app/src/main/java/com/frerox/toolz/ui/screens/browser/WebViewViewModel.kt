@@ -27,6 +27,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.search.WebSearchRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,6 +109,7 @@ class WebViewViewModel @Inject constructor(
         if (tabManager.tabs.value.isEmpty()) {
             // We'll let the Screen call addTab with the initial URL if needed
         }
+        cleanOrphanPreviews()
     }
 
     fun ensureTabExists(url: String) {
@@ -248,7 +250,7 @@ class WebViewViewModel @Inject constructor(
             try {
                 val previewDir = File(application.cacheDir, "tab_previews")
                 if (!previewDir.exists()) previewDir.mkdirs()
-                
+
                 val file = File(previewDir, "preview_$tabId.jpg")
                 FileOutputStream(file).use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 70, out)
@@ -256,6 +258,34 @@ class WebViewViewModel @Inject constructor(
                 tabManager.updateTab(tabId, previewPath = file.absolutePath)
             } catch (e: Exception) {
                 e.printStackTrace()
+            } finally {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    /** Removes the stored preview for a tab (e.g. when its URL changes so the thumbnail stays fresh). */
+    fun invalidateTabPreview(tabId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val file = File(File(application.cacheDir, "tab_previews"), "preview_$tabId.jpg")
+                if (file.exists()) file.delete()
+                tabManager.updateTab(tabId, previewPath = null)
+            }
+        }
+    }
+
+    /** Deletes preview files that no longer belong to any open tab. */
+    fun cleanOrphanPreviews() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val previewDir = File(application.cacheDir, "tab_previews")
+                if (!previewDir.exists()) return@runCatching
+                val liveIds = tabManager.tabs.value.mapTo(hashSetOf()) { it.id }
+                previewDir.listFiles()?.forEach { file ->
+                    val tabId = file.name.removePrefix("preview_").removeSuffix(".jpg")
+                    if (tabId !in liveIds) file.delete()
+                }
             }
         }
     }
@@ -280,7 +310,6 @@ class WebViewViewModel @Inject constructor(
             onResolved(BrowserAddressResolver.resolve(
                 raw = input,
                 engine = settingsRepository.searchEngine.first(),
-                customTemplate = settingsRepository.searchCustomEngineUrl.first(),
             ))
         }
     }

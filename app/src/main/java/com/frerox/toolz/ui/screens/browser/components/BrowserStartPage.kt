@@ -105,7 +105,8 @@ fun BrowserStartPage(
             StartPageRail(
                 heading = "Pick up where you left off",
                 icon = Icons.Rounded.AutoStories,
-                entries = history.take(10).map { it.title to it.url },
+                // Only the single most recent visit
+                entries = history.take(1).map { it.title to it.url },
                 onOpenUrl = onOpenUrl,
             )
         }

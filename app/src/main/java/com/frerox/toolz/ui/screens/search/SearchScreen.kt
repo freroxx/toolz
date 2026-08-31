@@ -25,6 +25,8 @@ import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.*
@@ -114,9 +116,11 @@ fun SearchScreen(
     }
 
     if (showEngineSheet) {
+        val engineHealth by viewModel.engineHealth.collectAsState()
         SearchEngineSheet(
             onDismiss      = { showEngineSheet = false },
             currentEngine  = uiState.searchEngine,
+            engineHealth   = engineHealth,
             onEngineSelect = { viewModel.setSearchEngine(it); showEngineSheet = false }
         )
     }
@@ -810,13 +814,26 @@ private fun BrowserPulseCard(
     }
     val name = userName.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
     val palette = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val isPressed by interaction.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "pulseCardPressScale",
+    )
 
     Surface(
-        shape = RoundedCornerShape(32.dp),
-        color = if (isPrivate) palette.inverseSurface else palette.primaryContainer,
-        contentColor = if (isPrivate) palette.inverseOnSurface else palette.onPrimaryContainer,
+        shape = RoundedCornerShape(28.dp),
+        color = if (isPrivate) palette.inverseSurface else palette.surfaceContainerHigh,
+        contentColor = if (isPrivate) palette.inverseOnSurface else palette.onSurface,
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, palette.outlineVariant.copy(alpha = .35f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            },
     ) {
         Column(
             modifier = Modifier.padding(22.dp),
@@ -825,7 +842,7 @@ private fun BrowserPulseCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     shape = CircleShape,
-                    color = if (isPrivate) palette.inversePrimary.copy(alpha = .18f) else palette.primary.copy(alpha = .14f),
+                    color = if (isPrivate) palette.inversePrimary.copy(alpha = .18f) else palette.primaryContainer,
                     modifier = Modifier.size(44.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -858,14 +875,18 @@ private fun BrowserPulseCard(
 
 @Composable
 private fun BrowserMetric(value: String, label: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(LocalContentColor.current.copy(alpha = .09f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 1.dp,
+        modifier = modifier,
     ) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = .68f))
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = .68f))
+        }
     }
 }
 
@@ -921,7 +942,8 @@ private fun BrowserHistorySection(
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .3f)),
         ) {
             Column {
-                items.take(5).forEachIndexed { index, item ->
+                // Show only the single most recent visit
+                items.firstOrNull()?.let { item ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -939,7 +961,6 @@ private fun BrowserHistorySection(
                             Icon(Icons.Rounded.Close, contentDescription = "Remove from history", modifier = Modifier.size(18.dp))
                         }
                     }
-                    if (index < items.take(5).lastIndex) HorizontalDivider(modifier = Modifier.padding(start = 50.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
                 }
             }
         }
@@ -1558,6 +1579,7 @@ private fun SecuritySheet(
 private fun SearchEngineSheet(
     onDismiss: () -> Unit,
     currentEngine: String,
+    engineHealth: Map<String, com.frerox.toolz.data.search.WebSearchRepository.EngineHealth> = emptyMap(),
     onEngineSelect: (String) -> Unit,
 ) {
     ModalBottomSheet(
@@ -1578,7 +1600,7 @@ private fun SearchEngineSheet(
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant & Marginalia with consensus ranking"),
+                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant, Marginalia & Bing with consensus ranking"),
                 "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results"),
                 "QWANT"      to ("Qwant" to "Privacy-first European search engine with independent web & media indexing"),
                 "MARGINALIA" to ("Marginalia" to "Independent search engine focusing on non-commercial and text-rich web"),
@@ -1591,6 +1613,7 @@ private fun SearchEngineSheet(
                 val name = pair.first
                 val desc = pair.second
                 val selected = currentEngine == key
+                val health = engineHealth[key]
                 Surface(
                     onClick        = { onEngineSelect(key) },
                     shape          = RoundedCornerShape(16.dp),
@@ -1640,6 +1663,21 @@ private fun SearchEngineSheet(
                                 color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        // Live engine health dot (AI's choice)
+                        if (health != null) {
+                            val (dotColor, dotLabel) = when (health) {
+                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.OK -> Color(0xFF4CAF50) to "OK"
+                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.COOLDOWN -> Color(0xFFFFC107) to "Cooling down"
+                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.FAILING -> Color(0xFFF44336) to "Failing"
+                            }
+                            Box {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = dotColor,
+                                    modifier = Modifier.size(10.dp).align(Alignment.Center),
+                                ) { }
+                            }
                         }
                         if (selected) {
                             Icon(

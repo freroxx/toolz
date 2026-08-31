@@ -31,10 +31,11 @@ class BrowserAddressResolverTest {
     }
 
     @Test
-    fun `custom providers receive encoded query in template`() {
-        assertEquals(
-            "https://search.example/?q=hello+world",
-            BrowserAddressResolver.resolve("hello world", "CUSTOM", "https://search.example/?q=%s"),
+    fun `legacy engine ids fall back to maintained providers`() {
+        val resolved = BrowserAddressResolver.resolve("hello world", "CUSTOM")
+        assertTrue(
+            resolved.contains("yahoo.com") || resolved.contains("qwant.com") ||
+                resolved.contains("bing.com") || resolved.contains("marginalia.nu")
         )
     }
 

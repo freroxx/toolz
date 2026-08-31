@@ -103,6 +103,7 @@ import com.frerox.toolz.ui.screens.search.components.safeHostFromUrl
 import com.frerox.toolz.util.network.AdBlockWebViewClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.File
 
 // ══════════════════════════════════════════════════════════
@@ -494,14 +495,50 @@ fun WebViewScreen(
                                     if (tabId != null) {
                                         scope.launch {
                                             delay(800)
-                                            runCatching {
-                                                val bmp = Bitmap.createBitmap(
-                                                    width.coerceAtLeast(1),
-                                                    (height * 0.5f).toInt().coerceAtLeast(1),
-                                                    Bitmap.Config.ARGB_8888,
-                                                )
-                                                draw(Canvas(bmp))
-                                                viewModel.saveTabPreview(tabId, bmp)
+                                            val captured = runCatching {
+                                                val wv = webView
+                                                if (wv == null || wv.width < 1 || wv.height < 1) return@runCatching null
+                                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                                    // Hardware-accelerated WebViews render via the GPU, so a plain
+                                                    // View.draw(Canvas) yields a blank bitmap. PixelCopy reads the
+                                                    // actual on-screen surface instead.
+                                                    val bmp = android.graphics.Bitmap.createBitmap(
+                                                        wv.width,
+                                                        (wv.height * 0.6f).toInt().coerceAtLeast(1),
+                                                        android.graphics.Bitmap.Config.ARGB_8888,
+                                                    )
+                                                    // PixelCopy needs a Window/SurfaceView — read the web
+                                                    // content off the webview's drawing cache via a
+                                                    // software layer toggle as fallback for WebView.
+                                                    val copied = suspendCancellableCoroutine { cont: kotlinx.coroutines.CancellableContinuation<Boolean> ->
+                                                        val activity = wv.context as? android.app.Activity
+                                                        val window = activity?.window
+                                                        if (window == null) {
+                                                            cont.resume(false) { _, _, _ -> }
+                                                        } else {
+                                                            android.view.PixelCopy.request(
+                                                                window, bmp,
+                                                                { result -> cont.resume(result == android.view.PixelCopy.SUCCESS) { _, _, _ -> } },
+                                                                android.os.Handler(android.os.Looper.getMainLooper()),
+                                                            )
+                                                        }
+                                                    }
+                                                    if (!copied) { bmp.recycle(); return@runCatching null }
+                                                    bmp
+                                                } else {
+                                                    val bmp = android.graphics.Bitmap.createBitmap(
+                                                        wv.width.coerceAtLeast(1),
+                                                        (wv.height * 0.6f).toInt().coerceAtLeast(1),
+                                                        android.graphics.Bitmap.Config.ARGB_8888,
+                                                    )
+                                                    wv.draw(android.graphics.Canvas(bmp))
+                                                    bmp
+                                                }
+                                            }.onFailure {
+                                                android.util.Log.w("TabPreview", "Capture failed for tab $tabId", it)
+                                            }.getOrNull()
+                                            if (captured != null) {
+                                                viewModel.saveTabPreview(tabId, captured)
                                             }
                                         }
                                     }

@@ -196,6 +196,29 @@ class WebSearchRepository @Inject constructor(
         engineCooldowns[engine] = EngineCooldown(until = System.currentTimeMillis() + COOLDOWN_MS)
     }
 
+    // ─── Per-engine health (AI's choice: visible engine status) ───────────────
+
+    enum class EngineHealth { OK, COOLDOWN, FAILING }
+
+    private data class EngineStats(val lastSuccessAt: Long, val lastResultCount: Int)
+    private val engineStats = ConcurrentHashMap<String, EngineStats>()
+
+    fun recordEngineSuccess(engine: String, count: Int) {
+        engineStats[engine] = EngineStats(System.currentTimeMillis(), count)
+    }
+
+    /** Snapshot of engine health for the UI status indicator. */
+    fun engineHealthSnapshot(): Map<String, EngineHealth> {
+        val names = listOf("YAHOO", "QWANT", "MARGINALIA", "BING")
+        return names.associateWith { eng ->
+            when {
+                !isEngineAvailable(eng) -> EngineHealth.COOLDOWN
+                engineStats[eng] != null -> EngineHealth.OK
+                else -> EngineHealth.FAILING
+            }
+        }
+    }
+
     // Maintained engines fallback order
     private val FALLBACK_ORDER = listOf("YAHOO", "QWANT", "MARGINALIA", "BING")
 
@@ -301,7 +324,7 @@ class WebSearchRepository @Inject constructor(
 
         val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
         val safeSearchBing = if (safeSearch) "&adlt=strict" else "&adlt=off"
-        val safeSearchQwant = if (safeSearch) "&safesearch=1" else "&safesearch=0"
+        val safeSearchQwantParam = if (safeSearch) 1 else -1
         val safeSearchYahoo = if (safeSearch) "&vm=r" else ""
 
         val client = getDnsClient()
@@ -317,7 +340,7 @@ class WebSearchRepository @Inject constructor(
             val deferredImages = imageEngines.map { eng ->
                 async {
                     fetchFromEngine(
-                        eng, encodedQuery, offset, safeSearchBing, safeSearchQwant,
+                        eng, encodedQuery, offset, safeSearchBing, safeSearchQwantParam,
                         safeSearchYahoo, client, adBlockEnabled, category
                     )
                 }
@@ -337,7 +360,7 @@ class WebSearchRepository @Inject constructor(
             val deferredVideos = videoEngines.map { eng ->
                 async {
                     fetchFromEngine(
-                        eng, encodedQuery, offset, safeSearchBing, safeSearchQwant,
+                        eng, encodedQuery, offset, safeSearchBing, safeSearchQwantParam,
                         safeSearchYahoo, client, adBlockEnabled, category
                     )
                 }
@@ -350,7 +373,7 @@ class WebSearchRepository @Inject constructor(
 
         // ── Category: Web (ALL / NEWS) ────────────────────────────────────────
         val mainEngines = when (engine) {
-            "META" -> listOf("YAHOO", "QWANT", "MARGINALIA")
+            "META" -> listOf("YAHOO", "QWANT", "MARGINALIA", "BING")
             else -> listOf(engine)
         }
 
@@ -359,7 +382,7 @@ class WebSearchRepository @Inject constructor(
         val deferred = mainEngines.map { eng ->
             async {
                 eng to fetchFromEngine(
-                    eng, encodedQuery, offset, safeSearchBing, safeSearchQwant,
+                    eng, encodedQuery, offset, safeSearchBing, safeSearchQwantParam,
                     safeSearchYahoo, client, adBlockEnabled, category
                 )
             }
@@ -373,7 +396,7 @@ class WebSearchRepository @Inject constructor(
             val alternatives = FALLBACK_ORDER.filter { it != engine && isEngineAvailable(it) }
             for (altEng in alternatives) {
                 val altResults = fetchFromEngine(
-                    altEng, encodedQuery, offset, safeSearchBing, safeSearchQwant,
+                    altEng, encodedQuery, offset, safeSearchBing, safeSearchQwantParam,
                     safeSearchYahoo, client, adBlockEnabled, category
                 )
                 if (altResults.isNotEmpty()) {
@@ -397,7 +420,7 @@ class WebSearchRepository @Inject constructor(
         encodedQuery: String,
         offset: Int,
         safeSearchBing: String,
-        safeSearchQwant: String,
+        safeSearchQwantParam: Int,
         safeSearchYahoo: String,
         client: OkHttpClient,
         adBlockEnabled: Boolean,
@@ -425,27 +448,22 @@ class WebSearchRepository @Inject constructor(
                 val offsetParam = if (offset > 0) "&offset=$offset" else ""
                 when (category) {
                     SearchCategory.IMAGES -> listOf(
-                        "https://api.qwant.com/v3/search/images?q=$encodedQuery&count=30$offsetParam&locale=en_US",
-                        "https://lite.qwant.com/?q=$encodedQuery&t=images$offsetParam$safeSearchQwant"
+                        "https://api.qwant.com/v3/search/images?q=$encodedQuery&count=30$offsetParam&locale=en_US&device=desktop&safesearch=$safeSearchQwantParam"
                     )
                     SearchCategory.NEWS -> listOf(
-                        "https://api.qwant.com/v3/search/news?q=$encodedQuery&count=25$offsetParam&locale=en_US",
-                        "https://lite.qwant.com/?q=$encodedQuery&t=news$offsetParam$safeSearchQwant"
+                        "https://api.qwant.com/v3/search/news?q=$encodedQuery&count=25$offsetParam&locale=en_US&device=desktop&safesearch=$safeSearchQwantParam"
                     )
                     SearchCategory.VIDEOS -> listOf(
-                        "https://api.qwant.com/v3/search/videos?q=$encodedQuery&count=25$offsetParam&locale=en_US",
-                        "https://lite.qwant.com/?q=$encodedQuery&t=videos$offsetParam$safeSearchQwant"
+                        "https://api.qwant.com/v3/search/videos?q=$encodedQuery&count=25$offsetParam&locale=en_US&device=desktop&safesearch=$safeSearchQwantParam"
                     )
                     else -> listOf(
-                        "https://api.qwant.com/v3/search/web?q=$encodedQuery&count=25$offsetParam&locale=en_US",
-                        "https://lite.qwant.com/?q=$encodedQuery&t=web$offsetParam$safeSearchQwant"
+                        "https://api.qwant.com/v3/search/web?q=$encodedQuery&count=25$offsetParam&locale=en_US&device=desktop&safesearch=$safeSearchQwantParam"
                     )
                 }
             }
             "MARGINALIA" -> {
-                val page = offset / 10 + 1
+                // Public API is the only reliably accessible surface (the HTML page is a JS SPA now)
                 listOf(
-                    "https://search.marginalia.nu/search?query=$encodedQuery&page=$page",
                     "https://api.marginalia.nu/public/search/$encodedQuery"
                 )
             }
@@ -455,9 +473,13 @@ class WebSearchRepository @Inject constructor(
         for (tryUrl in urls) {
             try {
                 val request  = buildRequest(tryUrl)
-                val response = withTimeoutOrNull(8_000) { client.newCall(request).execute() } ?: continue
+                val response = withTimeoutOrNull(8_000) { client.newCall(request).execute() } ?: run {
+                    android.util.Log.w("Search", "[$eng] Timeout fetching $tryUrl")
+                    continue
+                }
 
                 if (!response.isSuccessful) {
+                    android.util.Log.w("Search", "[$eng] HTTP ${response.code} for $tryUrl")
                     if (response.code in listOf(429, 403)) {
                         setCooldown(eng)
                         break
@@ -471,8 +493,10 @@ class WebSearchRepository @Inject constructor(
                 if (bodyStr.contains("detected suspicious activity") ||
                     bodyStr.contains("unusual traffic") ||
                     bodyStr.contains("cf-browser-verification") ||
-                    bodyStr.contains("challenge-form")
+                    bodyStr.contains("challenge-form") ||
+                    bodyStr.contains("captcha-delivery")
                 ) {
+                    android.util.Log.w("Search", "[$eng] Bot challenge detected at $tryUrl — cooling down")
                     setCooldown(eng)
                     continue
                 }
@@ -481,7 +505,11 @@ class WebSearchRepository @Inject constructor(
                 val trimmed = bodyStr.trim()
                 if (trimmed.startsWith("{") && eng == "QWANT") {
                     val jsonResults = parseQwantJson(trimmed, adBlockEnabled, category)
-                    if (jsonResults.isNotEmpty()) return jsonResults
+                    if (jsonResults.isNotEmpty()) { recordEngineSuccess(eng, jsonResults.size); return jsonResults }
+                }
+                if (trimmed.startsWith("{") && eng == "MARGINALIA") {
+                    val jsonResults = parseMarginaliaJson(trimmed, adBlockEnabled)
+                    if (jsonResults.isNotEmpty()) { recordEngineSuccess(eng, jsonResults.size); return jsonResults }
                 }
 
                 val doc = Jsoup.parse(bodyStr, tryUrl)
@@ -492,12 +520,14 @@ class WebSearchRepository @Inject constructor(
                     "MARGINALIA" -> parseMarginaliaResults(doc, adBlockEnabled)
                     else -> parseBingResults(doc, adBlockEnabled, category)
                 }
-                if (parsed.isNotEmpty()) return parsed
+                if (parsed.isNotEmpty()) { recordEngineSuccess(eng, parsed.size); return parsed }
+                android.util.Log.w("Search", "[$eng] Fetched $tryUrl but parsed 0 results")
             } catch (e: Exception) {
                 android.util.Log.w("Search", "[$eng] Error fetching $tryUrl", e)
                 continue
             }
         }
+        android.util.Log.w("Search", "[$eng] All candidate URLs exhausted — returning 0 results")
         return emptyList()
     }
 
@@ -892,6 +922,39 @@ class WebSearchRepository @Inject constructor(
     }
 
     // ─── Marginalia parser ───────────────────────────────────────────────────
+
+    // Public API JSON: { results: [ { url, title, description, quality, ... } ] }
+    private fun parseMarginaliaJson(
+        jsonStr: String,
+        adBlockEnabled: Boolean
+    ): List<SearchResult> {
+        return try {
+            val root = org.json.JSONObject(jsonStr)
+            val arr = root.optJSONArray("results") ?: return emptyList()
+            val results = mutableListOf<SearchResult>()
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val url = item.optString("url")
+                if (!url.startsWith("http")) continue
+                if (adBlockEnabled && AdBlockList.isBlocked(url)) continue
+                val title = item.optString("title").ifBlank { safeHost(url) }
+                val description = item.optString("description")
+                val (date, clean) = extractDateFromSnippet(description)
+                results += SearchResult(
+                    title = title,
+                    snippet = clean,
+                    url = url,
+                    displayUrl = safeHost(url),
+                    source = "Marginalia",
+                    engineRank = i,
+                )
+            }
+            results
+        } catch (e: Exception) {
+            android.util.Log.w("Search", "[MARGINALIA] JSON parse failed", e)
+            emptyList()
+        }
+    }
 
     private fun parseMarginaliaResults(
         doc: org.jsoup.nodes.Document,

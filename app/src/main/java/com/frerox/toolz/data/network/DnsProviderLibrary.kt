@@ -194,6 +194,19 @@ object DnsProviderLibrary {
 
     fun byId(id: String): DnsProvider? = providers.firstOrNull { it.id == id }
 
+    /**
+     * Returns the NextDNS provider with the user's profile ID baked into the DoH URL.
+     * Without the profile ID the generic anycast resolver is queried, which means the
+     * user's personal blocklists/analytics never apply. Returns the stock entry if
+     * [profileId] is blank.
+     */
+    fun nextDnsWithProfile(profileId: String): DnsProvider {
+        val clean = profileId.trim().removePrefix("https://dns.nextdns.io/")
+        val stock = byId("nextdns") ?: return providers.first()
+        if (clean.isBlank()) return stock
+        return stock.copy(dohUrl = "https://dns.nextdns.io/$clean")
+    }
+
     /** Single source for DNS weighted scoring — l*0.6 + j*0.25 + p*0.15 (used by DnsEngine + DnsRealBenchmark) */
     fun weightedScore(latencyMs: Long?, jitterMs: Long?, packetLossPercent: Float): Int {
         if (latencyMs == null) return 0

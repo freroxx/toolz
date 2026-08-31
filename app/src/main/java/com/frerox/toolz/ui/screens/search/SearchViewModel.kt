@@ -173,6 +173,10 @@ class SearchViewModel @Inject constructor(
     private val _query = MutableStateFlow(SearchQueryState())
     val queryState: StateFlow<SearchQueryState> = _query.asStateFlow()
 
+    // AI's choice: visible per-engine health for the status indicator
+    private val _engineHealth = MutableStateFlow<Map<String, WebSearchRepository.EngineHealth>>(emptyMap())
+    val engineHealth: StateFlow<Map<String, WebSearchRepository.EngineHealth>> = _engineHealth.asStateFlow()
+
     // ── Backward-compat combined flow ─────────────────────────────────────────
 
     val uiState: StateFlow<SearchUiState> = combine(_settings, _query) { s, q ->
@@ -388,6 +392,7 @@ class SearchViewModel @Inject constructor(
 
             runCatching { repository.search(trimmed, 0, category) }
                 .onSuccess { results ->
+                    _engineHealth.value = repository.engineHealthSnapshot()
                     _query.update {
                         it.copy(
                             results     = results,

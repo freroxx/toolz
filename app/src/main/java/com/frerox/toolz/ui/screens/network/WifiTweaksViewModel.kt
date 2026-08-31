@@ -72,6 +72,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -720,10 +721,17 @@ class WifiTweaksViewModel @Inject constructor(
                 )
             }
             addLog("DNS", "Starting real DoH + TCP benchmark: ${candidateProviders.size} providers", LogLevel.INFO)
+            val nextDnsId = settingsRepository.searchNextDnsId.first()
             val results = kotlinx.coroutines.coroutineScope {
                 candidateProviders.map { (id, name, host) ->
                     async {
-                        val stub = com.frerox.toolz.data.network.DnsProvider(id, name, listOf(host), host, "https://$host/dns-query")
+                        val stub = if (id == "nextdns" && nextDnsId.isNotBlank()) {
+                            // Benchmark the user's actual NextDNS profile, not the generic resolver
+                            com.frerox.toolz.data.network.DnsProviderLibrary.nextDnsWithProfile(nextDnsId)
+                                .copy(id = id, name = name)
+                        } else {
+                            com.frerox.toolz.data.network.DnsProvider(id, name, listOf(host), host, "https://$host/dns-query")
+                        }
                         val bench = runCatching { dnsRealBenchmark.benchmark(stub, samples = 2) }.getOrNull()
                         val latency = bench?.metrics?.latencyMs ?: pingHost(host)
                         // P4: DoT capability probe (what Private DNS actually uses)
