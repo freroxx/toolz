@@ -60,6 +60,8 @@ fun CleanerStorageArc(storageInfo: StorageInfo, cleanableBytes: Long = storageIn
             val glowScale by infinite.animateFloat(0.94f, 1.06f, infiniteRepeatable(tween(2000), RepeatMode.Reverse), label = "glowV2")
             Box(modifier = Modifier.size(210.dp).graphicsLayer { scaleX = glowScale; scaleY = glowScale }.background(Brush.radialGradient(listOf(primary.copy(alpha = 0.12f), Color.Transparent)), CircleShape))
         }
+        val primaryBrush = remember(primary) { Brush.sweepGradient(listOf(primary.copy(alpha = 0.7f), primary)) }
+        val errorBrush = remember(error) { Brush.sweepGradient(listOf(error.copy(alpha = 0.7f), error)) }
         Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
             val sw = 36f
             val arcSz = Size(size.width - sw, size.height - sw)
@@ -67,8 +69,8 @@ fun CleanerStorageArc(storageInfo: StorageInfo, cleanableBytes: Long = storageIn
             val start = 135f
             val sweep = 270f
             drawArc(outline, start, sweep, false, tl, arcSz, style = Stroke(sw, cap = StrokeCap.Round))
-            if (animBase > 0f) drawArc(Brush.sweepGradient(listOf(primary.copy(alpha = 0.7f), primary)), start, sweep * animBase, false, tl, arcSz, style = Stroke(sw, cap = StrokeCap.Round))
-            if (animClean > 0f) drawArc(Brush.sweepGradient(listOf(error.copy(alpha = 0.7f), error)), start + sweep * animBase, sweep * animClean, false, tl, arcSz, style = Stroke(sw, cap = StrokeCap.Round))
+            if (animBase > 0f) drawArc(primaryBrush, start, sweep * animBase, false, tl, arcSz, style = Stroke(sw, cap = StrokeCap.Round))
+            if (animClean > 0f) drawArc(errorBrush, start + sweep * animBase, sweep * animClean, false, tl, arcSz, style = Stroke(sw, cap = StrokeCap.Round))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(Formatter.formatFileSize(context, storageInfo.usedBytes), style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Black, letterSpacing = (-1.5).sp))

@@ -36,7 +36,7 @@ class DuplicateAnalyzer @Inject constructor() : CleanerAnalyzer {
     override val description="Exact duplicates — keep oldest, delete others"
     override val isSafeToClean=false
     override suspend fun analyze(root: File, installedPackages: Set<String>, progress: (String)->Unit, exclusions: Set<String>, isActive: ()->Boolean, config: CleanScanConfig): CleanCategory {
-        val sizeMap=HashMap<Long, MutableList<File>>(65536)
+        val sizeMap=HashMap<Long, MutableList<File>>(4096)
         var scanned=0
         root.walkTopDown().onEnter { dir -> if (!isActive()) return@onEnter false; if (dir.name.startsWith(".") && !config.includeHidden) return@onEnter false; if (exclusions.any { dir.absolutePath.contains(it) }) return@onEnter false; true }.forEach { file ->
             if (!isActive()) return@forEach

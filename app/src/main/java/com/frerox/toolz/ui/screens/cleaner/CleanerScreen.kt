@@ -37,6 +37,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +51,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -326,8 +328,8 @@ private fun ResultsV2(
         AnimatedVisibility(
             visible = state.selectedBytes > 0,
             modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp).navigationBarsPadding(),
-            enter = slideInVertically(spring(Spring.DampingRatioMediumBouncy)) { it / 2 } + fadeIn() + scaleIn(0.92f),
-            exit = slideOutVertically { it / 2 } + fadeOut() + scaleOut(0.92f)
+            enter = slideInVertically(spring(Spring.DampingRatioMediumBouncy)) { it / 2 } + fadeIn() + scaleIn(initialScale = 0.92f),
+            exit = slideOutVertically { it / 2 } + fadeOut() + scaleOut(targetScale = 0.92f)
         ) {
             CleanerBottomBar(
                 selectedBytes = state.selectedBytes,

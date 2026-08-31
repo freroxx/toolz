@@ -399,6 +399,16 @@ class CleanerRepository @Inject constructor(
                     is CleanItem.UnusedApp -> {
                         if (item.entry.isSelected) toUninstallApps.add(item.entry.packageName)
                     }
+                    is CleanItem.AppCache -> {}
+                    is CleanItem.EmptyDir -> {
+                        if (item.entry.isSelected) toDeleteFiles.add(item.entry.path to 0L)
+                    }
+                    is CleanItem.MediaFile -> {
+                        if (item.entry.isSelected) toDeleteFiles.add(item.entry.path to item.entry.sizeBytes)
+                    }
+                    is CleanItem.ApkFile -> {
+                        if (item.entry.isSelected) toDeleteFiles.add(item.entry.path to item.entry.sizeBytes)
+                    }
                 }
             }
 
@@ -451,6 +461,10 @@ class CleanerRepository @Inject constructor(
                             if (item.entry.packageName == itemId) CleanItem.UnusedApp(item.entry.copy(isSelected = !item.entry.isSelected))
                             else item
                         }
+                        is CleanItem.AppCache -> item
+                        is CleanItem.EmptyDir -> item
+                        is CleanItem.MediaFile -> item
+                        is CleanItem.ApkFile -> item
                         else -> item
                     }
                 }
@@ -491,6 +505,10 @@ class CleanerRepository @Inject constructor(
                 is CleanItem.Corpse -> if (item.entry.isSelected) item.entry.sizeBytes else 0L
                 is CleanItem.GenericFile -> if (item.file.isSelected) item.file.sizeBytes else 0L
                 is CleanItem.UnusedApp -> if (item.entry.isSelected) item.entry.sizeBytes else 0L
+                is CleanItem.AppCache -> if (item.entry.isSelected) item.entry.cacheBytes else 0L
+                is CleanItem.EmptyDir -> 0L
+                is CleanItem.MediaFile -> if (item.entry.isSelected) item.entry.sizeBytes else 0L
+                is CleanItem.ApkFile -> if (item.entry.isSelected) item.entry.sizeBytes else 0L
             }
         }
     }
