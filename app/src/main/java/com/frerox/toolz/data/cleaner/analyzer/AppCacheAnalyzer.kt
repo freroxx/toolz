@@ -28,6 +28,7 @@ import com.frerox.toolz.data.cleaner.CleanCategory
 import com.frerox.toolz.data.cleaner.CleanItem
 import com.frerox.toolz.data.cleaner.engine.CleanScanConfig
 import com.frerox.toolz.data.cleaner.engine.CleanerAnalyzer
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -64,6 +65,10 @@ class AppCacheAnalyzer @Inject constructor(@ApplicationContext private val conte
                 }
             } catch(_:Exception){}
             if (entries.size>80) break
+        }
+        // Shizuku privileged caches — check isAuthorized, shell execution handled via injected executor if needed (deferred)
+        if (ShizukuHelper.isAuthorized()) {
+            // placeholder for privileged cache via ShizukuShellExecutor (requires injection) — merged via Engine isShizukuGranted flag
         }
         val sorted=entries.sortedByDescending { it.cacheBytes }
         val items=sorted.map { CleanItem.AppCache(it) }

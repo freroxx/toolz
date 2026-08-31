@@ -50,6 +50,10 @@ class LargeFilesAnalyzer @Inject constructor(@ApplicationContext private val con
                 if (collected.size>config.maxLargeFiles*2) return@forEach
             }
         }
+        // include empty files <1KB subtle
+        var emptyCount = 0
+        root.walkTopDown().onEnter { dir -> if (!isActive()) return@onEnter false; true }.forEach { f -> if (f.isFile && f.length() in 1..1023) emptyCount++ }
+        // keep Large category focused, empty count just for info (could be used later)
         val sorted=collected.sortedByDescending { it.sizeBytes }.take(config.maxLargeFiles)
         val items=sorted.map { CleanItem.GenericFile(it) }
         val total=sorted.sumOf { it.sizeBytes }

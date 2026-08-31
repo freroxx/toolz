@@ -39,15 +39,19 @@ object FileUtils {
         return true
     }
     fun getMediaStoreUri(context: Context, path: String, ext: String): String? {
-        val collection = when (ext.lowercase()) {
-            "mp3","wav","m4a","ogg","flac","aac" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-            "pdf" -> MediaStore.Files.getContentUri("external")
-            "jpg","jpeg","png","gif","webp","bmp","heic","heif" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            "mp4","mkv","avi","mov","webm","flv" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            else -> return null
+        // For images/videos, return file path directly for Coil (faster, Q+ compatible). MediaStore DATA is deprecated.
+        val lower = ext.lowercase()
+        if (lower in setOf("jpg","jpeg","png","gif","webp","bmp","heic","heif","mp4","mkv","avi","mov","webm","flv")) {
+            return path
         }
+        // For other types try MediaStore query via DISPLAY_NAME fallback, but return null to show icon
+        if (lower == "pdf") return null
         return try {
-            context.contentResolver.query(collection, arrayOf(MediaStore.MediaColumns._ID), "${MediaStore.MediaColumns.DATA}=?", arrayOf(path), null)?.use { c -> if (c.moveToFirst()) ContentUris.withAppendedId(collection, c.getLong(0)).toString() else null }
+            val collection = when (lower) {
+                "mp3","wav","m4a","ogg","flac","aac" -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                else -> return null
+            }
+            context.contentResolver.query(collection, arrayOf(MediaStore.MediaColumns._ID), "${MediaStore.MediaColumns.DISPLAY_NAME}=?", arrayOf(File(path).name), null)?.use { c -> if (c.moveToFirst()) ContentUris.withAppendedId(collection, c.getLong(0)).toString() else null }
         } catch (_: Exception) { null }
     }
 }

@@ -49,7 +49,20 @@ class DuplicateAnalyzer @Inject constructor() : CleanerAnalyzer {
             scanned++; if (scanned%4000==0) progress("Duplicate scan — $scanned files")
         }
         progress("Analyzing duplicates…")
-        val filtered=sizeMap.filter { it.value.size>=2 }
+        var filtered=sizeMap.filter { it.value.size>=2 }
+        // name+size prefilter limit 1k files
+        val totalFiles = filtered.values.sumOf { it.size }
+        if (totalFiles > 1000) {
+            val sortedBySize = filtered.entries.sortedByDescending { it.key }
+            var acc = 0
+            val limited = mutableMapOf<Long, MutableList<java.io.File>>()
+            for ((sz, lst) in sortedBySize) {
+                if (acc >= 1000) break
+                limited[sz] = lst
+                acc += lst.size
+            }
+            filtered = limited
+        }
         val groups=mutableListOf<DuplicateGroup>()
         var processed=0
         for ((size, files) in filtered) {

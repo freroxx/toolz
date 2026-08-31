@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -213,6 +214,8 @@ fun WebViewScreen(
                     viewModel.toggleBookmark(pageTitle, currentUrl)
                 },
                 onUrlBarClick    = { showSearchOverlay = true },
+                onUrlGo = { target -> webView?.loadUrl(target); currentUrl = target; viewModel.updateTab(url = target) },
+                downloads = downloads,
                 onShare = {
                     val intent = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
@@ -667,8 +670,42 @@ private fun TopChrome(
     onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
+    onUrlGo: ((String) -> Unit)? = null,
+    downloads: List<com.frerox.toolz.data.browser.DownloadItem> = emptyList(),
 ) {
     var showOptions by remember { mutableStateOf(false) }
+    var isEditingUrl by remember { mutableStateOf(false) }
+    var editUrlText by remember(currentUrl) { mutableStateOf(currentUrl) }
+    val ctxLocal = LocalContext.current
+    val focusReq = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(currentUrl) { if (!isEditingUrl) editUrlText = currentUrl }
+    LaunchedEffect(isEditingUrl) {
+        if (isEditingUrl) {
+            kotlinx.coroutines.delay(80)
+            try { focusReq.requestFocus() } catch (_: Exception) {}
+        }
+    }
+    // Back closes edit first
+    androidx.activity.compose.BackHandler(enabled = isEditingUrl) { isEditingUrl = false }
+    fun isValidUrl(s: String): Boolean {
+        val t = s.trim()
+        if (t.contains(" ")) return false
+        if (t.startsWith("localhost") || t.startsWith("127.") || t.startsWith("192.168.") || t.startsWith("10.")) return true
+        // Require dot and no spaces, or scheme present
+        if (t.startsWith("http://") || t.startsWith("https://")) return true
+        val uri = try { Uri.parse(if (t.contains("://")) t else "https://$t") } catch (_: Exception) { null }
+        val host = uri?.host ?: return false
+        return host.contains(".") && host.length >= 3 && !host.startsWith(".") && !host.endsWith(".")
+    }
+    fun resolveInput(input: String): String {
+        val t = input.trim()
+        if (t.isBlank()) return currentUrl
+        return when {
+            t.startsWith("http://") || t.startsWith("https://") -> t
+            isValidUrl(t) -> if (t.contains("://")) t else "https://$t"
+            else -> "https://www.google.com/search?q=" + java.net.URLEncoder.encode(t, "UTF-8")
+        }
+    }
 
     val progressAlpha by animateFloatAsState(
         targetValue   = if (isLoading) 1f else 0f,
@@ -701,59 +738,102 @@ private fun TopChrome(
                 )
             }
 
-            // URL pill — tapping triggers search navigation with auto-focus
-            Surface(
-                onClick        = onUrlBarClick,
-                modifier       = Modifier
-                    .weight(1f)
-                    .height(40.dp),
-                shape          = RoundedCornerShape(14.dp),
-                color          = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 1.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // URL pill — inline editable (no overlay screen)
+            if (isEditingUrl) {
+                Surface(
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 1.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                 ) {
-                    // Favicon
-                    PrivacyFaviconImage(url = currentUrl, size = 18.dp)
-
-                    // Title + host stacked
-                    Column(modifier = Modifier.weight(1f)) {
-                        if (pageTitle.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editUrlText,
+                            onValueChange = { editUrlText = it },
+                            modifier = Modifier.weight(1f).focusRequester(focusReq),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardActions = KeyboardActions(onGo = {
+                                val target = resolveInput(editUrlText)
+                                isEditingUrl = false
+                                if (onUrlGo != null) onUrlGo(target) else onUrlBarClick()
+                            }),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                        IconButton(onClick = {
+                            val cm = ctxLocal.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("URL", editUrlText))
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = { editUrlText = "" }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Close, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = {
+                            val target = resolveInput(editUrlText)
+                            isEditingUrl = false
+                            if (onUrlGo != null) onUrlGo(target)
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    onClick = { editUrlText = currentUrl; isEditingUrl = true },
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 1.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        PrivacyFaviconImage(url = currentUrl, size = 18.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (pageTitle.isNotBlank()) {
+                                Text(
+                                    text = pageTitle,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                             Text(
-                                text       = pageTitle,
-                                style      = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines   = 1,
-                                overflow   = TextOverflow.Ellipsis,
-                                color      = MaterialTheme.colorScheme.onSurface,
+                                text = safeHostFromUrl(currentUrl),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Text(
-                            text     = safeHostFromUrl(currentUrl),
-                            style    = MaterialTheme.typography.labelSmall,
-                            color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                        val isSecure = currentUrl.startsWith("https://")
+                        Icon(
+                            imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = if (isSecure) Color(0xFF4CAF50).copy(alpha = 0.9f) else MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                         )
                     }
-
-                    // HTTPS lock indicator
-                    val isSecure = currentUrl.startsWith("https://")
-                    Icon(
-                        imageVector        = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                        contentDescription = null,
-                        modifier           = Modifier.size(13.dp),
-                        tint               = if (isSecure)
-                            Color(0xFF4CAF50).copy(alpha = 0.9f)
-                        else
-                            MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                    )
                 }
             }
 
@@ -801,6 +881,24 @@ private fun TopChrome(
             onTabClose = onTabClose
         )
 
+        // Download pill progress (colored per mime, on pill lower border)
+        if (downloads.isNotEmpty()) {
+            val active = downloads.firstOrNull { it.status != android.app.DownloadManager.STATUS_SUCCESSFUL } ?: downloads.first()
+            val dColor = when {
+                active.mimeType?.contains("pdf", ignoreCase = true) == true -> Color(0xFFE53935)
+                active.mimeType?.contains("apk", ignoreCase = true) == true -> Color(0xFF43A047)
+                active.mimeType?.contains("image", ignoreCase = true) == true -> Color(0xFF1E88E5)
+                active.mimeType?.contains("video", ignoreCase = true) == true -> Color(0xFF8E24AA)
+                active.mimeType?.contains("audio", ignoreCase = true) == true -> Color(0xFFFB8C00)
+                else -> MaterialTheme.colorScheme.primary
+            }
+            LinearProgressIndicator(
+                progress = { active.progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)),
+                color = dColor,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+        }
         // Thin progress bar
         if (progressAlpha > 0.01f) {
             ExpressiveLinearProgressIndicator(

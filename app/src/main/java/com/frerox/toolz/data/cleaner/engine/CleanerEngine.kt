@@ -25,6 +25,8 @@ import com.frerox.toolz.data.cleaner.CleanResult
 import com.frerox.toolz.data.cleaner.ScanState
 import com.frerox.toolz.data.cleaner.StorageInfo
 import com.frerox.toolz.data.cleaner.analyzer.*
+import com.frerox.toolz.util.shizuku.ShizukuHelper
+import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import com.frerox.toolz.data.cleaner.trash.CleanerTrashDao
 import com.frerox.toolz.data.cleaner.trash.CleanerTrashEntity
 import com.frerox.toolz.data.cleaner.util.FileUtils
@@ -54,13 +56,18 @@ class CleanerEngine @Inject constructor(
     private val largeAnalyzer: LargeFilesAnalyzer,
     private val apkAnalyzer: ApkAnalyzer,
     private val mediaAnalyzer: MediaClutterAnalyzer,
+    private val databaseJunkAnalyzer: DatabaseJunkAnalyzer,
     private val trashDao: CleanerTrashDao,
+    private val shizukuExecutor: ShizukuShellExecutor,
     private val exclusionStore: CleanerExclusionStore
 ) {
     private val _scanState = MutableStateFlow<ScanState>(ScanState.Idle)
     val scanState: StateFlow<ScanState> = _scanState.asStateFlow()
     private val _storageInfo = MutableStateFlow(StorageInfo())
     val storageInfo: StateFlow<StorageInfo> = _storageInfo.asStateFlow()
+    private val _isShizukuGranted = MutableStateFlow(ShizukuHelper.isAuthorized())
+    val isShizukuGranted: StateFlow<Boolean> = _isShizukuGranted.asStateFlow()
+    fun refreshShizuku() { _isShizukuGranted.value = ShizukuHelper.isAuthorized() }
     private var scanJob: Job? = null
     private var scanConfig = CleanScanConfig()
     fun refreshStorageInfo(cleanable: Long? = null) {
@@ -76,7 +83,7 @@ class CleanerEngine @Inject constructor(
                 val pm = context.packageManager
                 val installed = try { pm.getInstalledPackages(0).map { it.packageName }.toSet() } catch (_: Exception) { emptySet() }
                 val exclusions = try { exclusionStore.exclusionsFlow.first() } catch (_: Exception) { emptySet() }
-                val analyzers: List<CleanerAnalyzer> = listOf(systemJunkAnalyzer, corpseAnalyzer, emptyDirAnalyzer, thumbAnalyzer, appCacheAnalyzer, duplicateAnalyzer, largeAnalyzer, apkAnalyzer, mediaAnalyzer)
+                val analyzers: List<CleanerAnalyzer> = listOf(systemJunkAnalyzer, corpseAnalyzer, emptyDirAnalyzer, thumbAnalyzer, appCacheAnalyzer, duplicateAnalyzer, largeAnalyzer, apkAnalyzer, mediaAnalyzer, databaseJunkAnalyzer)
                 val categories = mutableListOf<CleanCategory>()
                 var foundSize = 0L
                 for ((idx, analyzer) in analyzers.withIndex()) {
@@ -85,7 +92,13 @@ class CleanerEngine @Inject constructor(
                     _scanState.value = ScanState.Scanning(currentCategory = analyzer.categoryName, filesScanned = categories.sumOf { it.items.size }, foundSize = foundSize, progress = progBase)
                     try {
                         val cat = analyzer.analyze(root = root, installedPackages = installed, progress = { msg -> _scanState.value = ScanState.Scanning(msg, categories.sumOf { it.items.size }, foundSize, progBase) }, exclusions = exclusions, isActive = { isActive }, config = scanConfig)
-                        if (cat.items.isNotEmpty()) { categories.add(cat); foundSize += cat.totalSize }
+                        if (cat.items.isNotEmpty()) {
+                            val withFlag = when (analyzer.categoryId) {
+                                "app_cache", "db_junk" -> cat.copy(requiresShizuku = true)
+                                else -> cat
+                            }
+                            categories.add(withFlag); foundSize += withFlag.totalSize
+                        }
                     } catch (e: CancellationException) { throw e } catch (e: Exception) { Log.w("CleanerEngine", "Analyzer ${analyzer.categoryId} failed: ${e.message}") }
                 }
                 val totalCleanable = categories.sumOf { it.totalSize }
@@ -141,14 +154,25 @@ class CleanerEngine @Inject constructor(
             }
             if (appCacheCount>0) {
                 _scanState.value = ScanState.Cleaning(0.95f, "Clearing app caches…")
-                state.categories.flatMap { it.items }.filterIsInstance<CleanItem.AppCache>().filter { it.entry.isSelected }.forEach { item ->
-                    try {
-                        val extCache = File(Environment.getExternalStorageDirectory(), "Android/data/${item.entry.packageName}/cache")
-                        if (extCache.exists()) {
-                            val sz = FileUtils.calculateDirSize(extCache)
-                            if (extCache.deleteRecursively()) { deletedCount++; freed += sz }
-                        }
-                    } catch(_:Exception){}
+                val shizukuGranted = ShizukuHelper.isAuthorized()
+                for (item in state.categories.flatMap { it.items }.filterIsInstance<CleanItem.AppCache>().filter { it.entry.isSelected }) {
+                    var cleared = false
+                    var size = item.entry.cacheBytes
+                    if (shizukuGranted) {
+                        try {
+                            val res1 = shizukuExecutor.executeForResult("rm -rf /data/data/${item.entry.packageName}/cache/*")
+                            val res2 = shizukuExecutor.executeForResult("rm -rf /data/data/${item.entry.packageName}/code_cache/*")
+                            if (res1.isSuccess || res2.isSuccess) { cleared = true }
+                            val extCache = File(Environment.getExternalStorageDirectory(), "Android/data/${item.entry.packageName}/cache")
+                            if (extCache.exists()) { val sz = FileUtils.calculateDirSize(extCache); if (extCache.deleteRecursively()) { cleared = true; size = maxOf(size, sz) } }
+                        } catch(_:Exception){}
+                    } else {
+                        try {
+                            val extCache = File(Environment.getExternalStorageDirectory(), "Android/data/${item.entry.packageName}/cache")
+                            if (extCache.exists()) { val sz = FileUtils.calculateDirSize(extCache); if (extCache.deleteRecursively()) { cleared = true; size = sz } }
+                        } catch(_:Exception){}
+                    }
+                    if (cleared) { deletedCount++; freed += size; try { trashDao.insert(CleanerTrashEntity(originalPath = item.entry.packageName, sizeBytes = size, type = "appcache")) } catch(_:Exception){} } else { failedCount++ }
                 }
             }
             _scanState.value = ScanState.Cleaning(1f, "Finishing…")

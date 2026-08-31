@@ -42,6 +42,7 @@ class CleanerViewModel @Inject constructor(
 
     val scanState: StateFlow<ScanState> = engine.scanState
     val storageInfo: StateFlow<StorageInfo> = engine.storageInfo
+    val isShizukuGranted: StateFlow<Boolean> = engine.isShizukuGranted
 
     private val _hasStoragePermission = MutableStateFlow(false)
     val hasStoragePermission: StateFlow<Boolean> = _hasStoragePermission.asStateFlow()
@@ -54,6 +55,7 @@ class CleanerViewModel @Inject constructor(
 
     init {
         checkPermission()
+        engine.refreshShizuku()
         engine.refreshStorageInfo()
         viewModelScope.launch {
             scanState.collect { state ->
@@ -100,4 +102,8 @@ class CleanerViewModel @Inject constructor(
 
     fun openGridView(category: CleanCategory) { _gridCategory.value = category }
     fun closeGridView() { _gridCategory.value = null }
+    fun refreshShizuku() { engine.refreshShizuku() }
+    fun requestShizukuPermission(requestCode: Int = 1001) {
+        try { com.frerox.toolz.util.shizuku.ShizukuHelper.requestPermission(requestCode) } catch(_:Exception){}
+    }
 }

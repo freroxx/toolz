@@ -49,13 +49,14 @@ class SystemJunkAnalyzer @Inject constructor(@ApplicationContext private val con
             if (file.isFile) {
                 val ext=file.extension.lowercase(); val abs=file.absolutePath; val isMedia=mediaExt.contains(ext); val isDoc=docExt.contains(ext)
                 val isJunkExt=junkExtensions.contains(ext); val isJunkPath=junkPatterns.any { abs.contains(it, ignoreCase=true) }
+                if (file.name == ".nomedia" || file.name == ".gitkeep") return@forEach
                 if ((isJunkExt || isJunkPath) && !isMedia && !isDoc) {
                     if (file.length() in 1..500_000_000L) entries.add(file.toEntry(true))
                 }
             }
             if (entries.size>800) return@forEach
         }
-        val top=entries.sortedByDescending { it.sizeBytes }.take(500)
+        val top=entries.sortedByDescending { it.sizeBytes }.take(400)
         val items=top.map { CleanItem.GenericFile(it) }
         val total=top.sumOf { it.sizeBytes }
         val selected=items.sumOf { (it as CleanItem.GenericFile).let { f -> if (f.file.isSelected) f.file.sizeBytes else 0L } }

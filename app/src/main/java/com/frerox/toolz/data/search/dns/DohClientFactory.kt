@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
-private data class DnsKey(val provider: String, val customDns: String)
+private data class DnsKey(val provider: String, val customDns: String, val nextDnsId: String)
 @Singleton
 class DohClientFactory @Inject constructor(private val settingsRepository: SettingsRepository) {
     private val baseClient: OkHttpClient = OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).writeTimeout(8, TimeUnit.SECONDS).followRedirects(true).build()
@@ -25,7 +25,7 @@ class DohClientFactory @Inject constructor(private val settingsRepository: Setti
         val provider = settingsRepository.searchDnsProvider.first()
         val customDns = settingsRepository.searchCustomDns.first()
         val nextDnsId = settingsRepository.searchNextDnsId.first()
-        val key = DnsKey(provider, customDns+nextDnsId)
+        val key = DnsKey(provider, customDns, nextDnsId)
         cache.get()?.let{ (k,c)-> if(k==key) return c }
         val dns: Dns = withContext(Dispatchers.IO){
             try{
@@ -34,12 +34,20 @@ class DohClientFactory @Inject constructor(private val settingsRepository: Setti
                     "CLOUDFLARE"->doh("https://cloudflare-dns.com/dns-query","1.1.1.1","1.0.0.1")
                     "GOOGLE"->doh("https://dns.google/dns-query","8.8.8.8","8.8.4.4")
                     "QUAD9"->doh("https://dns.quad9.net/dns-query","9.9.9.9")
-                    "NEXTDNS"->{ val url=if(nextDnsId.isNotBlank()) "https://dns.nextdns.io/$nextDnsId" else "https://dns.nextdns.io/dns-query"; doh(url,"45.90.28.0","45.90.30.0") }
+                    "NEXTDNS"->{
+                        if (nextDnsId.isBlank()) {
+                            android.util.Log.w("DohFactory","NEXTDNS id blank — falling back to SYSTEM")
+                            Dns.SYSTEM
+                        } else {
+                            val url="https://dns.nextdns.io/$nextDnsId"
+                            doh(url,"45.90.28.0","45.90.30.0")
+                        }
+                    }
                     "CUSTOM"->{ val url=if(customDns.startsWith("http")) customDns else if(customDns.isNotBlank()) "https://$customDns/dns-query" else ""; if(url.startsWith("http")) doh(url) else Dns.SYSTEM }
                     else->Dns.SYSTEM
                 }
                 if(primary===Dns.SYSTEM) Dns.SYSTEM else ResilientDns(primary, Dns.SYSTEM)
-            } catch(_:Exception){ Dns.SYSTEM }
+            } catch(e:Exception){ android.util.Log.e("DohFactory","dns build failed",e); Dns.SYSTEM }
         }
         val client = baseClient.newBuilder().dns(dns).connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
         cache.set(key to client); return client

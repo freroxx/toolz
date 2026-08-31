@@ -66,7 +66,7 @@ data class SearchResult(
 
 // ─── DNS client cache ─────────────────────────────────────────────────────────
 
-private data class DnsClientCacheKey(val provider: String, val customDns: String)
+private data class DnsClientCacheKey(val provider: String, val customDns: String, val nextDnsId: String)
 
 // ─── Repository ───────────────────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ class WebSearchRepository @Inject constructor(
         val provider  = settingsRepository.searchDnsProvider.first()
         val customDns = settingsRepository.searchCustomDns.first()
         val nextDnsId = settingsRepository.searchNextDnsId.first()
-        val key = DnsClientCacheKey(provider, customDns + nextDnsId)
+        val key = DnsClientCacheKey(provider, customDns, nextDnsId)
 
         dnsClientCache.get()?.let { (cached, client) ->
             if (cached == key) return client
@@ -113,12 +113,13 @@ class WebSearchRepository @Inject constructor(
                     "QUAD9"             -> doh("https://dns.quad9.net/dns-query", "9.9.9.9")
                     "OPENDNS"           -> doh("https://doh.opendns.com/dns-query", "208.67.222.222")
                     "NEXTDNS"           -> {
-                        val url = if (nextDnsId.isNotBlank()) {
-                            "https://dns.nextdns.io/$nextDnsId"
+                        if (nextDnsId.isBlank()) {
+                            android.util.Log.w("SearchDns","NEXTDNS id blank — fallback to SYSTEM")
+                            Dns.SYSTEM
                         } else {
-                            "https://dns.nextdns.io/dns-query"
+                            val url = "https://dns.nextdns.io/$nextDnsId"
+                            doh(url, "45.90.28.0", "45.90.30.0")
                         }
-                        doh(url, "45.90.28.0", "45.90.30.0")
                     }
                     "CONTROLD"          -> doh("https://freedns.controld.com/p1", "76.76.2.0")
                     "CLEANBROWSING"     -> doh("https://doh.cleanbrowsing.org/doh/family-filter/", "185.228.168.168")

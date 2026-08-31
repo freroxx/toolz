@@ -24,6 +24,7 @@ import com.frerox.toolz.data.cleaner.CorpseType
 import com.frerox.toolz.data.cleaner.engine.CleanScanConfig
 import com.frerox.toolz.data.cleaner.engine.CleanerAnalyzer
 import com.frerox.toolz.data.cleaner.util.FileUtils
+import com.frerox.toolz.util.shizuku.ShizukuHelper
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +38,11 @@ class CorpseAnalyzer @Inject constructor() : CleanerAnalyzer {
     override val isSafeToClean=true
     override suspend fun analyze(root: File, installedPackages: Set<String>, progress: (String)->Unit, exclusions: Set<String>, isActive: ()->Boolean, config: CleanScanConfig): CleanCategory {
         val entries=mutableListOf<CorpseEntry>()
+        val shizukuPkgs = if (ShizukuHelper.isAuthorized()) {
+            // Shizuku available — could fetch via shell pm list, but fallback to installed for now
+            emptySet<String>()
+        } else emptySet()
+        val allInstalled = installedPackages + shizukuPkgs
         val paths=listOf("Android/data","Android/obb","Android/media","Android/obj")
         for (p in paths) {
             if (!isActive()) break
@@ -49,7 +55,7 @@ class CorpseAnalyzer @Inject constructor() : CleanerAnalyzer {
                 val name=dir.name
                 if (name.startsWith("com.android.")||name.startsWith("com.google.android.")) return@forEach
                 if (exclusions.any { dir.absolutePath.contains(it) }) return@forEach
-                if (!installedPackages.contains(name)) {
+                if (!allInstalled.contains(name)) {
                     val size=FileUtils.calculateDirSize(dir)
                     if (size>0) {
                         val type=when { p.contains("obb")->CorpseType.OBB; p.contains("media")->CorpseType.MEDIA; else->CorpseType.DATA }

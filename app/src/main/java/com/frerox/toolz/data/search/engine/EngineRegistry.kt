@@ -20,11 +20,11 @@ class EngineRegistry @Inject constructor(
     private data class Cooldown(val until: Long)
     private val cooldowns = ConcurrentHashMap<EngineId, Cooldown>()
     private val COOLDOWN_MS = 30000L
-    private val FALLBACK_ORDER = listOf(EngineId.BING, EngineId.BRAVE, EngineId.YAHOO)
+    private val FALLBACK_ORDER = listOf(EngineId.YAHOO, EngineId.BRAVE, EngineId.MOJEEK, EngineId.QWANT, EngineId.MARGINALIA, EngineId.BING)
     fun isAvailable(id: EngineId): Boolean { val c=cooldowns[id] ?: return true; return System.currentTimeMillis() >= c.until }
     fun cooldown(id: EngineId){ cooldowns[id]=Cooldown(System.currentTimeMillis()+COOLDOWN_MS) }
     fun resolve(engineSetting: String): List<EngineId> = when(engineSetting.uppercase()){
-        "META"->listOf(EngineId.BING, EngineId.BRAVE, EngineId.YAHOO)
+        "META"->listOf(EngineId.DUCKDUCKGO, EngineId.YAHOO, EngineId.BRAVE, EngineId.MOJEEK, EngineId.QWANT)
         "CUSTOM"->listOf(EngineId.CUSTOM)
         else->listOf(EngineId.fromString(engineSetting))
     }

@@ -138,7 +138,7 @@ class SettingsRepository @Inject constructor(
     val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
     val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "META" }
-    val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: true }
+    val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: false }
     val searchResultsDensity: Flow<String> = dataStore.data.map { it[SEARCH_RESULTS_DENSITY] ?: "COMFY" }
     val searchCardRadius: Flow<Int> = dataStore.data.map { it[SEARCH_CARD_RADIUS] ?: 16 }
     val searchAccentPerEngine: Flow<Boolean> = dataStore.data.map { it[SEARCH_ACCENT_PER_ENGINE] ?: true }

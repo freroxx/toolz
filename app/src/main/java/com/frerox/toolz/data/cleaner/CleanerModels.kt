@@ -37,7 +37,8 @@ data class CleanCategory(
     val selectedSize: Long,
     val isSafeToClean: Boolean = false,
     val isExpanded: Boolean = false,
-    val description: String? = null
+    val description: String? = null,
+    val requiresShizuku: Boolean = false
 )
 
 sealed class CleanItem {
