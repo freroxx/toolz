@@ -96,6 +96,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="whisper-auth" android:host="login" />
             </intent-filter>
+            <!-- Make Toolz available as a real browser target for http(s) links. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <!-- V3-FIX (reviewwhisper.md item 6): FCM entry point for Whisper wake pings. -->

@@ -23,6 +23,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.data.browser.TabManager
+import com.frerox.toolz.data.browser.BrowserHistoryStore
+import com.frerox.toolz.data.browser.BrowserHistoryItem
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchHistoryEntry
@@ -152,6 +154,7 @@ class SearchViewModel @Inject constructor(
     private val repository:        WebSearchRepository,
     private val settingsRepository: SettingsRepository,
     private val tabManager:        TabManager,
+    private val browserHistoryStore: BrowserHistoryStore,
     private val dnsEngine:         com.frerox.toolz.util.network.DnsEngine,
     private val offlineManager:    com.frerox.toolz.util.OfflineManager,
 ) : ViewModel() {
@@ -210,6 +213,7 @@ class SearchViewModel @Inject constructor(
     val bookmarks   = repository.bookmarks
     val quickLinks  = repository.quickLinks
     val isFirstTime = settingsRepository.searchFirstTime
+    val browserHistory = browserHistoryStore.items
 
     // ── Coroutine job handles ─────────────────────────────────────────────────
 
@@ -558,6 +562,8 @@ class SearchViewModel @Inject constructor(
     fun openTab(url: String)  { tabManager.addTab(url, isPrivate = _settings.value.isIncognito) }
     fun closeTab(id: String)  { tabManager.removeTab(id) }
     fun switchTab(id: String) { tabManager.switchTab(id) }
+    fun removeBrowserHistory(url: String) { browserHistoryStore.remove(url) }
+    fun clearBrowserHistory() { browserHistoryStore.clear() }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 

@@ -1043,13 +1043,11 @@ fun ToolzNavHost(
         composable(Screen.TabManagement.route) {
             TabManagementScreen(
                 onBack = { toolOnBack() },
-                onTabClick = { id, url ->
-                    navController.navigate(Screen.Browser.createRoute(url))
-                },
-                onNewTab = {
-                    navController.navigate(Screen.Search.route) {
-                        popUpTo(Screen.Search.route) { inclusive = true }
-                    }
+                onTabClick = { _, _ ->
+                    // The browser renderer is already below the tab overview. Returning to
+                    // it preserves the one-WebView session and avoids building a back stack
+                    // of duplicate browser destinations each time a tab is selected.
+                    navController.popBackStack()
                 }
             )
         }
@@ -1475,6 +1473,15 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
         if (uri.toString().lowercase().endsWith(".tzbk")) {
             return Screen.BackupRestore.createRoute(uri.toString())
         }
+        if (uri.scheme.equals("http", true) || uri.scheme.equals("https", true)) {
+            return Screen.Browser.createRoute(uri.toString())
+        }
+    }
+
+    if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+        val sharedUrl = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(sharedText)?.value
+        if (sharedUrl != null) return Screen.Browser.createRoute(sharedUrl)
     }
 
     if (intent.getBooleanExtra(MainActivity.EXTRA_SHOW_UPDATE, false) ||

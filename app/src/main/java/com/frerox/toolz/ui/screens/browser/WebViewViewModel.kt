@@ -19,6 +19,9 @@ package com.frerox.toolz.ui.screens.browser
 
 import com.frerox.toolz.data.password.PasswordEntity
 import android.graphics.Bitmap
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.webkit.WebView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.search.WebSearchRepository
@@ -44,6 +47,10 @@ import kotlinx.coroutines.flow.StateFlow
 import com.frerox.toolz.data.browser.BrowserDownloadManager
 import com.frerox.toolz.data.browser.BrowserAddressResolver
 import com.frerox.toolz.data.browser.BrowserTabStateStore
+import com.frerox.toolz.data.browser.BrowserHistoryStore
+import com.frerox.toolz.data.browser.BrowserSitePermission
+import com.frerox.toolz.data.browser.BrowserSitePermissionStore
+import com.frerox.toolz.data.browser.BrowserReadingListStore
 import com.frerox.toolz.data.browser.DownloadItem
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
@@ -59,10 +66,15 @@ class WebViewViewModel @Inject constructor(
     private val passwordDao: PasswordDao,
     private val downloadManager: BrowserDownloadManager,
     private val tabStateStore: BrowserTabStateStore,
+    private val browserHistoryStore: BrowserHistoryStore,
+    private val sitePermissionStore: BrowserSitePermissionStore,
+    private val readingListStore: BrowserReadingListStore,
 ) : ViewModel() {
 
     private val _isBookmarked = MutableStateFlow(false)
     val isBookmarked = _isBookmarked.asStateFlow()
+    private val _isSavedForLater = MutableStateFlow(false)
+    val isSavedForLater = _isSavedForLater.asStateFlow()
 
     private val _autofillSuggestions = MutableStateFlow<List<PasswordEntity>>(emptyList())
     val autofillSuggestions = _autofillSuggestions.asStateFlow()
@@ -86,6 +98,9 @@ class WebViewViewModel @Inject constructor(
     val customSearchEngineUrl = settingsRepository.searchCustomEngineUrl
 
     val downloads = downloadManager.downloads
+    val browserHistory = browserHistoryStore.items
+    val bookmarks = repository.bookmarks
+    val readingList = readingListStore.items
 
     init {
         // Initialization handled by AdBlockManager
@@ -96,7 +111,9 @@ class WebViewViewModel @Inject constructor(
     }
 
     fun ensureTabExists(url: String) {
-        if (tabManager.tabs.value.isEmpty()) {
+        val active = tabManager.activeTabId.value?.let { id -> tabManager.tabs.value.find { it.id == id } }
+        if (active?.url == url) return
+        if (tabManager.tabs.value.isEmpty() || url != "about:blank") {
             tabManager.addTab(url)
         }
     }
@@ -222,6 +239,7 @@ class WebViewViewModel @Inject constructor(
     }
 
     fun closeTabs(ids: Set<String>) {
+        tabStateStore.removeAll(ids)
         tabManager.removeTabs(ids)
     }
 
@@ -251,9 +269,8 @@ class WebViewViewModel @Inject constructor(
         tabManager.removeTab(id)
     }
 
-    fun addTab(url: String, isPrivate: Boolean = false) {
+    fun addTab(url: String, isPrivate: Boolean = false): TabEntry =
         tabManager.addTab(url, isPrivate = isPrivate)
-    }
 
     /** Resolves omnibox text using the user's selected search provider. */
     fun resolveAddress(input: String, onResolved: (String) -> Unit) {
@@ -278,10 +295,41 @@ class WebViewViewModel @Inject constructor(
     fun restoreTabState(tabId: String, webView: android.webkit.WebView): Boolean =
         tabStateStore.restore(tabId, webView)
 
+    fun recordPageVisit(url: String, title: String) {
+        browserHistoryStore.record(url, title, tabManager.tabs.value.find { it.id == tabManager.activeTabId.value }?.isPrivate == true)
+    }
+
+    /** A single, predictable privacy boundary for all browser-owned local data. */
+    fun clearBrowsingData(webView: WebView, onFinished: () -> Unit = {}) {
+        webView.apply {
+            clearHistory()
+            clearCache(true)
+            clearFormData()
+        }
+        browserHistoryStore.clear()
+        sitePermissionStore.clearAll()
+        tabStateStore.clear()
+        CookieManager.getInstance().removeAllCookies {
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+            onFinished()
+        }
+    }
+
+    fun sitePermission(origin: String): BrowserSitePermission = sitePermissionStore.decision(origin)
+    fun setSitePermission(origin: String, decision: BrowserSitePermission) = sitePermissionStore.setDecision(origin, decision)
+    fun resetSitePermission(origin: String) = sitePermissionStore.clear(origin)
+
     fun checkBookmark(url: String) {
         viewModelScope.launch {
             _isBookmarked.value = repository.isBookmarked(url)
         }
+    }
+
+    fun checkReadingList(url: String) { _isSavedForLater.value = readingListStore.contains(url) }
+
+    fun toggleReadingList(title: String, url: String) {
+        _isSavedForLater.value = readingListStore.toggle(url, title)
     }
 
     fun toggleBookmark(title: String, url: String) {

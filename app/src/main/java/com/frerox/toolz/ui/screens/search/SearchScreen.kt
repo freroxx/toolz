@@ -68,6 +68,7 @@ fun SearchScreen(
     val history          by viewModel.history.collectAsState(initial = emptyList())
     val bookmarks        by viewModel.bookmarks.collectAsState(initial = emptyList())
     val quickLinks       by viewModel.quickLinks.collectAsState(initial = emptyList())
+    val browserHistory   by viewModel.browserHistory.collectAsState()
     val isFirstTime      by viewModel.isFirstTime.collectAsState(initial = false)
     val context          = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
@@ -376,6 +377,7 @@ fun SearchScreen(
                     history         = history,
                     bookmarks       = bookmarks,
                     quickLinks      = quickLinks,
+                    browserHistory  = browserHistory,
                     onResultClick   = { result ->
                         vibrationManager?.vibrateNavigation()
                         viewModel.openTab(result.url)
@@ -392,6 +394,8 @@ fun SearchScreen(
                     onRemoveBookmark = viewModel::removeBookmark,
                     onDeleteHistory = viewModel::deleteHistory,
                     onClearHistory  = { showClearHistoryDialog = true },
+                    onDeleteBrowserHistory = viewModel::removeBrowserHistory,
+                    onClearBrowserHistory = viewModel::clearBrowserHistory,
                     onSeeAllBookmarks = { showBookmarksAll = true },
                     onRetry         = viewModel::retrySearch,
                     onSearch        = viewModel::onSearch,
@@ -537,6 +541,7 @@ private fun PageContent(
     history: List<SearchHistoryEntry>,
     bookmarks: List<BookmarkEntry>,
     quickLinks: List<QuickLinkEntry>,
+    browserHistory: List<com.frerox.toolz.data.browser.BrowserHistoryItem>,
     onResultClick: (SearchResult) -> Unit,
     onLongPress: (SearchResult) -> Unit,
     onLoadMore: () -> Unit,
@@ -549,6 +554,8 @@ private fun PageContent(
     onRemoveBookmark: (String) -> Unit,
     onDeleteHistory: (Long) -> Unit,
     onClearHistory: () -> Unit,
+    onDeleteBrowserHistory: (String) -> Unit,
+    onClearBrowserHistory: () -> Unit,
     onSeeAllBookmarks: () -> Unit,
     onRetry: () -> Unit,
     onSearch: (String) -> Unit,
@@ -635,6 +642,7 @@ private fun PageContent(
                 history             = history,
                 bookmarks           = bookmarks,
                 quickLinks          = quickLinks,
+                browserHistory      = browserHistory,
                 onUrlOpen           = onUrlOpen,
                 onResumeTab          = onResumeTab,
                 onAddQuickLink      = onAddQuickLink,
@@ -643,6 +651,8 @@ private fun PageContent(
                 onRemoveBookmark    = onRemoveBookmark,
                 onDeleteHistory     = onDeleteHistory,
                 onClearHistory      = onClearHistory,
+                onDeleteBrowserHistory = onDeleteBrowserHistory,
+                onClearBrowserHistory = onClearBrowserHistory,
                 onSeeAllBookmarks   = onSeeAllBookmarks,
                 onSearch            = onSearch,
             )
@@ -660,6 +670,7 @@ private fun HomePage(
     history: List<SearchHistoryEntry>,
     bookmarks: List<BookmarkEntry>,
     quickLinks: List<QuickLinkEntry>,
+    browserHistory: List<com.frerox.toolz.data.browser.BrowserHistoryItem>,
     onUrlOpen: (String) -> Unit,
     onResumeTab: (String, String) -> Unit,
     onAddQuickLink: () -> Unit,
@@ -668,6 +679,8 @@ private fun HomePage(
     onRemoveBookmark: (String) -> Unit,
     onDeleteHistory: (Long) -> Unit,
     onClearHistory: () -> Unit,
+    onDeleteBrowserHistory: (String) -> Unit,
+    onClearBrowserHistory: () -> Unit,
     onSeeAllBookmarks: () -> Unit,
     onSearch: (String) -> Unit,
 ) {
@@ -700,6 +713,17 @@ private fun HomePage(
                 ContinueBrowsingSection(
                     tabs = uiState.tabs,
                     onOpen = { onResumeTab(it.id, it.url) },
+                )
+            }
+        }
+
+        if (browserHistory.isNotEmpty()) {
+            item(key = "browserHistory") {
+                BrowserHistorySection(
+                    items = browserHistory,
+                    onOpen = onUrlOpen,
+                    onRemove = onDeleteBrowserHistory,
+                    onClear = onClearBrowserHistory,
                 )
             }
         }
@@ -859,6 +883,46 @@ private fun ContinueBrowsingSection(tabs: List<com.frerox.toolz.data.browser.Tab
                         }
                         Text(tab.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserHistorySection(
+    items: List<com.frerox.toolz.data.browser.BrowserHistoryItem>,
+    onOpen: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionHeader(title = "Recently visited", actionLabel = "Clear", onAction = onClear)
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .3f)),
+        ) {
+            Column {
+                items.take(5).forEachIndexed { index, item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpen(item.url) }
+                            .padding(start = 16.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PrivacyFaviconImage(url = item.url, size = 22.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(BrowserAddressResolver.displayHost(item.url), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onRemove(item.url) }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Remove from history", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    if (index < items.take(5).lastIndex) HorizontalDivider(modifier = Modifier.padding(start = 50.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
                 }
             }
         }

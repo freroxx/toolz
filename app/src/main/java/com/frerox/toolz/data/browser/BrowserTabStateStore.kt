@@ -25,4 +25,5 @@ class BrowserTabStateStore @Inject constructor() {
 
     fun remove(tabId: String) { states.remove(tabId) }
     fun removeAll(tabIds: Set<String>) { tabIds.forEach(states::remove) }
+    fun clear() { states.clear() }
 }

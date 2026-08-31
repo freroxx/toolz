@@ -32,6 +32,7 @@ open class AdBlockWebViewClient(
     private val adBlockEnabled: () -> Boolean = { true },
     private val onPageStarted: (String?) -> Unit = {},
     private val onPageFinished: (String?) -> Unit = {},
+    private val onBlockedRequest: () -> Unit = {},
     private val shouldOverrideUrl: (String?) -> Boolean = { false }
 ) : WebViewClient() {
 
@@ -79,6 +80,7 @@ open class AdBlockWebViewClient(
 
         if (adBlockEnabled() && AdBlockList.isBlocked(url)) {
             android.util.Log.d("AdBlock", "Blocked: $url")
+            onBlockedRequest()
 
             // Return a network-error response so that:
             //  • <img>.onerror fires  (ad-block test tools detect this)

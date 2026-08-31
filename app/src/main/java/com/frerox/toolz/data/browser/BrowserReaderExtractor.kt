@@ -1,6 +1,5 @@
 package com.frerox.toolz.data.browser
 
-import org.json.JSONObject
 import org.json.JSONTokener
 
 data class BrowserReaderArticle(
@@ -30,15 +29,13 @@ object BrowserReaderExtractor {
             raw.takeIf { it.trimStart().startsWith("{") },
             normalisePayload(raw).takeIf { it.startsWith("{") },
         )
-        val json = candidates.firstNotNullOfOrNull { candidate ->
-            runCatching { JSONObject(candidate) }.getOrNull()
-        } ?: return null
-        val text = (json.opt("text") as? String).orEmpty().trim()
+        val payload = candidates.firstOrNull { it.contains("\"text\"") } ?: return null
+        val text = jsonValue(payload, "text").orEmpty().trim()
         if (text.length < 80) return null
         return BrowserReaderArticle(
-            title = (json.opt("title") as? String).orEmpty()
-                .ifBlank { (json.opt("source") as? String).orEmpty().ifBlank { "Reader view" } },
-            source = (json.opt("source") as? String).orEmpty(),
+            title = jsonValue(payload, "title").orEmpty()
+                .ifBlank { jsonValue(payload, "source").orEmpty().ifBlank { "Reader view" } },
+            source = jsonValue(payload, "source").orEmpty(),
             text = text,
         )
     }
@@ -47,4 +44,10 @@ object BrowserReaderExtractor {
         .removeSurrounding("\"")
         .replace("\\\"", "\"")
         .replace("\\\\", "\\")
+
+    private fun jsonValue(payload: String, key: String): String? {
+        val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"")
+            .find(payload)?.groupValues?.getOrNull(1) ?: return null
+        return match.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\")
+    }
 }

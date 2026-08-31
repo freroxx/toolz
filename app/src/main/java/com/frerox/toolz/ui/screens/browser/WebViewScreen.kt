@@ -18,26 +18,30 @@
 package com.frerox.toolz.ui.screens.browser
 
 import com.frerox.toolz.data.browser.autofill.AutofillJsBridge
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
 import android.view.ViewGroup
+import android.view.View
 import android.webkit.*
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -60,9 +64,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -76,9 +80,10 @@ import androidx.webkit.WebViewFeature
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.browser.AdBlockList
-import com.frerox.toolz.data.browser.TabEntry
+import com.frerox.toolz.data.browser.BrowserAddressResolver
 import com.frerox.toolz.data.browser.BrowserReaderArticle
 import com.frerox.toolz.data.browser.BrowserReaderExtractor
+import com.frerox.toolz.data.browser.BrowserSitePermission
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.browser.components.AutofillBottomSheet
@@ -86,7 +91,7 @@ import com.frerox.toolz.ui.screens.browser.components.AutofillSuccessOverlay
 import com.frerox.toolz.ui.screens.browser.components.DownloadsSheet
 import com.frerox.toolz.ui.screens.browser.components.ManualPasswordBottomSheet
 import com.frerox.toolz.ui.screens.browser.components.ReaderViewSheet
-import com.frerox.toolz.ui.screens.search.components.FloatingSearchDock
+import com.frerox.toolz.ui.screens.browser.components.BrowserStartPage
 import com.frerox.toolz.ui.screens.search.components.PrivacyFaviconImage
 import com.frerox.toolz.ui.screens.search.components.SearchPill
 import com.frerox.toolz.ui.screens.search.components.safeHostFromUrl
@@ -126,6 +131,7 @@ fun WebViewScreen(
     var pageTitle    by remember { mutableStateOf("") }
     var canGoBack    by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
+    var blockedRequests by remember { mutableIntStateOf(0) }
 
     // UI state
     var showFindInPage by remember { mutableStateOf(false) }
@@ -136,6 +142,35 @@ fun WebViewScreen(
     var showDownloadsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var readerArticle by remember { mutableStateOf<BrowserReaderArticle?>(null) }
+    var showClearDataDialog by remember { mutableStateOf(false) }
+    var pendingFileSelection by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var pendingWebPermission by remember { mutableStateOf<PermissionRequest?>(null) }
+    var pendingWebPermissionOrigin by remember { mutableStateOf<String?>(null) }
+    var fullscreenContent by remember { mutableStateOf<View?>(null) }
+    var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        pendingFileSelection?.onReceiveValue(uris.toTypedArray())
+        pendingFileSelection = null
+    }
+    val webPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val request = pendingWebPermission
+        if (request != null) {
+            val approved = request.resources.filter { resource ->
+                when (resource) {
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> grants[Manifest.permission.CAMERA] == true
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> grants[Manifest.permission.RECORD_AUDIO] == true
+                    else -> false
+                }
+            }.toTypedArray()
+            if (approved.isNotEmpty()) request.grant(approved) else request.deny()
+            viewModel.setSitePermission(
+                pendingWebPermissionOrigin.orEmpty(),
+                if (approved.isNotEmpty()) BrowserSitePermission.ALLOW else BrowserSitePermission.ASK,
+            )
+        }
+        pendingWebPermission = null
+        pendingWebPermissionOrigin = null
+    }
 
     // Pull to refresh
     val refreshState = rememberPullToRefreshState()
@@ -150,17 +185,26 @@ fun WebViewScreen(
     val activeTab = tabs.find { it.id == activeTabId }
     val isDesktopMode = activeTab?.isDesktopMode ?: false
     val downloads by viewModel.downloads.collectAsState()
+    val browserHistory by viewModel.browserHistory.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState(initial = emptyList())
+    val readingList by viewModel.readingList.collectAsState()
     val autofillSuggestions by viewModel.autofillSuggestions.collectAsState()
     val autofillSuccess by viewModel.autofillSuccess.collectAsState()
+    val isSavedForLater by viewModel.isSavedForLater.collectAsState()
     
     val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
+    val currentTabIsPrivate by rememberUpdatedState(activeTab?.isPrivate == true)
 
     LaunchedEffect(Unit) {
         viewModel.ensureTabExists(url)
     }
 
     BackHandler {
-        if (webView?.canGoBack() == true) {
+        if (fullscreenContent != null) {
+            fullscreenCallback?.onCustomViewHidden()
+            fullscreenContent = null
+            fullscreenCallback = null
+        } else if (webView?.canGoBack() == true) {
             webView?.goBack()
         } else {
             onBack()
@@ -185,7 +229,10 @@ fun WebViewScreen(
         }
     }
 
-    LaunchedEffect(currentUrl) { viewModel.checkBookmark(currentUrl) }
+    LaunchedEffect(currentUrl) {
+        viewModel.checkBookmark(currentUrl)
+        viewModel.checkReadingList(currentUrl)
+    }
 
     // ── Root layout ───────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
@@ -202,14 +249,11 @@ fun WebViewScreen(
                 canGoForward     = canGoForward,
                 showFindInPage   = showFindInPage,
                 findQuery        = findQuery,
-                tabs             = tabs,
-                activeTabId      = activeTabId,
                 isDesktopMode    = isDesktopMode,
                 isPrivate        = activeTab?.isPrivate == true,
+                blockedRequests  = blockedRequests,
                 adBlockEnabled   = adBlockEnabled,
                 floatingToolbarVisible = floatingToolbarVisible,
-                onTabClick       = { tab -> viewModel.switchTab(tab.id) },
-                onTabClose       = { tab -> viewModel.closeTab(tab.id) },
                 onFindQueryChange = { q ->
                     findQuery = q
                     webView?.findAllAsync(q)
@@ -220,20 +264,15 @@ fun WebViewScreen(
                     showFindInPage = !showFindInPage
                     if (!showFindInPage) { webView?.clearMatches(); findQuery = "" }
                 },
-                onBack           = { if (canGoBack) webView?.goBack() else onBack() },
                 onForward        = { webView?.goForward() },
                 onReload         = { webView?.reload() },
-                onStop           = { webView?.stopLoading() },
                 onBookmarkToggle = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.toggleBookmark(pageTitle, currentUrl)
                 },
+                isSavedForLater = isSavedForLater,
+                onReadingListToggle = { viewModel.toggleReadingList(pageTitle, currentUrl) },
                 onUrlBarClick    = { showSearchOverlay = true },
-                onUrlGo = { input -> viewModel.resolveAddress(input) { target ->
-                    webView?.loadUrl(target)
-                    currentUrl = target
-                    viewModel.updateTab(url = target)
-                } },
                 downloads = downloads,
                 onShare = {
                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -276,6 +315,8 @@ fun WebViewScreen(
                         readerArticle = BrowserReaderExtractor.parseJavascriptResult(raw)
                     }
                 },
+                onClearBrowsingData = { showClearDataDialog = true },
+                onResetSitePermissions = { viewModel.resetSitePermission(safeHostFromUrl(currentUrl)) },
             )
 
             // WebView with Pull-to-Refresh
@@ -315,7 +356,9 @@ fun WebViewScreen(
                                 allowContentAccess      = true
                                 allowFileAccess         = false
                                 databaseEnabled         = true
-                                setSupportMultipleWindows(false)
+                                // Convert target=_blank/pop-up navigation into Toolz tabs.
+                                setSupportMultipleWindows(true)
+                                javaScriptCanOpenWindowsAutomatically = false
                                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                                     safeBrowsingEnabled = true
                                 }
@@ -345,8 +388,10 @@ fun WebViewScreen(
                                 adBlockEnabled = { currentAdBlockEnabled },
                                 onPageStarted = { u ->
                                     isLoading = true
+                                    blockedRequests = 0
                                     u?.let { currentUrl = it; viewModel.updateTab(url = it) }
                                 },
+                                onBlockedRequest = { scope.launch { blockedRequests++ } },
                                 onPageFinished = { u ->
                                     isLoading    = false
                                     isRefreshing = false
@@ -356,6 +401,7 @@ fun WebViewScreen(
                                         pageTitle = t
                                         viewModel.updateTab(title = t)
                                     }
+                                    u?.let { viewModel.recordPageVisit(it, pageTitle) }
                                     activeTabId?.let { viewModel.captureTabState(it, this@apply) }
                                     // Autofill detection logic
                                     u?.let { finishedUrl ->
@@ -454,6 +500,98 @@ fun WebViewScreen(
                             }
 
                             webChromeClient = object : WebChromeClient() {
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    if (view == null) return
+                                    fullscreenContent = view
+                                    fullscreenCallback = callback
+                                }
+
+                                override fun onHideCustomView() {
+                                    fullscreenContent = null
+                                    fullscreenCallback = null
+                                }
+
+                                override fun onPermissionRequest(request: PermissionRequest?) {
+                                    val supported = request?.resources?.filter {
+                                        it == PermissionRequest.RESOURCE_VIDEO_CAPTURE ||
+                                            it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                                    }.orEmpty()
+                                    val origin = request?.origin?.toString().orEmpty()
+                                    if (request == null || supported.isEmpty()) {
+                                        request?.deny()
+                                    } else {
+                                        when (viewModel.sitePermission(origin)) {
+                                            BrowserSitePermission.DENY -> request.deny()
+                                            BrowserSitePermission.ALLOW -> {
+                                                val allGranted = supported.all { resource ->
+                                                    val permission = if (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE) Manifest.permission.CAMERA else Manifest.permission.RECORD_AUDIO
+                                                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+                                                }
+                                                if (allGranted) request.grant(supported.toTypedArray()) else {
+                                                    pendingWebPermission = request
+                                                    pendingWebPermissionOrigin = origin
+                                                }
+                                            }
+                                            BrowserSitePermission.ASK -> {
+                                                pendingWebPermission = request
+                                                pendingWebPermissionOrigin = origin
+                                            }
+                                        }
+                                    }
+                                }
+
+                                override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                                    if (pendingWebPermission == request) pendingWebPermission = null
+                                    pendingWebPermissionOrigin = null
+                                }
+
+                                override fun onShowFileChooser(
+                                    view: WebView?,
+                                    filePathCallback: ValueCallback<Array<Uri>>?,
+                                    fileChooserParams: WebChromeClient.FileChooserParams?,
+                                ): Boolean {
+                                    pendingFileSelection?.onReceiveValue(null)
+                                    pendingFileSelection = filePathCallback
+                                    val acceptedTypes = fileChooserParams?.acceptTypes
+                                        ?.filter { it.isNotBlank() }
+                                        ?.toTypedArray()
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?: arrayOf("*/*")
+                                    documentPicker.launch(acceptedTypes)
+                                    return true
+                                }
+
+                                override fun onCreateWindow(
+                                    view: WebView?,
+                                    isDialog: Boolean,
+                                    isUserGesture: Boolean,
+                                    resultMsg: android.os.Message?,
+                                ): Boolean {
+                                    if (!isUserGesture || resultMsg == null) return false
+                                    val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                                    val popup = WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        webViewClient = object : WebViewClient() {
+                                            override fun onPageStarted(popupView: WebView?, popupUrl: String?, favicon: Bitmap?) {
+                                                val destination = popupUrl?.takeIf { it.startsWith("http") } ?: return
+                                                val newTab = viewModel.addTab(destination, isPrivate = currentTabIsPrivate)
+                                                // The screen owns one rendering WebView; the temporary popup
+                                                // only resolves the destination, then hands it to the new tab.
+                                                webView?.loadUrl(destination)
+                                                currentUrl = destination
+                                                viewModel.updateTab(url = destination)
+                                                popupView?.stopLoading()
+                                                popupView?.destroy()
+                                                viewModel.switchTab(newTab.id)
+                                            }
+                                        }
+                                    }
+                                    transport.webView = popup
+                                    resultMsg.sendToTarget()
+                                    return true
+                                }
+
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     progress = newProgress / 100f
                                 }
@@ -507,7 +645,33 @@ fun WebViewScreen(
             }
         }
 
-        // ── Floating search dock — WebView mode ───────────────────────────────
+        // about:blank is Toolz's internal new-tab destination, never an empty WebView.
+        AnimatedVisibility(
+            visible = activeTab?.url == "about:blank" && !showSearchOverlay,
+            enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
+            modifier = Modifier.fillMaxSize().padding(top = 104.dp),
+        ) {
+            BrowserStartPage(
+                isPrivate = activeTab?.isPrivate == true,
+                bookmarks = bookmarks,
+                history = browserHistory,
+                readingList = readingList,
+                onFocusAddress = { showSearchOverlay = true },
+                onOpenUrl = { raw ->
+                    viewModel.resolveAddress(raw) { target ->
+                        webView?.loadUrl(target)
+                        currentUrl = target
+                        viewModel.updateTab(url = target)
+                    }
+                },
+                onNewPrivateTab = {
+                    viewModel.addTab("about:blank", isPrivate = true)
+                },
+            )
+        }
+
+        // ── Single, calm bottom navigation surface ────────────────────────────
         AnimatedVisibility(
             visible = isDockVisible && floatingToolbarVisible,
             enter = slideInVertically { it } + fadeIn(),
@@ -516,19 +680,19 @@ fun WebViewScreen(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
         ) {
-            FloatingSearchDock(
-                tabCount      = tabs.size,
-                tabs          = tabs,
-                activeTabId   = activeTabId,
-                onTabClick    = { tab -> viewModel.switchTab(tab.id) },
-                onManageTabs  = onManageTabs,
-                onNewTab      = {
+            BrowserNavigationBar(
+                canGoBack = canGoBack,
+                canGoForward = canGoForward,
+                tabCount = tabs.size,
+                onBack = { if (canGoBack) webView?.goBack() else onBack() },
+                onForward = { webView?.goForward() },
+                onAddress = { showSearchOverlay = true },
+                onTabs = onManageTabs,
+                onNewTab = {
                     viewModel.addTab("about:blank")
                     searchOverlayQuery = ""
                     showSearchOverlay = true
                 },
-                currentUrl    = currentUrl,
-                onSearchClick = { showSearchOverlay = true },
                 onSwipeDown   = { isDockVisible = false },
             )
         }
@@ -605,11 +769,85 @@ fun WebViewScreen(
 
                     Spacer(Modifier.height(16.dp))
 
-                    Text(
-                        stringResource(R.string.st_WebViewScreen_8f1a),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
+                    val normalizedQuery = searchOverlayQuery.trim()
+                    val suggestions = remember(normalizedQuery, bookmarks, browserHistory) {
+                        val needle = normalizedQuery.lowercase()
+                        buildList {
+                            bookmarks.forEach { bookmark ->
+                                if (needle.isBlank() || bookmark.title.contains(needle, true) || bookmark.url.contains(needle, true)) {
+                                    add(OmniboxSuggestion(bookmark.title, bookmark.url, Icons.Rounded.Bookmark, "Saved site"))
+                                }
+                            }
+                            browserHistory.forEach { visit ->
+                                if (needle.isBlank() || visit.title.contains(needle, true) || visit.url.contains(needle, true)) {
+                                    add(OmniboxSuggestion(visit.title, visit.url, Icons.Rounded.History, "Recent"))
+                                }
+                            }
+                        }.distinctBy { it.url }.take(6)
+                    }
+
+                    if (suggestions.isEmpty()) {
+                        Text(
+                            if (normalizedQuery.isBlank()) "Search the web or enter an address" else "Press search to open this address or search",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    } else {
+                        Text(
+                            if (normalizedQuery.isBlank()) "Suggestions" else "Matches",
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column {
+                                suggestions.forEachIndexed { index, suggestion ->
+                                    if (index > 0) HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f),
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showSearchOverlay = false
+                                                viewModel.resolveAddress(suggestion.url) { target ->
+                                                    webView?.loadUrl(target)
+                                                    currentUrl = target
+                                                    viewModel.updateTab(url = target)
+                                                }
+                                            }
+                                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Icon(suggestion.icon, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                suggestion.title.ifBlank { BrowserAddressResolver.displayHost(suggestion.url) },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                "${suggestion.kind} · ${BrowserAddressResolver.displayHost(suggestion.url)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -650,6 +888,79 @@ fun WebViewScreen(
             ReaderViewSheet(article = article, onDismiss = { readerArticle = null })
         }
 
+        if (showClearDataDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearDataDialog = false },
+                icon = { Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
+                title = { Text("Clear browsing data?") },
+                text = { Text("This clears visited pages, cookies, cached files, form data, and the current tab's back/forward history.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            webView?.let { viewModel.clearBrowsingData(it) }
+                            showClearDataDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    ) { Text("Clear data") }
+                },
+                dismissButton = { TextButton(onClick = { showClearDataDialog = false }) { Text("Cancel") } },
+            )
+        }
+
+        fullscreenContent?.let { content ->
+            AndroidView(
+                factory = { content },
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+            )
+        }
+
+        pendingWebPermission?.let { request ->
+            val needsCamera = PermissionRequest.RESOURCE_VIDEO_CAPTURE in request.resources
+            val needsMic = PermissionRequest.RESOURCE_AUDIO_CAPTURE in request.resources
+            AlertDialog(
+                onDismissRequest = {
+                    request.deny()
+                    viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.DENY)
+                    pendingWebPermission = null
+                    pendingWebPermissionOrigin = null
+                },
+                icon = { Icon(Icons.Rounded.Videocam, null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text("Allow site access?") },
+                text = {
+                    Text(buildString {
+                        append(safeHostFromUrl(currentUrl))
+                        append(" wants to use your ")
+                        append(listOfNotNull(if (needsCamera) "camera" else null, if (needsMic) "microphone" else null).joinToString(" and "))
+                        append(".")
+                    })
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val androidPermissions = buildList {
+                            if (needsCamera && ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) add(Manifest.permission.CAMERA)
+                            if (needsMic && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) add(Manifest.permission.RECORD_AUDIO)
+                        }
+                        if (androidPermissions.isEmpty()) {
+                            request.grant(request.resources.filter {
+                                it == PermissionRequest.RESOURCE_VIDEO_CAPTURE || it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                            }.toTypedArray())
+                            viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.ALLOW)
+                            pendingWebPermission = null
+                            pendingWebPermissionOrigin = null
+                        } else {
+                            webPermissionLauncher.launch(androidPermissions.toTypedArray())
+                        }
+                    }) { Text("Allow") }
+                },
+                dismissButton = { TextButton(onClick = {
+                    request.deny()
+                    viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.DENY)
+                    pendingWebPermission = null
+                    pendingWebPermissionOrigin = null
+                }) { Text("Block site") } },
+            )
+        }
+
         if (autofillSuggestions.isNotEmpty()) {
             AutofillBottomSheet(
                 passwords = autofillSuggestions,
@@ -688,6 +999,13 @@ fun WebViewScreen(
 
 // ── Components ───────────────────────────────────────────────────────────────
 
+private data class OmniboxSuggestion(
+    val title: String,
+    val url: String,
+    val icon: ImageVector,
+    val kind: String,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopChrome(
@@ -696,26 +1014,23 @@ private fun TopChrome(
     isLoading: Boolean,
     progress: Float,
     isBookmarked: Boolean,
+    isSavedForLater: Boolean,
     canGoForward: Boolean,
     showFindInPage: Boolean,
     findQuery: String,
-    tabs: List<TabEntry>,
-    activeTabId: String?,
     isDesktopMode: Boolean,
     isPrivate: Boolean,
+    blockedRequests: Int,
     adBlockEnabled: Boolean,
     floatingToolbarVisible: Boolean,
-    onTabClick: (TabEntry) -> Unit,
-    onTabClose: (TabEntry) -> Unit,
     onFindQueryChange: (String) -> Unit,
     onFindNext: () -> Unit,
     onFindPrev: () -> Unit,
     onToggleFind: () -> Unit,
-    onBack: () -> Unit,
     onForward: () -> Unit,
     onReload: () -> Unit,
-    onStop: () -> Unit,
     onBookmarkToggle: () -> Unit,
+    onReadingListToggle: () -> Unit,
     onUrlBarClick: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
@@ -728,23 +1043,11 @@ private fun TopChrome(
     onNewPrivateTab: () -> Unit,
     onClosePrivateTabs: () -> Unit,
     onOpenReader: () -> Unit,
-    onUrlGo: ((String) -> Unit)? = null,
+    onClearBrowsingData: () -> Unit,
+    onResetSitePermissions: () -> Unit,
     downloads: List<com.frerox.toolz.data.browser.DownloadItem> = emptyList(),
 ) {
     var showOptions by remember { mutableStateOf(false) }
-    var isEditingUrl by remember { mutableStateOf(false) }
-    var editUrlText by remember(currentUrl) { mutableStateOf(currentUrl) }
-    val ctxLocal = LocalContext.current
-    val focusReq = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(currentUrl) { if (!isEditingUrl) editUrlText = currentUrl }
-    LaunchedEffect(isEditingUrl) {
-        if (isEditingUrl) {
-            kotlinx.coroutines.delay(80)
-            try { focusReq.requestFocus() } catch (_: Exception) {}
-        }
-    }
-    // Back closes edit first
-    androidx.activity.compose.BackHandler(enabled = isEditingUrl) { isEditingUrl = false }
 
     val progressAlpha by animateFloatAsState(
         targetValue   = if (isLoading) 1f else 0f,
@@ -768,76 +1071,15 @@ private fun TopChrome(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // Back
-            IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.st_WebViewScreen_7c4d),
-                    modifier = Modifier.size(20.dp),
-                    tint     = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-
-            // URL pill — inline editable (no overlay screen)
-            if (isEditingUrl) {
-                Surface(
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 1.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = editUrlText,
-                            onValueChange = { editUrlText = it },
-                            modifier = Modifier.weight(1f).focusRequester(focusReq),
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                            keyboardActions = KeyboardActions(onGo = {
-                                isEditingUrl = false
-                                if (onUrlGo != null) onUrlGo(editUrlText) else onUrlBarClick()
-                            }),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        )
-                        IconButton(onClick = {
-                            val cm = ctxLocal.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData.newPlainText("URL", editUrlText))
-                        }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        IconButton(onClick = { editUrlText = "" }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Rounded.Close, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        IconButton(onClick = {
-                            isEditingUrl = false
-                            if (onUrlGo != null) onUrlGo(editUrlText)
-                        }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Rounded.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                }
-            } else {
-                Surface(
-                    onClick = { editUrlText = currentUrl; isEditingUrl = true },
+            // The display is deliberately passive; all typing happens in the single omnibox overlay.
+            Surface(
+                    onClick = onUrlBarClick,
                     modifier = Modifier.weight(1f).height(40.dp),
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 1.dp,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                ) {
+            ) {
                     Row(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -872,6 +1114,20 @@ private fun TopChrome(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
+                        if (blockedRequests > 0) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                            ) {
+                                Text(
+                                    text = blockedRequests.coerceAtMost(99).toString(),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
+                        }
                         Icon(
                             imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
                             contentDescription = null,
@@ -879,31 +1135,6 @@ private fun TopChrome(
                             tint = if (isSecure) Color(0xFF4CAF50).copy(alpha = 0.9f) else MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
                         )
                     }
-                }
-            }
-
-            // Reload / stop
-            IconButton(
-                onClick  = if (isLoading) onStop else onReload,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Crossfade(targetState = isLoading, label = "reloadStop") { loading ->
-                    if (loading) {
-                        CircularProgressIndicator(
-                            progress   = { progress },
-                            modifier   = Modifier.size(20.dp),
-                            strokeWidth = 2.5.dp,
-                            color      = MaterialTheme.colorScheme.primary,
-                            trackColor = Color.Transparent,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Rounded.Refresh, stringResource(R.string.st_WebViewScreen_9e2c),
-                            modifier = Modifier.size(20.dp),
-                            tint     = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
             }
 
             // Overflow menu (now a BottomSheet)
@@ -917,14 +1148,6 @@ private fun TopChrome(
                 }
             }
         }
-
-        // ── Tab Strip ────────────────────────────────────────────────────────
-        TabStrip(
-            tabs = tabs,
-            activeTabId = activeTabId,
-            onTabClick = onTabClick,
-            onTabClose = onTabClose
-        )
 
         // Download pill progress (colored per mime, on pill lower border)
         if (downloads.isNotEmpty()) {
@@ -1014,6 +1237,8 @@ private fun TopChrome(
         BrowserOptionsSheet(
             canGoForward = canGoForward,
             isBookmarked = isBookmarked,
+            isSavedForLater = isSavedForLater,
+            isPrivate = isPrivate,
             isDesktopMode = isDesktopMode,
             adBlockEnabled = adBlockEnabled,
             floatingToolbarVisible = floatingToolbarVisible,
@@ -1021,6 +1246,7 @@ private fun TopChrome(
             onForward = onForward,
             onReload = onReload,
             onBookmarkToggle = onBookmarkToggle,
+            onReadingListToggle = onReadingListToggle,
             onToggleFind = onToggleFind,
             onShare = onShare,
             onCopy = onCopy,
@@ -1033,85 +1259,67 @@ private fun TopChrome(
             onNewPrivateTab = onNewPrivateTab,
             onClosePrivateTabs = onClosePrivateTabs,
             onOpenReader = onOpenReader,
+            onClearBrowsingData = onClearBrowsingData,
+            onResetSitePermissions = onResetSitePermissions,
         )
     }
 }
 
 @Composable
-private fun TabStrip(
-    tabs: List<TabEntry>,
-    activeTabId: String?,
-    onTabClick: (TabEntry) -> Unit,
-    onTabClose: (TabEntry) -> Unit
+private fun BrowserNavigationBar(
+    canGoBack: Boolean,
+    canGoForward: Boolean,
+    tabCount: Int,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onAddress: () -> Unit,
+    onTabs: () -> Unit,
+    onNewTab: () -> Unit,
+    onSwipeDown: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
-
-    // Auto-scroll to active tab when it changes
-    LaunchedEffect(activeTabId) {
-        val index = tabs.indexOfFirst { it.id == activeTabId }
-        if (index != -1) {
-            listState.animateScrollToItem(index)
-        }
-    }
-
-    LazyRow(
-        state = listState,
+    val haptic = LocalHapticFeedback.current
+    Surface(
         modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 18.dp)
             .fillMaxWidth()
-            .height(40.dp)
-            .background(MaterialTheme.colorScheme.surface),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(64.dp)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures { change, dragAmount ->
+                    if (dragAmount > 25f) onSwipeDown()
+                }
+            },
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .96f),
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp,
     ) {
-        items(tabs, key = { it.id }) { tab ->
-            val isActive = tab.id == activeTabId
-            val backgroundColor = if (isActive)
-                MaterialTheme.colorScheme.primaryContainer
-            else
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            val contentColor = if (isActive)
-                MaterialTheme.colorScheme.onPrimaryContainer
-            else
-                MaterialTheme.colorScheme.onSurfaceVariant
-
-            Surface(
-                onClick = { onTabClick(tab) },
-                shape = RoundedCornerShape(12.dp),
-                color = backgroundColor,
-                modifier = Modifier
-                    .widthIn(max = 180.dp)
-                    .height(36.dp)
-                    .animateContentSize()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    PrivacyFaviconImage(url = tab.url, size = 16.dp)
-                    Text(
-                        text = tab.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium,
-                        color = contentColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (tabs.size > 1) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close Tab",
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clickable { onTabClose(tab) },
-                            tint = contentColor.copy(alpha = 0.6f)
-                        )
-                    }
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            BrowserNavIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", true, onBack)
+            BrowserNavIcon(Icons.AutoMirrored.Filled.ArrowForward, "Forward", canGoForward, onForward)
+            Surface(onClick = onAddress, shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.Search, "Address bar", modifier = Modifier.padding(13.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Surface(onClick = onTabs, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.size(46.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(tabCount.coerceAtLeast(1).toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
                 }
             }
+            IconButton(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onNewTab()
+            }) { Icon(Icons.Rounded.Add, "New tab") }
         }
+    }
+}
+
+@Composable
+private fun BrowserNavIcon(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Icon(icon, label, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .3f))
     }
 }
 
@@ -1120,6 +1328,8 @@ private fun TabStrip(
 private fun BrowserOptionsSheet(
     canGoForward: Boolean,
     isBookmarked: Boolean,
+    isSavedForLater: Boolean,
+    isPrivate: Boolean,
     isDesktopMode: Boolean,
     adBlockEnabled: Boolean,
     floatingToolbarVisible: Boolean,
@@ -1127,6 +1337,7 @@ private fun BrowserOptionsSheet(
     onForward: () -> Unit,
     onReload: () -> Unit,
     onBookmarkToggle: () -> Unit,
+    onReadingListToggle: () -> Unit,
     onToggleFind: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
@@ -1139,6 +1350,8 @@ private fun BrowserOptionsSheet(
     onNewPrivateTab: () -> Unit,
     onClosePrivateTabs: () -> Unit,
     onOpenReader: () -> Unit,
+    onClearBrowsingData: () -> Unit,
+    onResetSitePermissions: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1231,7 +1444,17 @@ private fun BrowserOptionsSheet(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OptionActionRow("New private tab", Icons.Rounded.VisibilityOff, onNewPrivateTab, onDismiss)
                 OptionActionRow("Close private tabs", Icons.Rounded.DeleteSweep, onClosePrivateTabs, onDismiss)
+                if (!isPrivate) {
+                    OptionActionRow(
+                        if (isSavedForLater) "Remove from read later" else "Read later",
+                        if (isSavedForLater) Icons.Rounded.BookmarkRemove else Icons.Rounded.BookmarkAdd,
+                        onReadingListToggle,
+                        onDismiss,
+                    )
+                }
                 OptionActionRow("Reader view", Icons.Rounded.AutoStories, onOpenReader, onDismiss)
+                OptionActionRow("Clear browsing data", Icons.Rounded.DeleteSweep, onClearBrowsingData, onDismiss)
+                OptionActionRow("Reset site permissions", Icons.Rounded.Security, onResetSitePermissions, onDismiss)
                 OptionActionRow(stringResource(R.string.st_AiAssistantScreen_9f0a), Icons.Rounded.Search, onToggleFind, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_7e8f), Icons.Rounded.Download, onShowDownloads, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_9f0a), Icons.Rounded.Share, onShare, onDismiss)

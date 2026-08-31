@@ -47,13 +47,6 @@ import com.frerox.toolz.data.browser.TabEntry
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.search.components.FaviconDisplay
 
-// ─── Accent Colors ────────────────────────────────────────────────────────────
-
-private val ElectricViolet    = Color(0xFF7B6EF6)
-private val ElectricVioletDim = Color(0xFF4A3FB8)
-private val NeonCyan          = Color(0xFF38F5D4)
-private val DangerRed         = Color(0xFFFF4D6A)
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,16 +54,23 @@ private val DangerRed         = Color(0xFFFF4D6A)
 fun TabManagementScreen(
     onBack: () -> Unit,
     onTabClick: (id: String, url: String) -> Unit,
-    onNewTab: () -> Unit,
     viewModel: WebViewViewModel = hiltViewModel(),
 ) {
     val tabs        by viewModel.tabs.collectAsState(initial = emptyList())
     val activeTabId by viewModel.activeTabId.collectAsState(initial = null)
+    val openNormalTab = {
+        val tab = viewModel.addTab("about:blank")
+        onTabClick(tab.id, tab.url)
+    }
     
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    var showPrivateTabs by remember { mutableStateOf(false) }
     val isMultiSelect by remember { derivedStateOf { selectedIds.isNotEmpty() } }
+    val visibleTabs by remember(tabs, showPrivateTabs) {
+        derivedStateOf { tabs.filter { it.isPrivate == showPrivateTabs } }
+    }
 
     // Animate header background on multi-select
     val topBarColor by animateColorAsState(
@@ -105,7 +105,7 @@ fun TabManagementScreen(
                                     Text(
                                         "${selectedIds.size} " + stringResource(R.string.st_TabManagementScreen_8f1a),
                                         fontWeight = FontWeight.Black,
-                                        color      = ElectricViolet,
+                                        color      = MaterialTheme.colorScheme.primary,
                                         style = MaterialTheme.typography.headlineMedium
                                     )
                                 } else {
@@ -122,13 +122,13 @@ fun TabManagementScreen(
                                         if (tabs.isNotEmpty()) {
                                             Surface(
                                                 shape = RoundedCornerShape(12.dp),
-                                                color = ElectricViolet.copy(alpha = 0.15f),
+                                                color = MaterialTheme.colorScheme.primaryContainer,
                                             ) {
                                                 Text(
                                                     "${tabs.size}",
                                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                                     style      = MaterialTheme.typography.labelLarge,
-                                                    color      = ElectricViolet,
+                                                    color      = MaterialTheme.colorScheme.onPrimaryContainer,
                                                     fontWeight = FontWeight.Black,
                                                 )
                                             }
@@ -174,7 +174,7 @@ fun TabManagementScreen(
                                             Icon(
                                                 Icons.Rounded.DoneAll,
                                                 contentDescription = stringResource(R.string.st_TabManagementScreen_7c4d),
-                                                tint = ElectricViolet,
+                                                tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(26.dp)
                                             )
                                         }
@@ -185,13 +185,19 @@ fun TabManagementScreen(
                                             Icon(
                                                 Icons.Rounded.DeleteSweep,
                                                 contentDescription = stringResource(R.string.st_TabManagementScreen_5f6e),
-                                                tint = DangerRed,
+                                                tint = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.size(26.dp)
                                             )
                                         }
                                     } else {
-                                        IconButton(onClick = onNewTab) {
-                                            Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_TabManagementScreen_2b8a), tint = ElectricViolet, modifier = Modifier.size(32.dp))
+                                        IconButton(onClick = {
+                                            val tab = viewModel.addTab("about:blank", isPrivate = true)
+                                            onTabClick(tab.id, tab.url)
+                                        }) {
+                                            Icon(Icons.Rounded.VisibilityOff, contentDescription = "New private tab", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                        }
+                                        IconButton(onClick = openNormalTab) {
+                                            Icon(Icons.Rounded.Add, contentDescription = stringResource(R.string.st_TabManagementScreen_2b8a), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                                         }
                                     }
                                 }
@@ -215,8 +221,8 @@ fun TabManagementScreen(
                         ExpressiveLinearProgressIndicator(
                             progress = { if (tabs.isEmpty()) 0f else selectedIds.size.toFloat() / tabs.size },
                             modifier  = Modifier.fillMaxWidth().height(4.dp),
-                            color     = ElectricViolet,
-                            trackColor = ElectricViolet.copy(alpha = 0.12f),
+                            color     = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primaryContainer,
                         )
                     }
                 }
@@ -229,21 +235,26 @@ fun TabManagementScreen(
                 exit    = scaleOut() + fadeOut(),
             ) {
                 ExtendedFloatingActionButton(
-                    onClick        = onNewTab,
+                    onClick        = openNormalTab,
                     icon           = { Icon(Icons.Rounded.Add, null, modifier = Modifier.size(28.dp)) },
                     text           = { Text(stringResource(R.string.st_TabManagementScreen_2b8a), fontWeight = FontWeight.Black) },
-                    shape          = ExtraLargeExpressiveShape,
-                    containerColor = ElectricViolet,
-                    contentColor   = Color.White,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp)
+                    shape          = RoundedCornerShape(20.dp),
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor   = MaterialTheme.colorScheme.onPrimaryContainer,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp)
                 )
             }
         },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) { padding ->
-        if (tabs.isEmpty()) {
+        if (visibleTabs.isEmpty()) {
             EmptyTabsView(
-                onNewTab = onNewTab,
+                onNewTab = if (showPrivateTabs) {
+                    {
+                        val tab = viewModel.addTab("about:blank", isPrivate = true)
+                        onTabClick(tab.id, tab.url)
+                    }
+                } else openNormalTab,
                 modifier = Modifier.padding(padding),
             )
         } else {
@@ -260,7 +271,18 @@ fun TabManagementScreen(
                     .padding(top = padding.calculateTopPadding())
                     .fillMaxSize(),
             ) {
-                itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    TabScopePicker(
+                        showPrivateTabs = showPrivateTabs,
+                        normalCount = tabs.count { !it.isPrivate },
+                        privateCount = tabs.count { it.isPrivate },
+                        onSelect = { private ->
+                            showPrivateTabs = private
+                            selectedIds = emptySet()
+                        },
+                    )
+                }
+                itemsIndexed(visibleTabs, key = { _, tab -> tab.id }) { index, tab ->
                     val isSelected = selectedIds.contains(tab.id)
                     val isActive   = tab.id == activeTabId
 
@@ -274,6 +296,7 @@ fun TabManagementScreen(
                             if (isMultiSelect) {
                                 selectedIds = if (isSelected) selectedIds - tab.id else selectedIds + tab.id
                             } else {
+                                viewModel.switchTab(tab.id)
                                 onTabClick(tab.id, tab.url)
                             }
                         },
@@ -285,6 +308,29 @@ fun TabManagementScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TabScopePicker(
+    showPrivateTabs: Boolean,
+    normalCount: Int,
+    privateCount: Int,
+    onSelect: (Boolean) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        FilterChip(
+            selected = !showPrivateTabs,
+            onClick = { onSelect(false) },
+            label = { Text("Tabs · $normalCount") },
+            leadingIcon = { Icon(Icons.Rounded.Public, null, modifier = Modifier.size(16.dp)) },
+        )
+        FilterChip(
+            selected = showPrivateTabs,
+            onClick = { onSelect(true) },
+            label = { Text("Private · $privateCount") },
+            leadingIcon = { Icon(Icons.Rounded.VisibilityOff, null, modifier = Modifier.size(16.dp)) },
+        )
     }
 }
 
@@ -308,8 +354,8 @@ private fun PremiumTabCard(
     // Card visual states
     val borderColor by animateColorAsState(
         targetValue   = when {
-            isSelected -> ElectricViolet
-            isActive   -> ElectricViolet.copy(alpha = 0.6f)
+            isSelected -> MaterialTheme.colorScheme.primary
+            isActive   -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
             else       -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         },
         animationSpec = tween(300),
@@ -318,7 +364,7 @@ private fun PremiumTabCard(
 
     val cardColor by animateColorAsState(
         targetValue   = when {
-            isSelected -> ElectricViolet.copy(alpha = 0.12f)
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
             isActive   -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
             else       -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
@@ -369,6 +415,14 @@ private fun PremiumTabCard(
                             color      = if (isActive) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.95f),
                         )
+                        if (tab.isPrivate) {
+                            Icon(
+                                Icons.Rounded.VisibilityOff,
+                                contentDescription = "Private tab",
+                                modifier = Modifier.size(17.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         if (!isMultiSelect) {
                             IconButton(
                                 onClick  = { haptic.tick(); onClose() },
@@ -477,34 +531,11 @@ private fun PremiumTabCard(
 
 @Composable
 private fun ActiveDot() {
-    val infiniteTransition = rememberInfiniteTransition(label = "activePulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue  = 1f,
-        targetValue   = 1.5f,
-        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label         = "pulseScale",
-    )
-
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(20.dp)) {
-        // Outer pulse
-        Box(
-            modifier = Modifier
-                .size(14.dp)
-                .scale(pulseScale)
-                .clip(CircleShape)
-                .background(ElectricViolet.copy(alpha = 0.3f))
-        )
-        // Solid core
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(listOf(NeonCyan, ElectricViolet))
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape)
-        )
-    }
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.size(10.dp),
+    ) {}
 }
 
 // ─── Multi-select Checkbox ────────────────────────────────────────────────────
@@ -523,13 +554,13 @@ private fun MultiSelectIndicator(isSelected: Boolean) {
             .scale(scale)
             .clip(CircleShape)
             .background(
-                if (isSelected) ElectricViolet
+                if (isSelected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
             )
             .border(
                 BorderStroke(
                     width = 1.5.dp,
-                    color = if (isSelected) ElectricViolet else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
                 ),
                 CircleShape,
             ),
@@ -577,15 +608,15 @@ private fun EmptyTabsView(
                 Surface(
                     modifier = Modifier.size(120.dp),
                     shape    = ExtraLargeExpressiveShape,
-                    color    = ElectricViolet.copy(alpha = 0.1f),
-                    border   = BorderStroke(1.5.dp, ElectricViolet.copy(alpha = 0.2f)),
+                    color    = MaterialTheme.colorScheme.primaryContainer,
+                    border   = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Rounded.Layers,
                             null,
                             modifier = Modifier.size(56.dp),
-                            tint     = ElectricViolet.copy(alpha = 0.8f),
+                            tint     = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -615,7 +646,7 @@ private fun EmptyTabsView(
                 Button(
                     onClick = onNewTab,
                     shape   = LargeExpressiveShape,
-                    colors  = ButtonDefaults.buttonColors(containerColor = ElectricViolet),
+                    colors  = ButtonDefaults.buttonColors(),
                     modifier = Modifier.height(56.dp).padding(horizontal = 24.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                 ) {

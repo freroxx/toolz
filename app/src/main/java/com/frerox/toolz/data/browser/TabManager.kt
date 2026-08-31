@@ -37,19 +37,22 @@ class TabManager @Inject constructor(
         if (_activeTabId.value !in _tabs.value.map { it.id }) _activeTabId.value = _tabs.value.lastOrNull()?.id
     }
 
-    fun addTab(url: String, title: String = "New Tab", isPrivate: Boolean = false) {
+    fun addTab(url: String, title: String = "New Tab", isPrivate: Boolean = false): TabEntry {
         val newTab = TabEntry(url = url, title = title, isPrivate = isPrivate)
         _tabs.value = _tabs.value + newTab
         _activeTabId.value = newTab.id
         persist()
+        return newTab
     }
 
     fun removeTab(tabId: String) {
         val currentTabs = _tabs.value
         if (currentTabs.size <= 1 && currentTabs.any { it.id == tabId }) {
-            // Keep at least one tab or handle empty state
-            _tabs.value = emptyList()
-            _activeTabId.value = null
+            // A browser never leaves the user staring at a stale renderer after
+            // closing the final tab: replace it with the internal new-tab page.
+            val freshTab = TabEntry(url = "about:blank")
+            _tabs.value = listOf(freshTab)
+            _activeTabId.value = freshTab.id
             persist()
             return
         }
@@ -91,10 +94,11 @@ class TabManager @Inject constructor(
 
     fun removeTabs(tabIds: Set<String>) {
         val currentTabs = _tabs.value
-        val newTabs = currentTabs.filter { it.id !in tabIds }
+        val keptTabs = currentTabs.filter { it.id !in tabIds }
+        val newTabs = if (keptTabs.isEmpty()) listOf(TabEntry(url = "about:blank")) else keptTabs
         _tabs.value = newTabs
         
-        if (_activeTabId.value in tabIds) {
+        if (_activeTabId.value in tabIds || _activeTabId.value !in newTabs.map { it.id }) {
             _activeTabId.value = newTabs.lastOrNull()?.id
         }
         persist()
