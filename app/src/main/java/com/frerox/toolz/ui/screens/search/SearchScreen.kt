@@ -49,6 +49,7 @@ import com.frerox.toolz.data.search.SearchCategory
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.data.browser.BrowserAddressResolver
+import com.frerox.toolz.data.browser.AddressDestination
 import com.frerox.toolz.ui.screens.search.components.*
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import java.util.Calendar
@@ -107,6 +108,8 @@ fun SearchScreen(
             onIncognitoToggle   = { viewModel.toggleIncognito(!uiState.isIncognito) },
             autofillEnabled     = uiState.searchAutofillEnabled,
             onAutofillToggle    = viewModel::toggleAutofill,
+            showGreetingCard    = uiState.showGreetingCard,
+            onGreetingCardToggle= viewModel::setShowGreetingCard,
         )
     }
 
@@ -332,15 +335,14 @@ fun SearchScreen(
                             onSearch      = { raw ->
                                 val q = raw.trim()
                                 if (q.isEmpty()) return@SearchPill
-                                val target = BrowserAddressResolver.resolve(
-                                    q, uiState.searchEngine, uiState.customEngineUrl
-                                )
-                                val looksLikeUrl = q.startsWith("http", true) || BrowserAddressResolver.isAddress(q)
-                                if (looksLikeUrl) {
-                                    viewModel.openTab(target)
-                                    onResultClick(target)
-                                } else {
-                                    viewModel.onSearch(q)
+                                when (val dest = BrowserAddressResolver.resolveDestination(q)) {
+                                    is AddressDestination.DirectUrl -> {
+                                        viewModel.openTab(dest.url)
+                                        onResultClick(dest.url)
+                                    }
+                                    is AddressDestination.SearchQuery -> {
+                                        viewModel.onSearch(dest.query)
+                                    }
                                 }
                                 viewModel.onActiveChange(false)
                             },
@@ -697,14 +699,16 @@ private fun HomePage(
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         // ── Greeting ─────────────────────────────────────
-        item(key = "greeting") {
-            BrowserPulseCard(
-                userName = uiState.userName,
-                engine = uiState.searchEngine,
-                tabCount = uiState.tabs.size,
-                isPrivate = uiState.isIncognito,
-                bookmarkCount = bookmarks.size,
-            )
+        if (uiState.showGreetingCard) {
+            item(key = "greeting") {
+                BrowserPulseCard(
+                    userName = uiState.userName,
+                    engine = uiState.searchEngine,
+                    tabCount = uiState.tabs.size,
+                    isPrivate = uiState.isIncognito,
+                    bookmarkCount = bookmarks.size,
+                )
+            }
         }
 
         // ── Resume session ───────────────────────────────
@@ -1077,33 +1081,52 @@ private fun ResultsPage(
             )
         }
 
+        if (uiState.results.isEmpty() && (uiState.category == SearchCategory.IMAGES || uiState.category == SearchCategory.VIDEOS) && uiState.phase == SearchPhase.Results) {
+            item(key = "mediaEmpty") {
+                ProviderUnavailableCard(
+                    category = uiState.category,
+                    onSearchAll = { onCategorySelected(SearchCategory.ALL) },
+                    modifier = Modifier.animateItem(),
+                )
+            }
+        }
+
         itemsIndexed(
             items = uiState.results,
             key   = { index, result -> "${result.url}_$index" },
         ) { index, result ->
-            // Inline WebView for image/video category
-            if ((uiState.category == SearchCategory.IMAGES || uiState.category == SearchCategory.VIDEOS)
-                && result.url.length > 10) {
-                InlineSearchWebView(
-                    result          = result,
-                    category        = uiState.category,
-                    adBlockEnabled  = uiState.adBlockEnabled,
-                    onOpenInBrowser = { url: String -> onResultClick(SearchResult(result.title, result.snippet, url, result.displayUrl, result.source)) },
-                    modifier        = Modifier.animateItem(
-                        fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
-                        placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
-                    ),
-                )
-            } else {
-                SearchResultCard(
-                    result      = result,
-                    onClick     = { onResultClick(result) },
-                    onLongClick = { onLongPress(result) },
-                    modifier    = Modifier.animateItem(
-                        fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
-                        placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
-                    ),
-                )
+            when (uiState.category) {
+                SearchCategory.IMAGES -> {
+                    NativeImageCard(
+                        result   = result,
+                        onClick  = { onResultClick(result) },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                            placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                        ),
+                    )
+                }
+                SearchCategory.VIDEOS -> {
+                    NativeVideoCard(
+                        result   = result,
+                        onClick  = { onResultClick(result) },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                            placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                        ),
+                    )
+                }
+                else -> {
+                    SearchResultCard(
+                        result      = result,
+                        onClick     = { onResultClick(result) },
+                        onLongClick = { onLongPress(result) },
+                        modifier    = Modifier.animateItem(
+                            fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                            placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                        ),
+                    )
+                }
             }
         }
 
@@ -1204,6 +1227,8 @@ private fun SearchSettingsSheet(
     onIncognitoToggle: () -> Unit,
     autofillEnabled: Boolean,
     onAutofillToggle: (Boolean) -> Unit,
+    showGreetingCard: Boolean = false,
+    onGreetingCardToggle: (Boolean) -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1273,6 +1298,20 @@ private fun SearchSettingsSheet(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             Spacer(Modifier.height(4.dp))
 
+            SettingsToggleRow(
+                title    = "Show Greeting & Stats",
+                subtitle = "Display quick browser pulse card on home",
+                checked  = showGreetingCard,
+                onCheckedChange = onGreetingCardToggle,
+                leadingIcon = {
+                    Icon(
+                        Icons.Rounded.WavingHand, null,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (showGreetingCard) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+            )
             SettingsToggleRow(
                 title    = stringResource(R.string.st_SearchScreen_s7s8),
                 subtitle = stringResource(R.string.st_SearchScreen_f9e0),
@@ -1526,14 +1565,12 @@ private fun SearchEngineSheet(
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "META"       to ("Meta Search (Recommended)" to "Aggregates Bing, Brave & Yahoo in parallel with consensus ranking"),
+                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant, Marginalia & Bing with consensus ranking"),
+                "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results"),
+                "QWANT"      to ("Qwant" to "Privacy-first European search engine with independent web & media indexing"),
+                "MARGINALIA" to ("Marginalia" to "Independent search engine focusing on non-commercial and text-rich web"),
                 "BING"       to (stringResource(R.string.st_SearchScreen_b7i8) to stringResource(R.string.st_SearchScreen_m9s0)),
-                "BRAVE"      to (stringResource(R.string.st_SearchScreen_b9r0) to stringResource(R.string.st_SearchScreen_f1p2)),
-                "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results powered by Yahoo"),
-                "DUCKDUCKGO" to (stringResource(R.string.st_SearchScreen_d5u6) to stringResource(R.string.st_SearchScreen_p7f8)),
-                "GOOGLE"     to (stringResource(R.string.st_SearchScreen_g3o4) to stringResource(R.string.st_SearchScreen_w5m6)),
-                "STARTPAGE"  to (stringResource(R.string.st_SearchScreen_s1t2) to stringResource(R.string.st_SearchScreen_g3r4)),
-                "ECOSIA"     to (stringResource(R.string.st_SearchScreen_e9c0) to stringResource(R.string.st_SearchScreen_p1t2)),
+                "CUSTOM"     to ("Custom Engine" to "User-configured search engine template URL"),
             )
 
             engines.forEach { entry ->
@@ -1564,14 +1601,12 @@ private fun SearchEngineSheet(
                                 Icon(
                                     when(key) {
                                         "META" -> Icons.Rounded.Hub
-                                        "BING" -> Icons.Rounded.TravelExplore
-                                        "BRAVE" -> Icons.Rounded.Shield
                                         "YAHOO" -> Icons.Rounded.Language
-                                        "GOOGLE" -> Icons.Rounded.Search
-                                        "DUCKDUCKGO" -> Icons.Rounded.VisibilityOff
-                                        "ECOSIA" -> Icons.Rounded.Park
-                                        "STARTPAGE" -> Icons.Rounded.Lock
-                                        else -> Icons.Rounded.Language
+                                        "QWANT" -> Icons.Rounded.Shield
+                                        "MARGINALIA" -> Icons.Rounded.AutoStories
+                                        "BING" -> Icons.Rounded.TravelExplore
+                                        "CUSTOM" -> Icons.Rounded.Tune
+                                        else -> Icons.Rounded.Search
                                     },
                                     null,
                                     modifier = Modifier.size(20.dp),

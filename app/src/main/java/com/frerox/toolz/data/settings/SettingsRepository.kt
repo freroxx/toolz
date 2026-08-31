@@ -123,6 +123,7 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_REGION = stringPreferencesKey("search_region")
     private val SEARCH_CUSTOM_ENGINE_URL = stringPreferencesKey("search_custom_engine_url")
     private val SEARCH_INCOGNITO_ENABLED = booleanPreferencesKey("search_incognito_enabled")
+    private val SEARCH_SHOW_GREETING_CARD = booleanPreferencesKey("search_show_greeting_card")
 
     val searchFirstTime: Flow<Boolean> = dataStore.data.map { it[SEARCH_FIRST_TIME] ?: true }
     val searchAdBlockEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_ENABLED] ?: true }
@@ -137,7 +138,10 @@ class SettingsRepository @Inject constructor(
     val searchCustomDns: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS] ?: "" }
     val searchCustomDnsSecondary: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_DNS_SECONDARY] ?: "" }
     val searchRecentDns: Flow<Set<String>> = dataStore.data.map { it[SEARCH_RECENT_DNS] ?: emptySet() }
-    val searchEngine: Flow<String> = dataStore.data.map { it[SEARCH_ENGINE] ?: "META" }
+    val searchEngine: Flow<String> = dataStore.data.map { prefs ->
+        val raw = prefs[SEARCH_ENGINE] ?: "META"
+        com.frerox.toolz.data.search.engine.EngineId.fromString(raw).name
+    }
     val searchSafeSearch: Flow<Boolean> = dataStore.data.map { it[SEARCH_SAFE_SEARCH] ?: false }
     val searchResultsDensity: Flow<String> = dataStore.data.map { it[SEARCH_RESULTS_DENSITY] ?: "COMFY" }
     val searchCardRadius: Flow<Int> = dataStore.data.map { it[SEARCH_CARD_RADIUS] ?: 16 }
@@ -145,6 +149,7 @@ class SettingsRepository @Inject constructor(
     val searchRegion: Flow<String> = dataStore.data.map { it[SEARCH_REGION] ?: "wt-wt" } // default: no region
     val searchCustomEngineUrl: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_ENGINE_URL] ?: "" }
     val searchIncognitoEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_INCOGNITO_ENABLED] ?: false }
+    val searchShowGreetingCard: Flow<Boolean> = dataStore.data.map { it[SEARCH_SHOW_GREETING_CARD] ?: false }
 
     companion object {
         val SEARCH_AUTOFILL_ENABLED = booleanPreferencesKey("search_autofill_enabled")
@@ -248,6 +253,9 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setSearchIncognitoEnabled(enabled: Boolean) {
         dataStore.edit { it[SEARCH_INCOGNITO_ENABLED] = enabled }
+    }
+    suspend fun setSearchShowGreetingCard(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_SHOW_GREETING_CARD] = enabled }
     }
     suspend fun setSearchResultsDensity(v: String){ dataStore.edit{ it[SEARCH_RESULTS_DENSITY]=v } }
     suspend fun setSearchCardRadius(v: Int){ dataStore.edit{ it[SEARCH_CARD_RADIUS]=v } }
@@ -553,7 +561,7 @@ class SettingsRepository @Inject constructor(
     val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
     val recentToolsRows: Flow<Int> = dataStore.data.map { it[RECENT_TOOLS_ROWS] ?: 1 }
     val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
-    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: true }
+    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: false }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }

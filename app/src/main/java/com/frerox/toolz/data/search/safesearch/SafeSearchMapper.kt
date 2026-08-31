@@ -9,17 +9,12 @@ import com.frerox.toolz.data.search.engine.SafeSearchLevel
 
 object SafeSearchMapper {
     fun queryParam(engine: EngineId, level: SafeSearchLevel): String = when (engine) {
-        EngineId.DUCKDUCKGO, EngineId.CUSTOM, EngineId.MOJEEK, EngineId.MARGINALIA -> when (level) {
+        EngineId.MARGINALIA, EngineId.CUSTOM -> when (level) {
             SafeSearchLevel.STRICT -> "&kp=1"
             SafeSearchLevel.MODERATE -> "&kp=-2"
             SafeSearchLevel.OFF -> "&kp=-1"
         }
-        EngineId.BRAVE -> when (level) {
-            SafeSearchLevel.STRICT -> "&safesearch=strict"
-            SafeSearchLevel.MODERATE -> "&safesearch=moderate"
-            SafeSearchLevel.OFF -> "&safesearch=off"
-        }
-        EngineId.BING, EngineId.ECOSIA -> when (level) {
+        EngineId.BING -> when (level) {
             SafeSearchLevel.STRICT -> "&adlt=strict"
             SafeSearchLevel.MODERATE -> "&adlt=moderate"
             SafeSearchLevel.OFF -> "&adlt=off"
@@ -35,9 +30,9 @@ object SafeSearchMapper {
             SafeSearchLevel.OFF -> ""
         }
         else -> when (level) {
-            SafeSearchLevel.STRICT -> "&safe=active"
-            SafeSearchLevel.MODERATE -> "&safe=active"
-            else -> "&safe=off"
+            SafeSearchLevel.STRICT -> "&adlt=strict"
+            SafeSearchLevel.MODERATE -> "&adlt=moderate"
+            else -> "&adlt=off"
         }
     }
 }

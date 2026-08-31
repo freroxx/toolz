@@ -11,14 +11,10 @@ enum class SafeSearchLevel { OFF, MODERATE, STRICT }
 @Immutable
 data class EngineCapabilities(val supportsImages: Boolean = true, val supportsNews: Boolean = true, val supportsVideos: Boolean = true, val supportsSafeSearch: Boolean = true, val safeSearchParam: String = "")
 val EngineCapabilitiesMatrix: Map<EngineId, EngineCapabilities> = mapOf(
-    EngineId.DUCKDUCKGO to EngineCapabilities(),
-    EngineId.BRAVE to EngineCapabilities(),
-    EngineId.BING to EngineCapabilities(),
     EngineId.YAHOO to EngineCapabilities(supportsImages = false, supportsVideos = false),
-    EngineId.MOJEEK to EngineCapabilities(supportsImages = false, supportsNews = false, supportsVideos = false),
-    EngineId.QWANT to EngineCapabilities(),
+    EngineId.QWANT to EngineCapabilities(supportsImages = true, supportsNews = true, supportsVideos = true),
     EngineId.MARGINALIA to EngineCapabilities(supportsImages = false, supportsNews = false, supportsVideos = false),
-    EngineId.PRESEARCH to EngineCapabilities(supportsImages = false, supportsNews = false, supportsVideos = false),
-    EngineId.META to EngineCapabilities(),
+    EngineId.BING to EngineCapabilities(supportsImages = true, supportsNews = true, supportsVideos = true),
+    EngineId.META to EngineCapabilities(supportsImages = true, supportsNews = true, supportsVideos = true),
     EngineId.CUSTOM to EngineCapabilities()
 )

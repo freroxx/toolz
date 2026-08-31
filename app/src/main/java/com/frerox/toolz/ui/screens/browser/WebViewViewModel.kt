@@ -269,6 +269,8 @@ class WebViewViewModel @Inject constructor(
         tabManager.removeTab(id)
     }
 
+    suspend fun fetchSuggestions(query: String): List<String> = repository.fetchSuggestions(query)
+
     fun addTab(url: String, isPrivate: Boolean = false): TabEntry =
         tabManager.addTab(url, isPrivate = isPrivate)
 

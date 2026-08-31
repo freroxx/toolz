@@ -19,6 +19,8 @@ package com.frerox.toolz.ui.screens.search.components
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.LargeExpressiveShape
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.*
@@ -1058,27 +1060,33 @@ fun BookmarkChip(
 
 // ══════════════════════════════════════════════════════════
 //  PRIVACY-RESPECTING FAVICON
-//  Uses DuckDuckGo's icon service instead of Google's
+//  Multi-tier resolution: cached bitmap -> site /favicon.ico -> Material icon
 // ══════════════════════════════════════════════════════════
 
 @Composable
 fun PrivacyFaviconImage(url: String, size: Dp, modifier: Modifier = Modifier) {
-    val faviconUrl = remember(url) {
-        runCatching {
-            val host = java.net.URI(url).host ?: return@runCatching null
-            "https://icons.duckduckgo.com/ip3/$host.ico"
-        }.getOrNull()
-    }
+    val cachedBitmap = remember(url) { com.frerox.toolz.data.browser.FaviconResolver.getCachedIcon(url) }
+    val directUrl = remember(url) { com.frerox.toolz.data.browser.FaviconResolver.directFaviconUrl(url) }
+
     Box(
         modifier         = modifier.size(size),
         contentAlignment = Alignment.Center,
     ) {
-        if (faviconUrl != null) {
+        if (cachedBitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = cachedBitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (directUrl != null) {
             AsyncImage(
-                model              = faviconUrl,
+                model              = directUrl,
                 contentDescription = null,
                 contentScale       = ContentScale.Fit,
                 modifier           = Modifier.fillMaxSize(),
+                error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.Language),
+                fallback = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.Language),
             )
         } else {
             Icon(
@@ -1890,194 +1898,221 @@ fun SearchCategoryChips(
 }
 
 @Composable
-fun InlineSearchWebView(
+fun NativeImageCard(
     result: com.frerox.toolz.data.search.SearchResult,
-    category: com.frerox.toolz.data.search.SearchCategory,
-    adBlockEnabled: Boolean,
-    onOpenInBrowser: (String) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        shape = MediumExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            val imgModel = result.imageUrl ?: result.url
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = imgModel,
+                    contentDescription = result.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.BrokenImage),
+                )
+                // Source badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = result.source.ifBlank { "Web" },
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            if (result.title.isNotBlank()) {
+                Text(
+                    text = result.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun NativeVideoCard(
+    result: com.frerox.toolz.data.search.SearchResult,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val accentColor = sourceAccentColor(result.source)
-    var isLoading by remember { mutableStateOf(true) }
-    var progress by remember { mutableFloatStateOf(0f) }
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        shape = LargeExpressiveShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(210.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!result.imageUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = result.imageUrl,
+                        contentDescription = result.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.OndemandVideo),
+                    )
+                }
+                // Play Icon overlay
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.65f),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            contentDescription = "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+                // Duration / Date badge
+                if (!result.date.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.75f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = result.date,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
 
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = result.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (result.snippet.isNotBlank()) {
+                    Text(
+                        text = result.snippet,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = result.displayUrl,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = accentColor.copy(alpha = 0.15f),
+                    ) {
+                        Text(
+                            text = result.source.ifBlank { "Video" },
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = accentColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProviderUnavailableCard(
+    category: com.frerox.toolz.data.search.SearchCategory,
+    onSearchAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(520.dp)
-            .padding(horizontal = 6.dp, vertical = 8.dp),
+            .padding(16.dp),
         shape = LargeExpressiveShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Header with Site Info
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) Icons.Rounded.VideocamOff else Icons.Rounded.HideImage,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            Text(
+                text = if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) "No videos available" else "No images available",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "No media results found for this query across maintained providers.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            FilledTonalButton(
+                onClick = onSearchAll,
+                shape = RoundedCornerShape(12.dp),
             ) {
-                Surface(
-                    shape = SmallExpressiveShape,
-                    color = accentColor.copy(alpha = 0.12f),
-                    modifier = Modifier.size(42.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        PrivacyFaviconImage(url = result.url, size = 24.dp)
-                    }
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = result.title,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = result.displayUrl,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                if (result.engines.size >= 2) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                    ) {
-                        Text(
-                            text = "MULTIPLE",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                ToolzTonalExpressiveIconButton(
-                    onClick = { onOpenInBrowser(result.url) },
-                    modifier = Modifier.size(38.dp),
-                    shape = SmallExpressiveShape
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp))
-                }
-            }
-
-            // WebView Area
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .clip(SmallExpressiveShape)
-                    .background(MaterialTheme.colorScheme.surface)
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                databaseEnabled = true
-                            }
-                            
-                            // Enable scrolling within LazyColumn
-                            setOnTouchListener { v, event ->
-                                when (event.action) {
-                                    android.view.MotionEvent.ACTION_DOWN,
-                                    android.view.MotionEvent.ACTION_MOVE -> {
-                                        v.parent.requestDisallowInterceptTouchEvent(true)
-                                    }
-                                }
-                                false
-                            }
-
-                            webViewClient = object : com.frerox.toolz.util.network.AdBlockWebViewClient(
-                                adBlockEnabled = { adBlockEnabled }
-                            ) {
-                                override fun onPageStarted(view: android.webkit.WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    isLoading = true
-                                }
-                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    isLoading = false
-                                }
-                            }
-                            webChromeClient = object : android.webkit.WebChromeClient() {
-                                override fun onProgressChanged(view: android.webkit.WebView?, newProgress: Int) {
-                                    progress = newProgress / 100f
-                                }
-                            }
-                            loadUrl(result.url)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                if (isLoading) {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(2.5.dp).align(Alignment.TopCenter),
-                        color = accentColor,
-                        trackColor = Color.Transparent
-                    )
-                }
-            }
-            
-            // Bottom Action Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, SmallExpressiveShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) 
-                                Icons.Rounded.OndemandVideo else Icons.Rounded.Image,
-                            null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        text = if (category == com.frerox.toolz.data.search.SearchCategory.VIDEOS) "Video Stream" else "Image Gallery",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                
-                ToolzExpressiveTextButton(
-                    onClick = { onOpenInBrowser(result.url) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = SmallExpressiveShape
-                ) {
-                    Text("Visit Source", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(8.dp))
-                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, modifier = Modifier.size(16.dp))
-                }
+                Text("Search All Web Results")
             }
         }
     }

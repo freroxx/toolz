@@ -8,35 +8,61 @@ import java.net.URLEncoder
  * prevents the search screen, browser chrome and quick actions from disagreeing
  * about whether text is a URL or a search.
  */
+sealed class AddressDestination {
+    data class DirectUrl(val url: String) : AddressDestination()
+    data class SearchQuery(val query: String) : AddressDestination()
+}
+
+/**
+ * Canonical interpretation of browser-bar input.
+ * Strictly separates direct URL destinations from search queries,
+ * eliminating DuckDuckGo fallbacks.
+ */
 object BrowserAddressResolver {
-    fun resolve(raw: String, engine: String, customTemplate: String = ""): String {
+    fun resolveDestination(raw: String): AddressDestination {
         val input = raw.trim()
-        if (input.isBlank()) return ""
-        if (input.startsWith("about:", true) || input.startsWith("file:", true)) return input
-        if (input.startsWith("http://", true) || input.startsWith("https://", true)) return input
+        if (input.isBlank()) return AddressDestination.DirectUrl("about:blank")
+        if (input.startsWith("about:", true) || input.startsWith("file:", true)) {
+            return AddressDestination.DirectUrl(input)
+        }
+        if (input.startsWith("http://", true) || input.startsWith("https://", true)) {
+            return AddressDestination.DirectUrl(input)
+        }
+        if (isAddress(input)) {
+            return AddressDestination.DirectUrl("https://$input")
+        }
+        return AddressDestination.SearchQuery(input)
+    }
 
-        if (isAddress(input)) return "https://$input"
-
-        val encoded = URLEncoder.encode(input, "UTF-8")
-        return when (engine.uppercase()) {
-            "GOOGLE" -> "https://www.google.com/search?q=$encoded"
-            "BING" -> "https://www.bing.com/search?q=$encoded"
-            "BRAVE" -> "https://search.brave.com/search?q=$encoded"
-            "STARTPAGE" -> "https://www.startpage.com/sp/search?query=$encoded"
-            "SEARXNG" -> "https://searx.be/search?q=$encoded"
-            "CUSTOM" -> customTemplate.takeIf { it.contains("%s") }
-                ?.replace("%s", encoded) ?: "https://duckduckgo.com/?q=$encoded"
-            else -> "https://duckduckgo.com/?q=$encoded"
+    fun resolve(raw: String, engine: String, customTemplate: String = ""): String {
+        return when (val dest = resolveDestination(raw)) {
+            is AddressDestination.DirectUrl -> dest.url
+            is AddressDestination.SearchQuery -> {
+                val encoded = URLEncoder.encode(dest.query, "UTF-8")
+                when (engine.uppercase()) {
+                    "YAHOO" -> "https://search.yahoo.com/search?p=$encoded"
+                    "QWANT" -> "https://www.qwant.com/?q=$encoded&t=web"
+                    "MARGINALIA" -> "https://search.marginalia.nu/search?query=$encoded"
+                    "BING" -> "https://www.bing.com/search?q=$encoded"
+                    "CUSTOM" -> {
+                        if (customTemplate.contains("{query}")) customTemplate.replace("{query}", encoded)
+                        else if (customTemplate.contains("%s")) customTemplate.replace("%s", encoded)
+                        else "https://www.bing.com/search?q=$encoded"
+                    }
+                    else -> "https://www.bing.com/search?q=$encoded"
+                }
+            }
         }
     }
 
     fun isAddress(input: String): Boolean {
-        val hostCandidate = input.substringBefore('/').substringBefore('?')
-        return !input.contains(' ') && (
-            hostCandidate.equals("localhost", true) ||
-                hostCandidate.matches(Regex("\\d{1,3}(?:\\.\\d{1,3}){3}")) ||
-                hostCandidate.contains('.') || hostCandidate.contains(':')
-            )
+        val trimmed = input.trim()
+        if (trimmed.isEmpty() || trimmed.contains(' ')) return false
+        val hostCandidate = trimmed.substringBefore('/').substringBefore('?')
+        return hostCandidate.equals("localhost", true) ||
+            hostCandidate.matches(Regex("\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d+)?")) ||
+            (hostCandidate.contains('.') && hostCandidate.substringAfterLast('.').length in 2..10) ||
+            (hostCandidate.contains(':') && hostCandidate.substringAfterLast(':').all { it.isDigit() })
     }
 
     fun displayHost(url: String): String = runCatching {

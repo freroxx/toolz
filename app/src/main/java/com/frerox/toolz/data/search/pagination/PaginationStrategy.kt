@@ -13,11 +13,11 @@ sealed interface PaginationStrategy {
 }
 object OffsetBasedPagination : PaginationStrategy {
     override fun offsetParam(offset: Int, engine: EngineId): String = when (engine) {
-        EngineId.DUCKDUCKGO, EngineId.MOJEEK, EngineId.CUSTOM -> if (offset > 0) "&s=$offset" else ""
         EngineId.BING -> if (offset > 0) "&first=$offset" else ""
-        EngineId.BRAVE -> if (offset > 0) "&offset=$offset" else ""
         EngineId.YAHOO -> if (offset > 0) "&b=${offset + 1}" else ""
-        else -> if (offset > 0) "&s=$offset" else ""
+        EngineId.QWANT -> if (offset > 0) "&offset=$offset" else ""
+        EngineId.MARGINALIA -> if (offset > 0) "&page=${offset / 10 + 1}" else ""
+        else -> if (offset > 0) "&offset=$offset" else ""
     }
     override fun nextOffset(currentOffset: Int, pageSize: Int, returnedCount: Int, hasMoreHint: Boolean): Int? {
         if (!hasMore(returnedCount, pageSize, hasMoreHint)) return null
@@ -36,10 +36,10 @@ object NoPagination : PaginationStrategy {
 }
 object OffsetTranslator {
     fun translate(engine: EngineId, offset: Int, baseQuery: String, extra: String = ""): String = when (engine) {
-        EngineId.DUCKDUCKGO -> "${baseQuery}${if (offset>0) "&s=$offset" else ""}$extra"
-        EngineId.BING -> "${baseQuery}${if (offset>0) "&first=$offset" else ""}$extra"
-        EngineId.BRAVE -> "${baseQuery}${if (offset>0) "&offset=$offset" else ""}$extra"
-        EngineId.YAHOO -> "${baseQuery}${if (offset>0) "&b=${offset+1}" else ""}$extra"
-        else -> "${baseQuery}${if (offset>0) "&s=$offset" else ""}$extra"
+        EngineId.BING -> "${baseQuery}${if (offset > 0) "&first=$offset" else ""}$extra"
+        EngineId.YAHOO -> "${baseQuery}${if (offset > 0) "&b=${offset + 1}" else ""}$extra"
+        EngineId.QWANT -> "${baseQuery}${if (offset > 0) "&offset=$offset" else ""}$extra"
+        EngineId.MARGINALIA -> "${baseQuery}${if (offset > 0) "&page=${offset / 10 + 1}" else ""}$extra"
+        else -> "${baseQuery}${if (offset > 0) "&offset=$offset" else ""}$extra"
     }
 }

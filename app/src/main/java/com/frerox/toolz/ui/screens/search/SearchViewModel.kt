@@ -81,13 +81,14 @@ data class SearchSettingsState(
     val customDns:             String        = "",
     val recentDns:             List<String>  = emptyList(),
     val isIncognito:           Boolean       = false,
-    val searchEngine:          String        = "DUCKDUCKGO",
+    val searchEngine:          String        = "META",
     val safeSearch:            Boolean       = false,
     val region:                String        = "wt-wt",
     val customEngineUrl:       String        = "",
     val searchAutofillEnabled: Boolean       = true,
     val userName:              String        = "",
     val nextDnsId:             String        = "",
+    val showGreetingCard:      Boolean       = false,
     val tabs:                  List<TabEntry> = emptyList(),
     val activeTabId:           String?       = null,
     val dnsBenchmarks:         Map<String, Long?> = emptyMap(),
@@ -129,13 +130,14 @@ data class SearchUiState(
     val customDns:             String       = "",
     val recentDns:             List<String> = emptyList(),
     val isIncognito:           Boolean      = false,
-    val searchEngine:          String       = "DUCKDUCKGO",
+    val searchEngine:          String       = "META",
     val safeSearch:            Boolean      = false,
     val region:                String       = "wt-wt",
     val customEngineUrl:       String       = "",
     val searchAutofillEnabled: Boolean      = true,
     val userName:              String       = "",
     val nextDnsId:             String       = "",
+    val showGreetingCard:      Boolean      = false,
 
     // Tabs
     val tabs:        List<TabEntry> = emptyList(),
@@ -196,6 +198,7 @@ class SearchViewModel @Inject constructor(
             searchAutofillEnabled = s.searchAutofillEnabled,
             userName              = s.userName,
             nextDnsId             = s.nextDnsId,
+            showGreetingCard      = s.showGreetingCard,
             tabs                  = s.tabs,
             activeTabId           = s.activeTabId,
             dnsBenchmarks         = s.dnsBenchmarks,
@@ -231,15 +234,17 @@ class SearchViewModel @Inject constructor(
                 settingsRepository.searchDnsProvider,
                 settingsRepository.searchCustomDns,
                 settingsRepository.searchNextDnsId,
+                settingsRepository.searchShowGreetingCard,
             ) { args: Array<Any?> ->
                 _settings.update {
                     it.copy(
-                        userName       = args[0] as String,
-                        isIncognito    = args[1] as Boolean,
-                        adBlockEnabled = args[2] as Boolean,
-                        dnsProvider    = args[3] as String,
-                        customDns      = args[4] as String,
-                        nextDnsId      = args[5] as String,
+                        userName         = args[0] as String,
+                        isIncognito      = args[1] as Boolean,
+                        adBlockEnabled   = args[2] as Boolean,
+                        dnsProvider      = args[3] as String,
+                        customDns        = args[4] as String,
+                        nextDnsId        = args[5] as String,
+                        showGreetingCard = args[6] as Boolean,
                     )
                 }
             }.catch { /* non-fatal */ }.collect {}
@@ -510,6 +515,10 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    fun setShowGreetingCard(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setSearchShowGreetingCard(enabled)
+    }
+
     fun setSecurityPreset(preset: String) = viewModelScope.launch {
         when (preset) {
             "LOW" -> {
@@ -520,13 +529,13 @@ class SearchViewModel @Inject constructor(
             "BASIC" -> {
                 settingsRepository.setSearchAdBlockEnabled(true)
                 settingsRepository.setDnsProvider("CLOUDFLARE")
-                settingsRepository.setSearchEngine("DUCKDUCKGO")
+                settingsRepository.setSearchEngine("META")
                 settingsRepository.setSearchIncognitoEnabled(false)
             }
             "MAX" -> {
                 settingsRepository.setSearchAdBlockEnabled(true)
                 settingsRepository.setDnsProvider("QUAD9")
-                settingsRepository.setSearchEngine("DUCKDUCKGO")
+                settingsRepository.setSearchEngine("META")
                 settingsRepository.setSearchIncognitoEnabled(true)
             }
         }

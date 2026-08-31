@@ -24,7 +24,7 @@ class JsoupFetcher @Inject constructor(private val client: OkHttpClient) {
         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         .header("Accept-Language", "en-US,en;q=0.9")
         .header("Cookie", "SOCS=CAESHAgBEhJnd3NfMjAyNDA2MTAtMF9SQzEaAmVuIAEaBgiAo_uwBg; CONSENT=PENDING+999")
-        .header("Referer", if (url.contains("duckduckgo")) "https://html.duckduckgo.com/" else "https://www.google.com/")
+        .header("Referer", "https://www.bing.com/")
         .build()
     suspend fun fetch(url: String): Document? {
         repeat(3) { attempt ->
@@ -52,11 +52,4 @@ class JsoupFetcher @Inject constructor(private val client: OkHttpClient) {
         return null to snippet
     }
     fun safeHost(url: String): String = try { java.net.URI(url).host?.removePrefix("www.") ?: url } catch(_:Exception){ url }
-    fun cleanDuckDuckGoUrl(raw: String): String = try {
-        when {
-            raw.startsWith("//duckduckgo.com/l/?uddg=") -> java.net.URLDecoder.decode(raw.substringAfter("uddg=").substringBefore("&"), "UTF-8")
-            raw.startsWith("/l/?uddg=") -> java.net.URLDecoder.decode(raw.substringAfter("uddg=").substringBefore("&"), "UTF-8")
-            else -> raw
-        }
-    } catch(_:Exception){ raw }
 }

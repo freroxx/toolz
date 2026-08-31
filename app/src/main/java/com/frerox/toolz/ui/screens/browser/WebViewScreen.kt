@@ -18,6 +18,11 @@
 package com.frerox.toolz.ui.screens.browser
 
 import com.frerox.toolz.data.browser.autofill.AutofillJsBridge
+import com.frerox.toolz.data.browser.TabEntry
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -254,6 +259,16 @@ fun WebViewScreen(
                 blockedRequests  = blockedRequests,
                 adBlockEnabled   = adBlockEnabled,
                 floatingToolbarVisible = floatingToolbarVisible,
+                tabs             = tabs,
+                activeTabId      = activeTabId,
+                onSwitchTab      = { id -> viewModel.switchTab(id) },
+                onCloseTab       = { id -> viewModel.closeTab(id) },
+                onNewTab         = {
+                    viewModel.addTab("about:blank", isPrivate = activeTab?.isPrivate == true)
+                    searchOverlayQuery = ""
+                    showSearchOverlay = true
+                },
+                onOpenTabOverview = onManageTabs,
                 onFindQueryChange = { q ->
                     findQuery = q
                     webView?.findAllAsync(q)
@@ -266,6 +281,7 @@ fun WebViewScreen(
                 },
                 onForward        = { webView?.goForward() },
                 onReload         = { webView?.reload() },
+                onStop           = { webView?.stopLoading() },
                 onBookmarkToggle = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.toggleBookmark(pageTitle, currentUrl)
@@ -601,6 +617,9 @@ fun WebViewScreen(
                                 }
                                 override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
                                     super.onReceivedIcon(view, icon)
+                                    if (icon != null && view?.url != null) {
+                                        com.frerox.toolz.data.browser.FaviconResolver.cacheIcon(view.url.orEmpty(), icon)
+                                    }
                                 }
                             }
 
@@ -1023,12 +1042,19 @@ private fun TopChrome(
     blockedRequests: Int,
     adBlockEnabled: Boolean,
     floatingToolbarVisible: Boolean,
+    tabs: List<TabEntry>,
+    activeTabId: String?,
+    onSwitchTab: (String) -> Unit,
+    onCloseTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+    onOpenTabOverview: () -> Unit,
     onFindQueryChange: (String) -> Unit,
     onFindNext: () -> Unit,
     onFindPrev: () -> Unit,
     onToggleFind: () -> Unit,
     onForward: () -> Unit,
     onReload: () -> Unit,
+    onStop: () -> Unit,
     onBookmarkToggle: () -> Unit,
     onReadingListToggle: () -> Unit,
     onUrlBarClick: () -> Unit,
@@ -1048,6 +1074,7 @@ private fun TopChrome(
     downloads: List<com.frerox.toolz.data.browser.DownloadItem> = emptyList(),
 ) {
     var showOptions by remember { mutableStateOf(false) }
+    var showSiteControls by remember { mutableStateOf(false) }
 
     val progressAlpha by animateFloatAsState(
         targetValue   = if (isLoading) 1f else 0f,
@@ -1058,8 +1085,7 @@ private fun TopChrome(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp, bottomStart = 20.dp, bottomEnd = 20.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .statusBarsPadding(),
     ) {
 
@@ -1067,87 +1093,115 @@ private fun TopChrome(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // The display is deliberately passive; all typing happens in the single omnibox overlay.
             Surface(
-                    onClick = onUrlBarClick,
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 1.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                onClick = onUrlBarClick,
+                modifier = Modifier.weight(1f).height(42.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
+                    IconButton(
+                        onClick = { showSiteControls = true },
+                        modifier = Modifier.size(24.dp)
                     ) {
-                        PrivacyFaviconImage(url = currentUrl, size = 18.dp)
-                        Column(modifier = Modifier.weight(1f)) {
-                            if (pageTitle.isNotBlank()) {
-                                Text(
-                                    text = pageTitle,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                            Text(
-                                text = safeHostFromUrl(currentUrl),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        val isSecure = currentUrl.startsWith("https://")
-                        if (isPrivate) {
-                            Icon(
-                                Icons.Rounded.VisibilityOff,
-                                contentDescription = "Private tab",
-                                modifier = Modifier.size(13.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        if (blockedRequests > 0) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                            ) {
-                                Text(
-                                    text = blockedRequests.coerceAtMost(99).toString(),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            }
-                        }
                         Icon(
                             imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                            contentDescription = null,
-                            modifier = Modifier.size(13.dp),
-                            tint = if (isSecure) Color(0xFF4CAF50).copy(alpha = 0.9f) else MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            contentDescription = "Site controls",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isSecure) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
                         )
                     }
-            }
 
-            // Overflow menu (now a BottomSheet)
-            Box {
-                IconButton(onClick = { showOptions = true }, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Rounded.MoreVert, stringResource(R.string.st_WebViewScreen_1a2b),
-                        modifier = Modifier.size(22.dp),
-                        tint     = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    PrivacyFaviconImage(url = currentUrl, size = 18.dp)
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        if (pageTitle.isNotBlank()) {
+                            Text(
+                                text = pageTitle,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        Text(
+                            text = safeHostFromUrl(currentUrl),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    if (isPrivate) {
+                        Icon(
+                            Icons.Rounded.VisibilityOff,
+                            contentDescription = "Private tab",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    if (blockedRequests > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                        ) {
+                            Text(
+                                text = blockedRequests.coerceAtMost(99).toString(),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        }
+                    }
                 }
             }
+
+            // Reload / Stop button beside the address bar
+            IconButton(
+                onClick = if (isLoading) onStop else onReload,
+                modifier = Modifier.size(38.dp),
+            ) {
+                Icon(
+                    imageVector = if (isLoading) Icons.Rounded.Close else Icons.Rounded.Refresh,
+                    contentDescription = if (isLoading) "Stop loading" else "Reload",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // Overflow menu button
+            IconButton(onClick = { showOptions = true }, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    Icons.Rounded.MoreVert, stringResource(R.string.st_WebViewScreen_1a2b),
+                    modifier = Modifier.size(22.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+
+        // Always-visible Tab Strip below the address bar
+        BrowserTabStrip(
+            tabs = tabs,
+            activeTabId = activeTabId,
+            onSwitchTab = onSwitchTab,
+            onCloseTab = onCloseTab,
+            onNewTab = onNewTab,
+            onOpenOverview = onOpenTabOverview,
+        )
 
         // Download pill progress (colored per mime, on pill lower border)
         if (downloads.isNotEmpty()) {
@@ -1233,6 +1287,15 @@ private fun TopChrome(
         }
     }
 
+    if (showSiteControls) {
+        SiteControlsSheet(
+            url = currentUrl,
+            blockedRequests = blockedRequests,
+            onDismiss = { showSiteControls = false },
+            onResetPermissions = onResetSitePermissions,
+        )
+    }
+
     if (showOptions) {
         BrowserOptionsSheet(
             canGoForward = canGoForward,
@@ -1266,6 +1329,231 @@ private fun TopChrome(
 }
 
 @Composable
+private fun BrowserTabStrip(
+    tabs: List<TabEntry>,
+    activeTabId: String?,
+    onSwitchTab: (String) -> Unit,
+    onCloseTab: (String) -> Unit,
+    onNewTab: () -> Unit,
+    onOpenOverview: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(tabs, key = { it.id }) { tab ->
+                    val isActive = tab.id == activeTabId
+                    Surface(
+                        onClick = { onSwitchTab(tab.id) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isActive) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = if (isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                        modifier = Modifier
+                            .height(30.dp)
+                            .widthIn(min = 90.dp, max = 150.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            PrivacyFaviconImage(url = tab.url, size = 14.dp)
+                            Text(
+                                text = tab.title.ifBlank { safeHostFromUrl(tab.url) },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                                color = if (isActive) MaterialTheme.colorScheme.onSurface
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (tabs.size > 1) {
+                                IconButton(
+                                    onClick = { onCloseTab(tab.id) },
+                                    modifier = Modifier.size(16.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "Close tab",
+                                        modifier = Modifier.size(12.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tab count overview button
+            Surface(
+                onClick = onOpenOverview,
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                modifier = Modifier.size(28.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = tabs.size.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            // New tab button
+            IconButton(
+                onClick = onNewTab,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = "New tab",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SiteControlsSheet(
+    url: String,
+    blockedRequests: Int,
+    onDismiss: () -> Unit,
+    onResetPermissions: () -> Unit,
+) {
+    val host = remember(url) { safeHostFromUrl(url) }
+    val isSecure = url.startsWith("https://", ignoreCase = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PrivacyFaviconImage(url = url, size = 32.dp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = host.ifBlank { "Current site" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (isSecure) "Connection is secure (HTTPS)" else "Connection is not secure (HTTP)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isSecure) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+            // Security & Privacy metrics
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Rounded.Shield, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text("Trackers & Ads Blocked", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Text(
+                            text = "$blockedRequests",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            // Permissions section
+            Text(
+                text = "Site Permissions",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Camera, microphone, and device access permissions granted to $host.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // Scroll-safe prominent reset button
+            FilledTonalButton(
+                onClick = {
+                    onResetPermissions()
+                    onDismiss()
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Icon(Icons.Rounded.RestartAlt, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Reset permissions for this site", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
 private fun BrowserNavigationBar(
     canGoBack: Boolean,
     canGoForward: Boolean,
@@ -1289,7 +1577,7 @@ private fun BrowserNavigationBar(
                 }
             },
         shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .96f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 8.dp,
         shadowElevation = 12.dp,
     ) {

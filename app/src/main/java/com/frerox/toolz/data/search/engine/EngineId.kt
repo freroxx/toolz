@@ -5,20 +5,28 @@
 package com.frerox.toolz.data.search.engine
 
 enum class EngineId(val label: String) {
-    DUCKDUCKGO("DuckDuckGo"),
-    BRAVE("Brave"),
-    BING("Bing"),
     YAHOO("Yahoo"),
-    MOJEEK("Mojeek"),
     QWANT("Qwant"),
     MARGINALIA("Marginalia"),
-    PRESEARCH("Presearch"),
-    ECOSIA("Ecosia"),
-    SWISSCOWS("Swisscows"),
-    STARTPAGE("Startpage"),
+    BING("Bing"),
     CUSTOM("Custom"),
     META("Meta");
+
     companion object {
-        fun fromString(raw: String): EngineId = entries.find { it.name == raw.uppercase() } ?: DUCKDUCKGO
+        fun fromString(raw: String): EngineId {
+            val normalized = raw.trim().uppercase()
+            return when (normalized) {
+                "YAHOO" -> YAHOO
+                "QWANT" -> QWANT
+                "MARGINALIA" -> MARGINALIA
+                "BING" -> BING
+                "CUSTOM" -> CUSTOM
+                "META" -> META
+                // Explicit migrations from removed engines to META
+                "DUCKDUCKGO", "BRAVE", "GOOGLE", "STARTPAGE",
+                "ECOSIA", "SWISSCOWS", "MOJEEK", "PRESEARCH" -> META
+                else -> entries.find { it.name == normalized } ?: META
+            }
+        }
     }
 }
