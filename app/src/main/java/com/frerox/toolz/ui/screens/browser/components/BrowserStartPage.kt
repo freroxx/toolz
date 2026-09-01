@@ -3,6 +3,7 @@ package com.frerox.toolz.ui.screens.browser.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -32,12 +34,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.frerox.toolz.data.browser.BrowserAddressResolver
 import com.frerox.toolz.data.browser.BrowserHistoryItem
 import com.frerox.toolz.data.browser.BrowserReadingItem
+import com.frerox.toolz.data.browser.FaviconResolver
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.ui.screens.search.components.PrivacyFaviconImage
 
@@ -150,16 +156,77 @@ private fun StartPageRail(heading: String, icon: androidx.compose.ui.graphics.ve
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(entries, key = { it.second }) { (title, url) ->
-                Surface(onClick = { onOpenUrl(url) }, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.width(176.dp).height(88.dp)) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PrivacyFaviconImage(url, 22.dp)
-                        Column(Modifier.weight(1f)) {
-                            Text(title.ifBlank { BrowserAddressResolver.displayHost(url) }, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(BrowserAddressResolver.displayHost(url), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Surface(
+                    onClick = { onOpenUrl(url) },
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.width(176.dp).height(132.dp),
+                ) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Thumbnail preview (176dp) — uses site preview if cached, else favicon background
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(88.dp)
+                                .background(MaterialTheme.colorScheme.surfaceContainer),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val thumbUrl = rememberThumbUrl(url)
+                            if (thumbUrl != null) {
+                                AsyncImage(
+                                    model = thumbUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
+                                )
+                            }
+                            // Favicon overlay fallback / indicator
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).size(28.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    PrivacyFaviconImage(url, 18.dp)
+                                }
+                            }
+                        }
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    title.ifBlank { BrowserAddressResolver.displayHost(url) },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    BrowserAddressResolver.displayHost(url),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun rememberThumbUrl(url: String): String? {
+    // Use FaviconResolver's direct favicon as lightweight thumbnail; if site provides preview image via cache, prefer it
+    // For true thumbnail, attempt to load a 176px preview via thum.io fallback or cached site icon — keep privacy-respecting
+    return try {
+        val host = java.net.URI(url).host ?: return null
+        // Use favicon as thumbnail proxy; larger preview could be https://$host/favicon.ico scaled, or placeholder
+        FaviconResolver.directFaviconUrl(url)
+    } catch (_: Exception) { null }
 }

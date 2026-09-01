@@ -76,11 +76,9 @@ fun SearchScreen(
     val context          = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
 
-    // Sheet / dialog flags
-    var showSearchSettings     by remember { mutableStateOf(false) }
-    var showSecuritySheet      by remember { mutableStateOf(false) }
+    // Sheet / dialog flags — merged into single Search options
+    var showSearchOptions      by remember { mutableStateOf(false) }
     var showDnsSheet           by remember { mutableStateOf(false) }
-    var showEngineSheet        by remember { mutableStateOf(false) }
     var showAddQuickLink       by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showBookmarksAll       by remember { mutableStateOf(false) }
@@ -95,50 +93,28 @@ fun SearchScreen(
 
     // ── Sheets & dialogs ──────────────────────────────────
 
-    if (showSearchSettings) {
-        SearchSettingsSheet(
-            onDismiss           = { showSearchSettings = false },
-            currentEngine       = uiState.searchEngine,
-            onEngineClick       = { showEngineSheet = true; showSearchSettings = false },
-            adBlockEnabled      = uiState.adBlockEnabled,
-            onAdBlockToggle     = viewModel::toggleAdBlock,
-            currentDns          = uiState.dnsProvider,
-            onDnsClick          = { showDnsSheet = true; showSearchSettings = false },
-            safeSearch          = uiState.safeSearch,
-            onSafeSearchToggle  = viewModel::setSafeSearch,
-            isIncognito         = uiState.isIncognito,
-            onIncognitoToggle   = { viewModel.toggleIncognito(!uiState.isIncognito) },
-            autofillEnabled     = uiState.searchAutofillEnabled,
-            onAutofillToggle    = viewModel::toggleAutofill,
-            showGreetingCard    = uiState.showGreetingCard,
-            onGreetingCardToggle= viewModel::setShowGreetingCard,
-        )
-    }
-
-    if (showEngineSheet) {
+    if (showSearchOptions) {
         val engineHealth by viewModel.engineHealth.collectAsState()
-        SearchEngineSheet(
-            onDismiss      = { showEngineSheet = false },
-            currentEngine  = uiState.searchEngine,
-            engineHealth   = engineHealth,
-            onEngineSelect = { viewModel.setSearchEngine(it); showEngineSheet = false }
-        )
-    }
-
-    if (showSecuritySheet) {
-        SecuritySheet(
-            onDismiss           = { showSecuritySheet = false },
-            currentProvider     = uiState.dnsProvider,
-            adBlockEnabled      = uiState.adBlockEnabled,
-            isIncognito         = uiState.isIncognito,
-            autofillEnabled     = uiState.searchAutofillEnabled,
-            onAdBlockToggle     = viewModel::toggleAdBlock,
-            onIncognitoToggle   = viewModel::toggleIncognito,
-            onAutofillToggle    = viewModel::toggleAutofill,
-            onPresetSelect      = viewModel::setSecurityPreset,
-            onDnsClick          = { showDnsSheet = true; showSecuritySheet = false },
-            onCustomizeAdBlock  = {
-                showSecuritySheet = false
+        com.frerox.toolz.ui.screens.search.components.SearchOptionsSheet(
+            onDismiss = { showSearchOptions = false },
+            currentEngine = uiState.searchEngine,
+            engineHealth = engineHealth,
+            onEngineSelect = { viewModel.setSearchEngine(it) },
+            adBlockEnabled = uiState.adBlockEnabled,
+            onAdBlockToggle = viewModel::toggleAdBlock,
+            currentDns = uiState.dnsProvider,
+            onDnsClick = { showDnsSheet = true },
+            safeSearch = uiState.safeSearch,
+            onSafeSearchToggle = viewModel::setSafeSearch,
+            isIncognito = uiState.isIncognito,
+            onIncognitoToggle = viewModel::toggleIncognito,
+            autofillEnabled = uiState.searchAutofillEnabled,
+            onAutofillToggle = viewModel::toggleAutofill,
+            showGreetingCard = uiState.showGreetingCard,
+            onGreetingCardToggle = viewModel::setShowGreetingCard,
+            onPresetSelect = viewModel::setSecurityPreset,
+            onCustomizeAdBlock = {
+                showSearchOptions = false
                 onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
             }
         )
@@ -260,7 +236,7 @@ fun SearchScreen(
                     onClick = {
                         showNextDnsWarning = false
                         showDnsSheet = false
-                        showSearchSettings = false
+                        showSearchOptions = false
                         onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
                     },
                     shape = RoundedCornerShape(12.dp)
@@ -353,7 +329,7 @@ fun SearchScreen(
                             active        = uiState.isActive,
                             onActiveChange = viewModel::onActiveChange,
                             onBackClick   = onBackClick,
-                            onSettingsClick = { showSearchSettings = true },
+                            onSettingsClick = { showSearchOptions = true },
                             isIncognito   = uiState.isIncognito,
                             modifier      = Modifier.weight(1f),
                         )
@@ -370,7 +346,7 @@ fun SearchScreen(
                             dnsProvider    = uiState.dnsProvider,
                             isIncognito    = uiState.isIncognito,
                             latency        = uiState.dnsBenchmarks[uiState.dnsProvider.lowercase()],
-                            onClick        = { showSecuritySheet = true },
+                            onClick        = { showSearchOptions = true },
                         )
                     }
                 }
@@ -406,8 +382,8 @@ fun SearchScreen(
                     onRetry         = viewModel::retrySearch,
                     onSearch        = viewModel::onSearch,
                     onReturnToDashboard = onBackClick,
-                    onOpenDnsSettings = { showDnsSheet = true },
-                    onOpenEngineSettings = { showEngineSheet = true },
+                    onOpenDnsSettings = { showSearchOptions = true },
+                    onOpenEngineSettings = { showSearchOptions = true },
                     onCategorySelected = viewModel::setSearchCategory,
                     onCopyMathResult = { result ->
                         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -813,61 +789,47 @@ private fun BrowserPulseCard(
         else -> "Good evening"
     }
     val name = userName.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
-    val palette = MaterialTheme.colorScheme
-    val interaction = remember { MutableInteractionSource() }
-    val isPressed by interaction.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "pulseCardPressScale",
-    )
-
+    // Simple clear M3 expressive: 28dp corners, 18dp metric chips, no inverseSurface clutter
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = if (isPrivate) palette.inverseSurface else palette.surfaceContainerHigh,
-        contentColor = if (isPrivate) palette.inverseOnSurface else palette.onSurface,
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, palette.outlineVariant.copy(alpha = .35f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            },
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .18f)),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
                     shape = CircleShape,
-                    color = if (isPrivate) palette.inversePrimary.copy(alpha = .18f) else palette.primaryContainer,
-                    modifier = Modifier.size(44.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(32.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (isPrivate) Icons.Rounded.VisibilityOff else Icons.Rounded.Public,
+                            if (isPrivate) Icons.Rounded.VisibilityOff else Icons.Rounded.WavingHand,
                             contentDescription = null,
-                            tint = if (isPrivate) palette.inversePrimary else palette.primary,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
-                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("$greeting$name", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text("$greeting$name", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        if (isPrivate) "Private browsing is on" else "Your private web, ready when you are",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = LocalContentColor.current.copy(alpha = .72f),
+                        if (isPrivate) "Private browsing is on" else "Ready to explore",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Icon(Icons.Rounded.Shield, null, tint = LocalContentColor.current.copy(alpha = .8f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 BrowserMetric("$tabCount", if (tabCount == 1) "tab" else "tabs", Modifier.weight(1f))
                 BrowserMetric("$bookmarkCount", "saved", Modifier.weight(1f))
-                BrowserMetric(engine.lowercase().replaceFirstChar { it.titlecase() }, "search", Modifier.weight(1.25f))
+                BrowserMetric(engine.lowercase().replaceFirstChar { it.titlecase() }, "engine", Modifier.weight(1.25f))
             }
         }
     }
@@ -878,7 +840,7 @@ private fun BrowserMetric(value: String, label: String, modifier: Modifier = Mod
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 1.dp,
+        tonalElevation = 0.dp,
         modifier = modifier,
     ) {
         Column(
@@ -895,7 +857,7 @@ private fun ContinueBrowsingSection(tabs: List<com.frerox.toolz.data.browser.Tab
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(title = "Continue browsing")
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 4.dp)) {
-            items(tabs.sortedByDescending { it.lastAccessed }.take(8), key = { it.id }) { tab ->
+            items(tabs.sortedByDescending { it.lastAccessed }.take(1), key = { it.id }) { tab ->
                 Surface(
                     onClick = { onOpen(tab) },
                     shape = RoundedCornerShape(24.dp),

@@ -1903,17 +1903,19 @@ fun NativeImageCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val accent = sourceAccentColor(result.source)
     Surface(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        shape = MediumExpressiveShape,
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+        tonalElevation = 1.dp,
+        shadowElevation = 1.dp,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            val imgModel = result.imageUrl ?: result.url
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1921,6 +1923,7 @@ fun NativeImageCard(
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                 contentAlignment = Alignment.Center
             ) {
+                val imgModel = result.imageUrl ?: result.url
                 AsyncImage(
                     model = imgModel,
                     contentDescription = result.title,
@@ -1928,32 +1931,72 @@ fun NativeImageCard(
                     modifier = Modifier.fillMaxSize(),
                     error = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.BrokenImage),
                 )
-                // Source badge
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                // Gradient scrim bottom for badge readability
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.35f)
+                            )
+                        )
+                )
+                // Top-end source badge accent
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = accent.copy(alpha = 0.92f),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
                 ) {
                     Text(
                         text = result.source.ifBlank { "Web" },
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
-            if (result.title.isNotBlank()) {
-                Text(
-                    text = result.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (result.title.isNotBlank()) {
+                    Text(
+                        text = result.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 18.sp,
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PrivacyFaviconImage(url = result.url, size = 14.dp)
+                    Text(
+                        text = result.displayUrl,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (result.engines.size >= 2) {
+                        Text(
+                            text = "• ${result.engines.size} sources",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = accent,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }

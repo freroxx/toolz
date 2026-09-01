@@ -335,7 +335,8 @@ class WebSearchRepository @Inject constructor(
                 "BING" -> listOf("BING")
                 "QWANT" -> listOf("QWANT")
                 "YAHOO" -> listOf("YAHOO")
-                else -> listOf("QWANT", "YAHOO", "BING")
+                "MARGINALIA" -> listOf("MARGINALIA")
+                else -> listOf("QWANT", "YAHOO")
             }
             val deferredImages = imageEngines.map { eng ->
                 async {
@@ -355,7 +356,8 @@ class WebSearchRepository @Inject constructor(
                 "BING" -> listOf("BING")
                 "QWANT" -> listOf("QWANT")
                 "YAHOO" -> listOf("YAHOO")
-                else -> listOf("QWANT", "YAHOO", "BING")
+                "MARGINALIA" -> listOf("MARGINALIA")
+                else -> listOf("QWANT", "YAHOO")
             }
             val deferredVideos = videoEngines.map { eng ->
                 async {
@@ -373,7 +375,7 @@ class WebSearchRepository @Inject constructor(
 
         // ── Category: Web (ALL / NEWS) ────────────────────────────────────────
         val mainEngines = when (engine) {
-            "META" -> listOf("YAHOO", "QWANT", "MARGINALIA", "BING")
+            "META" -> listOf("YAHOO", "QWANT", "MARGINALIA")
             else -> listOf(engine)
         }
 
@@ -521,6 +523,9 @@ class WebSearchRepository @Inject constructor(
                     else -> parseBingResults(doc, adBlockEnabled, category)
                 }
                 if (parsed.isNotEmpty()) { recordEngineSuccess(eng, parsed.size); return parsed }
+                // Generic fallback: if specific parser yielded 0, try lenient anchor extraction so we never return Yahoo-only when others are reachable
+                val generic = parseGenericFallback(doc, adBlockEnabled, eng, category)
+                if (generic.isNotEmpty()) { recordEngineSuccess(eng, generic.size); return generic }
                 android.util.Log.w("Search", "[$eng] Fetched $tryUrl but parsed 0 results")
             } catch (e: Exception) {
                 android.util.Log.w("Search", "[$eng] Error fetching $tryUrl", e)
@@ -570,6 +575,31 @@ class WebSearchRepository @Inject constructor(
                     displayUrl = safeHost(cleanUrl), source = "Bing",
                     imageUrl = imgSrc, engineRank = rank,
                 )
+            }
+            // Fallback regex scan for murl in raw HTML if selector yielded 0 (Bing changed layout)
+            if (results.isEmpty()) {
+                try {
+                    val html = doc.html()
+                    val murlRegex = Regex("\"murl\":\"(.*?)\"")
+                    val turlRegex = Regex("\"turl\":\"(.*?)\"")
+                    val titleRegex = Regex("\"t\":\"(.*?)\"")
+                    val murls = murlRegex.findAll(html).map { it.groupValues[1] }.toList()
+                    val turls = turlRegex.findAll(html).map { it.groupValues[1] }.toList()
+                    val titles = titleRegex.findAll(html).map { it.groupValues[1] }.toList()
+                    murls.forEachIndexed { idx, murl ->
+                        val clean = murl.replace("\\u002f", "/").decodeUrl()
+                        if (clean.isBlank() || !clean.startsWith("http")) return@forEachIndexed
+                        if (adBlockEnabled && AdBlockList.isBlocked(clean)) return@forEachIndexed
+                        val thumb = turls.getOrNull(idx)?.replace("\\u002f", "/")
+                        val title = titles.getOrNull(idx)?.replace("\\u002f", "/")?.takeIf { it.isNotBlank() } ?: "Image"
+                        results += SearchResult(
+                            title = title, snippet = "", url = clean,
+                            displayUrl = safeHost(clean), source = "Bing",
+                            imageUrl = thumb?.takeIf { it.startsWith("http") },
+                            engineRank = idx,
+                        )
+                    }
+                } catch (_: Exception) {}
             }
             return results
         }
@@ -677,6 +707,23 @@ class WebSearchRepository @Inject constructor(
                     imageUrl = imgSrc,
                     engineRank = rank
                 )
+            }
+            if (results.isEmpty()) {
+                try {
+                    val html = doc.html()
+                    // Fallback: scan for imgurl= pattern in Yahoo images HTML
+                    val regex = Regex("imgurl=([^&\"']+)")
+                    regex.findAll(html).forEachIndexed { idx, m ->
+                        val raw = m.groupValues[1].decodeUrl()
+                        if (!raw.startsWith("http")) return@forEachIndexed
+                        if (adBlockEnabled && AdBlockList.isBlocked(raw)) return@forEachIndexed
+                        results += SearchResult(
+                            title = "Image", snippet = "", url = raw,
+                            displayUrl = safeHost(raw), source = "Yahoo",
+                            engineRank = idx
+                        )
+                    }
+                } catch (_: Exception) {}
             }
             return results
         }
@@ -796,19 +843,22 @@ class WebSearchRepository @Inject constructor(
     ): List<SearchResult> {
         return try {
             val root = org.json.JSONObject(jsonStr)
-            val data = root.optJSONObject("data") ?: return emptyList()
-            val result = data.optJSONObject("result") ?: return emptyList()
+            // Qwant wraps in data.result but handle variants
+            val data = root.optJSONObject("data") ?: root
+            val result = data.optJSONObject("result") ?: data
             val results = mutableListOf<SearchResult>()
 
             if (category == SearchCategory.IMAGES) {
-                val items = result.optJSONArray("items") ?: return emptyList()
+                // images: result.items is JSONArray of {title, url, media, thumbnail}
+                val items = result.optJSONArray("items") ?: data.optJSONArray("items") ?: return emptyList()
                 for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue
-                    val title = item.optString("title", "Image")
-                    val url = item.optString("url")
-                    val media = item.optString("media")
-                    val thumb = item.optString("thumbnail")
-                    val targetUrl = media.takeIf { it.startsWith("http") } ?: url
+                    val title = item.optString("title", "Image").ifBlank { "Image" }
+                    // Some Qwant responses use "media" as object with "url"
+                    val mediaRaw = item.optString("media").takeIf { it.isNotBlank() } ?: item.optJSONObject("media")?.optString("url") ?: ""
+                    val thumbRaw = item.optString("thumbnail").takeIf { it.isNotBlank() } ?: item.optString("thumb") ?: ""
+                    val urlRaw = item.optString("url").takeIf { it.startsWith("http") } ?: ""
+                    val targetUrl = mediaRaw.takeIf { it.startsWith("http") } ?: urlRaw
                     if (targetUrl.isBlank() || !targetUrl.startsWith("http")) continue
                     if (adBlockEnabled && AdBlockList.isBlocked(targetUrl)) continue
                     results += SearchResult(
@@ -817,7 +867,7 @@ class WebSearchRepository @Inject constructor(
                         url = targetUrl,
                         displayUrl = safeHost(targetUrl),
                         source = "Qwant",
-                        imageUrl = thumb.takeIf { it.startsWith("http") } ?: media,
+                        imageUrl = thumbRaw.takeIf { it.startsWith("http") } ?: mediaRaw.takeIf { it.startsWith("http") },
                         engineRank = i
                     )
                 }
@@ -825,13 +875,13 @@ class WebSearchRepository @Inject constructor(
             }
 
             if (category == SearchCategory.VIDEOS) {
-                val items = result.optJSONArray("items") ?: return emptyList()
+                val items = result.optJSONArray("items") ?: data.optJSONArray("items") ?: return emptyList()
                 for (i in 0 until items.length()) {
                     val item = items.optJSONObject(i) ?: continue
                     val title = item.optString("title")
                     val url = item.optString("url")
-                    val thumb = item.optString("thumbnail")
-                    val desc = item.optString("desc")
+                    val thumb = item.optString("thumbnail").takeIf { it.isNotBlank() } ?: item.optString("thumb")
+                    val desc = item.optString("desc").takeIf { it.isNotBlank() } ?: item.optString("description") ?: ""
                     if (url.isBlank() || !url.startsWith("http")) continue
                     if (adBlockEnabled && AdBlockList.isBlocked(url)) continue
                     results += SearchResult(
@@ -840,24 +890,27 @@ class WebSearchRepository @Inject constructor(
                         url = url,
                         displayUrl = safeHost(url),
                         source = "Qwant",
-                        imageUrl = thumb.takeIf { it.startsWith("http") },
+                        imageUrl = thumb?.takeIf { it.startsWith("http") },
                         engineRank = i
                     )
                 }
                 return results
             }
 
+            // Web/News: handle both {items:{main:[...]}} and {items:[...]}
             val itemsObj = result.optJSONObject("items")
             val mainArr = itemsObj?.optJSONArray("main")
                 ?: result.optJSONArray("items")
+                ?: data.optJSONArray("items")
+                ?: root.optJSONArray("items")
                 ?: return emptyList()
 
             for (i in 0 until mainArr.length()) {
                 val item = mainArr.optJSONObject(i) ?: continue
-                val title = item.optString("title")
-                val url = item.optString("url")
-                val desc = item.optString("desc")
-                val date = item.optString("date").takeIf { it.isNotBlank() }
+                val title = item.optString("title").takeIf { it.isNotBlank() } ?: item.optString("name") ?: ""
+                val url = item.optString("url").takeIf { it.startsWith("http") } ?: item.optString("uri") ?: ""
+                val desc = item.optString("desc").takeIf { it.isNotBlank() } ?: item.optString("description") ?: item.optString("excerpt") ?: ""
+                val date = item.optString("date").takeIf { it.isNotBlank() } ?: item.optString("age")?.takeIf { it.isNotBlank() }
                 if (url.isBlank() || !url.startsWith("http")) continue
                 if (adBlockEnabled && AdBlockList.isBlocked(url)) continue
                 results += SearchResult(
@@ -872,6 +925,7 @@ class WebSearchRepository @Inject constructor(
             }
             results
         } catch (e: Exception) {
+            android.util.Log.w("Search", "[QWANT_JSON] parse failed", e)
             emptyList()
         }
     }
@@ -982,6 +1036,49 @@ class WebSearchRepository @Inject constructor(
             )
         }
         return results
+    }
+
+    // ─── Generic fallback — ensures non-Yahoo engines never appear “dead” due to brittle selectors ───
+    private fun parseGenericFallback(
+        doc: org.jsoup.nodes.Document,
+        adBlockEnabled: Boolean,
+        engine: String,
+        category: SearchCategory
+    ): List<SearchResult> {
+        if (category == SearchCategory.IMAGES || category == SearchCategory.VIDEOS) return emptyList()
+        val source = when (engine.uppercase()) {
+            "BING" -> "Bing"
+            "YAHOO" -> "Yahoo"
+            "QWANT" -> "Qwant"
+            "MARGINALIA" -> "Marginalia"
+            else -> engine
+        }
+        val results = mutableListOf<SearchResult>()
+        var rank = 0
+        // Collect all anchors with http href that have a heading-like ancestor or long text
+        doc.select("a[href^=http]").forEach { a ->
+            val href = a.attr("href").trim()
+            if (href.isBlank() || href.contains("yahoo.com/search") || href.contains("bing.com/search") || href.contains("qwant.com") || href.contains("marginalia.nu")) return@forEach
+            if (adBlockEnabled && AdBlockList.isBlocked(href)) return@forEach
+            val title = a.text().trim().ifBlank { a.attr("title").trim() }.ifBlank { null } ?: return@forEach
+            if (title.length < 8 || title.length > 200) return@forEach
+            // Find snippet in same parent block
+            val parent = a.parents().firstOrNull { it.select("p, div, span").isNotEmpty() } ?: a.parent()
+            val snippet = parent?.select("p, .snippet, .desc, .compText")?.firstOrNull()?.text()?.trim() ?: ""
+            if (snippet.length < 10 && results.size > 5) return@forEach // prefer entries with snippet after few
+            val (date, cleanSnippet) = extractDateFromSnippet(snippet)
+            results += SearchResult(
+                title = title,
+                snippet = cleanSnippet,
+                url = href,
+                displayUrl = safeHost(href),
+                source = source,
+                date = date,
+                engineRank = rank++,
+            )
+            if (results.size >= 15) return@forEach
+        }
+        return results.take(15)
     }
 
     // ─── URL helpers ─────────────────────────────────────────────────────────

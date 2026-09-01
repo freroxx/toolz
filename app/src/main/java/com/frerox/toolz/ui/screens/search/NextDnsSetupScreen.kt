@@ -1,76 +1,119 @@
-/*
- * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 package com.frerox.toolz.ui.screens.search
 
-import android.content.Intent
-import android.net.Uri
-import androidx.appcompat.app.AppCompatActivity
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.frerox.toolz.ui.components.ExpressiveWebView
-import com.frerox.toolz.ui.screens.browser.WebViewViewModel
-import com.frerox.toolz.ui.screens.browser.components.ManualPasswordBottomSheet
+import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NextDnsSetupScreen(
     url: String,
     onBack: () -> Unit,
-    viewModel: WebViewViewModel = hiltViewModel()
+    viewModel: AdBlockSettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val activity = context as AppCompatActivity
-    var showPasswords by remember { mutableStateOf(false) }
-    val manualPasswords by viewModel.manualPasswords.collectAsState()
+    val scope = rememberCoroutineScope()
+    val snackbarHost = remember { SnackbarHostState() }
+    var hasExtracted by remember { mutableStateOf(false) }
 
-    ExpressiveWebView(
-        url = url,
-        onBack = onBack,
-        onOpenExternal = { u ->
-            runCatching {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
+    fun extractAndSave(rawUrl: String?, html: String? = null) {
+        if (hasExtracted) return
+        // Try URL first: https://my.nextdns.io/<id> or https://my.nextdns.io/account/.../<id>
+        val candidates = mutableListOf<String>()
+        rawUrl?.let { candidates.add(it) }
+        html?.let { candidates.add(it) }
+        // Also check html for dns.nextdns.io/<id>
+        val idRegex = Regex("""(?:my\.nextdns\.io/|dns\.nextdns\.io/)([a-f0-9]{6})(?:\b|/|")""", RegexOption.IGNORE_CASE)
+        val dohRegex = Regex("""https://dns\.nextdns\.io/([a-f0-9]{6})""", RegexOption.IGNORE_CASE)
+        for (candidate in candidates) {
+            val m = idRegex.find(candidate) ?: continue
+            val id = m.groupValues[1].lowercase()
+            if (id.length != 6) continue
+            // Build DoH hostname if found, else default
+            val dohMatch = html?.let { dohRegex.find(it) }?.value ?: "https://dns.nextdns.io/$id"
+            hasExtracted = true
+            scope.launch {
+                viewModel.setNextDnsId(id)
+                viewModel.setNextDnsUrl(dohMatch)
+                // Apply config: enables NEXTDNS provider
+                viewModel.applyNextDnsConfig()
+                snackbarHost.showSnackbar("NextDNS $id auto-configured ✓")
+                kotlinx.coroutines.delay(900)
+                onBack()
             }
-        },
-        title = "NextDNS Setup",
-        showPasswordHelper = true,
-        onPasswordClick = {
-            viewModel.verifyBiometric(activity) {
-                viewModel.findManualPasswords("nextdns.io")
-                showPasswords = true
-            }
+            break
         }
-    )
+    }
 
-    if (showPasswords) {
-        ManualPasswordBottomSheet(
-            passwords = manualPasswords,
-            onDismiss = {
-                showPasswords = false
-                viewModel.clearManualPasswords()
-            },
-            onFill = { pwd ->
-                // Since ExpressiveWebView doesn't expose the WebView reference easily for JS injection here
-                // without extra plumbing, we'll assume the user can copy/paste from the helper
-                // or we could add a Copy button to the Password helper.
-                // ManualPasswordBottomSheet usually handles its own "Copy" if needed, 
-                // but for simplicity, we'll keep it as is.
-                showPasswords = false
-            }
-        )
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("NextDNS Setup") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHost) },
+        containerColor = MaterialTheme.colorScheme.surface
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.userAgentString = settings.userAgentString
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val u = request?.url?.toString()
+                                extractAndSave(u, null)
+                                return false
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                extractAndSave(url, null)
+                                // Also scan HTML for doh hostname
+                                view?.evaluateJavascript(
+                                    "(function(){return document.documentElement.outerHTML;})();"
+                                ) { html ->
+                                    // html is quoted JSON string, unescape
+                                    val unquoted = html?.removeSurrounding("\"")?.replace("\\u003C", "<")?.replace("\\\"", "\"")?.replace("\\n", "\n")
+                                    extractAndSave(url, unquoted)
+                                }
+                            }
+                        }
+                        loadUrl(url)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { wv ->
+                    if (wv.url == null) wv.loadUrl(url)
+                }
+            )
+        }
     }
 }

@@ -1748,6 +1748,7 @@ private fun BrowserOptionsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp)
                 .navigationBarsPadding()

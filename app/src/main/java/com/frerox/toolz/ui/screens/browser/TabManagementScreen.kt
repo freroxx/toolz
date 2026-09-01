@@ -89,53 +89,15 @@ fun TabManagementScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
-                color = if (isMultiSelect) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
-                tonalElevation = 1.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Top Bar Header
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            IconButton(
-                                onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    if (isMultiSelect) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
-                                    contentDescription = "Back",
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            if (isMultiSelect) {
-                                Text(
-                                    "${selectedIds.size} selected",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            } else {
-                                Text(
-                                    "Open Tabs",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Black
-                                )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Standard M3 TopAppBar
+                TopAppBar(
+                    title = {
+                        if (isMultiSelect) {
+                            Text("${selectedIds.size} selected", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Open Tabs", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -150,47 +112,51 @@ fun TabManagementScreen(
                                 }
                             }
                         }
-
-                        // Top Actions
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (isMultiSelect) {
-                                IconButton(
-                                    onClick = {
-                                        selectedIds = if (selectedIds.size == visibleTabs.size) emptySet() else visibleTabs.map { it.id }.toSet()
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.DoneAll, "Select all", tint = MaterialTheme.colorScheme.primary)
-                                }
-                                IconButton(
-                                    onClick = {
-                                        viewModel.closeTabs(selectedIds)
-                                        selectedIds = emptySet()
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.DeleteOutline, "Delete selected", tint = MaterialTheme.colorScheme.error)
-                                }
-                            } else {
-                                if (visibleTabs.isNotEmpty()) {
-                                    IconButton(onClick = { showCloseAllDialog = true }) {
-                                        Icon(Icons.Rounded.DeleteSweep, "Close all tabs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                IconButton(onClick = openNewTab) {
-                                    Icon(Icons.Rounded.Add, "New tab", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack) {
+                            Icon(
+                                if (isMultiSelect) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                    },
+                    actions = {
+                        if (isMultiSelect) {
+                            IconButton(onClick = { selectedIds = if (selectedIds.size == visibleTabs.size) emptySet() else visibleTabs.map { it.id }.toSet() }) {
+                                Icon(Icons.Rounded.DoneAll, "Select all", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { viewModel.closeTabs(selectedIds); selectedIds = emptySet() }) {
+                                Icon(Icons.Rounded.DeleteOutline, "Delete selected", tint = MaterialTheme.colorScheme.error)
+                            }
+                        } else {
+                            if (visibleTabs.isNotEmpty()) {
+                                IconButton(onClick = { showCloseAllDialog = true }) {
+                                    Icon(Icons.Rounded.DeleteSweep, "Close all tabs", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
+                            IconButton(onClick = openNewTab) {
+                                Icon(Icons.Rounded.Add, "New tab", tint = MaterialTheme.colorScheme.primary)
+                            }
                         }
-                    }
-
-                    // Segmented Normal vs Private Tabs Switcher
-                    if (!isMultiSelect) {
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = if (isMultiSelect) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+                    ),
+                )
+                // Normal / Private Segmented Control — standard M3
+                if (!isMultiSelect) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Using simple segmented control via Surface row (M3 compliant)
                         Surface(
                             modifier = Modifier.fillMaxWidth().height(44.dp),
                             shape = RoundedCornerShape(22.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh
                         ) {
                             Row(modifier = Modifier.fillMaxSize().padding(3.dp)) {
-                                // Normal Tabs
                                 Surface(
                                     onClick = { showPrivateTabs = false },
                                     shape = RoundedCornerShape(19.dp),
@@ -218,8 +184,6 @@ fun TabManagementScreen(
                                         )
                                     }
                                 }
-
-                                // Private Tabs
                                 Surface(
                                     onClick = { showPrivateTabs = true },
                                     shape = RoundedCornerShape(19.dp),
