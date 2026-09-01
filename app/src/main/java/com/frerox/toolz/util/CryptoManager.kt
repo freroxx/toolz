@@ -202,10 +202,18 @@ object CryptoManager {
      * with the marker byte. Error semantics match [decryptAes].
      */
     fun decryptWithPassphrase(combinedBase64: String, passphrase: CharArray): Pair<String, Boolean> {
+        // Be tolerant to whitespace/line-breaks: files may be transferred via email/cloud that wraps Base64 at 76 chars
+        val cleaned = combinedBase64.trim().replace(Regex("\\s"), "")
+        if (cleaned.isEmpty()) return Pair("Malformed encrypted data", false)
         val combined = try {
-            Base64.decode(combinedBase64, Base64.NO_WRAP)
+            // DEFAULT is whitespace-tolerant; NO_WRAP is strict — try lenient first
+            try {
+                Base64.decode(cleaned, Base64.DEFAULT)
+            } catch (_: Exception) {
+                Base64.decode(cleaned, Base64.NO_WRAP)
+            }
         } catch (e: Exception) {
-            return Pair("Decryption failed: ${e.message}", false)
+            return Pair("Malformed encrypted data", false)
         }
         if (combined.isNotEmpty() && combined[0] == HARDENED_FORMAT_MARKER) {
             val hardened = decodeSaltedLayout(

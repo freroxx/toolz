@@ -386,14 +386,21 @@ class WhisperAubupManager @Inject constructor(
 
     private fun decryptCiphertext(cipherText: String, whisperCode: String): WhisperAccessPayload {
         // V2-FIX B1: hardened 310000-iteration format first, legacy 65536 fallback so
-        // pre-B1 .enc access files keep decrypting.
+        // pre-B1 .enc access files keep decrypting. Also tolerate whitespace/line-wrapped Base64 from email/cloud.
+        val cleaned = cipherText.trim().replace(Regex("\\s"), "")
+        if (cleaned.isEmpty()) error("Could not read the selected file")
         val (decryptedJson, success) = CryptoManager.decryptWithPassphrase(
-            combinedBase64 = cipherText,
+            combinedBase64 = cleaned,
             passphrase = whisperCode.toCharArray(),
         )
-        if (!success || decryptedJson.isBlank()) {
+        if (!success) {
+            // Preserve specific malformed signal so mapper can show AubupInvalidFile instead of generic Incorrect Code
+            if (decryptedJson.contains("Malformed", ignoreCase = true)) {
+                error("Malformed encrypted data")
+            }
             error("Incorrect Whisper Code or corrupted access file.")
         }
+        if (decryptedJson.isBlank()) error("Incorrect Whisper Code or corrupted access file.")
         val payload = json.decodeFromString<WhisperAccessPayload>(decryptedJson)
         require(payload.app == "toolz_whisper") { "This file is not a valid Whisper Access File." }
         return payload
