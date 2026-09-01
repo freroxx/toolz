@@ -135,30 +135,98 @@ class WhisperAubupManager @Inject constructor(
         }
     }
 
-    // P0-3 FIX: Deprecated getExternalStoragePublicDirectory fails on Android Q+ scoped storage.
-    // Provide modern resolver: Q+ uses MediaStore/Downloads via app-specific fallback + legacy dir for reading.
+    // P0-3 FIX: Q+ scoped storage — public Downloads via MediaStore is the only
+    // uninstall-persistent location. App-specific external files (scoped) is deleted
+    // on uninstall, so it defeats the backup purpose. Writes now try MediaStore
+    // public Downloads/Toolz first; scoped is fallback only if MediaStore fails.
     private fun resolveToolzDir(): File {
         return try {
-            // On Q+ the public Downloads/Toolz is restricted; prefer app's external files dir
-            // plus also keep legacy for reading old files. Writes go to scoped location that
-            // does not require STORAGE permission.
-            val scoped = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
-            // Also ensure legacy dir exists for backward-compat scanning (best-effort)
             val legacy = File(
                 @Suppress("DEPRECATION") Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                 "Toolz"
             )
-            // Prefer scoped if we are on Q+, otherwise legacy still works for write.
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                if (!scoped.exists()) scoped.mkdirs()
-                scoped
-            } else {
+            val scoped = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
+            // On pre-Q, legacy public dir is freely writable via File API
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 if (!legacy.exists()) legacy.mkdirs()
-                if (legacy.exists() && legacy.canWrite()) legacy else scoped.apply { if (!exists()) mkdirs() }
+                if (legacy.exists() && legacy.canWrite()) return legacy
             }
+            // On Q+, legacy File API may still work if MANAGE_EXTERNAL_STORAGE granted, try it first for persistence
+            if (legacy.exists() && legacy.canWrite()) return legacy
+            // Try to ensure legacy via MediaStore probe (best-effort) — actual write will use MediaStore path
+            // Fallback to scoped which is always writable but NOT persistent
+            if (!scoped.exists()) scoped.mkdirs()
+            scoped
         } catch (_: Exception) {
             File(context.filesDir, "Toolz_access").apply { if (!exists()) mkdirs() }
         }
+    }
+
+    private fun writeViaMediaStore(fileName: String, content: String): File? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return try {
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Toolz")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+            resolver.openOutputStream(uri)?.use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+            }
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            // Return a File pointing to legacy path for caller convenience (even though MediaStore holds the truth)
+            // On Q+ the File API path may not be directly readable without permission, but we return it for UI toast
+            @Suppress("DEPRECATION")
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz/$fileName")
+        } catch (_: Exception) { null }
+    }
+
+    private fun queryMediaStoreForEncFiles(): List<File> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return emptyList()
+        val result = mutableListOf<File>()
+        try {
+            val resolver = context.contentResolver
+            val projection = arrayOf(MediaStore.Downloads.DISPLAY_NAME, MediaStore.Downloads.RELATIVE_PATH)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.Downloads.RELATIVE_PATH} LIKE ?"
+            val args = arrayOf("whisper%.enc", "%Download/Toolz%")
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, args, null)?.use { cursor ->
+                val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIdx) ?: continue
+                    if (!name.lowercase().endsWith(".enc")) continue
+                    if (!name.lowercase().contains("whisper") && !name.lowercase().startsWith(ACCESS_FILE_PREFIX)) continue
+                    @Suppress("DEPRECATION")
+                    val legacyFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz/$name")
+                    // Even if File API can't list, the MediaStore entry proves it exists — add legacyFile handle
+                    result += legacyFile
+                    // Also check if file actually exists via File API (when permission granted) to get lastModified
+                    if (!legacyFile.exists()) {
+                        // Keep synthetic entry with lastModified 0 — will be sorted last
+                    }
+                }
+            }
+            // Also sweep Downloads root via MediaStore (user moved file out of Toolz)
+            val rootArgs = arrayOf("whisper%.enc", "%Download%")
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, rootArgs, null)?.use { cursor ->
+                val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                val pathIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.RELATIVE_PATH)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIdx) ?: continue
+                    val relPath = cursor.getString(pathIdx) ?: ""
+                    if (!name.lowercase().contains("whisper")) continue
+                    if (relPath.contains("Toolz")) continue // already added
+                    @Suppress("DEPRECATION")
+                    val rootFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name)
+                    if (rootFile !in result) result += rootFile
+                }
+            }
+        } catch (_: Exception) {}
+        return result
     }
 
     /**
@@ -215,13 +283,25 @@ class WhisperAubupManager @Inject constructor(
                 error("Encryption failed with the provided Whisper Code.")
             }
 
+            val fileName = "${ACCESS_FILE_PREFIX}${accessFileStem(displayName, username)}.enc"
+            // Try MediaStore public Downloads/Toolz first on Q+ (persistent across uninstall)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val mediaFile = writeViaMediaStore(fileName, encryptedText)
+                if (mediaFile != null) {
+                    // Also keep a copy in scoped for immediate scan fallback (best-effort, ignore failures)
+                    try {
+                        val scopedDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
+                        if (!scopedDir.exists()) scopedDir.mkdirs()
+                        val scopedFile = File(scopedDir, fileName)
+                        FileOutputStream(scopedFile).use { it.write(encryptedText.toByteArray(Charsets.UTF_8)) }
+                    } catch (_: Exception) {}
+                    return@runCatching mediaFile
+                }
+            }
             val toolzDir = resolveToolzDir()
             // P1 privacy: filenames no longer embed a hash of the raw username.
             // V3-FIX (multi-account): the visible stem is now the sanitized display name
-            // (fallback username) so multiple Whisper accounts produce distinct files;
-            // whisper_access_ prefix kept for scanner backward-compat.
-            val targetFile = File(toolzDir, "${ACCESS_FILE_PREFIX}${accessFileStem(displayName, username)}.enc")
-
+            val targetFile = File(toolzDir, fileName)
             FileOutputStream(targetFile).use { output ->
                 output.write(encryptedText.toByteArray(Charsets.UTF_8))
             }
@@ -321,11 +401,13 @@ class WhisperAubupManager @Inject constructor(
                         .takeIf { it.isNotEmpty() }?.let { add(it) }
                 }
             }
-            // Scan both scoped (Q+ writes) and legacy public dir for backward compat.
+            // Scan both scoped (Q+ writes) and legacy public dir for backward compat, plus MediaStore on Q+
+            val mediaFiles = queryMediaStoreForEncFiles()
             val scopedDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Toolz")
             @Suppress("DEPRECATION")
             val legacyDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Toolz")
             val files = mutableListOf<File>()
+            files += mediaFiles
             for (dir in listOf(scopedDir, legacyDir)) {
                 if (!dir.exists() || !dir.isDirectory) continue
                 val listed = dir.listFiles() ?: continue
@@ -344,6 +426,7 @@ class WhisperAubupManager @Inject constructor(
             // V6-R7 FIX (auto-detect): also sweep the PUBLIC Downloads ROOT — users
             // frequently move access files out of /Toolz. File-API listing here works
             // on ≤API29 or when legacy storage is granted; harmless otherwise.
+            // On Q+ MediaStore already covered root, but keep File API for <Q or granted permission.
             @Suppress("DEPRECATION")
             val downloadsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             downloadsRoot.listFiles()?.let { listed ->
@@ -368,12 +451,44 @@ class WhisperAubupManager @Inject constructor(
     suspend fun decryptAccessFile(file: File, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
             require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
-            if (!file.exists() || file.length() == 0L) error("Could not read the selected file")
-            if (file.length() > 1_200_000L) error("Access file exceeds the 1 MB limit")
-            val cipherText = FileInputStream(file).use { it.bufferedReader().readText().trim() }
-            if (cipherText.isBlank()) error("Could not read the selected file")
+            // On Q+ the File API may report !exists even though MediaStore has the file (no MANAGE_EXTERNAL_STORAGE).
+            // Try File API first, then MediaStore fallback.
+            var cipherText: String? = null
+            if (file.exists() && file.length() > 0 && file.length() <= 1_200_000L) {
+                cipherText = runCatching { FileInputStream(file).use { it.bufferedReader().readText().trim() } }.getOrNull()
+            }
+            if (cipherText.isNullOrBlank()) {
+                // MediaStore fallback on Q+
+                cipherText = readViaMediaStore(file.name)
+            }
+            if (cipherText.isNullOrBlank()) {
+                if (!file.exists()) error("Could not read the selected file")
+                if (file.length() == 0L) error("Could not read the selected file")
+                if (file.length() > 1_200_000L) error("Access file exceeds the 1 MB limit")
+                // Last attempt via FileInputStream without length check
+                cipherText = FileInputStream(file).use { it.bufferedReader().readText().trim() }
+            }
+            if (cipherText.isNullOrBlank()) error("Could not read the selected file")
             decryptCiphertext(cipherText, whisperCode)
         }
+    }
+
+    private fun readViaMediaStore(fileName: String): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return try {
+            val resolver = context.contentResolver
+            val projection = arrayOf(MediaStore.Downloads._ID)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
+            val args = arrayOf(fileName)
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, args, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                    val id = cursor.getLong(idIdx)
+                    val uri = android.net.Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id.toString())
+                    resolver.openInputStream(uri)?.use { it.bufferedReader().readText().trim() }
+                } else null
+            }
+        } catch (_: Exception) { null }
     }
 
     suspend fun decryptAccessBytes(bytes: ByteArray, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
