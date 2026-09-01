@@ -89,14 +89,41 @@ fun TabManagementScreen(
 
     Scaffold(
         topBar = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // Standard M3 TopAppBar
-                TopAppBar(
-                    title = {
+            // Matches the web search home screen: rounded expressive header surface
+            // wrapping the bar + segmented control, instead of a flat TopAppBar.
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+                color = if (isMultiSelect) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack) {
+                            Icon(
+                                if (isMultiSelect) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
                         if (isMultiSelect) {
-                            Text("${selectedIds.size} selected", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                "${selectedIds.size} selected",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
                         } else {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Text("Open Tabs", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
@@ -112,16 +139,6 @@ fun TabManagementScreen(
                                 }
                             }
                         }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = if (isMultiSelect) { { selectedIds = emptySet() } } else onBack) {
-                            Icon(
-                                if (isMultiSelect) Icons.Rounded.Close else Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        }
-                    },
-                    actions = {
                         if (isMultiSelect) {
                             IconButton(onClick = { selectedIds = if (selectedIds.size == visibleTabs.size) emptySet() else visibleTabs.map { it.id }.toSet() }) {
                                 Icon(Icons.Rounded.DoneAll, "Select all", tint = MaterialTheme.colorScheme.primary)
@@ -139,76 +156,72 @@ fun TabManagementScreen(
                                 Icon(Icons.Rounded.Add, "New tab", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (isMultiSelect) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface,
-                    ),
-                )
-                // Normal / Private Segmented Control — standard M3
-                if (!isMultiSelect) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        // Using simple segmented control via Surface row (M3 compliant)
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(22.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
+                    // Normal / Private Segmented Control
+                    if (!isMultiSelect) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Row(modifier = Modifier.fillMaxSize().padding(3.dp)) {
-                                Surface(
-                                    onClick = { showPrivateTabs = false },
-                                    shape = RoundedCornerShape(19.dp),
-                                    color = if (!showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
-                                    shadowElevation = if (!showPrivateTabs) 1.dp else 0.dp,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center,
-                                        modifier = Modifier.fillMaxSize()
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
+                                shape = RoundedCornerShape(22.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Row(modifier = Modifier.fillMaxSize().padding(3.dp)) {
+                                    Surface(
+                                        onClick = { showPrivateTabs = false },
+                                        shape = RoundedCornerShape(19.dp),
+                                        color = if (!showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                        shadowElevation = if (!showPrivateTabs) 1.dp else 0.dp,
+                                        modifier = Modifier.weight(1f).fillMaxHeight()
                                     ) {
-                                        Icon(
-                                            Icons.Rounded.Public,
-                                            null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = if (!showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            "Tabs ($normalCount)",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = if (!showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (!showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.Public,
+                                                null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (!showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                "Tabs ($normalCount)",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = if (!showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (!showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
-                                }
-                                Surface(
-                                    onClick = { showPrivateTabs = true },
-                                    shape = RoundedCornerShape(19.dp),
-                                    color = if (showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
-                                    shadowElevation = if (showPrivateTabs) 1.dp else 0.dp,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center,
-                                        modifier = Modifier.fillMaxSize()
+                                    Surface(
+                                        onClick = { showPrivateTabs = true },
+                                        shape = RoundedCornerShape(19.dp),
+                                        color = if (showPrivateTabs) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                        shadowElevation = if (showPrivateTabs) 1.dp else 0.dp,
+                                        modifier = Modifier.weight(1f).fillMaxHeight()
                                     ) {
-                                        Icon(
-                                            Icons.Rounded.VisibilityOff,
-                                            null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = if (showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            "Private ($privateCount)",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = if (showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.VisibilityOff,
+                                                null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = if (showPrivateTabs) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                "Private ($privateCount)",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = if (showPrivateTabs) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (showPrivateTabs) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }

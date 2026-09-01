@@ -39,7 +39,7 @@ class DohClientFactory @Inject constructor(
         .followRedirects(true)
         .build()
 
-        private data class DnsKey(val provider: String, val customDns: String, val nextDnsId: String)
+        private data class DnsKey(val provider: String, val customDns: String, val nextDnsId: String, val nextDnsUrl: String)
 
             private val cache = AtomicReference<Pair<DnsKey, OkHttpClient>?>(null)
 
@@ -48,11 +48,12 @@ class DohClientFactory @Inject constructor(
                 val provider = settingsRepository.searchDnsProvider.first()
                 val customDns = settingsRepository.searchCustomDns.first()
                 val nextDnsId = settingsRepository.searchNextDnsId.first()
-                val key = DnsKey(provider, customDns, nextDnsId)
+                val nextDnsUrl = settingsRepository.searchNextDnsDnsUrl.first()
+                val key = DnsKey(provider, customDns, nextDnsId, nextDnsUrl)
 
                 cache.get()?.let { (cachedKey, cachedClient) -> if (cachedKey == key) return cachedClient }
 
-                val dns = withContext(Dispatchers.IO) { buildDns(provider, customDns, nextDnsId) }
+                val dns = withContext(Dispatchers.IO) { buildDns(provider, customDns, nextDnsId, nextDnsUrl) }
                 val client = baseClient.newBuilder()
                 .dns(dns)
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -64,8 +65,8 @@ class DohClientFactory @Inject constructor(
                 return client
             }
 
-            private fun buildDns(provider: String, customDns: String, nextDnsId: String): Dns = try {
-                val primary = resolveProvider(provider, customDns, nextDnsId)
+            private fun buildDns(provider: String, customDns: String, nextDnsId: String, nextDnsUrl: String = ""): Dns = try {
+                val primary = resolveProvider(provider, customDns, nextDnsId, nextDnsUrl)
                 // Wrap every DoH provider (but not plain system DNS) in a fallback to system DNS,
                 // so a DoH provider outage degrades to normal resolution instead of breaking search.
                 if (primary === Dns.SYSTEM) Dns.SYSTEM else ResilientDns(primary, Dns.SYSTEM)
@@ -74,7 +75,7 @@ class DohClientFactory @Inject constructor(
                 Dns.SYSTEM
             }
 
-            private fun resolveProvider(provider: String, customDns: String, nextDnsId: String): Dns = when (provider) {
+            private fun resolveProvider(provider: String, customDns: String, nextDnsId: String, nextDnsUrl: String = ""): Dns = when (provider) {
                 "ADGUARD" -> doh("https://dns.adguard-dns.com/dns-query", "94.140.14.14")
                 "ADGUARD_FAMILY" -> doh("https://dns-family.adguard-dns.com/dns-query", "94.140.14.15")
                 "CLOUDFLARE" -> doh("https://cloudflare-dns.com/dns-query", "1.1.1.1", "1.0.0.1")
@@ -85,17 +86,30 @@ class DohClientFactory @Inject constructor(
                 "CONTROLD" -> doh("https://freedns.controld.com/p1", "76.76.2.0")
                 "CLEANBROWSING" -> doh("https://doh.cleanbrowsing.org/doh/family-filter/", "185.228.168.168")
                 "CLEANBROWSING_SECURITY" -> doh("https://doh.cleanbrowsing.org/doh/security-filter/", "185.228.168.168")
-                "NEXTDNS" -> resolveNextDns(nextDnsId)
+                "NEXTDNS" -> resolveNextDns(nextDnsId, nextDnsUrl)
                 "CUSTOM" -> resolveCustom(customDns)
                 else -> Dns.SYSTEM
             }
 
-            private fun resolveNextDns(nextDnsId: String): Dns {
-                if (nextDnsId.isBlank()) {
-                    android.util.Log.w("DohClientFactory", "NextDNS selected but id is blank — falling back to system DNS")
-                    return Dns.SYSTEM
+            private fun resolveNextDns(nextDnsId: String, nextDnsUrl: String): Dns {
+                // A custom DoH hostname saved via the setup flow takes precedence — it
+                // supports IPv6 bootstrap (dns.nextdns.io only bootstraps v4).
+                if (nextDnsUrl.isNotBlank()) {
+                    val url = if (nextDnsUrl.startsWith("http")) nextDnsUrl else "https://$nextDnsUrl"
+                    return doh(url, "45.90.28.0", "45.90.30.0")
                 }
-                return doh("https://dns.nextdns.io/$nextDnsId", "45.90.28.0", "45.90.30.0")
+                // Sanitize: users paste full hostnames ("abcdef.dns.nextdns.io") or URLs
+                // into the ID field — building "https://dns.nextdns.io/abcdef.dns.nextdns.io"
+                // silently breaks all resolution, so always reduce to the bare profile id.
+                val cleanId = com.frerox.toolz.data.browser.nextdns.NextDnsClient.sanitizeId(nextDnsId)
+                if (cleanId.isBlank()) {
+                    android.util.Log.w("DohClientFactory", "NextDNS selected but id is blank — falling back to AdGuard DoH so filtering stays ON (was: silent system DNS, which made NextDNS appear active while blocking nothing)")
+                    // Previously this returned Dns.SYSTEM: the UI showed NextDNS selected,
+                    // but resolution went through unfiltered system DNS — the "NextDNS is
+                    // completely dead" report. A safe DoH default keeps real filtering.
+                    return doh("https://dns.adguard-dns.com/dns-query", "94.140.14.14")
+                }
+                return doh("https://dns.nextdns.io/$cleanId", "45.90.28.0", "45.90.30.0")
             }
 
             private fun resolveCustom(customDns: String): Dns {

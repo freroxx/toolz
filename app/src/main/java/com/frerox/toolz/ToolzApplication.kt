@@ -55,6 +55,9 @@ class ToolzApplication : Application(), Configuration.Provider {
     lateinit var adBlockManager: AdBlockManager
 
     @Inject
+    lateinit var dohClientFactory: com.frerox.toolz.data.search.dns.DohClientFactory
+
+    @Inject
     lateinit var musicRepository: com.frerox.toolz.data.music.MusicRepository
 
     @Inject
@@ -94,6 +97,13 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
+        // Warm the search DNS client at startup so the user's first search doesn't pay the
+        // DoH bootstrap cost (blocking InetAddress bootstrap + DataStore reads) mid-query.
+        appScope.launch {
+            try { dohClientFactory.getClient() } catch (e: Exception) {
+                android.util.Log.w("ToolzApplication", "DoH warmup failed; first search will build it lazily", e)
+            }
+        }
         // PurgeShot: ensure it works outside Toolz — start observer service + JobScheduler trigger + Shizuku watcher
         appScope.launch {
             try {

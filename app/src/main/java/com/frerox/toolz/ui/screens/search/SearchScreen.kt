@@ -216,6 +216,10 @@ fun SearchScreen(
             result           = result,
             onDismiss        = { longPressedResult = null },
             onBookmarkToggle = { viewModel.toggleBookmark(result); longPressedResult = null },
+            onFilterSite = {
+                viewModel.applySiteFilter(result.displayUrl)
+                longPressedResult = null
+            },
             onShare          = {
                 context.startActivity(
                     android.content.Intent.createChooser(
@@ -395,7 +399,10 @@ fun SearchScreen(
                     onReturnToDashboard = onBackClick,
                     onOpenDnsSettings = { showSearchOptions = true },
                     onOpenEngineSettings = { showSearchOptions = true },
+                    siteCandidatesFn = viewModel::siteFilterCandidates,
                     onCategorySelected = viewModel::setSearchCategory,
+                    onSiteFilter = viewModel::applySiteFilter,
+                    onClearSiteFilter = viewModel::clearSiteFilter,
                     onCopyMathResult = { result ->
                         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clip.setPrimaryClip(ClipData.newPlainText("Math Result", result))
@@ -463,6 +470,7 @@ fun SearchScreen(
                                 text     = s,
                                 onSearch = { viewModel.onSearch(s); viewModel.onActiveChange(false) },
                                 onFill   = { viewModel.onQueryChange(s) },
+                                highlightQuery = uiState.query,
                             )
                             if (i < uiState.suggestions.lastIndex.coerceAtMost(5)) {
                                 HorizontalDivider(
@@ -514,6 +522,7 @@ fun SearchScreen(
                                 query    = entry.query,
                                 onSearch = { viewModel.onSearch(entry.query); viewModel.onActiveChange(false) },
                                 onDelete = { viewModel.deleteHistory(entry.id) },
+                                highlightQuery = uiState.query,
                             )
                         }
                         Spacer(Modifier.height(6.dp))
@@ -555,14 +564,29 @@ private fun PageContent(
     onReturnToDashboard: () -> Unit = {},
     onOpenDnsSettings: () -> Unit = {},
     onOpenEngineSettings: () -> Unit = {},
+    siteCandidatesFn: (List<SearchResult>) -> List<String> = { emptyList() },
     onCategorySelected: (SearchCategory) -> Unit = {},
     onCopyMathResult: (String) -> Unit = {},
     onOpenCalculator: () -> Unit = {},
+    siteCandidates: List<String> = emptyList(),
+    onSiteFilter: (String) -> Unit = {},
+    onClearSiteFilter: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
+
+    // Distinct hosts worth filtering by — derived from the raw result list so the
+    // candidate chips stay stable even while a site filter is applied.
+    val siteCandidates = remember(uiState.results) { siteCandidatesFn(uiState.results) }
+
+    val visibleResults = uiState.siteFilter?.let { host ->
+        uiState.results.filter { r ->
+            runCatching { java.net.URI(r.url).host?.removePrefix("www.") }.getOrNull() == host
+        }
+    } ?: uiState.results
+
     val screenState = when {
         uiState.phase == SearchPhase.Loading                               -> "loading"
-        uiState.results.isNotEmpty()                                       -> "results"
+        visibleResults.isNotEmpty()                                        -> "results"
         uiState.phase == SearchPhase.Results && uiState.error != null      -> "error"
         uiState.phase == SearchPhase.Results && uiState.results.isEmpty()  -> "error"
         else                                                               -> "home"
@@ -585,13 +609,19 @@ private fun PageContent(
     ) { state ->
         when (state) {
             "loading" -> Column(Modifier.fillMaxSize()) {
-                SearchCategoryChips(
-                    selectedCategory = uiState.category,
-                    onCategorySelected = onCategorySelected,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                )
+                // No category chips here: the results list re-introduces them after
+                // load, and keeping them during loading makes the skeleton visibly
+                // "jump" when the real list replaces it. The skeleton fills the
+                // exact frame the results will occupy.
                 Box(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    SearchShimmer()
+                    // Category-matched skeletons: media tabs get a grid/list skeleton
+                    // shaped like the real image tiles / video cards, web gets the
+                    // standard result-card skeleton.
+                    when (uiState.category) {
+                        SearchCategory.IMAGES -> ImageGridShimmer()
+                        SearchCategory.VIDEOS -> VideoListShimmer()
+                        else -> SearchShimmer()
+                    }
                 }
             }
 
@@ -633,6 +663,8 @@ private fun PageContent(
 
             "results" -> ResultsPage(
                 uiState            = uiState,
+                visibleResults     = visibleResults,
+                siteCandidates     = siteCandidates,
                 onResultClick      = onResultClick,
                 onLongPress        = onLongPress,
                 onLoadMore         = onLoadMore,
@@ -640,6 +672,8 @@ private fun PageContent(
                 onCategorySelected = onCategorySelected,
                 onCopyMathResult   = onCopyMathResult,
                 onOpenCalculator   = onOpenCalculator,
+                onSiteFilter       = onSiteFilter,
+                onClearSiteFilter  = onClearSiteFilter,
             )
 
             else -> HomePage(
@@ -691,9 +725,15 @@ private fun HomePage(
 ) {
     val listState = rememberLazyListState()
 
-    // Entering the tool (or returning from results to home) always lands at the top.
-    LaunchedEffect(uiState.phase) {
-        if (uiState.phase == SearchPhase.Idle) listState.scrollToItem(0)
+    // "Always land at the top when entering the tool": fires on every composition
+    // entry of HomePage. The scroll is deferred one frame because LazyColumn restores
+    // a remembered scroll position AFTER first composition — an immediate scroll on
+    // entry gets overwritten by that restoration (the "scroll-to-top doesn't work"
+    // bug). Unconditional: the user asked for top on EVERY tool entry.
+    LaunchedEffect(Unit) {
+        listState.scrollToItem(0)
+        withFrameNanos { }
+        listState.scrollToItem(0)
     }
 
     LazyColumn(
@@ -1027,6 +1067,8 @@ private fun QuickLinksSection(
 @Composable
 private fun ResultsPage(
     uiState: SearchUiState,
+    visibleResults: List<SearchResult>,
+    siteCandidates: List<String>,
     onResultClick: (SearchResult) -> Unit,
     onLongPress: (SearchResult) -> Unit,
     onLoadMore: () -> Unit,
@@ -1034,6 +1076,8 @@ private fun ResultsPage(
     onCategorySelected: (SearchCategory) -> Unit = {},
     onCopyMathResult: (String) -> Unit = {},
     onOpenCalculator: () -> Unit = {},
+    onSiteFilter: (String) -> Unit = {},
+    onClearSiteFilter: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
@@ -1072,6 +1116,62 @@ private fun ResultsPage(
             )
         }
 
+        // Site filter: quick "only this domain" chips + active-filter indicator
+        if (uiState.siteFilter != null || siteCandidates.isNotEmpty()) {
+            item(key = "siteFilter") {
+                Row(
+                    modifier = Modifier.fillMaxWidth().animateItem(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    uiState.siteFilter?.let { host ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    host,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                                IconButton(onClick = onClearSiteFilter, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        Icons.Rounded.Close, "Clear site filter",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (uiState.siteFilter == null) {
+                        siteCandidates.forEach { host ->
+                            Surface(
+                                onClick = { onSiteFilter(host) },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
+                                Text(
+                                    host,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Instant math result card
         uiState.mathResult?.let { math ->
             item(key = "mathResult") {
@@ -1088,12 +1188,28 @@ private fun ResultsPage(
         }
 
         item(key = "resultsCount") {
-            Text(
-                stringResource(R.string.st_SearchScreen_results_count, uiState.results.size),
-                style    = MaterialTheme.typography.labelSmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp).animateItem(),
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, bottom = 2.dp)
+                    .animateItem(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.st_SearchScreen_results_count, visibleResults.size),
+                    style    = MaterialTheme.typography.labelSmall,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+                // Search latency feedback — closes the loop on "did the tool actually do work".
+                uiState.searchDurationMs?.takeIf { uiState.siteFilter == null }?.let { ms ->
+                    Text(
+                        "• %.1fs".format(ms / 1000.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    )
+                }
+            }
         }
 
         if (uiState.results.isEmpty() && (uiState.category == SearchCategory.IMAGES || uiState.category == SearchCategory.VIDEOS) && uiState.phase == SearchPhase.Results) {
@@ -1107,19 +1223,43 @@ private fun ResultsPage(
         }
 
         itemsIndexed(
-            items = uiState.results,
+            items = visibleResults,
             key   = { index, result -> "${result.url}_$index" },
         ) { index, result ->
             when (uiState.category) {
+                // Image results come in pairs inside a single row — a 2-up grid shows
+                // twice the media per screen vs. stacking full-width cards. Odd indexes
+                // render as the right half of the previous item's row.
                 SearchCategory.IMAGES -> {
-                    NativeImageCard(
-                        result   = result,
-                        onClick  = { onResultClick(result) },
-                        modifier = Modifier.animateItem(
-                            fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
-                            placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
-                        ),
-                    )
+                    if (index % 2 == 0) {
+                        val second = visibleResults.getOrNull(index + 1)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateItem(
+                                    fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
+                                    placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
+                                ),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(Modifier.weight(1f)) {
+                                NativeImageCard(
+                                    result   = result,
+                                    onClick  = { onResultClick(result) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                            Box(Modifier.weight(1f)) {
+                                if (second != null) {
+                                    NativeImageCard(
+                                        result   = second,
+                                        onClick  = { onResultClick(second) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 SearchCategory.VIDEOS -> {
                     NativeVideoCard(
@@ -1581,11 +1721,12 @@ private fun SearchEngineSheet(
             Spacer(Modifier.height(10.dp))
 
             val engines = listOf(
-                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant, Marginalia & Bing with consensus ranking"),
+                "META"       to ("Meta Search (Recommended)" to "Parallel search across Yahoo, Qwant, Marginalia, DuckDuckGo & Bing with consensus ranking"),
                 "YAHOO"      to ("Yahoo Search" to "Fast, reliable web and news results"),
                 "QWANT"      to ("Qwant" to "Privacy-first European search engine with independent web & media indexing"),
                 "MARGINALIA" to ("Marginalia" to "Independent search engine focusing on non-commercial and text-rich web"),
                 "BING"       to (stringResource(R.string.st_SearchScreen_b7i8) to stringResource(R.string.st_SearchScreen_m9s0)),
+                "DUCKDUCKGO" to ("DuckDuckGo" to "Privacy-first search with no tracking and instant-answer support"),
             )
 
             engines.forEach { entry ->
@@ -1621,6 +1762,7 @@ private fun SearchEngineSheet(
                                         "QWANT" -> Icons.Rounded.Shield
                                         "MARGINALIA" -> Icons.Rounded.AutoStories
                                         "BING" -> Icons.Rounded.TravelExplore
+                                        "DUCKDUCKGO" -> Icons.Rounded.Security
                                         else -> Icons.Rounded.Search
                                     },
                                     null,
@@ -1867,6 +2009,7 @@ private fun ResultActionsSheet(
     onBookmarkToggle: () -> Unit,
     onShare: () -> Unit,
     onCopy: () -> Unit,
+    onFilterSite: () -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1893,7 +2036,56 @@ private fun ResultActionsSheet(
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             Spacer(Modifier.height(8.dp))
+
+            // Engine section — shows exactly which engines returned this result, so
+            // the compact "✓ N engines" badge on the card is explorable. The primary
+            // (highest-ranked) engine is highlighted.
+            if (result.engines.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(vertical = 10.dp),
+                ) {
+                    Text(
+                        "Found on",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    result.engines.forEachIndexed { idx, engineLabel ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (idx == 0) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .background(
+                                            sourceAccentColor(engineLabel),
+                                            androidx.compose.foundation.shape.CircleShape,
+                                        ),
+                                )
+                                Text(
+                                    sourceLabel(engineLabel),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                                )
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                Spacer(Modifier.height(8.dp))
+            }
+
             ActionRow(Icons.Rounded.BookmarkAdd, stringResource(R.string.st_SearchScreen_save_bookmarks), onBookmarkToggle)
+            ActionRow(Icons.Rounded.FilterAlt, "Only show results from ${result.displayUrl}", onFilterSite)
             ActionRow(Icons.Rounded.Share, stringResource(R.string.st_SearchScreen_share_link), onShare)
             ActionRow(Icons.Rounded.ContentCopy, stringResource(R.string.st_SearchScreen_copy_url), onCopy)
         }

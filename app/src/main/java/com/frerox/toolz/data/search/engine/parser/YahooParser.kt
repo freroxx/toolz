@@ -85,6 +85,7 @@ class YahooParser @Inject constructor() : EngineParser {
 
     private fun parseVideos(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+        // Legacy markup
         doc.select("li.vlist, div.v-meta, div.v-title, div.v-card").forEachIndexed { rank, el ->
             val linkEl = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
             val cleanUrl = resolveHref(linkEl) ?: return@forEachIndexed
@@ -100,12 +101,42 @@ class YahooParser @Inject constructor() : EngineParser {
                 date = date, imageUrl = imgSrc, engineRank = rank,
             )
         }
+
+        // 2026 UDS markup: results are `li.tile` with the real target in
+        // data-referenceurl (or imgurl= on the tracking href) and the thumbnail
+        // on img.tile-image — the older vlist/v-meta selectors no longer match.
+        if (results.isEmpty()) {
+            doc.select("li.tile").forEachIndexed { rank, el ->
+                val linkEl = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
+                val rawHref = linkEl.attr("href")
+                val target = el.attr("data-referenceurl").takeIf { it.startsWith("http") }
+                    ?: rawHref.takeIf { it.contains("imgurl=") }
+                        ?.let { ParserSupport.decodeUrl(it.substringAfter("imgurl=").substringBefore("&")) }
+                    ?: resolveHref(linkEl)
+                    ?: return@forEachIndexed
+                if (adBlockEnabled && AdBlockList.isBlocked(target)) return@forEachIndexed
+                val imgEl = el.select("img").firstOrNull()
+                val imgSrc = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
+                    ?: imgEl?.attr("data-src")?.takeIf { it.startsWith("http") }
+                val title = el.select(".tile-title").firstOrNull()?.text()?.trim()?.ifBlank { null }
+                    ?: imgEl?.attr("alt")?.trim()?.ifBlank { null }
+                    ?: linkEl.attr("title").trim().ifBlank { null }
+                    ?: ParserSupport.safeHost(target)
+                val snippet = el.select(".tile-description").firstOrNull()?.text()?.trim() ?: ""
+                results += SearchResult(
+                    title = title, snippet = snippet, url = target,
+                    displayUrl = ParserSupport.safeHost(target), source = id.label,
+                    imageUrl = imgSrc, engineRank = rank,
+                )
+            }
+        }
         return results
     }
 
     private fun parseNews(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
         doc.select("div.NewsArticle, li.NewsArticle, div.dd.news, div.compArticle, li.algo").forEachIndexed { rank, el ->
+            if (el.hasClass("ads")) return@forEachIndexed
             val titleEl = el.select("h4.s-title a, h4 a, h3 a, a.thmb").firstOrNull() ?: return@forEachIndexed
             val cleanUrl = resolveHref(titleEl) ?: return@forEachIndexed
             if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
@@ -142,6 +173,13 @@ class YahooParser @Inject constructor() : EngineParser {
             val resultContainer = heading.parents().firstOrNull {
                 it.tagName().equals("li", ignoreCase = true) || it.hasClass("algo") || it.hasClass("dd")
             }
+            // Sponsored rows live in div.dd.ads (verified against live 2026 markup: class
+            // "dd fst ads bcan1 relsrch AdTop" etc.). Their targets are rdclks redirects on
+            // r.search.yahoo.com — the same host the allowlist exempts, so AdBlockList can
+            // never filter them; skip on the container class instead.
+            if (resultContainer?.hasClass("ads") == true) continue
+            // rdclks/secclk are Yahoo's sponsored-click redirect paths — never organic results.
+            if (rawHref.contains("/rdclks/") || rawHref.contains("/secclk/")) continue
             val snippetText = resultContainer
                 ?.select(".compText, .fz-m, p, .fc-falcon, .compText p")
                 ?.firstOrNull()?.text()?.trim() ?: ""

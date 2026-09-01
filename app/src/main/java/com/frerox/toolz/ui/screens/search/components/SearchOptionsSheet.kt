@@ -59,7 +59,7 @@ fun SearchOptionsSheet(
 
             Text("SEARCH ENGINE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            val engines = listOf("META" to "Meta (Yahoo • Qwant • Marginalia)", "YAHOO" to "Yahoo", "QWANT" to "Qwant", "MARGINALIA" to "Marginalia", "BING" to "Bing")
+            val engines = listOf("META" to "Meta (Yahoo • Qwant • Marginalia • DDG)", "YAHOO" to "Yahoo", "QWANT" to "Qwant", "MARGINALIA" to "Marginalia", "BING" to "Bing", "DUCKDUCKGO" to "DuckDuckGo")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 engines.forEach { (id, label) ->
                     val isSelected = currentEngine.equals(id, ignoreCase = true)

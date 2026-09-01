@@ -29,6 +29,14 @@ interface EngineParser {
      */
     fun buildRequestUrls(query: String, offset: Int, category: SearchCategory, safeSearch: Boolean): List<String>
 
+    /**
+     * When non-empty, the request for this engine's URLs is issued as a POST with
+     * these form fields (built for the same query/offset/category/safeSearch inputs)
+     * instead of a GET. Engines that serve results on POST but bot-challenge GET
+     * requests with a query string (DuckDuckGo) set this.
+     */
+    fun buildRequestFormFields(query: String, offset: Int, category: SearchCategory, safeSearch: Boolean): Map<String, String> = emptyMap()
+
     /** True if [body] looks like this engine's JSON API response rather than HTML. */
     fun looksLikeJson(body: String): Boolean = body.trimStart().startsWith("{")
 

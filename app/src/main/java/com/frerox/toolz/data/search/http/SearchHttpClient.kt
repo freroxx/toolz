@@ -52,6 +52,9 @@ class SearchHttpClient @Inject constructor(
         "cf-browser-verification",
         "challenge-form",
         "captcha-delivery",
+        // DuckDuckGo anomaly interstitial — served with HTTP 202 and no results.
+        "anomaly.js",
+        "anomaly-modal",
     )
 
     /**
@@ -79,9 +82,37 @@ class SearchHttpClient @Inject constructor(
         return lastFailure?.let { FetchResult.Failure(it) } ?: FetchResult.Timeout
     }
 
-    private suspend fun attemptFetch(url: String, timeoutMs: Long): FetchResult {
+    /**
+     * Same contract as [fetch], but issues a POST with [formFields] as the request
+     * body. Needed for engines (DuckDuckGo) that serve results on POST but show a
+     * bot-challenge interstitial to GET requests carrying a query string.
+     */
+    suspend fun fetchPost(
+        url: String,
+        formFields: Map<String, String>,
+        timeoutMs: Long = 8_000,
+        retries: Int = 2,
+        initialBackoffMs: Long = 400L,
+    ): FetchResult {
+        var lastFailure: Exception? = null
+        repeat(retries + 1) { attempt ->
+            val outcome = attemptFetch(url, timeoutMs, formFields)
+            when (outcome) {
+                is FetchResult.Success, FetchResult.RateLimited, FetchResult.BotChallenge -> return outcome
+                is FetchResult.Failure -> lastFailure = outcome.cause
+                FetchResult.Timeout -> lastFailure = null
+            }
+            if (attempt < retries) delay(initialBackoffMs * (1L shl attempt))
+        }
+        return lastFailure?.let { FetchResult.Failure(it) } ?: FetchResult.Timeout
+    }
+
+    private suspend fun attemptFetch(url: String, timeoutMs: Long, formFields: Map<String, String>? = null): FetchResult {
         val client = dohClientFactory.getClient()
-        val request = buildRequest(url)
+        val formBody = formFields?.takeIf { it.isNotEmpty() }?.let { fields ->
+            okhttp3.FormBody.Builder().apply { fields.forEach { (k, v) -> add(k, v) } }.build()
+        }
+        val request = buildRequest(url, formBody)
         val response = try {
             withTimeoutOrNull(timeoutMs) { client.newCall(request).execute() } ?: return FetchResult.Timeout
         } catch (e: Exception) {
@@ -108,13 +139,16 @@ class SearchHttpClient @Inject constructor(
         return FetchResult.Success(body)
     }
 
-    fun buildRequest(url: String): Request = Request.Builder()
-        .url(url)
-        .header("User-Agent", userAgents.random())
-        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,image/avif,image/webp,*/*;q=0.8")
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .header("Referer", "https://www.google.com/")
-        .build()
+    fun buildRequest(url: String, formBody: okhttp3.RequestBody? = null): Request {
+        val builder = Request.Builder()
+            .url(url)
+            .header("User-Agent", userAgents.random())
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,image/avif,image/webp,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Referer", "https://www.google.com/")
+        if (formBody != null) builder.post(formBody)
+        return builder.build()
+    }
 
     /**
      * Dedicated client for large plain-text downloads (ad-block lists can run ~2MB).

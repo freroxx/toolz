@@ -85,6 +85,7 @@ private val KnownSourceColors: Map<String, Color> = mapOf(
     "QWANT" to Color(0xFFF75708),
     "MARGINALIA" to Color(0xFF4C7A2E),
     "META" to Color(0xFF6750A4),
+    "DUCKDUCKGO" to Color(0xFFDE5833),
 )
 
 private val KnownSourceLabels: Map<String, String> = mapOf(
@@ -101,6 +102,7 @@ private val KnownSourceLabels: Map<String, String> = mapOf(
     "QWANT" to "Qwant",
     "MARGINALIA" to "Marginalia",
     "META" to "Meta",
+    "DUCKDUCKGO" to "DuckDuckGo",
 )
 
 @Composable
@@ -195,7 +197,10 @@ fun SearchResultCard(
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                         ) {
                             Text(
-                                text = "Found on ${result.engines.joinToString(", ")}",
+                                // Compact consensus badge: "✓3 · Yahoo" — shows the count
+                                // plus the primary (highest-ranked) engine so the user can
+                                // see WHICH engine without opening the long-press sheet.
+                                text = "✓${result.engines.size} · ${sourceLabel(result.source)}",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontWeight = FontWeight.Bold,
@@ -215,8 +220,7 @@ fun SearchResultCard(
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                             )
                         }
-                    }
-                }
+                    }                }
 
                 if (!result.breadcrumb.isNullOrBlank()) {
                     Text(
@@ -347,7 +351,7 @@ fun NativeImageCard(
     val accent = sourceAccentColor(result.source)
     Surface(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
@@ -356,7 +360,7 @@ fun NativeImageCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(200.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                modifier = Modifier.fillMaxWidth().height(140.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh),
                 contentAlignment = Alignment.Center,
             ) {
                 AsyncImage(

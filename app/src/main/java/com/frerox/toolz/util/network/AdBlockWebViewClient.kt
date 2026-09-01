@@ -76,17 +76,14 @@ open class AdBlockWebViewClient(
             android.util.Log.d("AdBlock", "Blocked: $url")
             onBlockedRequest()
 
-            // Return a network-error response so that:
-            //  • <img>.onerror fires  (ad-block test tools detect this)
-            //  • <script> fails to execute
-            //  • fetch() / XHR rejects with a network error
-            //
-            // Returning HTTP 200 with a 1x1 GIF (old approach) causes test tools to score
-            // 0% because the request "succeeded". A null-stream WebResourceResponse causes
-            // the WebView to emit net::ERR_FAILED — the correct signal for a blocked resource.
-            return WebResourceResponse("text/plain", "UTF-8", null)
+            // A blocked request must hard-fail so ad scripts never execute and
+            // test tools see net::ERR_FAILED. Returning a response with a null
+            // stream is unreliable across WebView versions (some surface it as
+            // an empty 200); an explicit 404 with an empty stream is the most
+            // portable way to guarantee failure.
+            return WebResourceResponse("text/plain", "UTF-8", 404, "Blocked", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
         }
-        
+
         return null
     }
 

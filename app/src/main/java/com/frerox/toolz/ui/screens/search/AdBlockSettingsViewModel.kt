@@ -124,8 +124,11 @@ class AdBlockSettingsViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
-            _nextDnsHealth.value = nextDnsClient.checkHealth(id)
+        _nextDnsHealth.value = NextDnsHealth.UNKNOWN
+        // Run on IO dispatcher and await completion so callers that show the
+        // refreshed badge right after toggling actually see the new result.
+        _nextDnsHealth.value = withContext(Dispatchers.IO) {
+            nextDnsClient.checkHealth(id)
         }
     }
 
@@ -236,7 +239,10 @@ class AdBlockSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             delay(500) // Debounce save to DataStore
             if (_nextDnsIdInput.value == id) {
-                settingsRepository.setSearchNextDnsId(id.trim())
+                // Always persist the bare profile id — hostnames/URLs break DoH resolution.
+                settingsRepository.setSearchNextDnsId(
+                    com.frerox.toolz.data.browser.nextdns.NextDnsClient.sanitizeId(id)
+                )
                 _nextDnsIdInput.value = null
                 checkDnsHealth()
             }

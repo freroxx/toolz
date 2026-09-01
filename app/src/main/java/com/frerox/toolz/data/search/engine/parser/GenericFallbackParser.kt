@@ -38,7 +38,12 @@ class GenericFallbackParser @Inject constructor() {
 
             val href = anchor.attr("href").trim()
             if (href.isBlank() || ownSearchUrlMarkers.any { href.contains(it) }) continue
+            // Yahoo sponsored-click redirect paths — never organic results.
+            if (href.contains("/rdclks/") || href.contains("/secclk/")) continue
             if (adBlockEnabled && AdBlockList.isBlocked(href)) continue
+
+            // Skip anchors inside sponsored containers (div.dd.ads on Yahoo).
+            if (anchor.parents().any { it.hasClass("ads") }) continue
 
             val title = anchor.text().trim().ifBlank { anchor.attr("title").trim() }
             if (title.length !in 8..200) continue

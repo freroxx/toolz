@@ -130,6 +130,11 @@ class SettingsRepository @Inject constructor(
     val searchAdBlockBlocklists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ADBLOCK_BLOCKLISTS] ?: emptySet() }
     val searchAdBlockAllowlists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ADBLOCK_ALLOWLISTS] ?: emptySet() }
     val searchNextDnsId: Flow<String> = dataStore.data.map { it[SEARCH_NEXTDNS_ID] ?: "" }
+    // NextDNS DoH hostname override captured from the setup webview flow. Persisted so
+    // DohClientFactory rebuilds the resolver with the hostname the user actually configured.
+    // The health check intentionally does NOT depend on this — it probes the profile's own
+    // DoH endpoint directly, so "Linked" reflects the saved profile rather than whichever
+    // system resolver the device happens to be using at check time.
     val searchNextDnsDnsUrl: Flow<String> = dataStore.data.map { it[SEARCH_NEXTDNS_DNS_URL] ?: "" }
     val searchEnabledImportedLists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ENABLED_IMPORTED_LISTS] ?: emptySet() }
     val searchAdBlockImportedCount: Flow<Int> = dataStore.data.map { it[SEARCH_ADBLOCK_IMPORTED_COUNT] ?: 0 }
@@ -149,7 +154,7 @@ class SettingsRepository @Inject constructor(
     val searchRegion: Flow<String> = dataStore.data.map { it[SEARCH_REGION] ?: "wt-wt" } // default: no region
     val searchCustomEngineUrl: Flow<String> = dataStore.data.map { it[SEARCH_CUSTOM_ENGINE_URL] ?: "" }
     val searchIncognitoEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_INCOGNITO_ENABLED] ?: false }
-    val searchShowGreetingCard: Flow<Boolean> = dataStore.data.map { it[SEARCH_SHOW_GREETING_CARD] ?: false }
+    val searchShowGreetingCard: Flow<Boolean> = dataStore.data.map { it[SEARCH_SHOW_GREETING_CARD] ?: true }
 
     companion object {
         val SEARCH_AUTOFILL_ENABLED = booleanPreferencesKey("search_autofill_enabled")

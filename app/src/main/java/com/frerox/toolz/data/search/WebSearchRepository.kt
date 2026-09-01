@@ -169,16 +169,21 @@ class WebSearchRepository @Inject constructor(
             }
         }
 
-        val filtered = if (category == SearchCategory.VIDEOS) results.filter { isAllowedVideoTarget(it.url) } else results
+        // Restrict video clicks to playable embeddable domains, but never let the
+        // filter wipe out the whole result set: if nothing survived (e.g. the engine
+        // returned non-allowlisted hosts), show the unfiltered list rather than a
+        // dead "no videos" tab.
+        val allowed = results.filter { isAllowedVideoTarget(it.url) }
+        val filtered = if (allowed.isNotEmpty() || results.isEmpty()) allowed else results
         filtered.distinctBy { metaMerger.canonicalUrl(it.url) }.take(500)
     }
 
     /** Engines that support returning images/videos for the user's selected engine setting, in fallback order. */
     private fun mediaEnginesFor(engine: EngineId): List<EngineId> = when (engine) {
-        EngineId.META -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.BING)
-        // Marginalia has no media search — start from the next maintained media engine
-        // instead of guaranteeing an empty result (engine.label is preserved on results).
-        EngineId.MARGINALIA -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.BING)
+        // Bing last: its image/video quality is the weakest of the media engines.
+        EngineId.META -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.DUCKDUCKGO, EngineId.BING)
+        // Marginalia has no media search — fall straight to the non-Bing media engines.
+        EngineId.MARGINALIA -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.DUCKDUCKGO, EngineId.BING)
         else -> listOf(engine) + EngineId.CONCRETE.filter { it != engine && it != EngineId.MARGINALIA }
     }
 
@@ -232,7 +237,7 @@ class WebSearchRepository @Inject constructor(
             val parser = parsers[engine] ?: return emptyList()
 
             for (url in parser.buildRequestUrls(encodedQuery, offset, category, safeSearch)) {
-                val outcome = tryFetchAndParse(parser, engine, url, category, adBlockEnabled)
+                val outcome = tryFetchAndParse(parser, engine, url, encodedQuery, offset, category, safeSearch, adBlockEnabled)
                 when (outcome) {
                     EngineFetchOutcome.RateLimited -> {
                         healthTracker.recordRateLimited(engine)
@@ -262,10 +267,20 @@ class WebSearchRepository @Inject constructor(
         parser: EngineParser,
         engine: EngineId,
         url: String,
+        encodedQuery: String,
+        offset: Int,
         category: SearchCategory,
+        safeSearch: Boolean,
         adBlockEnabled: Boolean,
     ): EngineFetchOutcome {
-        val fetch = httpClient.fetch(url)
+        // Engines that bot-challenge GET-with-query (DuckDuckGo) declare POST form
+        // fields — issue the request as a form POST instead of a GET.
+        val formFields = parser.buildRequestFormFields(encodedQuery, offset, category, safeSearch)
+        val fetch = if (formFields.isNotEmpty()) {
+            httpClient.fetchPost(url, formFields)
+        } else {
+            httpClient.fetch(url)
+        }
         val body = when (fetch) {
             is FetchResult.Success -> fetch.body
             FetchResult.RateLimited -> return EngineFetchOutcome.RateLimited

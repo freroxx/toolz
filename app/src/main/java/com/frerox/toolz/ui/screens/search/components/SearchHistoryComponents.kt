@@ -47,11 +47,13 @@ import androidx.compose.ui.unit.dp
 import com.frerox.toolz.data.search.SearchHistoryEntry
 
 /** A live "did you mean" / trending-style row shown while the query is being typed. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SuggestionRow(
     text: String,
     onSearch: () -> Unit,
     onFill: () -> Unit,
+    highlightQuery: String = "",
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -67,8 +69,22 @@ fun SuggestionRow(
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
         )
+        val annotated = remember(text, highlightQuery) {
+            buildAnnotatedString {
+                val startIdx = if (highlightQuery.isBlank()) -1 else text.lowercase().indexOf(highlightQuery.lowercase())
+                if (startIdx < 0) {
+                    append(text)
+                } else {
+                    append(text.substring(0, startIdx))
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(text.substring(startIdx, startIdx + highlightQuery.length))
+                    }
+                    append(text.substring(startIdx + highlightQuery.length))
+                }
+            }
+        }
         Text(
-            text,
+            annotated,
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,

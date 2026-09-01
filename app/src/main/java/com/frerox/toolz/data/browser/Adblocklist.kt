@@ -36,12 +36,14 @@ object AdBlockList {
         "ad.doubleclick.net", "stats.g.doubleclick.net", "pagead.l.google.com",
         "partnerad.l.google.com", "googleadservices.com", "googleads.g.doubleclick.net",
         "googleads.com", "googleadsserving.cn", "pagead-googlehosted.com",
+        "adssettings.google.com", "crashlyticsreports-pa.googleapis.com",
 
         // META / FACEBOOK TRACKING PIXELS & ADS ONLY (never block CDN/static/app domains)
         "connect.facebook.net", "pixel.facebook.com", "an.facebook.com",
-        "graph.facebook.com/tr", "fbevents.com",
+        "graph.facebook.com/tr", "fbevents.com", "b-api.facebook.com",
+        "dedicatedmedia.facebook.com", "fndows.facebook.com",
 
-        // AMAZON / CRITEO / TABOOLA / OUTBRAIN / ADS NETWORKS
+        // AMAZON / CRITEO / TABOOLA / OUTBRAIN / AD NETWORKS
         "amazon-adsystem.com", "aaxads.com", "mads.amazon.com", "assoc-amazon.com",
         "aax-eu.amazon-adsystem.com", "aax-us-east.amazon-adsystem.com",
         "amazon-adsystem.net", "amazonadvertising.com", "amazoncpm.com",
@@ -49,20 +51,36 @@ object AdBlockList {
         "adroll.com", "rubiconproject.com", "pubmatic.com", "openx.net", "appnexus.com",
         "ads.pinterest.com", "static.ads-twitter.com", "ads-api.twitter.com",
         "ads.tiktok.com", "analytics.tiktok.com", "clarity.ms",
+        "adnxs.com", "adform.net", "adcolony.com", "admob.com", "unityads.unity3d.com",
+        "applovin.com", "chartboost.com", "inmobi.com", "vungle.com", "ironsrc.com",
+        "moatads.com", "adsafeprotected.com", "doubleverify.com", "mediamath.com",
+        "bidswitch.net", "casalemedia.com", "spotxchange.com", "teads.tv", "sharethrough.com",
+        "33across.com", "liveintent.com", "magnetic.com", "smartadserver.com", "yieldmo.com",
 
         // TELEMETRY & USER TRACKING
         "mixpanel.com", "amplitude.com", "hotjar.com", "luckyorange.com",
-        "mouseflow.com", "optimizely.com", "crashlytics.com"
+        "mouseflow.com", "optimizely.com", "crashlytics.com", "segment.io",
+        "fullstory.com", "quantserve.com", "exelator.com", "agkn.com", "crwdcntrl.net",
+        "demdex.net", "omtrdc.net", "everesttech.net", "mathtag.com", "rlcdn.com",
+        "adsymptotic.com", "id5-sync.com", "adsco.re", "branch.io", "appsflyer.com",
+        "kochava.com", "singular.net", "tenjin.io", "adjust.com"
     )
 
     // ────────────────────────────────────────────────────────── Default Allowlist (Search & Core Infra)
+    // NOTE: never add a bare registrable domain here (e.g. "google.com") — the
+    // allowlist is consulted BEFORE ad rules in isBlocked(), and host matching is
+    // suffix-based, so "google.com" whitelisted adservice.google.com,
+    // analytics.google.com and every other Google ad/tracker subdomain.
     private val defaultAllowlist: Set<String> = setOf(
         // SEARCH ENGINES & SUGGESTIONS
         "duckduckgo.com", "html.duckduckgo.com", "links.duckduckgo.com", "lite.duckduckgo.com",
-        "google.com", "www.google.com", "encrypted.google.com", "gstatic.com", "apis.google.com",
+        "www.google.com", "encrypted.google.com", "gstatic.com", "apis.google.com",
         "brave.com", "search.brave.com", "cdn.search.brave.com",
-        "bing.com", "www.bing.com", "api.bing.com", "ssl.bing.com",
-        "yahoo.com", "search.yahoo.com", "r.search.yahoo.com",
+        "www.bing.com", "api.bing.com", "ssl.bing.com",
+        "search.yahoo.com", "r.search.yahoo.com",
+        "images.search.yahoo.com", "video.search.yahoo.com", "news.search.yahoo.com",
+        "qwant.com", "www.qwant.com", "api.qwant.com", "lite.qwant.com",
+        "marginalia.nu", "search.marginalia.nu", "api.marginalia.nu",
         "ecosia.org", "www.ecosia.org",
         "startpage.com", "www.startpage.com",
         "swisscows.com", "www.swisscows.com",
@@ -76,11 +94,16 @@ object AdBlockList {
         "freedns.controld.com", "doh.cleanbrowsing.org",
 
         // ESSENTIAL INFRASTRUCTURE, CDNs & SOCIAL PLATFORMS FOR WEBVIEWS
+        // NOTE: platform roots (facebook.com, x.com, reddit.com …) must NOT be
+        // allowlisted wholesale — the allowlist is consulted BEFORE ad rules and
+        // host matching is suffix-based, so "facebook.com" here silently whitelisted
+        // connect.facebook.net / an.facebook.com and made those static rules dead.
         "github.com", "raw.githubusercontent.com", "github.io",
         "jsdelivr.net", "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
         "wikipedia.org", "wikimedia.org", "cloudflare.com", "fastly.net", "akamaihd.net",
-        "fbcdn.net", "facebook.com", "web.facebook.com", "instagram.com", "cdninstagram.com",
-        "twimg.com", "twitter.com", "x.com", "reddit.com", "redditmedia.com"
+        "fbcdn.net", "web.facebook.com", "www.instagram.com", "cdninstagram.com",
+        "abs.twimg.com", "pbs.twimg.com", "www.twitter.com", "www.reddit.com",
+        "redditmedia.com", "preview.redd.it", "i.redd.it"
     )
 
     // ────────────────────────────────────────────────────────── Dynamic Indexes

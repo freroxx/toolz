@@ -42,8 +42,11 @@ object OffsetBasedPagination : PaginationStrategy {
             return when (engine) {
                 EngineId.BING -> "&first=$offset"
                 EngineId.YAHOO -> "&b=${offset + 1}"
+                // Qwant slot now resolves to Brave Search HTML (Qwant's own API is
+                // DataDome-walled) — Brave paginates with a plain offset param.
                 EngineId.QWANT -> "&offset=$offset"
                 EngineId.MARGINALIA -> "&page=${offset / 10 + 1}"
+                EngineId.DUCKDUCKGO -> "&s=$offset"
                 EngineId.META -> "" // META has no single offset — see NoPagination
             }
     }

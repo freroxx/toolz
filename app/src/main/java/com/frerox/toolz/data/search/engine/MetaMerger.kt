@@ -20,6 +20,9 @@ class MetaMerger @Inject constructor() {
 
     private data class Appearance(val engine: EngineId, val rank: Int)
 
+    /** Public wrapper so the ViewModel can reuse the same dedup normalization for load-more. */
+    fun canonical(url: String): String = canonicalUrl(url)
+
         fun merge(resultsByEngine: Map<EngineId, List<SearchResult>>): List<SearchResult> {
             val appearancesByUrl = mutableMapOf<String, MutableList<Appearance>>()
             val bestResultByUrl = mutableMapOf<String, SearchResult>()
@@ -78,7 +81,17 @@ class MetaMerger @Inject constructor() {
                 val dateBonus = if (result.date != null) 1.05 else 1.0
 
                 val total = rankScore * consensusBonus * snippetBonus * dateBonus
-                return Scored(result.copy(engines = engines.map { it.label }), total)
+
+                // Tag attribution: the result is labelled by the engine that ranked it
+                // HIGHEST, not the first engine in fan-out order — otherwise every
+                // deduped result inherits Yahoo's tag just because Yahoo is queried
+                // first. Ties break toward the engine with more appearances.
+                val bestAppearance = appearances.minWithOrNull(
+                    compareBy({ it.rank }, { -appearances.count { a -> a.engine == it.engine } })
+                ) ?: appearances.first()
+                val bestSource = bestAppearance.engine.label
+
+                return Scored(result.copy(engines = engines.map { it.label }, source = bestSource), total)
             }
 
             /**

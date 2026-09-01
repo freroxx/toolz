@@ -30,6 +30,7 @@ import com.frerox.toolz.data.search.QuickLinkEntry
 import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.data.search.WebSearchRepository
+import com.frerox.toolz.data.search.engine.MetaMerger
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -108,6 +109,9 @@ data class SearchQueryState(
     val isActive:         Boolean            = false,
     val category:         SearchCategory     = SearchCategory.ALL,
     val mathResult:       MathResult?        = null,
+    val searchDurationMs: Long?              = null,
+    /** Non-null when the result list is filtered down to a single domain ("site:"). */
+    val siteFilter:       String?            = null,
 )
 
 // ─── Combined UI state (backward-compat — remove once screens are fully migrated) ──
@@ -123,6 +127,8 @@ data class SearchUiState(
     val isActive:         Boolean            = false,
     val category:         SearchCategory     = SearchCategory.ALL,
     val mathResult:       MathResult?        = null,
+    val searchDurationMs: Long?              = null,
+    val siteFilter:       String?            = null,
 
     // Settings
     val adBlockEnabled:        Boolean      = true,
@@ -159,6 +165,7 @@ class SearchViewModel @Inject constructor(
     private val browserHistoryStore: BrowserHistoryStore,
     private val dnsEngine:         com.frerox.toolz.util.network.DnsEngine,
     private val offlineManager:    com.frerox.toolz.util.OfflineManager,
+    private val metaMerger:        MetaMerger,
 ) : ViewModel() {
 
     // ─── Offline state (cached as StateFlow for synchronous .value access) ───
@@ -190,6 +197,8 @@ class SearchViewModel @Inject constructor(
             isActive              = q.isActive,
             category              = q.category,
             mathResult            = q.mathResult,
+            searchDurationMs      = q.searchDurationMs,
+            siteFilter            = q.siteFilter,
             adBlockEnabled        = s.adBlockEnabled,
             dnsProvider           = s.dnsProvider,
             customDns             = s.customDns,
@@ -308,9 +317,17 @@ class SearchViewModel @Inject constructor(
         if (newQuery.length >= 2 && mathRes == null) {
             suggestionJob = viewModelScope.launch {
                 delay(280)
-                val suggestions = runCatching { repository.fetchSuggestions(newQuery) }
+                // Merge remote suggestions with matching local history so the user's own
+                // past searches surface immediately, before the network round-trip lands.
+                val localMatches = repository.history.first()
+                    .map { it.query }
+                    .filter { it.contains(newQuery, ignoreCase = true) && !it.equals(newQuery, ignoreCase = true) }
+                    .take(3)
+                val remote = runCatching { repository.fetchSuggestions(newQuery) }
                     .getOrDefault(emptyList())
-                _query.update { it.copy(suggestions = suggestions) }
+                _query.update {
+                    it.copy(suggestions = (localMatches + remote).distinctBy { s -> s.lowercase() }.take(8))
+                }
             }
         } else {
             _query.update { it.copy(suggestions = emptyList()) }
@@ -365,8 +382,9 @@ class SearchViewModel @Inject constructor(
                     isActive    = false,
                     error       = SearchError.Offline,
                     results     = emptyList(),
-                    suggestions = emptyList(),
-                    canLoadMore = false,
+                    suggestions     = emptyList(),
+                    canLoadMore     = false,
+                    searchDurationMs = null,
                 )
             }
             return
@@ -374,18 +392,20 @@ class SearchViewModel @Inject constructor(
 
         _query.update {
             it.copy(
-                query       = trimmed,
-                category    = category,
-                phase       = SearchPhase.Loading,
-                isActive    = false,
-                error       = null,
-                results     = emptyList(),
-                suggestions = emptyList(),
-                canLoadMore = false,
+                query            = trimmed,
+                category         = category,
+                phase            = SearchPhase.Loading,
+                isActive         = false,
+                error            = null,
+                results          = emptyList(),
+                suggestions      = emptyList(),
+                canLoadMore      = false,
+                searchDurationMs = null,
             )
         }
 
         searchJob = viewModelScope.launch {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
             if (!_settings.value.isIncognito) {
                 runCatching { repository.addHistory(trimmed) }
             }
@@ -393,6 +413,7 @@ class SearchViewModel @Inject constructor(
             runCatching { repository.search(trimmed, 0, category) }
                 .onSuccess { results ->
                     _engineHealth.value = repository.engineHealthSnapshot().mapKeys { it.key.name }
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
                     _query.update {
                         it.copy(
                             results     = results,
@@ -400,6 +421,7 @@ class SearchViewModel @Inject constructor(
                             // Pagination revamp: allow load-more for ALL categories including images/videos now that real HTML parsing is enabled with proper offset handling
                             canLoadMore = results.isNotEmpty() && results.size < 500,
                             error       = if (results.isEmpty()) SearchError.NoResults else null,
+                            searchDurationMs = elapsed,
                         )
                     }
                 }
@@ -416,6 +438,29 @@ class SearchViewModel @Inject constructor(
         if (q.isNotEmpty()) onSearch(q)
     }
 
+    // ─── Site filter ("show only results from this domain") ───────────────────
+
+    /** Filters the current result list down to a single host — local-only, instant, no new request. */
+    fun applySiteFilter(host: String) {
+        _query.update { it.copy(siteFilter = host.trim().removePrefix("www.")) }
+    }
+
+    fun clearSiteFilter() {
+        _query.update { it.copy(siteFilter = null) }
+    }
+
+    /** Distinct hosts across the current results, most frequent first — powers the quick filter chips. */
+    fun siteFilterCandidates(results: List<SearchResult>): List<String> =
+        results.asSequence()
+            .map { runCatching { java.net.URI(it.url).host?.removePrefix("www.") }.getOrNull() }
+            .filterNotNull()
+            .filter { it.isNotBlank() }
+            .groupBy { it }
+            .map { (host, urls) -> host to urls.size }
+            .sortedByDescending { it.second }
+            .take(4)
+            .map { it.first }
+
     // ─── Load More ────────────────────────────────────────────────────────────
 
     fun loadMore() {
@@ -431,13 +476,21 @@ class SearchViewModel @Inject constructor(
                     if (newResults.isEmpty()) {
                         _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
                     } else {
-                        val combined = (q.results + newResults).distinctBy { it.url }.take(500)
+                        // Canonical dedupe (not raw-URL): engines return the same page
+                        // with different tracking params across pages. MetaMerger's
+                        // canonicalUrl strips www/scheme/tracking params, so page-2
+                        // repeats of page-1 results collapse here too.
+                        val seen = q.results.mapTo(mutableSetOf()) { metaMerger.canonical(it.url) }
+                        val combined = (q.results + newResults)
+                            .filter { seen.add(metaMerger.canonical(it.url)) }
+                            .take(500)
                         _query.update {
                             it.copy(
                                 results     = combined,
                                 phase       = SearchPhase.Results,
-                                // Keep allowing load-more unless we hit the 500 cap or engine returned nothing
-                                canLoadMore = combined.size < 500,
+                                // Stop load-more when a page yields nothing new — avoids
+                                // hammering a drained engine with identical pages.
+                                canLoadMore = combined.size < 500 && combined.size > q.results.size,
                             )
                         }
                     }

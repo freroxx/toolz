@@ -14,19 +14,27 @@ package com.frerox.toolz.data.search.engine
  */
 enum class EngineId(val label: String) {
     YAHOO("Yahoo"),
+
+    /**
+     * Qwant slot. Live-verified 2026: Qwant's own API/HTML are DataDome-walled and
+     * unscrapable, so this slot resolves to **Brave Search** (independent,
+     * privacy-first index). The historical label is kept so persisted settings,
+     * META consensus badges, and engine-health tracking stay stable.
+     */
     QWANT("Qwant"),
     MARGINALIA("Marginalia"),
     BING("Bing"),
+    DUCKDUCKGO("DuckDuckGo"),
 
     /** Meta-search: fans out to every entry in [META_MEMBERS] and merges results. */
     META("Meta");
 
     companion object {
         /** Engines META queries and merges. Single source of truth for fan-out order. */
-        val META_MEMBERS: List<EngineId> = listOf(YAHOO, QWANT, MARGINALIA)
+        val META_MEMBERS: List<EngineId> = listOf(YAHOO, QWANT, MARGINALIA, DUCKDUCKGO, BING)
 
         /** All concrete (non-META) engines, in fallback-rotation order. */
-        val CONCRETE: List<EngineId> = listOf(YAHOO, QWANT, MARGINALIA, BING)
+        val CONCRETE: List<EngineId> = listOf(YAHOO, QWANT, MARGINALIA, BING, DUCKDUCKGO)
 
         /**
          * Parses a persisted settings string into an [EngineId].

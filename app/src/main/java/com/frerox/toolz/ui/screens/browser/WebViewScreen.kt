@@ -110,6 +110,10 @@ import java.io.File
 //  WebViewScreen
 // ══════════════════════════════════════════════════════════
 
+/** UA applied when the per-tab desktop-site toggle is on. */
+private const val DESKTOP_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebViewScreen(
@@ -129,6 +133,8 @@ fun WebViewScreen(
     // WebView state
     var webView: WebView? by remember { mutableStateOf(null) }
     var defaultUserAgent by remember { mutableStateOf<String?>(null) }
+    var lastAppliedDesktopMode by remember { mutableStateOf<Boolean?>(null) }
+    var renderedUaTarget by remember { mutableStateOf("") }
     var progress     by remember { mutableFloatStateOf(0f) }
     var isLoading    by remember { mutableStateOf(true) }
     var currentUrl   by remember { mutableStateOf(url) }
@@ -275,11 +281,19 @@ fun WebViewScreen(
                 webView?.let { viewModel.captureTabState(oldTabId, it) }
             }
             renderedTabId = tab.id
+            // Apply the tab's desktop-mode UA BEFORE any load/restore so the new tab's
+            // first request is never issued with the previous tab's user agent.
+            val defaultUa = defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(webView?.context ?: return@let)
+            val targetUa = if (tab.isDesktopMode) DESKTOP_USER_AGENT else defaultUa
+            webView?.settings?.userAgentString = targetUa
             val restored = webView?.let { viewModel.restoreTabState(tab.id, it) } == true
             if (restored) {
                 currentUrl = webView?.url ?: tab.url
                 pageTitle = webView?.title.orEmpty()
-            } else if (tab.url != currentUrl) {
+            } else if (oldTabId != tab.id) {
+                // Load unconditionally on an actual tab switch: a URL equality check
+                // silently skipped loading when two tabs shared the same URL (e.g. the
+                // new-tab page), leaving the previous tab's content on screen.
                 webView?.loadUrl(tab.url)
             }
         }
@@ -724,7 +738,12 @@ fun WebViewScreen(
                                     val popup = WebView(ctx).apply {
                                         settings.javaScriptEnabled = true
                                         settings.domStorageEnabled = true
-                                        webViewClient = object : WebViewClient() {
+                                        // Popup tabs must inherit the ad-block client too —
+                                        // a bare WebViewClient here silently bypassed blocking
+                                        // for every target=_blank navigation.
+                                        webViewClient = object : AdBlockWebViewClient(
+                                            adBlockEnabled = { currentAdBlockEnabled },
+                                        ) {
                                             override fun onPageStarted(popupView: WebView?, popupUrl: String?, favicon: Bitmap?) {
                                                 val destination = popupUrl?.takeIf { it.startsWith("http") } ?: return
                                                 val newTab = viewModel.addTab(destination, isPrivate = currentTabIsPrivate)
@@ -768,9 +787,7 @@ fun WebViewScreen(
                     },
                     update = { wv ->
                         wv.settings.apply {
-                            val targetUA = if (isDesktopMode) {
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-                            } else {
+                            val targetUA = if (isDesktopMode) DESKTOP_USER_AGENT else {
                                 defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(wv.context)
                             }
                             // Always ensure viewport settings match mode
@@ -779,8 +796,21 @@ fun WebViewScreen(
                             setSupportZoom(true)
                             builtInZoomControls = true
                             displayZoomControls = false
-                            if (targetUA != null && userAgentString != targetUA) {
+                            // Reload whenever the applied UA differs from the target OR when the
+                            // mode changed without a reload following it. Comparing UA strings
+                            // alone missed rapid toggles (the string already matched, so no
+                            // reload fired and the page kept the old layout).
+                            val uaChanged = targetUA.isNotEmpty() && userAgentString != targetUA
+                            if (uaChanged) {
                                 userAgentString = targetUA
+                                lastAppliedDesktopMode = isDesktopMode
+                                renderedUaTarget = targetUA
+                                wv.reload()
+                            } else if (lastAppliedDesktopMode != isDesktopMode) {
+                                // UA already matches (e.g. previous application completed) but the
+                                // page was never re-rendered for this mode — force the reload once.
+                                lastAppliedDesktopMode = isDesktopMode
+                                renderedUaTarget = targetUA
                                 wv.reload()
                             }
                             cacheMode = if (activeTab?.isPrivate == true) {

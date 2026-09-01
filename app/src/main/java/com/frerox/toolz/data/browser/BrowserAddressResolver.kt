@@ -61,6 +61,9 @@ object BrowserAddressResolver {
     }
 
     fun displayHost(url: String): String = runCatching {
+        // about:blank is Toolz's internal home/new-tab destination — never surface
+        // the scheme string in tabs UI or the address bar.
+        if (url.equals("about:blank", ignoreCase = true)) return "Home"
         Uri.parse(url).host?.removePrefix("www.") ?: url
     }.getOrDefault(url)
 }

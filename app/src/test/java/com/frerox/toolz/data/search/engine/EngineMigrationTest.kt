@@ -8,9 +8,9 @@ class EngineMigrationTest {
     @Test
     fun `removed legacy engines migrate to META`() {
         val legacyEngines = listOf(
-            "CUSTOM", "custom", "DUCKDUCKGO", "BRAVE", "GOOGLE", "STARTPAGE",
+            "CUSTOM", "custom", "BRAVE", "GOOGLE", "STARTPAGE",
             "ECOSIA", "SWISSCOWS", "MOJEEK", "PRESEARCH",
-            "duckduckgo", "brave", "google", "unknown_engine"
+            "brave", "google", "unknown_engine"
         )
 
         for (legacy in legacyEngines) {
@@ -25,6 +25,9 @@ class EngineMigrationTest {
         assertEquals(EngineId.QWANT, EngineId.fromString("QWANT"))
         assertEquals(EngineId.MARGINALIA, EngineId.fromString("MARGINALIA"))
         assertEquals(EngineId.BING, EngineId.fromString("BING"))
+        // DUCKDUCKGO was retired once, but is a maintained engine again.
+        assertEquals(EngineId.DUCKDUCKGO, EngineId.fromString("DUCKDUCKGO"))
+        assertEquals(EngineId.DUCKDUCKGO, EngineId.fromString("duckduckgo"))
         assertEquals(EngineId.META, EngineId.fromString("META"))
     }
 }

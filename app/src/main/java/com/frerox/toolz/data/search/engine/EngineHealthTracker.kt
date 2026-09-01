@@ -51,6 +51,9 @@ class EngineHealthTracker @Inject constructor() {
             when {
                 !isAvailable(engine) -> EngineHealth.COOLDOWN
                 stats.containsKey(engine) -> EngineHealth.OK
+                // Engine hasn't been tried yet this session — report OK rather than
+                // FAILING so a fresh install doesn't show every engine as dead.
+                cooldowns.isEmpty() -> EngineHealth.OK
                 else -> EngineHealth.FAILING
             }
         }

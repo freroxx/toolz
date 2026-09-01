@@ -9,158 +9,143 @@ import com.frerox.toolz.data.search.SearchCategory
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.data.search.engine.EngineId
 import com.frerox.toolz.data.search.pagination.OffsetBasedPagination
-import org.json.JSONObject
 import org.jsoup.nodes.Document
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Qwant-slot engine parser.
+ *
+ * Live-verified (2026): Qwant's own surfaces are unusable for scraping —
+ * api.qwant.com/v3 is behind a DataDome JS challenge (403 + captcha-delivery on
+ * every request, all header/UA variants) and www.qwant.com renders client-side
+ * behind the same wall. Rather than keep a dead slot in the META fan-out, this
+ * parser queries **Brave Search** — an independent, privacy-first index, unlike
+ * Yahoo/Bing — and labels results with [EngineId.QWANT]'s slot so engine
+ * settings, health tracking, and META consensus keep working unchanged.
+ */
 @Singleton
 class QwantParser @Inject constructor() : EngineParser {
     override val id = EngineId.QWANT
 
     override fun buildRequestUrls(query: String, offset: Int, category: SearchCategory, safeSearch: Boolean): List<String> {
-        val safeSearchParam = if (safeSearch) 1 else -1
         val offsetParam = OffsetBasedPagination.offsetParam(offset, id)
-        val endpoint = when (category) {
-            SearchCategory.IMAGES -> "images"
-            SearchCategory.NEWS -> "news"
-            SearchCategory.VIDEOS -> "videos"
-            SearchCategory.ALL -> "web"
-        }
-        val count = if (category == SearchCategory.IMAGES) 30 else 25
-        return listOf(
-            "https://api.qwant.com/v3/search/$endpoint?q=$query&count=$count$offsetParam&locale=en_US&device=desktop&safesearch=$safeSearchParam"
-        )
-    }
-
-    // The Qwant API always returns JSON — HTML parsing below is a defensive fallback
-    // in case the API endpoint is ever unreachable and the caller retries against
-    // the plain qwant.com HTML search page instead.
-    override fun looksLikeJson(body: String): Boolean = body.trimStart().startsWith("{")
-
-    override fun parseJson(body: String, category: SearchCategory, adBlockEnabled: Boolean): List<SearchResult> = try {
-        val root = JSONObject(body)
-        val data = root.optJSONObject("data") ?: root
-        val result = data.optJSONObject("result") ?: data
-        when (category) {
-            SearchCategory.IMAGES -> parseJsonItems(result, data, adBlockEnabled) { item, rank ->
-                val title = item.optString("title", "Image").ifBlank { "Image" }
-                val media = item.optString("media").takeIf { it.isNotBlank() }
-                    ?: item.optJSONObject("media")?.optString("url") ?: ""
-                val thumb = item.optString("thumbnail").takeIf { it.isNotBlank() } ?: item.optString("thumb")
-                val fallbackUrl = item.optString("url").takeIf { it.startsWith("http") } ?: ""
-                val target = media.takeIf { it.startsWith("http") } ?: fallbackUrl
-                if (target.isBlank() || !target.startsWith("http")) return@parseJsonItems null
-                if (adBlockEnabled && AdBlockList.isBlocked(target)) return@parseJsonItems null
-                SearchResult(
-                    title = title, snippet = "", url = target,
-                    displayUrl = ParserSupport.safeHost(target), source = id.label,
-                    imageUrl = (thumb ?: media).takeIf { it.startsWith("http") }, engineRank = rank,
-                )
-            }
-            SearchCategory.VIDEOS -> parseJsonItems(result, data, adBlockEnabled) { item, rank ->
-                val url = item.optString("url")
-                if (url.isBlank() || !url.startsWith("http")) return@parseJsonItems null
-                if (adBlockEnabled && AdBlockList.isBlocked(url)) return@parseJsonItems null
-                val title = item.optString("title").ifBlank { ParserSupport.safeHost(url) }
-                val desc = item.optString("desc").takeIf { it.isNotBlank() } ?: item.optString("description") ?: ""
-                val thumb = item.optString("thumbnail").takeIf { it.isNotBlank() } ?: item.optString("thumb")
-                SearchResult(
-                    title = title, snippet = desc, url = url,
-                    displayUrl = ParserSupport.safeHost(url), source = id.label,
-                    imageUrl = thumb?.takeIf { it.startsWith("http") }, engineRank = rank,
-                )
-            }
-            else -> parseWebOrNewsJson(root, data, result, adBlockEnabled)
-        }
-    } catch (e: Exception) {
-        android.util.Log.w("QwantParser", "JSON parse failed", e)
-        emptyList()
-    }
-
-    /** Runs [transform] over `result.items` (or `data.items` as a fallback shape), dropping nulls. */
-    private inline fun parseJsonItems(
-        result: JSONObject,
-        data: JSONObject,
-        adBlockEnabled: Boolean,
-        transform: (JSONObject, Int) -> SearchResult?,
-    ): List<SearchResult> {
-        val items = result.optJSONArray("items") ?: data.optJSONArray("items") ?: return emptyList()
-        val out = mutableListOf<SearchResult>()
-        for (i in 0 until items.length()) {
-            val item = items.optJSONObject(i) ?: continue
-            transform(item, i)?.let { out += it }
-        }
-        return out
-    }
-
-    private fun parseWebOrNewsJson(root: JSONObject, data: JSONObject, result: JSONObject, adBlockEnabled: Boolean): List<SearchResult> {
-        // Web/News responses nest items under items.main; some variants put them directly under items.
-        val mainArr = result.optJSONObject("items")?.optJSONArray("main")
-            ?: result.optJSONArray("items")
-            ?: data.optJSONArray("items")
-            ?: root.optJSONArray("items")
-            ?: return emptyList()
-
-        val results = mutableListOf<SearchResult>()
-        for (i in 0 until mainArr.length()) {
-            val item = mainArr.optJSONObject(i) ?: continue
-            val url = item.optString("url").takeIf { it.startsWith("http") } ?: item.optString("uri") ?: ""
-            if (url.isBlank() || !url.startsWith("http")) continue
-            if (adBlockEnabled && AdBlockList.isBlocked(url)) continue
-            val title = item.optString("title").takeIf { it.isNotBlank() } ?: item.optString("name") ?: ""
-            val desc = item.optString("desc").takeIf { it.isNotBlank() }
-                ?: item.optString("description").takeIf { it.isNotBlank() }
-                ?: item.optString("excerpt") ?: ""
-            val date = item.optString("date").takeIf { it.isNotBlank() } ?: item.optString("age").takeIf { it.isNotBlank() }
-            results += SearchResult(
-                title = title.ifBlank { ParserSupport.safeHost(url) },
-                snippet = desc, url = url,
-                displayUrl = ParserSupport.safeHost(url), source = id.label,
-                date = date, engineRank = i,
+        val safeParam = if (safeSearch) "&safesearch=strict" else ""
+        return when (category) {
+            SearchCategory.IMAGES -> listOf(
+                "https://search.brave.com/images?q=$query$offsetParam$safeParam",
+            )
+            SearchCategory.VIDEOS -> listOf(
+                "https://search.brave.com/videos?q=$query$offsetParam$safeParam",
+            )
+            SearchCategory.NEWS -> listOf(
+                "https://search.brave.com/news?q=$query$offsetParam$safeParam",
+            )
+            SearchCategory.ALL -> listOf(
+                "https://search.brave.com/search?q=$query$offsetParam$safeParam",
             )
         }
-        return results
     }
 
-    override fun parseHtml(doc: Document, category: SearchCategory, adBlockEnabled: Boolean): List<SearchResult> {
-        if (category == SearchCategory.IMAGES) return parseImagesHtml(doc, adBlockEnabled)
+    override fun parseHtml(doc: Document, category: SearchCategory, adBlockEnabled: Boolean): List<SearchResult> = when (category) {
+        SearchCategory.IMAGES -> parseImages(doc, adBlockEnabled)
+        SearchCategory.VIDEOS -> parseVideos(doc, adBlockEnabled)
+        SearchCategory.NEWS -> parseWeb(doc, adBlockEnabled)
+        SearchCategory.ALL -> parseWeb(doc, adBlockEnabled)
+    }
+
+    /**
+     * Brave's Svelte-rendered HTML keeps stable semantic classes across its CSS
+     * hash churn: `div.snippet[data-type="web"]` for web results, `.title` for
+     * the headline, `.snippet-description` / `.generic-snippet` for text.
+     */
+    private fun parseWeb(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
-        doc.select("[data-testid=result], .result, article, li.result").forEachIndexed { rank, el ->
+        doc.select("div.snippet[data-type=web]").forEachIndexed { rank, el ->
             val linkEl = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
             val cleanUrl = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
-            if (cleanUrl.contains("qwant.com")) return@forEachIndexed
+            if (cleanUrl.contains("search.brave.com") || cleanUrl.contains("brave.com/search")) return@forEachIndexed
             if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
-            val titleEl = el.select("a[href] h2, a[href] h3, h2, h3").firstOrNull() ?: linkEl
-            val (date, snippet) = ParserSupport.extractLeadingDate(
-                el.select("p, .result-snippet, .desc").firstOrNull()?.text()?.trim() ?: ""
-            )
+            val title = el.select(".title").firstOrNull()?.text()?.trim()
+                ?: linkEl.select("[class~=title]").firstOrNull()?.text()?.trim()
+                ?: return@forEachIndexed
+            val snippetText = el.select(".snippet-description, .generic-snippet, .description")
+                .firstOrNull()?.text()?.trim() ?: ""
+            val (date, cleanSnippet) = ParserSupport.extractLeadingDate(snippetText)
             results += SearchResult(
-                title = titleEl.text().trim().ifBlank { ParserSupport.safeHost(cleanUrl) },
-                snippet = snippet, url = cleanUrl,
-                displayUrl = ParserSupport.safeHost(cleanUrl), source = id.label,
-                date = date, engineRank = rank,
+                title = title,
+                snippet = cleanSnippet,
+                url = cleanUrl,
+                displayUrl = ParserSupport.safeHost(cleanUrl),
+                source = id.label,
+                date = date,
+                engineRank = rank,
             )
         }
         return results
     }
 
-    private fun parseImagesHtml(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
+    /**
+     * Live-verified (2026) Brave images markup: `button.image-result` tiles with
+     * `div.image-wrapper img` thumbnails whose src embeds the ORIGINAL image URL
+     * as a base64 path segment (`/aHR0...` = "http…" in base64) behind
+     * imgs.search.brave.com, `span.image-metadata-title` for the caption.
+     */
+    private fun parseImages(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
-        doc.select("div.image-item, a[data-testid=image-item], div[data-testid=image]").forEachIndexed { rank, el ->
-            val linkEl = el.select("a[href]").firstOrNull() ?: el.takeIf { it.tagName() == "a" } ?: return@forEachIndexed
-            val imgEl = el.select("img").firstOrNull()
-            val cleanUrl = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
-            if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
-            val imgSrc = imgEl?.attr("src")?.takeIf { it.startsWith("http") }
-                ?: imgEl?.attr("data-src")?.takeIf { it.startsWith("http") }
+        doc.select("button.image-result, .image-wrapper").forEachIndexed { rank, el ->
+            val imgEl = el.select("img").firstOrNull() ?: return@forEachIndexed
+            val thumbSrc = imgEl.absUrl("src").ifBlank { imgEl.attr("src") }
+            // Decode Brave's base64 thumb path to recover the full-size original.
+            val fullImage = ParserSupport.decodeBraveThumb(thumbSrc)
+            val displayImage = fullImage ?: thumbSrc.takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(displayImage)) return@forEachIndexed
+            val title = el.select(".image-metadata-title").firstOrNull()?.text()?.trim()
+                ?: imgEl.attr("alt").trim()
             results += SearchResult(
-                title = imgEl?.attr("alt")?.trim()?.ifBlank { "Image" } ?: "Image",
-                snippet = "", url = cleanUrl,
-                displayUrl = ParserSupport.safeHost(cleanUrl), source = id.label,
-                imageUrl = imgSrc, engineRank = rank,
+                title = title.ifBlank { "Image" },
+                snippet = "",
+                url = displayImage,
+                displayUrl = ParserSupport.safeHost(displayImage),
+                source = id.label,
+                imageUrl = displayImage,
+                engineRank = rank,
             )
         }
         return results
     }
+
+    /**
+     * Live-verified (2026) Brave videos markup: `div.snippet[data-type=videos]`
+     * blocks, each with a thumbnail anchor `a[href*=watch]` (containing the
+     * duration in `.duration`), and `div.title` + `.description` in the content
+     * section.
+     */
+    private fun parseVideos(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        doc.select("div.snippet[data-type=videos]").forEachIndexed { rank, el ->
+            val linkEl = el.select("a[href*=watch], a.result-content a, a[href]").firstOrNull() ?: return@forEachIndexed
+            val cleanUrl = linkEl.attr("href").takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(cleanUrl)) return@forEachIndexed
+            val title = el.select(".result-content .title, div.title").firstOrNull()?.text()?.trim()
+                ?: linkEl.attr("title").trim().ifBlank { return@forEachIndexed }
+            val duration = el.select(".duration").firstOrNull()?.text()?.trim().orEmpty()
+            // Thumbnail: base64-decoded Brave thumb if possible, else the raw src.
+            val thumbEl = el.select(".thumbnail img, img").firstOrNull()
+            val thumbSrc = thumbEl?.absUrl("src").ifBlankOrNull() ?: thumbEl?.attr("src")?.takeIf { it.startsWith("http") }
+            val thumb = thumbSrc?.let { ParserSupport.decodeBraveThumb(it) ?: it }
+            results += SearchResult(
+                title = title,
+                snippet = duration,
+                url = cleanUrl,
+                displayUrl = ParserSupport.safeHost(cleanUrl),
+                source = id.label,
+                imageUrl = thumb,
+                engineRank = rank,
+            )
+        }
+        return results
+    }
+
+    private fun String?.ifBlankOrNull(): String? = this?.takeIf { it.isNotBlank() }
 }

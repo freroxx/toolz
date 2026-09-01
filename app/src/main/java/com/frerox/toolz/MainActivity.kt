@@ -1051,11 +1051,20 @@ fun ToolzNavHost(
         composable(Screen.TabManagement.route) {
             TabManagementScreen(
                 onBack = { toolOnBack() },
-                onTabClick = { _, _ ->
-                    // The browser renderer is already below the tab overview. Returning to
-                    // it preserves the one-WebView session and avoids building a back stack
-                    // of duplicate browser destinations each time a tab is selected.
-                    navController.popBackStack()
+                onTabClick = { _, url ->
+                    // TabManagement can be reached from the browser renderer OR from the
+                    // search tool. Popping back only works in the first case — from the
+                    // search screen it would return the user to search with the tab
+                    // switched invisibly underneath (the "sometimes can't open tabs" bug).
+                    // Always route through the browser destination: navigating to an
+                    // equivalent Browser entry pops the chooser off the stack instead.
+                    val target = Screen.Browser.createRoute(url)
+                    if (!navController.popBackStack(route = target, inclusive = false)) {
+                        navController.navigate(target) {
+                            popUpTo(Screen.TabManagement.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
                 }
             )
         }

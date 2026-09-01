@@ -19,12 +19,14 @@ class EngineParserRegistry @Inject constructor(
     yahoo: YahooParser,
     qwant: QwantParser,
     marginalia: MarginaliaParser,
+    duckduckgo: DuckDuckGoParser,
 ) {
     private val parsers: Map<EngineId, EngineParser> = mapOf(
         EngineId.BING to bing,
         EngineId.YAHOO to yahoo,
         EngineId.QWANT to qwant,
         EngineId.MARGINALIA to marginalia,
+        EngineId.DUCKDUCKGO to duckduckgo,
     )
 
     /** Returns the parser for [engine], or null for [EngineId.META] (which has no parser of its own). */

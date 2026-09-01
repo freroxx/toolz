@@ -62,8 +62,7 @@ fun NextDnsSetupScreen(
                 onBack()
             }
             break
-        }
-    }
+        }    }
 
     Scaffold(
         topBar = {

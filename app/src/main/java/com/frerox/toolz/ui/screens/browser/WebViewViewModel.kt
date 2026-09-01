@@ -218,7 +218,11 @@ class WebViewViewModel @Inject constructor(
     fun updateTab(url: String? = null, title: String? = null, faviconUrl: String? = null, previewPath: String? = null, isDesktopMode: Boolean? = null) {
         val currentActiveId = tabManager.activeTabId.value
         if (currentActiveId != null) {
-            tabManager.updateTab(currentActiveId, url, title, faviconUrl, previewPath, isDesktopMode)
+            // about:blank is Toolz's internal home/new-tab destination, never a real page —
+            // never overwrite a tab's stored URL with it (doing so wiped tab titles/URLs in
+            // the tabs screen whenever the start page flashed through the WebView).
+            val sanitizedUrl = url?.takeIf { !it.equals("about:blank", ignoreCase = true) }
+            tabManager.updateTab(currentActiveId, sanitizedUrl, title, faviconUrl, previewPath, isDesktopMode)
         }
     }
 
@@ -327,6 +331,8 @@ class WebViewViewModel @Inject constructor(
         tabStateStore.restore(tabId, webView)
 
     fun recordPageVisit(url: String, title: String) {
+        // about:blank is the internal home page, not a browsable page — never record it.
+        if (url.equals("about:blank", ignoreCase = true)) return
         browserHistoryStore.record(url, title, tabManager.tabs.value.find { it.id == tabManager.activeTabId.value }?.isPrivate == true)
     }
 

@@ -22,6 +22,48 @@ object ParserSupport {
         raw
     }
 
+    /** Resolves HTML entities (&quot; &amp; &#39; etc.) so escaped JSON attributes become parseable. */
+    fun unescapeHtml(raw: String): String = try {
+        org.jsoup.parser.Parser.unescapeEntities(raw, false)
+    } catch (_: Exception) {
+        raw
+    }
+
+    /**
+     * Extracts a string field from a flat JSON blob without org.json — the Android
+     * org.json classes are stubs on the JVM unit-test path, so parsers stay
+     * testable by using this instead. Handles escaped quotes inside values.
+     */
+    fun jsonStringField(json: String, key: String): String? {
+        val match = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(json) ?: return null
+        return match.groupValues[1]
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+            .replace("\\/", "/")
+            .replace("\\u002f", "/")
+            .takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Brave Search proxies thumbnails through imgs.search.brave.com, embedding the
+     * original media URL as a base64 path segment starting with "aHR0" ("http").
+     * The segment contains literal "/" line-splitting separators that must be
+     * stripped before decoding. Returns null when the URL isn't a Brave thumb
+     * (callers keep the raw src).
+     */
+    fun decodeBraveThumb(src: String): String? {
+        val idx = src.indexOf("/aHR0")
+        if (idx == -1) return null
+        val b64 = ("aHR0" + src.substring(idx + 5)).replace("/", "").trimEnd('=')
+        val padded = b64 + "=".repeat((4 - b64.length % 4) % 4)
+        return try {
+            val decoded = String(java.util.Base64.getDecoder().decode(padded), Charsets.UTF_8)
+            decoded.takeIf { it.startsWith("http") && !it.contains("favicon") }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun safeHost(url: String): String = try {
         URI(url).host?.removePrefix("www.") ?: url
     } catch (_: Exception) {

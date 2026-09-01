@@ -37,7 +37,30 @@ class BingParser @Inject constructor() : EngineParser {
     }
 
     private fun parseImages(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
+        // Live-verified (2026): Bing image results embed a per-result JSON blob in
+        // the m="…" attribute of a.iusc elements, HTML-escaped in the raw source
+        // (&quot;). Extract those blobs from entity-unescaped HTML.
+        val unescaped = ParserSupport.unescapeHtml(doc.html())
+        val mBlobs = Regex("m=\"(\\{.*?\\})\"").findAll(unescaped)
         val results = mutableListOf<SearchResult>()
+        mBlobs.forEachIndexed { idx, m ->
+            val blob = m.groupValues[1]
+            val murl = ParserSupport.jsonStringField(blob, "murl")?.takeIf { it.startsWith("http") } ?: return@forEachIndexed
+            val purl = ParserSupport.jsonStringField(blob, "purl")?.takeIf { it.startsWith("http") } ?: murl
+            if (adBlockEnabled && AdBlockList.isBlocked(purl)) return@forEachIndexed
+            results += SearchResult(
+                title = ParserSupport.jsonStringField(blob, "t")?.ifBlank { null } ?: "Image",
+                snippet = "",
+                url = purl,
+                displayUrl = ParserSupport.safeHost(purl),
+                source = id.label,
+                imageUrl = ParserSupport.jsonStringField(blob, "turl")?.takeIf { it.startsWith("http") } ?: murl,
+                engineRank = idx,
+            )
+        }
+        if (results.isNotEmpty()) return results
+
+        // Legacy DOM selector pass as a safety net if the m-attribute format moves.
         doc.select("div.imgpt, div.dg_b, div.iuscp, li.dgControl_item, a.iusc").forEachIndexed { rank, el ->
             val linkEl = el.select("a[href]").firstOrNull() ?: el.takeIf { it.tagName() == "a" } ?: return@forEachIndexed
             val imgEl = el.select("img").firstOrNull()
@@ -46,7 +69,6 @@ class BingParser @Inject constructor() : EngineParser {
             val rawUrl = linkEl.attr("href")
             val cleanUrl = when {
                 rawUrl.contains("mediaurl=") -> ParserSupport.decodeUrl(rawUrl.substringAfter("mediaurl=").substringBefore("&"))
-                rawUrl.contains("murl\":\"") -> rawUrl.substringAfter("murl\":\"").substringBefore("\"")
                 rawUrl.startsWith("http") -> rawUrl
                 else -> return@forEachIndexed
             }
@@ -57,31 +79,6 @@ class BingParser @Inject constructor() : EngineParser {
                 title = title, snippet = "", url = cleanUrl,
                 displayUrl = ParserSupport.safeHost(cleanUrl), source = id.label,
                 imageUrl = imgSrc, engineRank = rank,
-            )
-        }
-        // Bing periodically changes its image-grid markup; when the selector-based pass
-        // yields nothing, fall back to scanning the raw HTML for the murl/turl/t JSON
-        // fields it embeds inline regardless of DOM structure.
-        if (results.isEmpty()) results += parseImagesFromEmbeddedJson(doc.html(), adBlockEnabled)
-        return results
-    }
-
-    private fun parseImagesFromEmbeddedJson(html: String, adBlockEnabled: Boolean): List<SearchResult> {
-        val murls = Regex("\"murl\":\"(.*?)\"").findAll(html).map { it.groupValues[1] }.toList()
-        val turls = Regex("\"turl\":\"(.*?)\"").findAll(html).map { it.groupValues[1] }.toList()
-        val titles = Regex("\"t\":\"(.*?)\"").findAll(html).map { it.groupValues[1] }.toList()
-
-        val results = mutableListOf<SearchResult>()
-        murls.forEachIndexed { idx, murl ->
-            val clean = ParserSupport.decodeUrl(murl.replace("\\u002f", "/"))
-            if (!clean.startsWith("http")) return@forEachIndexed
-            if (adBlockEnabled && AdBlockList.isBlocked(clean)) return@forEachIndexed
-            val thumb = turls.getOrNull(idx)?.replace("\\u002f", "/")
-            val title = titles.getOrNull(idx)?.replace("\\u002f", "/")?.takeIf { it.isNotBlank() } ?: "Image"
-            results += SearchResult(
-                title = title, snippet = "", url = clean,
-                displayUrl = ParserSupport.safeHost(clean), source = id.label,
-                imageUrl = thumb?.takeIf { it.startsWith("http") }, engineRank = idx,
             )
         }
         return results
@@ -107,7 +104,35 @@ class BingParser @Inject constructor() : EngineParser {
     }
 
     private fun parseVideos(doc: Document, adBlockEnabled: Boolean): List<SearchResult> {
+        // Live-verified (2026): Bing video results carry the same escaped m="…" JSON
+        // blobs as images — with murl = the real watch URL (youtube.com/…),
+        // vt = title, du = duration, thid = thumbnail id.
+        val unescaped = ParserSupport.unescapeHtml(doc.html())
+        val mBlobs = Regex("m=\"(\\{.*?\\})\"").findAll(unescaped)
         val results = mutableListOf<SearchResult>()
+        mBlobs.forEachIndexed { idx, m ->
+            val blob = m.groupValues[1]
+            val watchUrl = ParserSupport.jsonStringField(blob, "murl")?.takeIf { it.startsWith("http") }
+                ?: ParserSupport.jsonStringField(blob, "pgurl")?.takeIf { it.startsWith("http") }
+                ?: return@forEachIndexed
+            if (adBlockEnabled && AdBlockList.isBlocked(watchUrl)) return@forEachIndexed
+            val title = ParserSupport.jsonStringField(blob, "vt") ?: ParserSupport.safeHost(watchUrl)
+            val thumbId = ParserSupport.jsonStringField(blob, "thid")
+            val thumb = thumbId?.let { "https://ts4.mm.bing.net/th?id=$it&w=480&h=360" }
+            val duration = ParserSupport.jsonStringField(blob, "du")
+            results += SearchResult(
+                title = title,
+                snippet = duration ?: "",
+                url = watchUrl,
+                displayUrl = ParserSupport.safeHost(watchUrl),
+                source = id.label,
+                imageUrl = thumb,
+                engineRank = idx,
+            )
+        }
+        if (results.isNotEmpty()) return results
+
+        // Legacy DOM selector pass as a safety net.
         doc.select("li.dg_u, div.mc_vtvc, div.dg_b, div.vr_card").forEachIndexed { rank, el ->
             val linkEl = el.select("a[href]").firstOrNull() ?: return@forEachIndexed
             val titleEl = el.select(".mc_vtvc_title, .tl, .tilte, h3").firstOrNull() ?: return@forEachIndexed
