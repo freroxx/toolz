@@ -55,7 +55,7 @@ object ToolShortcutDefinitions {
             shortLabelRes = R.string.st_Tool_Search,
             descriptionRes = R.string.st_Tool_Search_Desc,
             iconRes = R.drawable.ic_shortcut_search,
-            route = Screen.Search.route,
+            route = Screen.Search.homeRoute,
             rank = 6
         ),
         ToolShortcutDef(

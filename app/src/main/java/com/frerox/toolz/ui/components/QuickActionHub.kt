@@ -77,7 +77,7 @@ fun QuickActionHub(
                 clickableItem(
                     onClick = { 
                         vibrationManager?.vibrateClick()
-                        onNavigate(Screen.Search.route) 
+                        onNavigate(Screen.Search.homeRoute)
                     },
                     icon = { Icon(Icons.Rounded.Search, "Search") },
                     label = "SEARCH"

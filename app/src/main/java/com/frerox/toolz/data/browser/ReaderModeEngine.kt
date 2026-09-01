@@ -12,8 +12,11 @@ import javax.inject.Singleton
 class ReaderModeEngine @Inject constructor() {
     fun extractReadable(html: String, baseUrl: String): String {
         val doc = Jsoup.parse(html, baseUrl)
-        doc.select("script,style,nav,footer,header,aside,.ads,.sidebar,#cookie-banner,.ad-container").remove()
-        val article = doc.select("article,main,.content,.post-content,#content,.article-body").firstOrNull() ?: doc.body()
-        return article?.text()?.take(10000) ?: ""
+        doc.select("script,style,nav,footer,header,aside,.ads,.sidebar,#cookie-banner,.ad-container,.comments,.share").remove()
+        val article = doc.select("article,main,.content,.post-content,#content,.article-body,.entry-content").firstOrNull() ?: doc.body()
+        val htmlFragment = article?.html() ?: ""
+        return BrowserReaderExtractor.htmlToMarkdown(htmlFragment).take(15000).ifBlank { article?.text()?.take(10000) ?: "" }
     }
+
+    fun htmlToMarkdown(html: String): String = BrowserReaderExtractor.htmlToMarkdown(html)
 }

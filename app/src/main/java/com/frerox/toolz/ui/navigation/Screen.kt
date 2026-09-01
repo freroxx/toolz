@@ -99,7 +99,11 @@ sealed class Screen(val route: String) {
     object DeviceInfo : Screen("device_info")
     object NetworkPowerSuite : Screen("network_power_suite")
     object WifiTweaks : Screen("wifi_tweaks")
-    object Search : Screen("search")
+    object Search : Screen("search?query={query}") {
+        val homeRoute: String = "search"
+        fun createRoute(query: String? = null) = if (query.isNullOrBlank()) "search" else "search?query=${java.net.URLEncoder.encode(query, "UTF-8")}"
+    }
+    object SitePermissions : Screen("site_permissions")
     object AdBlockConfig : Screen("ad_block_settings")
     object NextDnsSetup : Screen("next_dns_setup?url={url}") {
         fun createRoute(url: String) = "next_dns_setup?url=${java.net.URLEncoder.encode(url, "UTF-8")}"

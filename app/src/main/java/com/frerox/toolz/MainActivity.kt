@@ -1005,12 +1005,20 @@ fun ToolzNavHost(
             StopwatchScreen(viewModel = hiltViewModel(), onBack = { toolOnBack() })
         }
 
-        composable(Screen.Search.route) {
+        composable(
+            route = Screen.Search.route,
+            arguments = listOf(navArgument("query") { type = NavType.StringType; nullable = true; defaultValue = null })
+        ) { backStackEntry ->
+            val rawQuery = backStackEntry.arguments?.getString("query")
+            val initialQuery = rawQuery?.let { java.net.URLDecoder.decode(it, "UTF-8") }
             SearchScreen(
+                initialQuery = initialQuery,
                 onBackClick = { toolOnBack() },
                 onResultClick = { url ->
                     if (url == Screen.AdBlockConfig.route) {
                         navController.navigate(Screen.AdBlockConfig.route)
+                    } else if (url == Screen.SitePermissions.route) {
+                        navController.navigate(Screen.SitePermissions.route)
                     } else {
                         navController.navigate(Screen.Browser.createRoute(url))
                     }
@@ -1063,6 +1071,9 @@ fun ToolzNavHost(
                 url = decodedUrl,
                 onBack = { toolOnBack() },
                 onManageTabs = { navController.navigate(Screen.TabManagement.route) },
+                onNavigateToSearch = { query ->
+                    navController.navigate(Screen.Search.createRoute(query))
+                },
                 onNavigateToPdf = { uri, title ->
                     pdfViewModel.openPdf(Uri.parse(uri), title)
                     navController.navigate(Screen.PdfReader.route)
@@ -1070,6 +1081,12 @@ fun ToolzNavHost(
                 onNavigateToMusic = { tab ->
                     navController.navigate(Screen.MusicPlayer.createRoute(tab))
                 }
+            )
+        }
+
+        composable(Screen.SitePermissions.route) {
+            com.frerox.toolz.ui.screens.browser.SitePermissionsScreen(
+                onBack = { toolOnBack() }
             )
         }
         composable(Screen.WorldClock.route) {

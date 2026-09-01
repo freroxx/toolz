@@ -37,7 +37,8 @@ fun SearchOptionsSheet(
     showGreetingCard: Boolean,
     onGreetingCardToggle: (Boolean) -> Unit,
     onPresetSelect: (String) -> Unit = {},
-    onCustomizeAdBlock: () -> Unit = {}
+    onCustomizeAdBlock: () -> Unit = {},
+    onSitePermissionsClick: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -176,6 +177,31 @@ fun SearchOptionsSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("DNS provider", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                         Text(currentDns.lowercase().replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                onClick = onSitePermissionsClick,
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Security, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Site permissions", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text("Camera, mic, notifications, location", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                 }

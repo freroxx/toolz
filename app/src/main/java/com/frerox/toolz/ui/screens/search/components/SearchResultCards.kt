@@ -81,6 +81,10 @@ private val KnownSourceColors: Map<String, Color> = mapOf(
     "ECOSIA" to Color(0xFF2B8A2B),
     "SWISSCOWS" to Color(0xFFD9253E),
     "STARTPAGE" to Color(0xFF3F4EAE),
+    "YAHOO" to Color(0xFF5F01D1),
+    "QWANT" to Color(0xFFF75708),
+    "MARGINALIA" to Color(0xFF4C7A2E),
+    "META" to Color(0xFF6750A4),
 )
 
 private val KnownSourceLabels: Map<String, String> = mapOf(
@@ -93,6 +97,10 @@ private val KnownSourceLabels: Map<String, String> = mapOf(
     "SWISSCOWS" to "Swisscows",
     "STARTPAGE" to "Startpage",
     "WEB" to "Web",
+    "YAHOO" to "Yahoo",
+    "QWANT" to "Qwant",
+    "MARGINALIA" to "Marginalia",
+    "META" to "Meta",
 )
 
 @Composable
@@ -371,7 +379,7 @@ fun NativeImageCard(
                     modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                 ) {
                     Text(
-                        text = result.source.ifBlank { "Web" },
+                        text = sourceLabel(result.source).ifBlank { "Web" },
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -485,7 +493,7 @@ fun NativeVideoCard(
                     Text(result.displayUrl, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     Surface(shape = RoundedCornerShape(8.dp), color = accentColor.copy(alpha = 0.15f)) {
                         Text(
-                            text = result.source.ifBlank { "Video" },
+                            text = sourceLabel(result.source).ifBlank { "Video" },
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             fontWeight = FontWeight.Bold,
                             color = accentColor,

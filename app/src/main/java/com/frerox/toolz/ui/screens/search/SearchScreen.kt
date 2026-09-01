@@ -62,11 +62,18 @@ import java.util.Calendar
 
 @Composable
 fun SearchScreen(
+    initialQuery: String? = null,
     onBackClick: () -> Unit,
     onResultClick: (url: String) -> Unit,
     onManageTabs: () -> Unit,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
+    LaunchedEffect(initialQuery) {
+        if (!initialQuery.isNullOrBlank()) {
+            viewModel.onQueryChange(initialQuery)
+            viewModel.onSearch(initialQuery)
+        }
+    }
     val uiState          by viewModel.uiState.collectAsState()
     val history          by viewModel.history.collectAsState(initial = emptyList())
     val bookmarks        by viewModel.bookmarks.collectAsState(initial = emptyList())
@@ -116,6 +123,10 @@ fun SearchScreen(
             onCustomizeAdBlock = {
                 showSearchOptions = false
                 onResultClick(com.frerox.toolz.ui.navigation.Screen.AdBlockConfig.route)
+            },
+            onSitePermissionsClick = {
+                showSearchOptions = false
+                onResultClick(com.frerox.toolz.ui.navigation.Screen.SitePermissions.route)
             }
         )
     }
@@ -678,7 +689,15 @@ private fun HomePage(
     onSeeAllBookmarks: () -> Unit,
     onSearch: (String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
+    // Entering the tool (or returning from results to home) always lands at the top.
+    LaunchedEffect(uiState.phase) {
+        if (uiState.phase == SearchPhase.Idle) listState.scrollToItem(0)
+    }
+
     LazyColumn(
+        state           = listState,
         modifier        = Modifier
             .fillMaxSize()
             .fadingEdges(),

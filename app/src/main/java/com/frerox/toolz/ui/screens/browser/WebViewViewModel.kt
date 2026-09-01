@@ -348,8 +348,13 @@ class WebViewViewModel @Inject constructor(
     }
 
     fun sitePermission(origin: String): BrowserSitePermission = sitePermissionStore.decision(origin)
+    fun sitePermission(origin: String, type: com.frerox.toolz.data.browser.BrowserPermissionType): BrowserSitePermission = sitePermissionStore.decisionFor(origin, type)
     fun setSitePermission(origin: String, decision: BrowserSitePermission) = sitePermissionStore.setDecision(origin, decision)
+    fun setSitePermission(origin: String, type: com.frerox.toolz.data.browser.BrowserPermissionType, decision: BrowserSitePermission) = sitePermissionStore.setDecisionFor(origin, type, decision)
     fun resetSitePermission(origin: String) = sitePermissionStore.clear(origin)
+    fun clearAllSitePermissions() = sitePermissionStore.clearAll()
+    fun getAllSitePermissions(): Map<String, Map<com.frerox.toolz.data.browser.BrowserPermissionType, BrowserSitePermission>> = sitePermissionStore.getAllPermissions()
+    fun getPermissionsForOrigin(origin: String): Map<com.frerox.toolz.data.browser.BrowserPermissionType, BrowserSitePermission> = sitePermissionStore.getPermissionsForOrigin(origin)
 
     fun checkBookmark(url: String) {
         viewModelScope.launch {

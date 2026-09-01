@@ -118,8 +118,7 @@ fun WebViewScreen(
     onManageTabs: () -> Unit,
     onNavigateToPdf: (String, String) -> Unit = { _, _ -> },
     onNavigateToMusic: (Int) -> Unit = { _ -> },
-    // NEW: navigate to SearchScreen and auto-open keyboard
-    onNavigateToSearch: () -> Unit = onBack,
+    onNavigateToSearch: (String) -> Unit = { _ -> onBack() },
     viewModel: WebViewViewModel = hiltViewModel(),
 ) {
     val activity    = LocalContext.current as AppCompatActivity
@@ -154,10 +153,14 @@ fun WebViewScreen(
     var pendingWebPermissionOrigin by remember { mutableStateOf<String?>(null) }
     var fullscreenContent by remember { mutableStateOf<View?>(null) }
     var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var permVersion by remember { mutableIntStateOf(0) }
     val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         pendingFileSelection?.onReceiveValue(uris.toTypedArray())
         pendingFileSelection = null
     }
+    var pendingGeolocationOrigin by remember { mutableStateOf<String?>(null) }
+    var pendingGeolocationCallback by remember { mutableStateOf<android.webkit.GeolocationPermissions.Callback?>(null) }
+
     val webPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         val request = pendingWebPermission
         if (request != null) {
@@ -169,13 +172,60 @@ fun WebViewScreen(
                 }
             }.toTypedArray()
             if (approved.isNotEmpty()) request.grant(approved) else request.deny()
-            viewModel.setSitePermission(
-                pendingWebPermissionOrigin.orEmpty(),
-                if (approved.isNotEmpty()) BrowserSitePermission.ALLOW else BrowserSitePermission.ASK,
-            )
+            // Persist per-type decisions
+            val origin = pendingWebPermissionOrigin.orEmpty()
+            request.resources.forEach { res ->
+                val type = when (res) {
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                    else -> null
+                }
+                if (type != null) {
+                    val granted = when (type) {
+                        com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA -> grants[Manifest.permission.CAMERA] == true
+                        com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE -> grants[Manifest.permission.RECORD_AUDIO] == true
+                        else -> false
+                    }
+                    viewModel.setSitePermission(origin, type, if (granted) BrowserSitePermission.ALLOW else BrowserSitePermission.DENY)
+                }
+            }
+            if (approved.isEmpty()) {
+                // If none approved, keep as DENY for asked types
+                request.resources.forEach { res ->
+                    val type = when (res) {
+                        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA
+                        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                        else -> null
+                    }
+                    if (type != null) viewModel.setSitePermission(origin, type, BrowserSitePermission.DENY)
+                }
+            }
+            permVersion++
         }
         pendingWebPermission = null
         pendingWebPermissionOrigin = null
+    }
+
+    val geolocationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val origin = pendingGeolocationOrigin
+        val callback = pendingGeolocationCallback
+        if (origin != null && callback != null) {
+            val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true || grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            callback.invoke(origin, granted, false)
+            viewModel.setSitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION, if (granted) BrowserSitePermission.ALLOW else BrowserSitePermission.DENY)
+            permVersion++
+        }
+        pendingGeolocationOrigin = null
+        pendingGeolocationCallback = null
+    }
+
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val origin = pendingGeolocationOrigin // reuse for notification? Actually separate
+        if (origin != null) {
+            viewModel.setSitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.NOTIFICATION, if (granted) BrowserSitePermission.ALLOW else BrowserSitePermission.DENY)
+            permVersion++
+        }
+        pendingGeolocationOrigin = null
     }
 
     // Pull to refresh
@@ -241,24 +291,7 @@ fun WebViewScreen(
     }
 
     // Dynamic Desktop Mode toggle handler
-    LaunchedEffect(isDesktopMode) {
-        webView?.let { wv ->
-            val targetUa = if (isDesktopMode) {
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            } else {
-                defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(wv.context)
-            }
-            wv.settings.apply {
-                userAgentString = targetUa
-                useWideViewPort = isDesktopMode
-                loadWithOverviewMode = isDesktopMode
-                setSupportZoom(true)
-                builtInZoomControls = true
-                displayZoomControls = false
-            }
-            wv.reload()
-        }
-    }
+    // Desktop mode is handled in AndroidView update block to avoid double-reload race
 
     // ── Root layout ───────────────────────────────────────────────────────────
     Box(modifier = Modifier.fillMaxSize()) {
@@ -356,7 +389,9 @@ fun WebViewScreen(
                     }
                 },
                 onClearBrowsingData = { showClearDataDialog = true },
-                onResetSitePermissions = { viewModel.resetSitePermission(safeHostFromUrl(currentUrl)) },
+                onResetSitePermissions = { viewModel.resetSitePermission(safeHostFromUrl(currentUrl)); permVersion++ },
+                sitePermissions = remember(currentUrl, permVersion) { viewModel.getPermissionsForOrigin(currentUrl) },
+                onRevokePermission = { type -> viewModel.setSitePermission(currentUrl, type, BrowserSitePermission.ASK); permVersion++ },
             )
 
             // WebView with Pull-to-Refresh
@@ -396,6 +431,7 @@ fun WebViewScreen(
                                 allowContentAccess      = true
                                 allowFileAccess         = false
                                 databaseEnabled         = true
+                                setGeolocationEnabled(true)
                                 // Convert target=_blank/pop-up navigation into Toolz tabs.
                                 setSupportMultipleWindows(true)
                                 javaScriptCanOpenWindowsAutomatically = false
@@ -596,22 +632,26 @@ fun WebViewScreen(
                                     if (request == null || supported.isEmpty()) {
                                         request?.deny()
                                     } else {
-                                        when (viewModel.sitePermission(origin)) {
-                                            BrowserSitePermission.DENY -> request.deny()
-                                            BrowserSitePermission.ALLOW -> {
-                                                val allGranted = supported.all { resource ->
-                                                    val permission = if (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE) Manifest.permission.CAMERA else Manifest.permission.RECORD_AUDIO
-                                                    ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-                                                }
-                                                if (allGranted) request.grant(supported.toTypedArray()) else {
-                                                    pendingWebPermission = request
-                                                    pendingWebPermissionOrigin = origin
-                                                }
-                                            }
-                                            BrowserSitePermission.ASK -> {
-                                                pendingWebPermission = request
-                                                pendingWebPermissionOrigin = origin
-                                            }
+                                        // Check per-type stored permission
+                                        val anyDenied = supported.any { res ->
+                                            val type = if (res == PermissionRequest.RESOURCE_VIDEO_CAPTURE) com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA else com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                                            viewModel.sitePermission(origin, type) == BrowserSitePermission.DENY
+                                        }
+                                        if (anyDenied) {
+                                            request.deny()
+                                            return
+                                        }
+                                        val allAllowedAndGranted = supported.all { resource ->
+                                            val type = if (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE) com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA else com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                                            val stored = viewModel.sitePermission(origin, type)
+                                            val androidGranted = ContextCompat.checkSelfPermission(context, if (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE) Manifest.permission.CAMERA else Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                            stored == BrowserSitePermission.ALLOW && androidGranted
+                                        }
+                                        if (allAllowedAndGranted) {
+                                            request.grant(supported.toTypedArray())
+                                        } else {
+                                            pendingWebPermission = request
+                                            pendingWebPermissionOrigin = origin
                                         }
                                     }
                                 }
@@ -619,6 +659,42 @@ fun WebViewScreen(
                                 override fun onPermissionRequestCanceled(request: PermissionRequest?) {
                                     if (pendingWebPermission == request) pendingWebPermission = null
                                     pendingWebPermissionOrigin = null
+                                }
+
+                                override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: android.webkit.GeolocationPermissions.Callback?) {
+                                    if (origin == null || callback == null) return
+                                    val stored = viewModel.sitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION)
+                                    when (stored) {
+                                        BrowserSitePermission.ALLOW -> {
+                                            val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                            if (granted) callback.invoke(origin, true, false) else {
+                                                pendingGeolocationOrigin = origin
+                                                pendingGeolocationCallback = callback
+                                                geolocationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                                            }
+                                        }
+                                        BrowserSitePermission.DENY -> callback.invoke(origin, false, false)
+                                        BrowserSitePermission.ASK -> {
+                                            pendingGeolocationOrigin = origin
+                                            pendingGeolocationCallback = callback
+                                            // Show dialog via state: we reuse pendingWebPermission dialog? Instead trigger via UI state below
+                                            // For now, directly show system permission request if needed, else show custom dialog via pendingGeolocation
+                                            // We'll rely on UI dialog for geolocation handled below in the pendingGeolocation UI
+                                            // To trigger UI, we keep callback pending and show dialog
+                                            // If Android permission not granted, request it first
+                                            val needsAndroid = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                                            if (needsAndroid) {
+                                                geolocationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                                            } else {
+                                                // Keep pending for UI dialog — will be handled in composable state
+                                            }
+                                        }
+                                    }
+                                }
+
+                                override fun onGeolocationPermissionsHidePrompt() {
+                                    pendingGeolocationOrigin = null
+                                    pendingGeolocationCallback = null
                                 }
 
                                 override fun onShowFileChooser(
@@ -691,19 +767,20 @@ fun WebViewScreen(
                         }
                     },
                     update = { wv ->
-                        // Desktop Mode handling
                         wv.settings.apply {
                             val targetUA = if (isDesktopMode) {
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
                             } else {
-                                defaultUserAgent
+                                defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(wv.context)
                             }
-
+                            // Always ensure viewport settings match mode
+                            useWideViewPort = isDesktopMode
+                            loadWithOverviewMode = isDesktopMode
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
                             if (targetUA != null && userAgentString != targetUA) {
                                 userAgentString = targetUA
-                                useWideViewPort = isDesktopMode
-                                loadWithOverviewMode = isDesktopMode
-                                setSupportZoom(true)
                                 wv.reload()
                             }
                             cacheMode = if (activeTab?.isPrivate == true) {
@@ -738,10 +815,15 @@ fun WebViewScreen(
                 readingList = readingList,
                 onFocusAddress = { showSearchOverlay = true },
                 onOpenUrl = { raw ->
-                    viewModel.resolveAddress(raw) { target ->
-                        webView?.loadUrl(target)
-                        currentUrl = target
-                        viewModel.updateTab(url = target)
+                    when (val dest = BrowserAddressResolver.resolveDestination(raw)) {
+                        is com.frerox.toolz.data.browser.AddressDestination.DirectUrl -> {
+                            viewModel.resolveAddress(raw) { target ->
+                                webView?.loadUrl(target)
+                                currentUrl = target
+                                viewModel.updateTab(url = target)
+                            }
+                        }
+                        is com.frerox.toolz.data.browser.AddressDestination.SearchQuery -> onNavigateToSearch(dest.query)
                     }
                 },
                 onNewPrivateTab = {
@@ -833,10 +915,17 @@ fun WebViewScreen(
                         onQueryChange = { searchOverlayQuery = it },
                         onSearch = { q ->
                             showSearchOverlay = false
-                            viewModel.resolveAddress(q) { target ->
-                                webView?.loadUrl(target)
-                                currentUrl = target
-                                viewModel.updateTab(url = target)
+                            when (val dest = BrowserAddressResolver.resolveDestination(q)) {
+                                is com.frerox.toolz.data.browser.AddressDestination.DirectUrl -> {
+                                    viewModel.resolveAddress(q) { target ->
+                                        webView?.loadUrl(target)
+                                        currentUrl = target
+                                        viewModel.updateTab(url = target)
+                                    }
+                                }
+                                is com.frerox.toolz.data.browser.AddressDestination.SearchQuery -> {
+                                    onNavigateToSearch(dest.query)
+                                }
                             }
                         },
                         active = true,
@@ -1037,7 +1126,16 @@ fun WebViewScreen(
             AlertDialog(
                 onDismissRequest = {
                     request.deny()
-                    viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.DENY)
+                    val origin = pendingWebPermissionOrigin.orEmpty()
+                    request.resources.forEach { res ->
+                        val type = when (res) {
+                            PermissionRequest.RESOURCE_VIDEO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA
+                            PermissionRequest.RESOURCE_AUDIO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                            else -> null
+                        }
+                        if (type != null) viewModel.setSitePermission(origin, type, BrowserSitePermission.DENY)
+                    }
+                    permVersion++
                     pendingWebPermission = null
                     pendingWebPermissionOrigin = null
                 },
@@ -1061,7 +1159,16 @@ fun WebViewScreen(
                             request.grant(request.resources.filter {
                                 it == PermissionRequest.RESOURCE_VIDEO_CAPTURE || it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
                             }.toTypedArray())
-                            viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.ALLOW)
+                            val origin = pendingWebPermissionOrigin.orEmpty()
+                            request.resources.forEach { res ->
+                                val type = when (res) {
+                                    PermissionRequest.RESOURCE_VIDEO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA
+                                    PermissionRequest.RESOURCE_AUDIO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                                    else -> null
+                                }
+                                if (type != null) viewModel.setSitePermission(origin, type, BrowserSitePermission.ALLOW)
+                            }
+                            permVersion++
                             pendingWebPermission = null
                             pendingWebPermissionOrigin = null
                         } else {
@@ -1071,10 +1178,58 @@ fun WebViewScreen(
                 },
                 dismissButton = { TextButton(onClick = {
                     request.deny()
-                    viewModel.setSitePermission(pendingWebPermissionOrigin.orEmpty(), BrowserSitePermission.DENY)
+                    val origin = pendingWebPermissionOrigin.orEmpty()
+                    request.resources.forEach { res ->
+                        val type = when (res) {
+                            PermissionRequest.RESOURCE_VIDEO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA
+                            PermissionRequest.RESOURCE_AUDIO_CAPTURE -> com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE
+                            else -> null
+                        }
+                        if (type != null) viewModel.setSitePermission(origin, type, BrowserSitePermission.DENY)
+                    }
+                    permVersion++
                     pendingWebPermission = null
                     pendingWebPermissionOrigin = null
                 }) { Text("Block site") } },
+            )
+        }
+
+        pendingGeolocationCallback?.let { callback ->
+            val origin = pendingGeolocationOrigin.orEmpty()
+            AlertDialog(
+                onDismissRequest = {
+                    callback.invoke(origin, false, false)
+                    viewModel.setSitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION, BrowserSitePermission.DENY)
+                    permVersion++
+                    pendingGeolocationCallback = null
+                    pendingGeolocationOrigin = null
+                },
+                icon = { Icon(Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text("Allow location access?") },
+                text = { Text("${safeHostFromUrl(origin.ifBlank { currentUrl })} wants to know your location.") },
+                confirmButton = {
+                    Button(onClick = {
+                        val needsAndroid = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                        if (needsAndroid) {
+                            geolocationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        } else {
+                            callback.invoke(origin, true, false)
+                            viewModel.setSitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION, BrowserSitePermission.ALLOW)
+                            permVersion++
+                            pendingGeolocationCallback = null
+                            pendingGeolocationOrigin = null
+                        }
+                    }) { Text("Allow") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        callback.invoke(origin, false, false)
+                        viewModel.setSitePermission(origin, com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION, BrowserSitePermission.DENY)
+                        permVersion++
+                        pendingGeolocationCallback = null
+                        pendingGeolocationOrigin = null
+                    }) { Text("Block") }
+                }
             )
         }
 
@@ -1170,6 +1325,8 @@ private fun TopChrome(
     onClearBrowsingData: () -> Unit,
     onResetSitePermissions: () -> Unit,
     downloads: List<com.frerox.toolz.data.browser.DownloadItem> = emptyList(),
+    sitePermissions: Map<com.frerox.toolz.data.browser.BrowserPermissionType, BrowserSitePermission> = emptyMap(),
+    onRevokePermission: (com.frerox.toolz.data.browser.BrowserPermissionType) -> Unit = {},
 ) {
     var showOptions by remember { mutableStateOf(false) }
     var showSiteControls by remember { mutableStateOf(false) }
@@ -1403,6 +1560,9 @@ private fun TopChrome(
             isDesktopMode = isDesktopMode,
             adBlockEnabled = adBlockEnabled,
             floatingToolbarVisible = floatingToolbarVisible,
+            currentUrl = currentUrl,
+            sitePermissions = sitePermissions,
+            onRevokePermission = onRevokePermission,
             onDismiss = { showOptions = false },
             onForward = onForward,
             onReload = onReload,
@@ -1544,9 +1704,11 @@ private fun SiteControlsSheet(
     blockedRequests: Int,
     onDismiss: () -> Unit,
     onResetPermissions: () -> Unit,
+    viewModel: WebViewViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     val host = remember(url) { safeHostFromUrl(url) }
     val isSecure = url.startsWith("https://", ignoreCase = true)
+    val perms = remember(url) { viewModel.getPermissionsForOrigin(url) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1623,10 +1785,68 @@ private fun SiteControlsSheet(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Camera, microphone, and device access permissions granted to $host.",
+                text = "Camera, microphone, notifications and location access for $host.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (perms.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("No permissions granted", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text("This site hasn't been granted any special permissions yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        perms.forEach { (type, perm) ->
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(
+                                    when (type) {
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA -> Icons.Rounded.Videocam
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE -> Icons.Rounded.Mic
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.NOTIFICATION -> Icons.Rounded.Notifications
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION -> Icons.Rounded.LocationOn
+                                    },
+                                    null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    when (type) {
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA -> "Camera"
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE -> "Microphone"
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.NOTIFICATION -> "Notifications"
+                                        com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION -> "Location"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (perm == BrowserSitePermission.ALLOW) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+                                ) {
+                                    Text(
+                                        if (perm == BrowserSitePermission.ALLOW) "Allowed" else "Blocked",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (perm == BrowserSitePermission.ALLOW) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Scroll-safe prominent reset button
             FilledTonalButton(
@@ -1719,6 +1939,9 @@ private fun BrowserOptionsSheet(
     isDesktopMode: Boolean,
     adBlockEnabled: Boolean,
     floatingToolbarVisible: Boolean,
+    currentUrl: String = "",
+    sitePermissions: Map<com.frerox.toolz.data.browser.BrowserPermissionType, BrowserSitePermission> = emptyMap(),
+    onRevokePermission: (com.frerox.toolz.data.browser.BrowserPermissionType) -> Unit = {},
     onDismiss: () -> Unit,
     onForward: () -> Unit,
     onReload: () -> Unit,
@@ -1822,6 +2045,88 @@ private fun BrowserOptionsSheet(
                         checked = floatingToolbarVisible,
                         onCheckedChange = { onToggleFloatingToolbar(); onDismiss() }
                     )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Permission Card — shows current site granted permissions
+            val host = remember(currentUrl) { com.frerox.toolz.ui.screens.search.components.safeHostFromUrl(currentUrl) }
+            val hasAnyPermission = sitePermissions.isNotEmpty()
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(36.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Security, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Site permissions", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(host.ifBlank { "Current site" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (hasAnyPermission) {
+                            TextButton(onClick = { onResetSitePermissions(); onDismiss() }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    if (!hasAnyPermission) {
+                        Text("No special permissions granted. Camera, microphone, notifications and location will ask when needed.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            sitePermissions.forEach { (type, perm) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        when (type) {
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA -> Icons.Rounded.Videocam
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE -> Icons.Rounded.Mic
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.NOTIFICATION -> Icons.Rounded.Notifications
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION -> Icons.Rounded.LocationOn
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        when (type) {
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.CAMERA -> "Camera"
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.MICROPHONE -> "Microphone"
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.NOTIFICATION -> "Notifications"
+                                            com.frerox.toolz.data.browser.BrowserPermissionType.GEOLOCATION -> "Location"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (perm == BrowserSitePermission.ALLOW) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                                    ) {
+                                        Text(
+                                            if (perm == BrowserSitePermission.ALLOW) "Allowed" else "Blocked",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (perm == BrowserSitePermission.ALLOW) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    TextButton(onClick = { onRevokePermission(type) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
+                                        Text("Revoke", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

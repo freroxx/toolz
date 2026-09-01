@@ -146,7 +146,7 @@ class WebSearchRepository @Inject constructor(
         }
     }
 
-    /** Images/videos never use META consensus merging — just fan out and dedupe by URL. */
+    /** Images/videos never use META consensus merging — fan out, fall back across engines, dedupe by URL. */
     private suspend fun searchMedia(
         engine: EngineId,
         encodedQuery: String,
@@ -156,20 +156,30 @@ class WebSearchRepository @Inject constructor(
         adBlockEnabled: Boolean,
     ): List<SearchResult> = coroutineScope {
         val candidateEngines = mediaEnginesFor(engine)
-        val results = candidateEngines
-        .map { eng -> async { fetchFromEngine(eng, encodedQuery, offset, category, safeSearch, adBlockEnabled) } }
-        .awaitAll()
-        .flatten()
+        val primary = candidateEngines.first()
+        var results = fetchFromEngine(primary, encodedQuery, offset, category, safeSearch, adBlockEnabled)
+
+        // Media engines rate-limit far more aggressively than web search (image/video
+        // endpoints are bot-challenge magnets) — rotate through the other media-capable
+        // engines rather than showing the user an empty media tab.
+        if (results.isEmpty()) {
+            for (alt in candidateEngines.drop(1)) {
+                results = fetchFromEngine(alt, encodedQuery, offset, category, safeSearch, adBlockEnabled)
+                if (results.isNotEmpty()) break
+            }
+        }
 
         val filtered = if (category == SearchCategory.VIDEOS) results.filter { isAllowedVideoTarget(it.url) } else results
         filtered.distinctBy { metaMerger.canonicalUrl(it.url) }.take(500)
     }
 
-    /** Engines that support returning images/videos for the user's selected engine setting. */
+    /** Engines that support returning images/videos for the user's selected engine setting, in fallback order. */
     private fun mediaEnginesFor(engine: EngineId): List<EngineId> = when (engine) {
-        EngineId.META -> listOf(EngineId.QWANT, EngineId.YAHOO) // Marginalia/Bing media coverage is unreliable enough to skip under META
-        EngineId.MARGINALIA -> listOf(EngineId.MARGINALIA) // will simply return empty — Marginalia has no media search
-        else -> listOf(engine)
+        EngineId.META -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.BING)
+        // Marginalia has no media search — start from the next maintained media engine
+        // instead of guaranteeing an empty result (engine.label is preserved on results).
+        EngineId.MARGINALIA -> listOf(EngineId.QWANT, EngineId.YAHOO, EngineId.BING)
+        else -> listOf(engine) + EngineId.CONCRETE.filter { it != engine && it != EngineId.MARGINALIA }
     }
 
     private suspend fun searchWebOrNews(
