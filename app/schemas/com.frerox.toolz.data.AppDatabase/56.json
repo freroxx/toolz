@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 56,
-    "identityHash": "f1fdb447e7ac5fb2ce425b7d7e7e512b",
+    "identityHash": "97c940bde6cdbb558c01a9656cb3c6b3",
     "entities": [
       {
         "tableName": "notes",
@@ -1067,7 +1067,18 @@
           "columnNames": [
             "id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_search_history_query",
+            "unique": true,
+            "columnNames": [
+              "query"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_search_history_query` ON `${TABLE_NAME}` (`query`)"
+          }
+        ]
       },
       {
         "tableName": "bookmarks",
@@ -1103,7 +1114,18 @@
           "columnNames": [
             "id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_bookmarks_url",
+            "unique": true,
+            "columnNames": [
+              "url"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_bookmarks_url` ON `${TABLE_NAME}` (`url`)"
+          }
+        ]
       },
       {
         "tableName": "quick_links",
@@ -1841,7 +1863,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f1fdb447e7ac5fb2ce425b7d7e7e512b')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '97c940bde6cdbb558c01a9656cb3c6b3')"
     ]
   }
 }

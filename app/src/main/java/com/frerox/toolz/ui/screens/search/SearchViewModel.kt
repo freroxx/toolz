@@ -174,8 +174,8 @@ class SearchViewModel @Inject constructor(
     val queryState: StateFlow<SearchQueryState> = _query.asStateFlow()
 
     // AI's choice: visible per-engine health for the status indicator
-    private val _engineHealth = MutableStateFlow<Map<String, WebSearchRepository.EngineHealth>>(emptyMap())
-    val engineHealth: StateFlow<Map<String, WebSearchRepository.EngineHealth>> = _engineHealth.asStateFlow()
+    private val _engineHealth = MutableStateFlow<Map<String, com.frerox.toolz.data.search.engine.EngineHealth>>(emptyMap())
+    val engineHealth: StateFlow<Map<String, com.frerox.toolz.data.search.engine.EngineHealth>> = _engineHealth.asStateFlow()
 
     // ── Backward-compat combined flow ─────────────────────────────────────────
 
@@ -392,7 +392,7 @@ class SearchViewModel @Inject constructor(
 
             runCatching { repository.search(trimmed, 0, category) }
                 .onSuccess { results ->
-                    _engineHealth.value = repository.engineHealthSnapshot()
+                    _engineHealth.value = repository.engineHealthSnapshot().mapKeys { it.key.name }
                     _query.update {
                         it.copy(
                             results     = results,

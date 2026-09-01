@@ -22,7 +22,7 @@ import com.frerox.toolz.R
 fun SearchOptionsSheet(
     onDismiss: () -> Unit,
     currentEngine: String,
-    engineHealth: Map<String, com.frerox.toolz.data.search.WebSearchRepository.EngineHealth> = emptyMap(),
+    engineHealth: Map<String, com.frerox.toolz.data.search.engine.EngineHealth> = emptyMap(),
     onEngineSelect: (String) -> Unit,
     adBlockEnabled: Boolean,
     onAdBlockToggle: (Boolean) -> Unit,
@@ -76,10 +76,9 @@ fun SearchOptionsSheet(
                         ) {
                             if (health != null) {
                                 val dotColor = when (health) {
-                                    com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.OK -> androidx.compose.ui.graphics.Color(0xFF4CAF50)
-                                    com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.COOLDOWN -> androidx.compose.ui.graphics.Color(0xFFFFC107)
-                                    com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.FAILING -> androidx.compose.ui.graphics.Color(0xFFF44336)
-                                    else -> MaterialTheme.colorScheme.outline
+                                    com.frerox.toolz.data.search.engine.EngineHealth.OK -> androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                                    com.frerox.toolz.data.search.engine.EngineHealth.COOLDOWN -> androidx.compose.ui.graphics.Color(0xFFFFC107)
+                                    com.frerox.toolz.data.search.engine.EngineHealth.FAILING -> androidx.compose.ui.graphics.Color(0xFFF44336)
                                 }
                                 Box(modifier = Modifier.size(8.dp).background(dotColor, CircleShape))
                             }

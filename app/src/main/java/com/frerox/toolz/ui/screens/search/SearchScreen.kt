@@ -1541,7 +1541,7 @@ private fun SecuritySheet(
 private fun SearchEngineSheet(
     onDismiss: () -> Unit,
     currentEngine: String,
-    engineHealth: Map<String, com.frerox.toolz.data.search.WebSearchRepository.EngineHealth> = emptyMap(),
+    engineHealth: Map<String, com.frerox.toolz.data.search.engine.EngineHealth> = emptyMap(),
     onEngineSelect: (String) -> Unit,
 ) {
     ModalBottomSheet(
@@ -1629,9 +1629,9 @@ private fun SearchEngineSheet(
                         // Live engine health dot (AI's choice)
                         if (health != null) {
                             val (dotColor, dotLabel) = when (health) {
-                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.OK -> Color(0xFF4CAF50) to "OK"
-                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.COOLDOWN -> Color(0xFFFFC107) to "Cooling down"
-                                com.frerox.toolz.data.search.WebSearchRepository.EngineHealth.FAILING -> Color(0xFFF44336) to "Failing"
+                                com.frerox.toolz.data.search.engine.EngineHealth.OK -> Color(0xFF4CAF50) to "OK"
+                                com.frerox.toolz.data.search.engine.EngineHealth.COOLDOWN -> Color(0xFFFFC107) to "Cooling down"
+                                com.frerox.toolz.data.search.engine.EngineHealth.FAILING -> Color(0xFFF44336) to "Failing"
                             }
                             Box {
                                 Surface(

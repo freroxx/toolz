@@ -17,35 +17,70 @@
 
 package com.frerox.toolz.data.search
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
+import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "search_history")
+/**
+ * A search query the user has run. [query] is unique — repeating a search
+ * bumps [timestamp] on the existing row via [SearchDao.recordHistory] rather
+ * than inserting a duplicate, so the recent-history list doesn't fill up with
+ * repeats of the same term.
+ */
+@Entity(
+    tableName = "search_history",
+    indices = [Index(value = ["query"], unique = true)],
+)
 data class SearchHistoryEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val query: String,
-    val timestamp: Long = System.currentTimeMillis()
+                              val query: String,
+                              val timestamp: Long = System.currentTimeMillis(),
 )
 
-@Entity(tableName = "bookmarks")
+/** A saved page. [url] is unique so the same page can't be bookmarked twice. */
+@Entity(
+    tableName = "bookmarks",
+    indices = [Index(value = ["url"], unique = true)],
+)
 data class BookmarkEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val title: String,
-    val url: String,
-    val timestamp: Long = System.currentTimeMillis()
+                         val title: String,
+                         val url: String,
+                         val timestamp: Long = System.currentTimeMillis(),
 )
 
+/** A user-pinned shortcut, ordered by [sortOrder] then recency. */
 @Entity(tableName = "quick_links")
 data class QuickLinkEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val title: String,
-    val url: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val sortOrder: Int = 0
+                          val title: String,
+                          val url: String,
+                          val timestamp: Long = System.currentTimeMillis(),
+                          val sortOrder: Int = 0,
 )
 
 @Dao
 interface SearchDao {
+
+    // ─── History ────────────────────────────────────────────────────────────
+
+    /**
+     * Records a search. If [query] was already searched before, this bumps its
+     * timestamp to now instead of inserting a duplicate row — use this rather
+     * than [insertHistory] directly for user-initiated searches.
+     */
+    @Query("""
+    INSERT INTO search_history (query, timestamp) VALUES (:query, :timestamp)
+    ON CONFLICT(query) DO UPDATE SET timestamp = :timestamp
+    """)
+    suspend fun recordHistory(query: String, timestamp: Long = System.currentTimeMillis())
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHistory(entry: SearchHistoryEntry)
 
@@ -57,6 +92,14 @@ interface SearchDao {
 
     @Query("DELETE FROM search_history")
     suspend fun clearHistory()
+
+    @Query("SELECT * FROM search_history")
+    suspend fun getAllHistorySync(): List<SearchHistoryEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHistories(entries: List<SearchHistoryEntry>)
+
+    // ─── Bookmarks ──────────────────────────────────────────────────────────
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBookmark(bookmark: BookmarkEntry)
@@ -70,6 +113,17 @@ interface SearchDao {
     @Query("SELECT EXISTS(SELECT 1 FROM bookmarks WHERE url = :url)")
     suspend fun isBookmarked(url: String): Boolean
 
+    @Query("UPDATE bookmarks SET title = :title, url = :url WHERE id = :id")
+    suspend fun updateBookmark(id: Long, title: String, url: String)
+
+    @Query("SELECT * FROM bookmarks")
+    suspend fun getAllBookmarksSync(): List<BookmarkEntry>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBookmarks(entries: List<BookmarkEntry>)
+
+    // ─── Quick links ────────────────────────────────────────────────────────
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuickLink(quickLink: QuickLinkEntry)
 
@@ -79,29 +133,14 @@ interface SearchDao {
     @Query("DELETE FROM quick_links WHERE id = :id")
     suspend fun deleteQuickLink(id: Long)
 
-    @Query("UPDATE bookmarks SET title = :title, url = :url WHERE id = :id")
-    suspend fun updateBookmark(id: Long, title: String, url: String)
-
     @Query("UPDATE quick_links SET title = :title, url = :url WHERE id = :id")
     suspend fun updateQuickLink(id: Long, title: String, url: String)
 
     @Update
     suspend fun updateQuickLinks(entries: List<QuickLinkEntry>)
 
-    @Query("SELECT * FROM search_history")
-    suspend fun getAllHistorySync(): List<SearchHistoryEntry>
-
-    @Query("SELECT * FROM bookmarks")
-    suspend fun getAllBookmarksSync(): List<BookmarkEntry>
-
     @Query("SELECT * FROM quick_links")
     suspend fun getAllQuickLinksSync(): List<QuickLinkEntry>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertHistories(entries: List<SearchHistoryEntry>)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBookmarks(entries: List<BookmarkEntry>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuickLinks(entries: List<QuickLinkEntry>)

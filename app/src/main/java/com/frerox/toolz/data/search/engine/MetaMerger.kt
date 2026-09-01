@@ -3,78 +3,107 @@
  * GPL-3.0 License
  */
 package com.frerox.toolz.data.search.engine
+
 import com.frerox.toolz.data.search.SearchResult
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Merges per-engine result lists for META search into one ranked list.
+ *
+ * Ranking rewards two things: how highly a result was ranked by the engine(s)
+ * that returned it, and how many independent engines agreed on it (consensus).
+ * A result four engines agree on beats one engine's #1 pick.
+ */
 @Singleton
 class MetaMerger @Inject constructor() {
-    fun merge(resultsByEngine: Map<String, List<SearchResult>>): List<SearchResult> {
-        val urlToAppearances = mutableMapOf<String, MutableList<Pair<String, Int>>>()
-        val canonicalToResult = mutableMapOf<String, SearchResult>()
 
-        for ((eng, list) in resultsByEngine) {
-            val canonicalEng = when (eng.uppercase()) {
-                "YAHOO" -> "Yahoo"
-                "QWANT" -> "Qwant"
-                "MARGINALIA" -> "Marginalia"
-                "BING" -> "Bing"
-                else -> eng.lowercase().replaceFirstChar { it.uppercase() }
-            }
-            list.forEachIndexed { rank, r ->
-                val canUrl = canonicalUrl(r.url)
-                urlToAppearances.getOrPut(canUrl) { mutableListOf() }.add(canonicalEng to rank)
-                if (!canonicalToResult.containsKey(canUrl) || (r.snippet.isNotBlank() && canonicalToResult[canUrl]?.snippet.isNullOrBlank())) {
-                    canonicalToResult[canUrl] = r
+    private data class Appearance(val engine: EngineId, val rank: Int)
+
+        fun merge(resultsByEngine: Map<EngineId, List<SearchResult>>): List<SearchResult> {
+            val appearancesByUrl = mutableMapOf<String, MutableList<Appearance>>()
+            val bestResultByUrl = mutableMapOf<String, SearchResult>()
+
+            for ((engine, results) in resultsByEngine) {
+                results.forEachIndexed { rank, result ->
+                    val canonical = canonicalUrl(result.url)
+                    appearancesByUrl.getOrPut(canonical) { mutableListOf() } += Appearance(engine, rank)
+                    bestResultByUrl[canonical] = mergeBest(bestResultByUrl[canonical], result)
                 }
             }
+
+            return bestResultByUrl.entries
+            .map { (canonicalUrl, result) ->
+                val appearances = appearancesByUrl.getValue(canonicalUrl)
+                score(result, appearances)
+            }
+            .sortedByDescending { it.score }
+            .map { it.result }
         }
 
-        data class Scored(val result: SearchResult, val score: Double)
+        /**
+         * Picks the richer of two candidate results for the same URL, keeping
+         * the best field from each rather than discarding one wholesale — a
+         * result with a snippet from engine A but a date only from engine B
+         * should end up with both, not lose the date because A "won" on snippet.
+         */
+        private fun mergeBest(current: SearchResult?, candidate: SearchResult): SearchResult {
+            if (current == null) return candidate
+                return current.copy(
+                    snippet = current.snippet.ifBlank { candidate.snippet },
+                    date = current.date ?: candidate.date,
+                    breadcrumb = current.breadcrumb ?: candidate.breadcrumb,
+                    imageUrl = current.imageUrl ?: candidate.imageUrl,
+                )
+        }
 
-        val scored = canonicalToResult.map { (canUrl, r) ->
-            val appearances = urlToAppearances[canUrl] ?: emptyList()
-            val engineNames = appearances.map { it.first }.distinct()
-            val hasNonBing = engineNames.any { it != "Bing" }
-            val nonBingCount = engineNames.count { it != "Bing" }
-            val isBingOnly = engineNames.size == 1 && engineNames.first() == "Bing"
+        private data class Scored(val result: SearchResult, val score: Double)
 
-            // Base rank score: sum of 1 / (rank + 1)
-            val rankScore = appearances.sumOf { (_, rank) -> 1.0 / (rank + 1) }
+            private fun score(result: SearchResult, appearances: List<Appearance>): Scored {
+                val engines = appearances.map { it.engine }.distinct()
 
-            // Multi-engine consensus bonus across Yahoo, Qwant, Marginalia
-            val consensusBonus = when {
-                engineNames.size >= 3 -> 3.0
-                engineNames.size >= 2 -> 2.0
-                else -> 1.0
+                // Sum of 1/(rank+1) across every engine that surfaced this URL — an engine's
+                // #1 result contributes 1.0, its #10 result contributes ~0.09.
+                val rankScore = appearances.sumOf { 1.0 / (it.rank + 1) }
+
+                // Independent-engine agreement is the strongest freshness/relevance signal
+                // META has over a single engine — weight it more heavily than rank alone.
+                val consensusBonus = when (engines.size) {
+                    1 -> 1.0
+                    2 -> 2.0
+                    else -> 3.0
+                }
+
+                val snippetBonus = if (result.snippet.isNotBlank()) 1.15 else 1.0
+                val dateBonus = if (result.date != null) 1.05 else 1.0
+
+                val total = rankScore * consensusBonus * snippetBonus * dateBonus
+                return Scored(result.copy(engines = engines.map { it.label }), total)
             }
 
-            val snippetBonus = if (r.snippet.isNotBlank()) 1.15 else 1.0
-            val freshnessBonus = if (r.date != null) 1.05 else 1.0
+            /**
+             * Normalizes a URL for cross-engine dedup: forces https, strips `www.`,
+             * trailing slash, and known tracking params (utm_*, ref=) so the same
+             * page returned by different engines with different tracking tags
+             * collapses to one result instead of appearing twice.
+             */
+            fun canonicalUrl(url: String): String = try {
+                val normalizedScheme = url.trim().let {
+                    if (it.startsWith("http://", ignoreCase = true)) "https://" + it.substring(7) else it
+                }
+                val uri = java.net.URI(normalizedScheme)
+                val host = uri.host?.lowercase()?.removePrefix("www.") ?: ""
+                val path = (uri.path ?: "").removeSuffix("/")
+                val query = uri.query
+                ?.split("&")
+                ?.filterNot { it.startsWith("utm_", ignoreCase = true) || it.startsWith("ref=", ignoreCase = true) }
+                ?.joinToString("&")
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { "?$it" }
+                .orEmpty()
 
-            val totalScore = rankScore * consensusBonus * snippetBonus * freshnessBonus
-            Scored(r.copy(engines = engineNames), totalScore)
-        }
-
-        return scored.sortedByDescending { it.score }.map { it.result }
-    }
-
-    fun canonicalUrl(url: String): String = try {
-        var u = url.trim()
-        if (u.startsWith("http://", ignoreCase = true)) {
-            u = "https://" + u.substring(7)
-        }
-        val uri = java.net.URI(u)
-        val host = (uri.host ?: "").lowercase().removePrefix("www.")
-        val path = (uri.path ?: "").removeSuffix("/")
-        val query = uri.query?.let { q ->
-            q.split("&")
-                .filterNot { it.startsWith("utm_", ignoreCase = true) || it.startsWith("ref=", ignoreCase = true) }
-                .joinToString("&")
-                .takeIf { it.isNotEmpty() }
-        }
-        val cleanQuery = if (query != null) "?$query" else ""
-        if (host.isNotEmpty()) "https://$host$path$cleanQuery" else u.lowercase().removeSuffix("/")
-    } catch (_: Exception) {
-        url.trim().removeSuffix("/").lowercase()
-    }
+                if (host.isNotEmpty()) "https://$host$path$query" else normalizedScheme.lowercase().removeSuffix("/")
+            } catch (_: Exception) {
+                url.trim().removeSuffix("/").lowercase()
+            }
 }
