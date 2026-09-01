@@ -366,6 +366,7 @@
     <string name="st_Whisper_Error_ImageTooLarge">Choose an image smaller than 22 MB.</string>
     <string name="st_Whisper_Error_EmailNotConfirmed">Please confirm your email before signing in.</string>
     <string name="st_Whisper_Error_SignupDisabled">Sign-up is temporarily unavailable. Try again later.</string>
+    <string name="st_Whisper_Error_WeakPassword">Password is too weak. Use a longer, stronger password.</string>
     <string name="st_Whisper_Error_RateLimit">Too many attempts. Wait a moment before trying again.</string>
     <string name="st_Whisper_Error_InvalidTokenFormat">That token doesn\'t look right — it should be a 64-character code.</string>
     <string name="st_Whisper_Error_Offline">You are currently offline. Please check your internet connection.</string>

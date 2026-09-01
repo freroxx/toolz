@@ -38,10 +38,18 @@ object SupabaseModule {
 
     @Provides
     @Singleton
-    fun provideSupabaseClient(@ApplicationContext context: Context): SupabaseClient = createSupabaseClient(
-        supabaseUrl = BuildConfig.SUPABASE_URL,
-        supabaseKey = BuildConfig.SUPABASE_ANON_KEY,
-    ) {
+    fun provideSupabaseClient(@ApplicationContext context: Context): SupabaseClient {
+        // Fail-fast diagnostic: empty BuildConfig means local.properties was missing at build time
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            android.util.Log.e("SupabaseModule", "SUPABASE_URL/KEY is blank — check local.properties and rebuild. Whisper will stay offline.")
+        }
+        // Use placeholder that fails fast with clear error if blank, to avoid obscure IllegalState at auth
+        val url = BuildConfig.SUPABASE_URL.ifBlank { "https://invalid.supabase.co" }
+        val key = BuildConfig.SUPABASE_ANON_KEY.ifBlank { "invalid-key" }
+        return createSupabaseClient(
+            supabaseUrl = url,
+            supabaseKey = key,
+        ) {
         install(Auth) {
             host = "login"
             scheme = "whisper-auth"
@@ -51,5 +59,6 @@ object SupabaseModule {
         install(Postgrest)
         install(Realtime)
         install(Storage)
+        }
     }
 }

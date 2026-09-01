@@ -20,6 +20,9 @@ package com.frerox.toolz.data.whisper
 import android.util.Log
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.R
+import io.github.jan.supabase.auth.exception.AuthErrorCode
+import io.github.jan.supabase.auth.exception.AuthRestException
+import io.github.jan.supabase.auth.exception.NoSessionFoundException
 import io.github.jan.supabase.exceptions.RestException
 
 /**
@@ -66,7 +69,15 @@ object WhisperErrorMapper {
 
     /** True when retrying cannot help: the request is rejected outright or the input is invalid. P2 FIX: 400-499 except 408/429 are permanent. */
     fun isPermanentError(throwable: Throwable): Boolean {
-        if (throwable is IllegalArgumentException || throwable is IllegalStateException) return true
+        // NoSession is expected on fresh install — not permanent, not an error to retry loudly
+        if (throwable is NoSessionFoundException) return false
+        if (throwable is IllegalArgumentException) return true
+        if (throwable is IllegalStateException) {
+            // "No session found in storage" is the normal logged-out signal — not a permanent failure
+            val msg = throwable.message.orEmpty()
+            if (msg.contains("No session", ignoreCase = true)) return false
+            return true
+        }
         if (throwable is RestException) {
             val code = throwable.statusCode
             // 408 timeout and 429 rate-limit are retryable; everything else 4xx permanent.
@@ -102,48 +113,69 @@ object WhisperErrorMapper {
             return UiText.DynamicString(SESSION_EXPIRED_SENTINEL)
         }
 
-        // L-5 FIX (reviewwhisper.md): STRUCTURED checks (status codes, error codes) now run
-        // BEFORE broad substring matching — the old order misrouted any server message
-        // merely containing "blocked"/"connect"/"network" into unrelated buckets.
-        // V2-FIX (reviewwhisper.md): the RestException status-code branches moved ABOVE the
-        // English phrase-matching block so e.g. a 500 whose body mentions "blocked"
-        // surfaces as ServerBusy, not Blocked.
+        // L-5 FIX (reviewwhisper.md): STRUCTURED checks now correctly ordered —
+        // AUTH-SPECIFIC error codes (invalid credentials, user exists, provider disabled etc.)
+        // MUST outrank generic 400..499 bucket, otherwise every 400 AuthRestException becomes
+        // generic RequestFailed (the bug that hid InvalidCredentials behind RequestFailed).
+        // V2-FIX: RestException 404/409 + block/42501 still outrank generic, but auth codes are above generic 400.
         return when {
-            // Structured HTTP status codes (RestException) before any keyword heuristics
+            // Structured 404/409 before anything
             throwable is RestException && throwable.statusCode == 404 ->
                 UiText.StringResource(R.string.st_Whisper_Error_NotFound)
             throwable is RestException && throwable.statusCode == 409 ->
                 UiText.StringResource(R.string.st_Whisper_Error_AlreadyUpToDate)
-            // P0 Fix: block enforcement is now server-enforced via
-            // whisper_check_block_before_message/friend triggers. Their
-            // "blocked by this user" phrase must map to Blocked even when
-            // PostgREST returns 4xx/5xx — so check it BEFORE the generic HTTP buckets.
+            // P0 Fix: block enforcement phrase must outrank generic 4xx/5xx
             msg.contains("You have blocked this user", ignoreCase = true) ||
                 msg.contains("You have been blocked by this user", ignoreCase = true) ||
                 msg.contains("blocked by this user", ignoreCase = true) ->
                 UiText.StringResource(R.string.st_Whisper_Error_Blocked)
-            // Permission / NotPermitted must also outrank generic 4xx/5xx (42501/P0001)
+            // Permission must also outrank generic 4xx/5xx
             msg.contains("row-level security", ignoreCase = true) || msg.contains("42501") ->
                 UiText.StringResource(R.string.st_Whisper_Error_NotPermitted)
+            // ——— AUTH-SPECIFIC checks BEFORE generic 400/500 ———
+            isInvalidCredentials(throwable) ->
+                UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
+            // User already exists: GoTrue returns 422 error_code user_already_exists / email_exists with phrase "User already registered"
+            (throwable is RestException && (throwable.error == "user_already_exists" || throwable.error == "email_exists")) ||
+                (throwable is AuthRestException && (throwable.errorCode == AuthErrorCode.UserAlreadyExists || throwable.errorCode == AuthErrorCode.EmailExists)) ||
+                msg.contains("User already registered", ignoreCase = true) ||
+                msg.contains("user_already_exists", ignoreCase = true) ||
+                msg.contains("email_exists", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_UsernameExists)
+            (throwable is RestException && throwable.error == "email_not_confirmed") ||
+                (throwable is AuthRestException && throwable.errorCode == AuthErrorCode.EmailNotConfirmed) ||
+                msg.contains("Email not confirmed", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_EmailNotConfirmed)
+            (throwable is RestException && throwable.error in setOf("signup_disabled", "provider_disabled", "email_provider_disabled", "anonymous_provider_disabled")) ||
+                (throwable is AuthRestException && throwable.errorCode in setOf(AuthErrorCode.SignupDisabled, AuthErrorCode.ProviderDisabled, AuthErrorCode.EmailProviderDisabled, AuthErrorCode.AnonymousProviderDisabled)) ||
+                msg.contains("signup_disabled", ignoreCase = true) ||
+                msg.contains("email_provider_disabled", ignoreCase = true) ||
+                msg.contains("provider_disabled", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_SignupDisabled)
+            // Weak password: sign-up rejects 422 weak_password
+            (throwable is RestException && throwable.error == "weak_password") ||
+                (throwable is AuthRestException && throwable.errorCode == AuthErrorCode.WeakPassword) ||
+                msg.contains("weak_password", ignoreCase = true) ||
+                msg.contains("Password should be", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_WeakPassword)
+            (throwable is RestException && throwable.error in setOf("over_email_send_rate_limit", "over_request_rate_limit", "over_sms_send_rate_limit")) ||
+                (throwable is AuthRestException && throwable.errorCode in setOf(AuthErrorCode.OverEmailSendRateLimit, AuthErrorCode.OverRequestRateLimit, AuthErrorCode.OverSmsSendRateLimit)) ||
+                msg.contains("over_email_send_rate_limit", ignoreCase = true) ||
+                msg.contains("over_request_rate_limit", ignoreCase = true) ||
+                msg.contains("over_sms_send_rate_limit", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
+            // Discover rate-limit RPC → P0002 with phrase rate_limited
+            msg.contains("rate_limited", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
+            // Captcha / hook failures that also surface as 400s
+            (throwable is AuthRestException && throwable.errorCode == AuthErrorCode.CaptchaFailed) ||
+                msg.contains("captcha_failed", ignoreCase = true) ->
+                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
+            // ——— GENERIC HTTP buckets AFTER auth-specific ———
             throwable is RestException && throwable.statusCode in 400..499 ->
                 UiText.StringResource(R.string.st_Whisper_Error_RequestFailed)
             throwable is RestException && throwable.statusCode in 500..599 ->
                 UiText.StringResource(R.string.st_Whisper_Error_ServerBusy)
-
-            // Auth errors (specific phrases + error codes)
-            isInvalidCredentials(throwable) ->
-                UiText.StringResource(R.string.st_Whisper_Error_InvalidCredentials)
-            msg.contains("User already registered", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_UsernameExists)
-            msg.contains("Email not confirmed", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_EmailNotConfirmed)
-            msg.contains("signup_disabled", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_SignupDisabled)
-            msg.contains("over_email_send_rate_limit", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
-            // Discover rate-limit (whisper_discover_profiles RPC → P0002)
-            msg.contains("rate_limited", ignoreCase = true) ->
-                UiText.StringResource(R.string.st_Whisper_Error_RateLimit)
 
             // Token errors
             msg.contains("Token must be", ignoreCase = true) ->
@@ -220,19 +252,35 @@ object WhisperErrorMapper {
 
     /**
      * V2-FIX (reviewwhisper.md): release-build log hygiene. Full throwable detail
-     * (message + stack trace) only in debug builds; release logs just the exception
-     * class name plus the caller's context prefix so no payload/URL detail leaks.
+     * (message + stack trace) only in debug builds; release logs limited diagnosable
+     * info (class + status + error code) so AuthRestException root cause is visible
+     * without leaking payload/URL.
      */
     private fun logTechnical(throwable: Throwable, context: String) {
         val prefix = if (context.isNotBlank()) "[$context] " else ""
+        if (throwable is NoSessionFoundException) {
+            // Expected on fresh install — not an error, just debug
+            if (BuildConfig.DEBUG) Log.d(TAG, "${prefix}NoSessionFound (expected logged-out)")
+            return
+        }
         if (BuildConfig.DEBUG) {
             Log.e(TAG, "$prefix${throwable.javaClass.simpleName}: ${throwable.message}", throwable)
         } else {
-            Log.e(TAG, "$prefix${throwable.javaClass.name}")
+            val code = (throwable as? RestException)?.statusCode?.toString() ?: "-"
+            val err = (throwable as? RestException)?.error ?: throwable.message?.take(120) ?: "-"
+            Log.e(TAG, "$prefix${throwable.javaClass.simpleName} code=$code err=$err")
         }
     }
 
-    private fun isInvalidCredentials(throwable: Throwable): Boolean =
-        (throwable is RestException && throwable.error == "invalid_grant") ||
-        throwable.message?.contains("Invalid login credentials", ignoreCase = true) == true
+    private fun isInvalidCredentials(throwable: Throwable): Boolean {
+        if (throwable is AuthRestException) {
+            if (throwable.errorCode == AuthErrorCode.InvalidCredentials) return true
+            if (throwable.error == "invalid_grant" || throwable.error == "invalid_credentials") return true
+        }
+        if (throwable is RestException) {
+            if (throwable.error == "invalid_grant" || throwable.error == "invalid_credentials") return true
+        }
+        return throwable.message?.contains("Invalid login credentials", ignoreCase = true) == true ||
+            throwable.message?.contains("invalid_credentials", ignoreCase = true) == true
+    }
 }

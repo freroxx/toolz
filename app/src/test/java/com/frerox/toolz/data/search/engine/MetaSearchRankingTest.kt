@@ -41,10 +41,10 @@ class MetaSearchRankingTest {
 
         val merged = merger.merge(
             mapOf(
-                "YAHOO" to yahooResults,
-                "QWANT" to qwantResults,
-                "MARGINALIA" to emptyList(),
-                "BING" to bingResults,
+                EngineId.YAHOO to yahooResults,
+                EngineId.QWANT to qwantResults,
+                EngineId.MARGINALIA to emptyList(),
+                EngineId.BING to bingResults,
             )
         )
 
@@ -89,8 +89,8 @@ class MetaSearchRankingTest {
 
         val merged = merger.merge(
             mapOf(
-                "YAHOO" to yahooResults,
-                "MARGINALIA" to marginaliaResults,
+                EngineId.YAHOO to yahooResults,
+                EngineId.MARGINALIA to marginaliaResults,
             )
         )
 

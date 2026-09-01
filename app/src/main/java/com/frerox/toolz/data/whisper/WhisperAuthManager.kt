@@ -10,6 +10,8 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.status.SessionStatus
+import io.github.jan.supabase.auth.exception.AuthErrorCode
+import io.github.jan.supabase.auth.exception.AuthRestException
 import io.github.jan.supabase.exceptions.RestException
 import com.frerox.toolz.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -272,15 +274,21 @@ class WhisperAuthManager @Inject constructor(
     fun normalizeToken(raw: String): String = raw.trim().replace(Regex("[^0-9a-fA-F]"), "").lowercase()
     fun isValidToken(token: String): Boolean = token.length == 64 && token.all { it in '0'..'9' || it in 'a'..'f' }
 
-    // V2-FIX W-A7: prefer structural detection — RestException error code
-    // ("invalid_grant") or HTTP status 400 — over exception message text matching,
-    // which breaks if GoTrue/localization changes wording. The message match remains
-    // only as a last-resort fallback for non-RestException transports.
+    // V2-FIX W-A7: prefer structural detection — AuthErrorCode.InvalidCredentials / error strings
+    // over broad statusCode 400. GoTrue returns error "invalid_credentials" (not "invalid_grant")
+    // for wrong password, and status 400 alone would misclassify provider_disabled etc. as invalid creds.
     fun isInvalidCredentials(throwable: Throwable): Boolean {
-        if (throwable is RestException) {
-            return throwable.error == "invalid_grant" || throwable.statusCode == 400
+        if (throwable is AuthRestException) {
+            if (throwable.errorCode == AuthErrorCode.InvalidCredentials) return true
+            if (throwable.error == "invalid_grant" || throwable.error == "invalid_credentials") return true
         }
-        return throwable.message?.contains("Invalid login credentials", ignoreCase = true) == true
+        if (throwable is RestException) {
+            if (throwable.error == "invalid_grant" || throwable.error == "invalid_credentials") return true
+        }
+        val msg = throwable.message.orEmpty()
+        return msg.contains("Invalid login credentials", ignoreCase = true) ||
+            msg.contains("invalid_credentials", ignoreCase = true) ||
+            msg.contains("invalid_grant", ignoreCase = true)
     }
 
     suspend fun signOut(): Result<Unit> = runCatching {

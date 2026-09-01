@@ -365,7 +365,10 @@ class WhisperAubupManager @Inject constructor(
     suspend fun decryptAccessFile(file: File, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
             require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
-            val cipherText = FileInputStream(file).use { it.bufferedReader().readText() }
+            if (!file.exists() || file.length() == 0L) error("Could not read the selected file")
+            if (file.length() > 1_200_000L) error("Access file exceeds the 1 MB limit")
+            val cipherText = FileInputStream(file).use { it.bufferedReader().readText().trim() }
+            if (cipherText.isBlank()) error("Could not read the selected file")
             decryptCiphertext(cipherText, whisperCode)
         }
     }
@@ -373,7 +376,10 @@ class WhisperAubupManager @Inject constructor(
     suspend fun decryptAccessBytes(bytes: ByteArray, whisperCode: String): Result<WhisperAccessPayload> = withContext(Dispatchers.IO) {
         runCatching {
             require(isValidWhisperCode(whisperCode)) { "Whisper Code must be exactly 6 digits." }
-            val cipherText = String(bytes, Charsets.UTF_8)
+            if (bytes.isEmpty()) error("Could not read the selected file")
+            if (bytes.size > 1_200_000) error("Access file exceeds the 1 MB limit")
+            val cipherText = String(bytes, Charsets.UTF_8).trim()
+            if (cipherText.isBlank()) error("Could not read the selected file")
             decryptCiphertext(cipherText, whisperCode)
         }
     }
