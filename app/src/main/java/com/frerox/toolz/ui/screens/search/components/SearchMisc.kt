@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.data.search.SearchCategory
@@ -148,10 +149,10 @@ fun InstantMathCard(
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Rounded.Calculate, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                Text("Instant Calculation", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_calc_title), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)) {
-                    Text("Local", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_calc_local), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -166,25 +167,26 @@ fun InstantMathCard(
                 ToolzExpressiveButton(onClick = onOpenCalculator, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), shape = RoundedCornerShape(12.dp)) {
                     Icon(Icons.Rounded.Calculate, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Open Calculator")
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_calc_open))
                 }
                 ToolzOutlinedExpressiveButton(onClick = { onCopy(mathResult.result) }, shape = RoundedCornerShape(12.dp)) {
                     Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Copy")
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_calc_copy))
                 }
             }
         }
     }
 }
 
-private data class CategoryUi(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+private data class CategoryUi(val labelRes: Int, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
+@Composable
 private fun categoryUi(category: SearchCategory): CategoryUi = when (category) {
-    SearchCategory.ALL -> CategoryUi("All", Icons.Rounded.Search)
-    SearchCategory.IMAGES -> CategoryUi("Images", Icons.Rounded.Image)
-    SearchCategory.NEWS -> CategoryUi("News", Icons.Rounded.Newspaper)
-    SearchCategory.VIDEOS -> CategoryUi("Videos", Icons.Rounded.OndemandVideo)
+    SearchCategory.ALL -> CategoryUi(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_all, Icons.Rounded.Search)
+    SearchCategory.IMAGES -> CategoryUi(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_images, Icons.Rounded.Image)
+    SearchCategory.NEWS -> CategoryUi(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_news, Icons.Rounded.Newspaper)
+    SearchCategory.VIDEOS -> CategoryUi(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_videos, Icons.Rounded.OndemandVideo)
 }
 
 /** Horizontal row of category filter chips (All / Images / News / Videos). */
@@ -204,7 +206,7 @@ fun SearchCategoryChips(
             ExpressiveFilterChip(
                 selected = cat == selectedCategory,
                 onClick = { onCategorySelected(cat) },
-                label = { Text(ui.label, style = MaterialTheme.typography.labelMedium) },
+                label = { Text(stringResource(ui.labelRes), style = MaterialTheme.typography.labelMedium) },
                 leadingIcon = { Icon(ui.icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
             )
         }

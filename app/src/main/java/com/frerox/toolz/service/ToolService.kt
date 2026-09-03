@@ -695,7 +695,7 @@ class ToolService : Service() {
 
         val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
             .setContentTitle(modeLabel)
-            .setSmallIcon(if (_pomodoroMode.value == "WORK") R.drawable.ic_launcher_foreground else R.drawable.ic_coffee)
+            .setSmallIcon(if (_pomodoroMode.value == "WORK") R.drawable.ic_launcher_foreground else R.drawable.ic_launcher_foreground)
             .setOngoing(_isPomodoroRunning.value)
             .setContentIntent(pendingIntent)
             .setShowWhen(false)

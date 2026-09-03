@@ -105,6 +105,7 @@ class SettingsRepository @Inject constructor(
     private val SEARCH_ADBLOCK_ENABLED = booleanPreferencesKey("search_adblock_enabled")
     private val SEARCH_ADBLOCK_BLOCKLISTS = stringSetPreferencesKey("search_adblock_blocklists")
     private val SEARCH_ADBLOCK_ALLOWLISTS = stringSetPreferencesKey("search_adblock_allowlists")
+    private val SEARCH_ADBLOCK_SCRIPT_ENABLED = booleanPreferencesKey("search_adblock_script_enabled")
     private val SEARCH_NEXTDNS_ID = stringPreferencesKey("search_nextdns_id")
     private val SEARCH_NEXTDNS_DNS_URL = stringPreferencesKey("search_nextdns_dns_url")
     private val SEARCH_ENABLED_IMPORTED_LISTS = stringSetPreferencesKey("search_enabled_imported_lists")
@@ -127,6 +128,7 @@ class SettingsRepository @Inject constructor(
 
     val searchFirstTime: Flow<Boolean> = dataStore.data.map { it[SEARCH_FIRST_TIME] ?: true }
     val searchAdBlockEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_ENABLED] ?: true }
+    val searchAdBlockScriptEnabled: Flow<Boolean> = dataStore.data.map { it[SEARCH_ADBLOCK_SCRIPT_ENABLED] ?: false }
     val searchAdBlockBlocklists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ADBLOCK_BLOCKLISTS] ?: emptySet() }
     val searchAdBlockAllowlists: Flow<Set<String>> = dataStore.data.map { it[SEARCH_ADBLOCK_ALLOWLISTS] ?: emptySet() }
     val searchNextDnsId: Flow<String> = dataStore.data.map { it[SEARCH_NEXTDNS_ID] ?: "" }
@@ -206,6 +208,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setSearchAdBlockEnabled(enabled: Boolean) {
         dataStore.edit { it[SEARCH_ADBLOCK_ENABLED] = enabled }
+    }
+
+    suspend fun setSearchAdBlockScriptEnabled(enabled: Boolean) {
+        dataStore.edit { it[SEARCH_ADBLOCK_SCRIPT_ENABLED] = enabled }
     }
 
     suspend fun setSearchAdBlockBlocklists(blocklists: Set<String>) {

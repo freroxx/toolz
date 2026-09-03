@@ -43,7 +43,12 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SearchShimmer(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(6) { i -> ShimmerCard(delayMs = i * 70) }
+        // Mirror ResultsPage LazyColumn items order pixel-for-pixel: chips -> siteFilter -> count -> media
+        ShimmerChips(delayMs = 0)
+        // Site filter chips placeholder (matches ResultsPage "siteFilter" item with 8dp spacing)
+        ShimmerSiteFilter(delayMs = 15)
+        ShimmerResultsCount(delayMs = 30)
+        repeat(6) { i -> ShimmerCard(delayMs = i * 70 + 60) }
     }
 }
 
@@ -54,11 +59,14 @@ fun SearchShimmer(modifier: Modifier = Modifier) {
  */
 @Composable
 fun ImageGridShimmer(modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ShimmerChips(delayMs = 0)
+        ShimmerSiteFilter(delayMs = 15)
+        ShimmerResultsCount(delayMs = 30)
         repeat(3) { row ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().height(200.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 repeat(2) { col ->
-                    ShimmerImageTile(delayMs = (row * 2 + col) * 90, modifier = Modifier.weight(1f))
+                    ShimmerImageTile(delayMs = (row * 2 + col) * 90 + 60, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -72,7 +80,10 @@ fun ImageGridShimmer(modifier: Modifier = Modifier) {
 @Composable
 fun VideoListShimmer(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        repeat(3) { i -> ShimmerVideoCard(delayMs = i * 90) }
+        ShimmerChips(delayMs = 0)
+        ShimmerSiteFilter(delayMs = 15)
+        ShimmerResultsCount(delayMs = 30)
+        repeat(3) { i -> ShimmerVideoCard(delayMs = i * 90 + 60) }
     }
 }
 
@@ -132,6 +143,45 @@ private fun ShimmerVideoCard(delayMs: Int) {
                 ShimmerBox(brush, Modifier.fillMaxWidth(0.45f).height(11.dp).clip(RoundedCornerShape(5.dp)))
             }
         }
+    }
+}
+
+@Composable
+private fun ShimmerChips(delayMs: Int) {
+    val brush = rememberShimmerBrush(delayMs)
+    // Exactly mirrors SearchCategoryChips: LazyRow with 8dp spacing + 4dp horizontal padding (contentPadding horizontal 4dp)
+    // 4 pills: All(58dp), Images(88dp), News(74dp), Videos(82dp) — average ~72dp but varied to avoid uniform look
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        val widths = listOf(62.dp, 86.dp, 76.dp, 80.dp)
+        widths.forEach { w ->
+            Box(
+                modifier = Modifier
+                    .width(w)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(brush)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShimmerSiteFilter(delayMs: Int) {
+    val brush = rememberShimmerBrush(delayMs)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Box(modifier = Modifier.width(78.dp).height(28.dp).clip(RoundedCornerShape(14.dp)).background(brush))
+        Box(modifier = Modifier.width(92.dp).height(28.dp).clip(RoundedCornerShape(14.dp)).background(brush))
+        Box(modifier = Modifier.width(84.dp).height(28.dp).clip(RoundedCornerShape(14.dp)).background(brush))
+    }
+}
+
+@Composable
+private fun ShimmerResultsCount(delayMs: Int) {
+    val brush = rememberShimmerBrush(delayMs)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 2.dp)) {
+        Box(modifier = Modifier.width(90.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(brush))
+        Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)))
+        Box(modifier = Modifier.width(40.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(brush))
     }
 }
 

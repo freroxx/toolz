@@ -192,7 +192,7 @@ class WhisperNotificationManager @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_whisper_notif)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(context.getString(R.string.st_Whisper_Notif_NewMessage))
             // Never copy decrypted content to the lock screen or notification history.
             .setContentText(context.getString(R.string.st_Whisper_Notif_OpenToRead))
@@ -206,7 +206,7 @@ class WhisperNotificationManager @Inject constructor(
         // V2-FIX M-M?: the group summary posts on its own low-importance channel so it can
         // be silenced independently of the per-message notifications.
         val summaryNotification = NotificationCompat.Builder(context, SUMMARY_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_whisper_notif)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("Whisper")
             .setContentText(context.getString(R.string.st_Whisper_Notif_SummaryText))
             .setGroup(GROUP_KEY)
@@ -246,7 +246,7 @@ class WhisperNotificationManager @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_whisper_notif)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(context.getString(R.string.st_Whisper_Notif_FriendRequest))
             .setContentText(fromName)
             // Sender names and requests stay off the lock screen like message notifications.

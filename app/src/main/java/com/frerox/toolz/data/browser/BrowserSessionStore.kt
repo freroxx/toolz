@@ -33,7 +33,7 @@ class BrowserSessionStore @Inject constructor(@ApplicationContext context: Conte
     fun restoreActiveTabId(): String? = prefs.getString("active", null)
 
     fun save(tabs: List<TabEntry>, activeTabId: String?) {
-        val storedTabs = tabs.filterNot { it.isPrivate }.takeLast(30)
+        val storedTabs = tabs.filterNot { it.isPrivate || it.url.equals("about:blank", ignoreCase = true) }.takeLast(30)
         val array = JSONArray()
         storedTabs.forEach { tab ->
             array.put(JSONObject().apply {

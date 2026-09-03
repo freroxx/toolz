@@ -120,6 +120,20 @@ object AdBlockList {
     @Volatile
     private var isEngineReady = false
 
+    /** Popular ad script blocking — when enabled blocks URLs like ad.js, gpt.js etc. Popular toggle in settings + webview sheet. */
+    @Volatile
+    var isAdScriptBlockingEnabled: Boolean = false
+
+    private val adScriptPaths: Set<String> = setOf(
+        // Path-boundary patterns: leading "/" or ".js" ensures query-aware matching (e.g. /ad.js?ver=1)
+        "/ad.js", "/ads.js", "/pagead.js", "/pagead/", "adsbygoogle.js", "/adsbygoogle", "googlesyndication.com/pagead", "/gpt.js", "/gpt/", "apstag.js", "/apstag/", "prebid.js", "/prebid", "/adframe", "/showad", "show_ads", "/adserver", "/adservice", "/adsystem", "/advertising.js", "advertising.js", "fbevents.js", "pixel.js", "/banner.ad", "doubleclick.net", "/doubleclick/", "/pubads", "pubads_impl", "/pagead2", "/amazon-adsystem", "/moatad", "/scorecardresearch", "/quantserve", "/criteo", "/taboola", "/outbrain", "/prebid/"
+    )
+
+    fun isAdScriptUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return adScriptPaths.any { lower.contains(it) }
+    }
+
     init { refreshIndex() }
 
     /**
@@ -344,7 +358,11 @@ object AdBlockList {
             val isDedicatedAdServer = host.contains("doubleclick.net") || 
                                      host.contains("pagead2.googlesyndication.com") ||
                                      host.contains("googleadservices.com") ||
-                                     host.contains("adservice.google.com")
+                                     host.contains("adservice.google.com") ||
+                                     host.contains("googlesyndication.com") ||
+                                     host.contains("googletagmanager.com") ||
+                                     host.contains("googletagservices.com") ||
+                                     host.contains("amazon-adsystem.com")
             if (!isDedicatedAdServer) return false
         }
 
@@ -361,6 +379,49 @@ object AdBlockList {
         // 6. Built-in path fragments fallback
         if (blockedPaths.any { fullUrlLower.contains(it) }) return hit("StaticFragment", cleanUrl)
         
+        // 7. Ad script blocking (popular toggle) — additive after main, robust path-boundary matching
+        if (isAdScriptBlockingEnabled && isAdScriptUrl(fullUrlLower)) {
+            return hit("AdScript", cleanUrl)
+        }
+        
+        return false
+    }
+
+    /** Main engine check without ad-script toggle — used by WebViewClient to keep toggles independent. */
+    fun isMainBlocked(url: String): Boolean {
+        if (!isEngineReady || url.isBlank()) return false
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        val fullUrlLower = cleanUrl.lowercase().trim()
+        val host = try {
+            val uri = URI(if (cleanUrl.contains("://")) cleanUrl else "https://$cleanUrl")
+            uri.host?.lowercase()
+        } catch (_: Exception) {
+            cleanUrl.substringAfter("://").substringBefore("/").substringBefore(":").lowercase()
+        } ?: ""
+        if (host.isNotBlank()) {
+            if (defaultAllowlist.any { host == it || host.endsWith(".$it") }) return false
+            if (allowlist.get().any { host == it || host.endsWith(".$it") }) return false
+            if (exceptionRules.get().any { host == it || host.endsWith(".$it") }) return false
+            if (exceptionPatterns.get().any { it.containsMatchIn(cleanUrl) }) return false
+        }
+        val isCssOrFont = fullUrlLower.endsWith(".css") || fullUrlLower.contains(".css?") ||
+                fullUrlLower.endsWith(".woff") || fullUrlLower.endsWith(".woff2") ||
+                fullUrlLower.endsWith(".ttf") || fullUrlLower.endsWith(".eot") ||
+                fullUrlLower.contains("/fonts/") || fullUrlLower.contains("/css/")
+        if (isCssOrFont) {
+            val isDedicatedAdServer = host.contains("doubleclick.net") ||
+                    host.contains("pagead2.googlesyndication.com") ||
+                    host.contains("googleadservices.com") ||
+                    host.contains("adservice.google.com") ||
+                    host.contains("googlesyndication.com") ||
+                    host.contains("googletagmanager.com") ||
+                    host.contains("googletagservices.com") ||
+                    host.contains("amazon-adsystem.com")
+            if (!isDedicatedAdServer) return false
+        }
+        if (host.isNotBlank() && deepDomainMatch(host, activeDomains.get())) return true
+        if (activePatterns.get().any { it.containsMatchIn(cleanUrl) }) return true
+        if (blockedPaths.any { fullUrlLower.contains(it) }) return true
         return false
     }
 
@@ -389,8 +450,17 @@ object AdBlockList {
     // ────────────────────────────────────────────────────────── Static Data
     
     private val blockedPaths: Set<String> = setOf(
-        "/pagead/", "/ads/", "/adserv", "/adsystem", "/tracker", "/pixel.", "/beacon.", 
-        "/telemetry", "/analytics", "/collect", "/gtm.js", "/clarity.", "/heatmap"
+        "/pagead/", "/ads/", "/adserv", "/adsystem", "/tracker", "/pixel.", "/beacon.",
+        "/telemetry", "/analytics", "/collect", "/gtm.js", "/clarity.", "/heatmap",
+        "/adserver", "/ad-frame", "/adframe", "/adplayer", "/advertising.js",
+        "/showad", "/banner.ad", "/bannerad", "/adbrite", "/adindex", "/adimage",
+        "/adclick", "/adview", "/2x2.gif", "/1x1.gif", "/adx/", "/sponsored/",
+        "/adrotation", "/aff-ad", "/banner468", "/banner728", "/popunder",
+        "/prebid", "/gpt.js", "/apstag", "/amazon-adsystem", "/moatad",
+        "/scorecardresearch", "/quantserve", "/doubleclick", "/adform",
+        "/criteo", "/taboola", "/outbrain", "/pubmatic", "/rubicon", "/openx",
+        "/casalemedia", "/smartadserver", "/sharethrough", "/bidswitch",
+        "/33across", "/yieldmo", "/spotxchange", "/teads"
     )
 
     private val publicSuffixes: Set<String> = setOf(

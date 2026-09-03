@@ -38,6 +38,7 @@ data class PlayabilityStatus(
 
 @Serializable
 data class StreamingData(
+    val formats: List<AdaptiveFormat>? = null,
     val adaptiveFormats: List<AdaptiveFormat>? = null
 )
 
@@ -54,7 +55,10 @@ data class AdaptiveFormat(
     val approxDurationMs: String? = null,
     val audioSampleRate: String? = null,
     val audioChannels: Int? = null,
-    val loudnessDb: Double? = null
+    val loudnessDb: Double? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val qualityLabel: String? = null
 )
 
 @Serializable

@@ -26,54 +26,100 @@ import android.os.storage.StorageManager
 import com.frerox.toolz.data.cleaner.AppCacheEntry
 import com.frerox.toolz.data.cleaner.CleanCategory
 import com.frerox.toolz.data.cleaner.CleanItem
-import com.frerox.toolz.data.cleaner.engine.CleanScanConfig
+import com.frerox.toolz.data.cleaner.access.AccessGate
+import com.frerox.toolz.data.cleaner.engine.FileIndex
+import com.frerox.toolz.data.cleaner.engine.ScanCtx
 import com.frerox.toolz.data.cleaner.engine.CleanerAnalyzer
-import com.frerox.toolz.util.shizuku.ShizukuHelper
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class AppCacheAnalyzer @Inject constructor(@ApplicationContext private val context: Context) : CleanerAnalyzer {
+class AppCacheAnalyzer @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val accessGate: AccessGate
+) : CleanerAnalyzer {
     override val categoryId="app_cache"
-    override val categoryName="App Cache"
+    override val categoryName="App caches"
     override val categoryIcon="Cached"
-    override val description="Hidden caches that can be cleared per app"
+    override val description="Per-app caches — external cleared directly, internal via automation or system settings"
     override val isSafeToClean=true
-    override suspend fun analyze(root: File, installedPackages: Set<String>, progress: (String)->Unit, exclusions: Set<String>, isActive: ()->Boolean, config: CleanScanConfig): CleanCategory {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CleanCategory(categoryId, categoryName, categoryIcon, emptyList(),0,0,isSafeToClean, description=description)
+    override suspend fun analyze(index: FileIndex, ctx: ScanCtx): CleanCategory {
+        val root = ctx.root
+        val exclusions = ctx.exclusions
+        val isActive = ctx.isActive
+        val progress = ctx.progress
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CleanCategory(categoryId, categoryName, categoryIcon, emptyList(),0,0,isSafeToClean, description=description,
+            blockedReason="Needs Android 8+", skippedCount=0)
+        // V3: never silent-zero — usage access is mandatory for real sizes
+        if (!accessGate.usageAccessGranted()) {
+            // Still report measurable external caches so the category is useful pre-grant
+            val extOnly = externalCacheFallback(root, exclusions, isActive, progress)
+            val items = extOnly.map { CleanItem.AppCache(it) }
+            val total = extOnly.sumOf { it.cacheBytes }
+            return CleanCategory(categoryId, categoryName, categoryIcon, items, total, total, isSafeToClean,
+                description="Grant Usage Access for full per-app sizes — showing external caches only",
+                blockedReason="Usage Access not granted — internal cache sizes hidden",
+                blockedFixLabel="Open settings", skippedCount=0)
+        }
         val pm=context.packageManager
-        val statsMgr=context.getSystemService(Context.STORAGE_STATS_SERVICE) as? StorageStatsManager ?: return CleanCategory(categoryId, categoryName, categoryIcon, emptyList(),0,0,isSafeToClean, description=description)
-        val installed=pm.getInstalledApplications(PackageManager.GET_META_DATA)
+        val statsMgr=context.getSystemService(Context.STORAGE_STATS_SERVICE) as? StorageStatsManager
+            ?: return CleanCategory(categoryId, categoryName, categoryIcon, emptyList(),0,0,isSafeToClean, description=description,
+                blockedReason="Storage stats unavailable on this device", blockedFixLabel=null)
+        val installed=try { pm.getInstalledApplications(PackageManager.GET_META_DATA) } catch (_: Exception) { emptyList() }
         val entries=mutableListOf<AppCacheEntry>()
-        var scanned=0
+        var scanned=0; var denied=0
         for (app in installed) {
             if (!isActive()) break
-            if ((app.flags and ApplicationInfo.FLAG_SYSTEM)!=0) continue
             if (app.packageName==context.packageName) continue
-            if (exclusions.any { it.contains(app.packageName) }) continue
+            if (exclusions.contains(app.packageName)) continue
             scanned++; if (scanned%25==0) progress("App cache — $scanned/${installed.size}")
             try {
                 val uuid=if (app.storageUuid==StorageManager.UUID_DEFAULT) StorageManager.UUID_DEFAULT else app.storageUuid
                 val stats=statsMgr.queryStatsForPackage(uuid, app.packageName, android.os.Process.myUserHandle())
                 val cache=stats.cacheBytes
-                if (cache>5*1024*1024L) {
-                    val label=pm.getApplicationLabel(app).toString()
-                    val icon=try { pm.getApplicationIcon(app) } catch(_:Exception){ null }
-                    entries.add(AppCacheEntry(app.packageName, label, cache, cache, icon, isSelected=true))
+                if (cache>2*1024*1024L) {
+                    val label=try { pm.getApplicationLabel(app).toString() } catch (_: Exception) { app.packageName }
+                    entries.add(AppCacheEntry(app.packageName, label, cache, cache, null, isSelected=true))
                 }
-            } catch(_:Exception){}
-            if (entries.size>80) break
-        }
-        // Shizuku privileged caches — check isAuthorized, shell execution handled via injected executor if needed (deferred)
-        if (ShizukuHelper.isAuthorized()) {
-            // placeholder for privileged cache via ShizukuShellExecutor (requires injection) — merged via Engine isShizukuGranted flag
+            } catch (se: SecurityException) { denied++ }
+            catch (_: Exception) { denied++ }
+            if (entries.size>=120) break
         }
         val sorted=entries.sortedByDescending { it.cacheBytes }
         val items=sorted.map { CleanItem.AppCache(it) }
         val total=sorted.sumOf { it.cacheBytes }
         val sel=sorted.filter { it.isSelected }.sumOf { it.cacheBytes }
-        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, sel, isSafeToClean, description=description)
+        // Routine per-package query failures (other profiles, restricted pkgs) are normal —
+        // only surface a banner when NOTHING could be measured, never alongside real results.
+        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, sel, isSafeToClean, description=description,
+            blockedReason=if (items.isEmpty() && denied>0) "Couldn't read per-app cache stats" else null,
+            blockedFixLabel=if (items.isEmpty() && denied>0) "Open settings" else null,
+            skippedCount=if (items.isEmpty()) denied else 0)
+    }
+
+    /** Pre-grant fallback: measure external Android/data+media caches directly (no permission beyond storage). */
+    private fun externalCacheFallback(root: File, exclusions: Set<String>, isActive: () -> Boolean, progress: (String) -> Unit): List<AppCacheEntry> {
+        val out = mutableListOf<AppCacheEntry>()
+        val pm = context.packageManager
+        val extBase = File(root, "Android/data")
+        val dirs = try { extBase.listFiles()?.filter { it.isDirectory } ?: emptyList() } catch (_: Exception) { emptyList() }
+        var n = 0
+        for (d in dirs) {
+            if (!isActive()) break
+            if (exclusions.contains(d.name)) continue
+            val cache = File(d, "cache")
+            if (!cache.exists()) continue
+            var sz = 0L
+            try { sz = com.frerox.toolz.data.cleaner.util.FileUtils.calculateDirSize(cache) } catch (_: Exception) {}
+            if (sz > 2*1024*1024L) {
+                val label = try { pm.getApplicationLabel(pm.getApplicationInfo(d.name, 0)).toString() } catch (_: Exception) { d.name }
+                out.add(AppCacheEntry(d.name, label, sz, sz, null, isSelected=true))
+            }
+            if (++n % 40 == 0) progress("App cache (external) — $n")
+            if (out.size >= 60) break
+        }
+        return out.sortedByDescending { it.cacheBytes }
     }
 }

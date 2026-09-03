@@ -34,16 +34,22 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.work.WorkManager
+import androidx.work.WorkInfo
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.res.stringResource
+import androidx.core.app.NotificationManagerCompat
 import com.frerox.toolz.R
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
@@ -268,6 +274,72 @@ fun SearchScreen(
         OnboardingDialog(onDismiss = { viewModel.dismissFirstTime() })
     }
 
+    // ── YouTube inline player & download sheet + notification permission gate ────────────
+    val activeVideoId = viewModel.activeVideoId.value
+    val videoDownloadTarget = viewModel.videoDownloadTarget.value
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_needed), Toast.LENGTH_LONG).show()
+        }
+    }
+    // Observe video+mp3 download WorkManager for global progress banners
+    val videoWorkInfos by WorkManager.getInstance(context.applicationContext).getWorkInfosByTagFlow(com.frerox.toolz.worker.VideoDownloadWorker.TAG_VIDEO_DOWNLOAD).collectAsState(initial = emptyList())
+    val hasActiveVideoDownload = videoWorkInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+    val activeVideoProgress = videoWorkInfos.firstOrNull { it.state == WorkInfo.State.RUNNING }?.progress?.getFloat(com.frerox.toolz.worker.VideoDownloadWorker.KEY_PROGRESS, 0f)?.takeIf { it > 0f }
+
+    val mp3WorkInfos by WorkManager.getInstance(context.applicationContext).getWorkInfosByTagFlow(com.frerox.toolz.worker.YouTubeMp3DownloadWorker.TAG_MP3_DOWNLOAD).collectAsState(initial = emptyList())
+    val hasActiveMp3Download = mp3WorkInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+    val activeMp3Progress = mp3WorkInfos.firstOrNull { it.state == WorkInfo.State.RUNNING }?.progress?.getFloat(com.frerox.toolz.worker.YouTubeMp3DownloadWorker.KEY_PROGRESS, 0f)?.takeIf { it > 0f }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    // Scrolling away or leaving the videos tab kills play-mode: any category change
+    // or query change dismisses the inline player and restores the thumbnail.
+    LaunchedEffect(uiState.category, uiState.query) {
+        viewModel.stopVideoPlayback()
+    }
+
+    videoDownloadTarget?.let { target ->
+        YouTubeDownloadSheet(
+            title = target.title,
+            onDismiss = { viewModel.dismissVideoDownloadSheet() },
+            onDownload = { quality ->
+                // Permission gate: Android 13+ needs POST_NOTIFICATIONS
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    val perm = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
+                    val enabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                    if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED || !enabled) {
+                        try { notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS) } catch (_: Exception) {
+                            Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_needed_short), Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                if (quality == "MP3") {
+                    viewModel.downloadYouTubeMp3(
+                        videoUrl = target.url,
+                        title = target.title,
+                        thumbnailUrl = target.imageUrl,
+                        context = context,
+                    )
+                } else {
+                    viewModel.downloadYouTubeVideo(
+                        videoUrl = target.url,
+                        title = target.title,
+                        thumbnailUrl = target.imageUrl,
+                        quality = quality,
+                        context = context,
+                    )
+                }
+                // Brief delay so the user sees the tapped option acknowledge before sheet slides away
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(350)
+                    viewModel.dismissVideoDownloadSheet()
+                }
+            },
+        )
+    }
+
     // ── Main layout ───────────────────────────────────────
 
     // Dim overlay while dropdown is open
@@ -364,6 +436,46 @@ fun SearchScreen(
                             onClick        = { showSearchOptions = true },
                         )
                     }
+                    if (hasActiveVideoDownload) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (activeVideoProgress != null) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { activeVideoProgress },
+                                    modifier = Modifier.weight(1f).height(3.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_video_pct, (activeVideoProgress * 100).toInt()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            } else {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    modifier = Modifier.weight(1f).height(3.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_video), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    if (hasActiveMp3Download) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (activeMp3Progress != null) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { activeMp3Progress },
+                                    modifier = Modifier.weight(1f).height(3.dp),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_mp3_pct, (activeMp3Progress * 100).toInt()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                            } else {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    modifier = Modifier.weight(1f).height(3.dp),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_mp3), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -403,10 +515,15 @@ fun SearchScreen(
                     onCategorySelected = viewModel::setSearchCategory,
                     onSiteFilter = viewModel::applySiteFilter,
                     onClearSiteFilter = viewModel::clearSiteFilter,
+                    onVideoPlay = viewModel::playVideo,
+                    onVideoDownload = viewModel::showVideoDownloadSheet,
+                    onImageDownload = { url -> viewModel.downloadImage(url, context) },
+                    activeVideoId = activeVideoId,
+                    onStopVideo = viewModel::stopVideoPlayback,
                     onCopyMathResult = { result ->
                         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clip.setPrimaryClip(ClipData.newPlainText("Math Result", result))
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_copied), Toast.LENGTH_SHORT).show()
                     },
                     onOpenCalculator = {
                         vibrationManager?.vibrateNavigation()
@@ -571,6 +688,11 @@ private fun PageContent(
     siteCandidates: List<String> = emptyList(),
     onSiteFilter: (String) -> Unit = {},
     onClearSiteFilter: () -> Unit = {},
+    onVideoPlay: (SearchResult) -> Unit = {},
+    onVideoDownload: (SearchResult) -> Unit = {},
+    onImageDownload: (String) -> Unit = {},
+    activeVideoId: String? = null,
+    onStopVideo: () -> Unit = {},
 ) {
     val vibrationManager = LocalVibrationManager.current
 
@@ -609,14 +731,9 @@ private fun PageContent(
     ) { state ->
         when (state) {
             "loading" -> Column(Modifier.fillMaxSize()) {
-                // No category chips here: the results list re-introduces them after
-                // load, and keeping them during loading makes the skeleton visibly
-                // "jump" when the real list replaces it. The skeleton fills the
-                // exact frame the results will occupy.
-                Box(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    // Category-matched skeletons: media tabs get a grid/list skeleton
-                    // shaped like the real image tiles / video cards, web gets the
-                    // standard result-card skeleton.
+                // Skeleton mirrors ResultsPage LazyColumn EXACT: contentPadding start16 top12 end16 bottom120, spacedBy 10dp
+                // Shimmer internals include chips -> siteFilter -> count -> cards in same order as real items
+                Box(Modifier.fillMaxSize().padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 120.dp)) {
                     when (uiState.category) {
                         SearchCategory.IMAGES -> ImageGridShimmer()
                         SearchCategory.VIDEOS -> VideoListShimmer()
@@ -674,6 +791,11 @@ private fun PageContent(
                 onOpenCalculator   = onOpenCalculator,
                 onSiteFilter       = onSiteFilter,
                 onClearSiteFilter  = onClearSiteFilter,
+                onVideoPlay        = onVideoPlay,
+                onVideoDownload    = onVideoDownload,
+                onImageDownload    = onImageDownload,
+                activeVideoId      = activeVideoId,
+                onStopVideo        = onStopVideo,
             )
 
             else -> HomePage(
@@ -979,7 +1101,7 @@ private fun BrowserHistorySection(
                             Text(BrowserAddressResolver.displayHost(item.url), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { onRemove(item.url) }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Remove from history", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Close, contentDescription = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_remove_history_desc), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -1078,17 +1200,23 @@ private fun ResultsPage(
     onOpenCalculator: () -> Unit = {},
     onSiteFilter: (String) -> Unit = {},
     onClearSiteFilter: () -> Unit = {},
+    onVideoPlay: (SearchResult) -> Unit = {},
+    onVideoDownload: (SearchResult) -> Unit = {},
+    onImageDownload: (String) -> Unit = {},
+    activeVideoId: String? = null,
+    onStopVideo: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
-    // Trigger load-more when 4 items from end
+    // Trigger load-more when 4 items from end — distinct + throttle to avoid rapid double-fire
     LaunchedEffect(listState) {
         snapshotFlow {
-            val last  = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val total = listState.layoutInfo.totalItemsCount
-            last >= total - 4
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val total = info.totalItemsCount
+            if (total == 0) false else last >= total - 4
         }.collect { nearEnd ->
-            if (nearEnd && uiState.canLoadMore && uiState.phase != SearchPhase.LoadingMore) {
+            if (nearEnd && uiState.canLoadMore && uiState.phase == SearchPhase.Results) {
                 onLoadMore()
             }
         }
@@ -1236,35 +1364,55 @@ private fun ResultsPage(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .height(200.dp)
                                 .animateItem(
                                     fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
                                     placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
                                 ),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Box(Modifier.weight(1f)) {
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
                                 NativeImageCard(
                                     result   = result,
                                     onClick  = { onResultClick(result) },
+                                    onDownload = { onImageDownload(result.imageUrl ?: result.url) },
+                                    onLongClick = { onLongPress(result) },
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                             }
-                            Box(Modifier.weight(1f)) {
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
                                 if (second != null) {
                                     NativeImageCard(
                                         result   = second,
                                         onClick  = { onResultClick(second) },
+                                        onDownload = { onImageDownload(second.imageUrl ?: second.url) },
+                                        onLongClick = { onLongPress(second) },
                                         modifier = Modifier.fillMaxWidth(),
                                     )
+                                } else {
+                                    // Placeholder to keep uniform row height when odd count
+                                    Spacer(modifier = Modifier.fillMaxSize())
                                 }
                             }
                         }
                     }
                 }
                 SearchCategory.VIDEOS -> {
+                    val ytId = youTubeVideoId(result.url)
+                    val isPlaying = ytId != null && ytId == activeVideoId
                     NativeVideoCard(
                         result   = result,
-                        onClick  = { onResultClick(result) },
+                        // Thumbnail press on a YouTube video starts the inline embed;
+                        // non-YouTube results open in the browser as before.
+                        onClick  = {
+                            if (ytId != null) onVideoPlay(result) else onResultClick(result)
+                        },
+                        onDownload = if (ytId != null) {
+                            { onVideoDownload(result) }
+                        } else null,
+                        isPlaying = isPlaying,
+                        videoId = ytId,
+                        onClosePlayer = onStopVideo,
                         modifier = Modifier.animateItem(
                             fadeInSpec    = tween(300, delayMillis = (index * 35).coerceAtMost(400)),
                             placementSpec = spring(Spring.DampingRatioLowBouncy, Spring.StiffnessLow),
@@ -2160,8 +2308,8 @@ private fun AllBookmarksSheet(
                                     Icon(Icons.Rounded.MoreVert, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                                 }
                                 DropdownMenu(showMenu, { showMenu = false }) {
-                                    DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { Icon(Icons.Rounded.Edit, null, Modifier.size(16.dp)) }, onClick = { onEdit(bm); showMenu = false })
-                                    DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error) }, onClick = { onDelete(bm.url); showMenu = false })
+                                    DropdownMenuItem(text = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_edit)) }, leadingIcon = { Icon(Icons.Rounded.Edit, null, Modifier.size(16.dp)) }, onClick = { onEdit(bm); showMenu = false })
+                                    DropdownMenuItem(text = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Rounded.Delete, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error) }, onClick = { onDelete(bm.url); showMenu = false })
                                 }
                             }
                         }

@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -174,8 +175,8 @@ fun RecentSearchSection(
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
-            title = "Recent searches",
-            actionLabel = if (history.isNotEmpty()) "Clear all" else null,
+            title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_title),
+            actionLabel = if (history.isNotEmpty()) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_clear) else null,
             onAction = onClearAll,
         )
 
@@ -260,7 +261,7 @@ fun EmptyHistory(modifier: Modifier = Modifier) {
             }
         }
         Text(
-            "Start your first search",
+            stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_history_start),
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

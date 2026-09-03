@@ -263,6 +263,62 @@ class CatalogRepository @Inject constructor(
     }
 
     /**
+     * Resolves a direct playable and downloadable video stream URL (MP4) for a YouTube video.
+     * Uses InnerTube first, then falls back to NewPipeExtractor muxed/video streams.
+     */
+    suspend fun resolveVideoStream(sourceUrl: String, maxHeight: Int = 720): String? = withContext(Dispatchers.IO) {
+        val videoId = sourceUrl.substringAfter("v=", "")
+            .substringBefore("&")
+            .ifBlank { sourceUrl.substringAfterLast("/", "") }
+
+        try {
+            // Step 1: Try InnerTube resolution first (fastest)
+            val innerTubeUrl = innerTubeClient.resolveVideoStream(videoId, maxHeight)
+            if (innerTubeUrl != null) {
+                android.util.Log.i("CatalogRepo", "Resolved video stream via InnerTube for $videoId")
+                return@withContext innerTubeUrl
+            }
+
+            // Step 2: Fallback to NewPipeExtractor
+            val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
+            val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
+
+            // Prefer muxed streams (video + audio in one stream, e.g. 720p or 360p MP4)
+            val muxed = streamInfo.videoStreams
+            if (!muxed.isNullOrEmpty()) {
+                val matched = muxed
+                    .filter { stream ->
+                        val res = stream.resolution?.replace("p", "")?.toIntOrNull() ?: 0
+                        res <= maxHeight
+                    }
+                    .maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
+                    ?: muxed.minByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: Int.MAX_VALUE }
+
+                if (matched?.content != null) {
+                    android.util.Log.i("CatalogRepo", "Resolved muxed video stream via NewPipe (${matched.resolution}) for $videoId")
+                    return@withContext matched.content
+                }
+            }
+
+            // Fallback to videoOnlyStreams
+            val videoOnly = streamInfo.videoOnlyStreams
+            if (!videoOnly.isNullOrEmpty()) {
+                val matched = videoOnly
+                    .filter { (it.resolution?.replace("p", "")?.toIntOrNull() ?: 0) <= maxHeight }
+                    .maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
+                    ?: videoOnly.firstOrNull()
+                if (matched?.content != null) {
+                    return@withContext matched.content
+                }
+            }
+            null
+        } catch (e: Exception) {
+            android.util.Log.w("CatalogRepo", "resolveVideoStream failed for $videoId: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Fetch timed captions (subtitles) from a YouTube video and convert to LRC format.
      * Returns null if no captions are available.
      */

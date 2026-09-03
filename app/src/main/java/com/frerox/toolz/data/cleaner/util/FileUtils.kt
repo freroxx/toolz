@@ -25,18 +25,60 @@ import java.io.File
 object FileUtils {
     fun calculateDirSize(dir: File): Long {
         var size = 0L
-        try { dir.walkTopDown().filter { it.isFile }.forEach { size += it.length() } } catch (_: Exception) {}
+        try {
+            var count = 0
+            for (f in dir.walkTopDown().onEnter { d -> !d.name.startsWith(".") || d == dir }) {
+                if (f.isFile) { size += f.length(); count++ }
+                if (count > 50_000) break
+            }
+        } catch (_: Exception) {}
         return size
     }
-    fun isImageExt(ext: String) = ext.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","heic","heif")
-    fun isVideoExt(ext: String) = ext.lowercase() in setOf("mp4","mkv","avi","mov","webm","flv")
-    fun isAudioExt(ext: String) = ext.lowercase() in setOf("mp3","wav","m4a","ogg","flac","aac")
-    fun isSafeToDelete(path: String): Boolean {
+    fun extOf(name: String): String = name.substringAfterLast('.', "").lowercase()
+    fun isImageExt(ext: String) = extOf(ext) in setOf("jpg","jpeg","png","gif","webp","bmp","heic","heif")
+    fun isVideoExt(ext: String) = extOf(ext) in setOf("mp4","mkv","avi","mov","webm","flv")
+    fun isAudioExt(ext: String) = extOf(ext) in setOf("mp3","wav","m4a","ogg","flac","aac")
+    /** Allowlist-based safety gate: only files under app-accessible external storage. */
+    fun isSafeToDelete(path: String, rootHint: String? = null): Boolean {
         if (path.isBlank()) return false
-        val normalized = File(path).canonicalPath
-        if (normalized == "/" || normalized == "/storage" || normalized == "/storage/emulated" || normalized == "/storage/emulated/0") return false
-        if (normalized.startsWith("/system") || normalized.startsWith("/vendor") || normalized.startsWith("/proc")) return false
+        val normalized = try { File(path).canonicalPath } catch (_: Exception) { return false }
+        // Hard blocks — system / device nodes, never cleanable
+        val blockedPrefixes = listOf("/system", "/vendor", "/proc", "/dev", "/sys", "/apex", "/acct", "/config", "/mnt", "/data", "/cache")
+        if (blockedPrefixes.any { normalized == it || normalized.startsWith("$it/") }) return false
+        if (normalized == "/" || normalized == "/storage" || normalized == "/storage/emulated" ||
+            normalized == "/storage/emulated/0" || normalized == "/sdcard") return false
+        // Allowlist: must live under shared external storage root
+        val roots = mutableListOf("/storage/emulated/0")
+        if (rootHint != null) {
+            try { roots.add(File(rootHint).canonicalPath) } catch (_: Exception) {}
+        }
+        if (roots.none { normalized == it || normalized.startsWith("$it/") }) return false
+        // Refuse traversal leftovers / sentinel files
+        val name = File(normalized).name
+        if (name == ".nomedia" || name == ".gitkeep") return false
         return true
+    }
+    /** Directory variant of the allowlist gate: same checks as [isSafeToDelete],
+     * plus the path must be an existing directory, or a non-existent path whose
+     * parent is an existing directory (creation target). */
+    fun isSafeDir(path: String, rootHint: String? = null): Boolean {
+        if (!isSafeToDelete(path, rootHint)) return false
+        return try {
+            val f = File(path)
+            if (f.exists()) f.isDirectory else (f.parentFile?.isDirectory == true)
+        } catch (_: Exception) { false }
+    }
+    /** Prefix-match exclusion (exact or child). Substring matching is intentionally NOT used. */
+    fun isExcluded(path: String, exclusions: Set<String>): Boolean {
+        if (exclusions.isEmpty()) return false
+        var p = path
+        try { p = File(path).canonicalPath } catch (_: Exception) {}
+        return exclusions.any { ex ->
+            if (ex.isBlank()) return@any false
+            var e = ex
+            try { e = File(ex).canonicalPath } catch (_: Exception) {}
+            p == e || p.startsWith("$e/")
+        }
     }
     fun getMediaStoreUri(context: Context, path: String, ext: String): String? {
         // For images/videos, return file path directly for Coil (faster, Q+ compatible). MediaStore DATA is deprecated.

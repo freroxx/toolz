@@ -48,11 +48,9 @@ class TabManager @Inject constructor(
     fun removeTab(tabId: String) {
         val currentTabs = _tabs.value
         if (currentTabs.size <= 1 && currentTabs.any { it.id == tabId }) {
-            // A browser never leaves the user staring at a stale renderer after
-            // closing the final tab: replace it with the internal new-tab page.
-            val freshTab = TabEntry(url = "about:blank")
-            _tabs.value = listOf(freshTab)
-            _activeTabId.value = freshTab.id
+            // Last tab closed — clear session; caller (WebViewScreen) navigates to search home.
+            _tabs.value = emptyList()
+            _activeTabId.value = null
             persist()
             return
         }
@@ -95,7 +93,7 @@ class TabManager @Inject constructor(
     fun removeTabs(tabIds: Set<String>) {
         val currentTabs = _tabs.value
         val keptTabs = currentTabs.filter { it.id !in tabIds }
-        val newTabs = if (keptTabs.isEmpty()) listOf(TabEntry(url = "about:blank")) else keptTabs
+        val newTabs = if (keptTabs.isEmpty()) emptyList() else keptTabs
         _tabs.value = newTabs
         
         if (_activeTabId.value in tabIds || _activeTabId.value !in newTabs.map { it.id }) {

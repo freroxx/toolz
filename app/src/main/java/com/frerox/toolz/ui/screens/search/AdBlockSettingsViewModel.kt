@@ -42,7 +42,8 @@ data class AdBlockSettingsUiState(
     val nextDnsUrl: String = "",
     val isFetching: Boolean = false,
     val nextDnsHealth: NextDnsHealth = NextDnsHealth.UNKNOWN,
-    val isNextDnsEnabled: Boolean = false
+    val isNextDnsEnabled: Boolean = false,
+    val adScriptEnabled: Boolean = false
 )@HiltViewModel
 class AdBlockSettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
@@ -67,6 +68,7 @@ class AdBlockSettingsViewModel @Inject constructor(
         settingsRepository.searchAdBlockAllowlists,
         settingsRepository.searchAdBlockImportedCount,
         settingsRepository.searchDnsProvider,
+        settingsRepository.searchAdBlockScriptEnabled,
         _nextDnsHealth,
         _isFetching,
         _nextDnsIdInput,
@@ -82,10 +84,11 @@ class AdBlockSettingsViewModel @Inject constructor(
         val allowed   = args[4] as Set<String>
         val domCount  = args[5] as Int
         val provider  = args[6] as String
-        val health    = args[7] as NextDnsHealth
-        val fetching  = args[8] as Boolean
-        val inputId   = args[9] as? String
-        val inputUrl  = args[10] as? String
+        val adScript  = args[7] as Boolean
+        val health    = args[8] as NextDnsHealth
+        val fetching  = args[9] as Boolean
+        val inputId   = args[10] as? String
+        val inputUrl  = args[11] as? String
         AdBlockSettingsUiState(
             blocklists            = blocked,
             allowlists            = allowed,
@@ -96,7 +99,8 @@ class AdBlockSettingsViewModel @Inject constructor(
             isFetching            = fetching,
             nextDnsHealth         = health,
             // Enabled means NextDNS is the ACTIVE provider, not just that an ID was typed
-            isNextDnsEnabled      = provider.equals("NEXTDNS", ignoreCase = true)
+            isNextDnsEnabled      = provider.equals("NEXTDNS", ignoreCase = true),
+            adScriptEnabled       = adScript
         )
     }.stateIn(
         scope = viewModelScope,
@@ -257,6 +261,13 @@ class AdBlockSettingsViewModel @Inject constructor(
                 settingsRepository.setSearchNextDnsDnsUrl(url.trim())
                 _nextDnsUrlInput.value = null
             }
+        }
+    }
+
+    fun toggleAdScriptBlock(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSearchAdBlockScriptEnabled(enabled)
+            com.frerox.toolz.data.browser.AdBlockList.isAdScriptBlockingEnabled = enabled
         }
     }
 }

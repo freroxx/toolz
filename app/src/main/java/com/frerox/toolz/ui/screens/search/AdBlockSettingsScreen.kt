@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -52,7 +53,7 @@ fun AdBlockSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Ad Block Settings", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_title), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, null)
@@ -75,7 +76,7 @@ fun AdBlockSettingsScreen(
             // ── Import Popular Lists ──────────────────────────────────────────
             item {
                 SettingsSection(
-                    title = "Import Popular Lists",
+                    title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_import_title),
                     icon = Icons.Rounded.CloudDownload
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -85,7 +86,7 @@ fun AdBlockSettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                "Community Blocklists",
+                                stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_community),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold
                             )
@@ -97,7 +98,7 @@ fun AdBlockSettingsScreen(
                                 border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                             ) {
                                 Text(
-                                    "BETA",
+                                    stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_beta),
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Black
@@ -112,7 +113,7 @@ fun AdBlockSettingsScreen(
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
                                     Text(
-                                        "${uiState.importedDomainCount} domains blocked",
+                                        stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_domains_blocked, uiState.importedDomainCount),
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -122,7 +123,7 @@ fun AdBlockSettingsScreen(
                         }
 
                         Text(
-                            "Sync high-quality community-maintained blocklists for maximum protection.",
+                            stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_sync_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -131,24 +132,24 @@ fun AdBlockSettingsScreen(
                             AdBlockSettingsViewModel.POPULAR_LISTS.forEach { (id, _) ->
                                 val enabled = uiState.enabledImportedLists.contains(id)
                                 val label = when(id) {
-                                    "OISD_BASIC" -> "OISD Basic (Recommended)"
-                                    "ADGUARD_BASE" -> "AdGuard DNS Filter"
-                                    "STEVENBLACK" -> "StevenBlack Unified"
-                                    "EASYLIST" -> "EasyList"
-                                    "FANBOY_ANNOYANCE" -> "Fanboy's Annoyance"
-                                    "PETER_LOWE" -> "Peter Lowe's Ad Server List"
-                                    "UBLOCK_ORIGIN" -> "uBlock Origin Filters"
+                                    "OISD_BASIC" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_oisd)
+                                    "ADGUARD_BASE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_adguard)
+                                    "STEVENBLACK" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_steven)
+                                    "EASYLIST" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_easylist)
+                                    "FANBOY_ANNOYANCE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_fanboy)
+                                    "PETER_LOWE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_peter)
+                                    "UBLOCK_ORIGIN" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_ublock)
                                     else -> id.lowercase().replaceFirstChar(Char::uppercase)
                                 }
                                 
                                 val description = when(id) {
-                                    "OISD_BASIC" -> "High reliability, low false positives"
-                                    "ADGUARD_BASE" -> "Comprehensive ads + tracking"
-                                    "STEVENBLACK" -> "Adware + malware + telemetry"
-                                    "EASYLIST" -> "Primary web ad filter"
-                                    "FANBOY_ANNOYANCE" -> "Blocks popups, cookie banners & widgets"
-                                    "PETER_LOWE" -> "Curated ad-server list with zero breakages"
-                                    "UBLOCK_ORIGIN" -> "Essential privacy & ad filter rules"
+                                    "OISD_BASIC" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_oisd_d)
+                                    "ADGUARD_BASE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_adguard_d)
+                                    "STEVENBLACK" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_steven_d)
+                                    "EASYLIST" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_easylist_d)
+                                    "FANBOY_ANNOYANCE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_fanboy_d)
+                                    "PETER_LOWE" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_peter_d)
+                                    "UBLOCK_ORIGIN" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_list_ublock_d)
                                     else -> ""
                                 }
                                 
@@ -196,13 +197,40 @@ fun AdBlockSettingsScreen(
                             if (uiState.isFetching) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                 Spacer(Modifier.width(10.dp))
-                                Text("Fetching...")
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_fetching))
                             } else {
                                 Icon(Icons.Rounded.Sync, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Sync Enabled Lists")
+                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_sync_lists))
                             }
                         }
+                    }
+                }
+            }
+
+            // ── Ad Script Blocking (Popular) ────────────────────────────────
+            item {
+                SettingsSection(
+                    title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_script_title),
+                    icon = Icons.Rounded.Code,
+                    trailing = {
+                        Switch(
+                            checked = uiState.adScriptEnabled,
+                            onCheckedChange = viewModel::toggleAdScriptBlock
+                        )
+                    }
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_script_desc1),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_script_desc2),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
                     }
                 }
             }
@@ -210,7 +238,7 @@ fun AdBlockSettingsScreen(
             // ── NextDNS Section ───────────────────────────────────────────────
             item {
                 SettingsSection(
-                    title = "NextDNS Integration", 
+                    title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_title), 
                     icon = Icons.Rounded.Dns,
                     trailing = {
                         Switch(
@@ -226,16 +254,16 @@ fun AdBlockSettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                "Status:",
+                                stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_status),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             
                             val (color, label) = when (uiState.nextDnsHealth) {
-                                NextDnsHealth.CONNECTED -> Color(0xFF4CAF50) to "Connected"
-                                NextDnsHealth.NOT_LINKED -> Color(0xFFFFC107) to "Not Linked"
-                                NextDnsHealth.ERROR -> Color(0xFFF44336) to "Error"
-                                NextDnsHealth.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to "Checking..."
+                                NextDnsHealth.CONNECTED -> Color(0xFF4CAF50) to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_connected)
+                                NextDnsHealth.NOT_LINKED -> Color(0xFFFFC107) to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_not_linked)
+                                NextDnsHealth.ERROR -> Color(0xFFF44336) to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_error)
+                                NextDnsHealth.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_checking)
                             }
                             
                             Surface(
@@ -254,7 +282,7 @@ fun AdBlockSettingsScreen(
                         }
 
                         Text(
-                            "Connect your NextDNS account to use your own custom blocklists and analytics.",
+                            stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -267,7 +295,7 @@ fun AdBlockSettingsScreen(
                         ) {
                             Icon(Icons.Rounded.OpenInBrowser, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Setup on NextDNS.io")
+                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_setup))
                         }
 
                         Row(
@@ -277,8 +305,8 @@ fun AdBlockSettingsScreen(
                             OutlinedTextField(
                                 value = uiState.nextDnsId,
                                 onValueChange = viewModel::setNextDnsId,
-                                label = { Text("NextDNS Configuration ID") },
-                                placeholder = { Text("e.g. abcdef") },
+                                label = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_id_label)) },
+                                placeholder = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_nextdns_id_hint)) },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(14.dp),
                                 singleLine = true
@@ -299,8 +327,8 @@ fun AdBlockSettingsScreen(
                         OutlinedTextField(
                             value = uiState.nextDnsUrl,
                             onValueChange = viewModel::setNextDnsUrl,
-                            label = { Text("Custom DoH Hostname") },
-                            placeholder = { Text("e.g. 221e93.dns.nextdns.io") },
+                            label = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_doh_label)) },
+                            placeholder = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_doh_hint)) },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             singleLine = true
@@ -311,13 +339,13 @@ fun AdBlockSettingsScreen(
 
             // ── Custom Blocklist ─────────────────────────────────────────────
             item {
-                SettingsSection(title = "Custom Blocklist", icon = Icons.Rounded.Block) {
+                SettingsSection(title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_custom_block), icon = Icons.Rounded.Block) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = newBlockedDomain,
                                 onValueChange = { newBlockedDomain = it },
-                                placeholder = { Text("example.com") },
+                                placeholder = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_allow_hint)) },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
                                 singleLine = true
@@ -344,13 +372,13 @@ fun AdBlockSettingsScreen(
 
             // ── Custom Allowlist ─────────────────────────────────────────────
             item {
-                SettingsSection(title = "Allowlist (Exceptions)", icon = Icons.Rounded.CheckCircle) {
+                SettingsSection(title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_allowlist), icon = Icons.Rounded.CheckCircle) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = newAllowedDomain,
                                 onValueChange = { newAllowedDomain = it },
-                                placeholder = { Text("trusted.com") },
+                                placeholder = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_adblock_trusted_hint)) },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
                                 singleLine = true

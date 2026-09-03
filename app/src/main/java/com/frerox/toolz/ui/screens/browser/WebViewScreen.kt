@@ -148,6 +148,10 @@ fun WebViewScreen(
     var showFindInPage by remember { mutableStateOf(false) }
     var findQuery      by remember { mutableStateOf("") }
     var isDockVisible  by remember { mutableStateOf(true) }
+    var isTopBarVisible by remember { mutableStateOf(true) }
+    var scrollStartTime by remember { mutableLongStateOf(0L) }
+    var scrollIdleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var hideTopBarJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var showSearchOverlay by remember { mutableStateOf(false) }
     var searchOverlayQuery by remember { mutableStateOf("") }
     var showDownloadsSheet by remember { mutableStateOf(false) }
@@ -241,6 +245,7 @@ fun WebViewScreen(
     // ViewModel state
     val isBookmarked   by viewModel.isBookmarked.collectAsState()
     val adBlockEnabled by viewModel.adBlockEnabled.collectAsState(initial = true)
+    val adScriptEnabled by viewModel.adScriptEnabled.collectAsState(initial = false)
     val floatingToolbarVisible by viewModel.floatingToolbarVisible.collectAsState(initial = true)
     val tabs           by viewModel.tabs.collectAsState(initial = emptyList())
     val activeTabId    by viewModel.activeTabId.collectAsState(initial = null)
@@ -255,6 +260,7 @@ fun WebViewScreen(
     val isSavedForLater by viewModel.isSavedForLater.collectAsState()
     
     val currentAdBlockEnabled by rememberUpdatedState(adBlockEnabled)
+    val currentAdScriptEnabled by rememberUpdatedState(adScriptEnabled)
     val currentTabIsPrivate by rememberUpdatedState(activeTab?.isPrivate == true)
 
     LaunchedEffect(Unit) {
@@ -312,9 +318,9 @@ fun WebViewScreen(
 
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // Modern top chrome
+            // Top chrome — always visible (user requested: hide bottom pill not top on scroll)
             TopChrome(
-                pageTitle        = pageTitle,
+                    pageTitle        = pageTitle,
                 currentUrl       = currentUrl,
                 isLoading        = isLoading,
                 progress         = progress,
@@ -332,9 +338,7 @@ fun WebViewScreen(
                 onSwitchTab      = { id -> viewModel.switchTab(id) },
                 onCloseTab       = { id -> viewModel.closeTab(id) },
                 onNewTab         = {
-                    viewModel.addTab("about:blank", isPrivate = activeTab?.isPrivate == true)
-                    searchOverlayQuery = ""
-                    showSearchOverlay = true
+                    onNavigateToSearch("")
                 },
                 onOpenTabOverview = onManageTabs,
                 onFindQueryChange = { q ->
@@ -383,6 +387,8 @@ fun WebViewScreen(
                 },
                 onToggleDesktop = { viewModel.toggleDesktopMode() },
                 onToggleAdBlock = { viewModel.setAdBlockEnabled(!adBlockEnabled) },
+                onToggleAdScriptBlock = { viewModel.setAdScriptBlockEnabled(!adScriptEnabled) },
+                adScriptEnabled = adScriptEnabled,
                 onToggleFloatingToolbar = { viewModel.setFloatingToolbarVisible(!floatingToolbarVisible) },
                 onShowDownloads = { showDownloadsSheet = true },
                 onShowPasswords = {
@@ -392,9 +398,7 @@ fun WebViewScreen(
                     }
                 },
                 onNewPrivateTab = {
-                    viewModel.addTab("about:blank", isPrivate = true)
-                    searchOverlayQuery = ""
-                    showSearchOverlay = true
+                    onNavigateToSearch("")
                 },
                 onClosePrivateTabs = { viewModel.clearPrivateTabs() },
                 onOpenReader = {
@@ -408,22 +412,37 @@ fun WebViewScreen(
                 onRevokePermission = { type -> viewModel.setSitePermission(currentUrl, type, BrowserSitePermission.ASK); permVersion++ },
             )
 
-            // WebView with Pull-to-Refresh
-            PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    isRefreshing = true
-                    webView?.reload()
-                    scope.launch {
-                        delay(1000)
-                        isRefreshing = false
-                    }
-                },
-                state = refreshState,
-                modifier = Modifier.weight(1f)
+            // WebView framed — 4-corner polished frame same color as TopChrome (surfaceContainerLow)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(10.dp)
             ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 2.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp))
+                ) {
+                    PullToRefreshBox(
+                        isRefreshing = isRefreshing,
+                        onRefresh = {
+                            isRefreshing = true
+                            webView?.reload()
+                            scope.launch {
+                                delay(1000)
+                                isRefreshing = false
+                            }
+                        },
+                        state = refreshState,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
                     factory  = { ctx ->
                         WebView(ctx).apply {
                             layoutParams = ViewGroup.LayoutParams(
@@ -435,6 +454,10 @@ fun WebViewScreen(
                                 domStorageEnabled       = true
                                 loadWithOverviewMode    = true
                                 useWideViewPort         = true
+                                // Desktop pages must load fully zoomed out (entire site width
+                                // visible, like every browser). scale 0 = auto overview fit.
+                                @Suppress("DEPRECATION")
+                                setInitialScale(0)
                                 builtInZoomControls     = true
                                 displayZoomControls     = false
                                 setSupportZoom(true)
@@ -451,6 +474,44 @@ fun WebViewScreen(
                                 javaScriptCanOpenWindowsAutomatically = false
                                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                                     safeBrowsingEnabled = true
+                                }
+                            }
+
+                            // Scroll listener for auto-hide TopChrome pill after 1s continuous scroll
+                            setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                                val dy = kotlin.math.abs(scrollY - oldScrollY)
+                                if (dy < 2) return@setOnScrollChangeListener
+                                // Always show bottom pill at top
+                                if (scrollY == 0) {
+                                    isDockVisible = true
+                                    scrollStartTime = 0L
+                                    scrollIdleJob?.cancel()
+                                    hideTopBarJob?.cancel()
+                                    return@setOnScrollChangeListener
+                                }
+                                // Don't hide when find bar or fullscreen
+                                if (showFindInPage || fullscreenContent != null) {
+                                    isDockVisible = true
+                                    return@setOnScrollChangeListener
+                                }
+                                // Cancel pending show
+                                scrollIdleJob?.cancel()
+                                // Start hide timer if not already — hide bottom pill after 1s continuous scroll
+                                if (hideTopBarJob == null || hideTopBarJob?.isActive != true) {
+                                    if (scrollStartTime == 0L) scrollStartTime = System.currentTimeMillis()
+                                    hideTopBarJob = scope.launch {
+                                        delay(1000)
+                                        if (System.currentTimeMillis() - scrollStartTime >= 1000) {
+                                            isDockVisible = false
+                                        }
+                                    }
+                                }
+                                // Schedule show when idle (no scroll for 350ms) — show bottom pill again
+                                scrollIdleJob = scope.launch {
+                                    delay(350)
+                                    isDockVisible = true
+                                    scrollStartTime = 0L
+                                    hideTopBarJob?.cancel()
                                 }
                             }
 
@@ -790,28 +851,54 @@ fun WebViewScreen(
                             val targetUA = if (isDesktopMode) DESKTOP_USER_AGENT else {
                                 defaultUserAgent ?: android.webkit.WebSettings.getDefaultUserAgent(wv.context)
                             }
-                            // Always ensure viewport settings match mode
-                            useWideViewPort = isDesktopMode
-                            loadWithOverviewMode = isDesktopMode
+                            // Viewport must ALWAYS be wide + overview for proper responsive layout.
+                            // Desktop toggle ONLY changes UA; viewport mode stays overview so full-page
+                            // width is always visible and zoom-out works.
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
                             setSupportZoom(true)
                             builtInZoomControls = true
                             displayZoomControls = false
-                            // Reload whenever the applied UA differs from the target OR when the
-                            // mode changed without a reload following it. Comparing UA strings
-                            // alone missed rapid toggles (the string already matched, so no
-                            // reload fired and the page kept the old layout).
+                            // Ensure desktop pages load fully zoomed-out (entire width visible)
+                            // Initial scale 0 = auto overview fit; we also force viewport meta via JS.
+                            @Suppress("DEPRECATION")
+                            if (isDesktopMode) wv.setInitialScale(0) else wv.setInitialScale(0)
                             val uaChanged = targetUA.isNotEmpty() && userAgentString != targetUA
                             if (uaChanged) {
                                 userAgentString = targetUA
                                 lastAppliedDesktopMode = isDesktopMode
                                 renderedUaTarget = targetUA
+                                @Suppress("DEPRECATION")
+                                wv.setInitialScale(0)
                                 wv.reload()
+                                if (isDesktopMode) {
+                                    wv.postDelayed({
+                                        try {
+                                            wv.evaluateJavascript(
+                                                "(function(){try{var m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}m.content='width=980, initial-scale=0.25, minimum-scale=0.25, user-scalable=yes';}catch(e){}})();",
+                                                null
+                                            )
+                                            repeat(3) { wv.zoomOut() }
+                                        } catch (_: Exception) {}
+                                    }, 900)
+                                }
                             } else if (lastAppliedDesktopMode != isDesktopMode) {
-                                // UA already matches (e.g. previous application completed) but the
-                                // page was never re-rendered for this mode — force the reload once.
                                 lastAppliedDesktopMode = isDesktopMode
                                 renderedUaTarget = targetUA
+                                @Suppress("DEPRECATION")
+                                wv.setInitialScale(0)
                                 wv.reload()
+                                if (isDesktopMode) {
+                                    wv.postDelayed({
+                                        try {
+                                            wv.evaluateJavascript(
+                                                "(function(){try{var m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}m.content='width=980, initial-scale=0.25';}catch(e){}})();",
+                                                null
+                                            )
+                                            repeat(3) { wv.zoomOut() }
+                                        } catch (_: Exception) {}
+                                    }, 900)
+                                }
                             }
                             cacheMode = if (activeTab?.isPrivate == true) {
                                 WebSettings.LOAD_NO_CACHE
@@ -828,38 +915,19 @@ fun WebViewScreen(
                         }
                     },
                 )
-            }
-        }
+                    } // PullToRefreshBox
+                } // Surface frame
+            } // Box frame outer
+        } // Column
 
-        // about:blank is Toolz's internal new-tab destination, never an empty WebView.
-        AnimatedVisibility(
-            visible = activeTab?.url == "about:blank" && !showSearchOverlay,
-            enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
-            modifier = Modifier.fillMaxSize().padding(top = 104.dp),
-        ) {
-            BrowserStartPage(
-                isPrivate = activeTab?.isPrivate == true,
-                bookmarks = bookmarks,
-                history = browserHistory,
-                readingList = readingList,
-                onFocusAddress = { showSearchOverlay = true },
-                onOpenUrl = { raw ->
-                    when (val dest = BrowserAddressResolver.resolveDestination(raw)) {
-                        is com.frerox.toolz.data.browser.AddressDestination.DirectUrl -> {
-                            viewModel.resolveAddress(raw) { target ->
-                                webView?.loadUrl(target)
-                                currentUrl = target
-                                viewModel.updateTab(url = target)
-                            }
-                        }
-                        is com.frerox.toolz.data.browser.AddressDestination.SearchQuery -> onNavigateToSearch(dest.query)
-                    }
-                },
-                onNewPrivateTab = {
-                    viewModel.addTab("about:blank", isPrivate = true)
-                },
-            )
+        // Previously about:blank new-tab page removed — new tabs now navigate to search home.
+        // Keep empty state to avoid blank WebView if tabs become empty via last-tab close.
+        LaunchedEffect(tabs.isEmpty(), activeTabId) {
+            if (tabs.isEmpty() && activeTabId == null) {
+                // Defer navigation to avoid recomposition clash
+                kotlinx.coroutines.delay(100)
+                onNavigateToSearch("")
+            }
         }
 
         // ── Single, calm bottom navigation surface ────────────────────────────
@@ -879,10 +947,8 @@ fun WebViewScreen(
                 onForward = { webView?.goForward() },
                 onAddress = { showSearchOverlay = true },
                 onTabs = onManageTabs,
-                onNewTab = {
-                    viewModel.addTab("about:blank")
-                    searchOverlayQuery = ""
-                    showSearchOverlay = true
+                onHome = {
+                    onNavigateToSearch("")
                 },
                 onSwipeDown   = { isDockVisible = false },
             )
@@ -1324,6 +1390,7 @@ private fun TopChrome(
     isPrivate: Boolean,
     blockedRequests: Int,
     adBlockEnabled: Boolean,
+    adScriptEnabled: Boolean = false,
     floatingToolbarVisible: Boolean,
     tabs: List<TabEntry>,
     activeTabId: String?,
@@ -1346,6 +1413,7 @@ private fun TopChrome(
     onOpenExternal: () -> Unit,
     onToggleDesktop: () -> Unit,
     onToggleAdBlock: () -> Unit,
+    onToggleAdScriptBlock: () -> Unit = {},
     onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
@@ -1367,116 +1435,147 @@ private fun TopChrome(
         label         = "progressAlpha",
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .statusBarsPadding(),
+    // ── Flat header — no rounded corners, frame provides polish instead
+    // User requested remove rounded corners from top bar; webpage frame now has 4-corner rounding
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.ui.graphics.RectangleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
-
-        // ── URL bar row ───────────────────────────────────────────────────────
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                onClick = onUrlBarClick,
-                modifier = Modifier.weight(1f).height(42.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            // URL bar row — expressive pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Surface(
+                    onClick = onUrlBarClick,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    tonalElevation = 1.dp,
+                    shadowElevation = 1.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.12f)),
                 ) {
-                    val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
-                    IconButton(
-                        onClick = { showSiteControls = true },
-                        modifier = Modifier.size(24.dp)
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(
-                            imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                            contentDescription = "Site controls",
-                            modifier = Modifier.size(16.dp),
-                            tint = if (isSecure) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
-                        )
-                    }
-
-                    PrivacyFaviconImage(url = currentUrl, size = 18.dp)
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        if (pageTitle.isNotBlank()) {
-                            Text(
-                                text = pageTitle,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
+                        val isSecure = currentUrl.startsWith("https://", ignoreCase = true)
+                        Surface(
+                            onClick = { showSiteControls = true },
+                            shape = CircleShape,
+                            color = if (isSecure) Color(0xFF4CAF50).copy(alpha = 0.14f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isSecure) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                                    contentDescription = "Site controls",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (isSecure) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
-                        Text(
-                            text = safeHostFromUrl(currentUrl),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
 
-                    if (isPrivate) {
-                        Icon(
-                            Icons.Rounded.VisibilityOff,
-                            contentDescription = "Private tab",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-
-                    if (blockedRequests > 0) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.size(22.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f)),
                         ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                PrivacyFaviconImage(url = currentUrl, size = 16.dp)
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (pageTitle.isNotBlank()) {
+                                Text(
+                                    text = pageTitle,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                             Text(
-                                text = blockedRequests.coerceAtMost(99).toString(),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                text = safeHostFromUrl(currentUrl),
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
+                        }
+
+                        if (isPrivate) {
+                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f), modifier = Modifier.size(22.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.VisibilityOff, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                }
+                            }
+                        }
+
+                        if (blockedRequests > 0) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shadowElevation = 1.dp,
+                            ) {
+                                Text(
+                                    text = blockedRequests.coerceAtMost(99).toString(),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            // Reload / Stop button beside the address bar
-            IconButton(
-                onClick = if (isLoading) onStop else onReload,
-                modifier = Modifier.size(38.dp),
-            ) {
-                Icon(
-                    imageVector = if (isLoading) Icons.Rounded.Close else Icons.Rounded.Refresh,
-                    contentDescription = if (isLoading) "Stop loading" else "Reload",
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+                // Reload / Stop — FilledIconButton expressive 40dp 14dp rounded
+                FilledIconButton(
+                    onClick = if (isLoading) onStop else onReload,
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = if (isLoading) Icons.Rounded.Close else Icons.Rounded.Refresh,
+                        contentDescription = if (isLoading) "Stop loading" else "Reload",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
 
-            // Overflow menu button
-            IconButton(onClick = { showOptions = true }, modifier = Modifier.size(38.dp)) {
-                Icon(
-                    Icons.Rounded.MoreVert, stringResource(R.string.st_WebViewScreen_1a2b),
-                    modifier = Modifier.size(22.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Overflow — tonal 40dp
+                FilledTonalIconButton(
+                    onClick = { showOptions = true },
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                ) {
+                    Icon(Icons.Rounded.MoreVert, stringResource(R.string.st_WebViewScreen_1a2b), modifier = Modifier.size(20.dp))
+                }
             }
-        }
 
         // Always-visible Tab Strip below the address bar
         BrowserTabStrip(
@@ -1570,7 +1669,8 @@ private fun TopChrome(
                 }
             }
         }
-    }
+        } // close Column
+    } // close expressive header Surface
 
     if (showSiteControls) {
         SiteControlsSheet(
@@ -1589,6 +1689,7 @@ private fun TopChrome(
             isPrivate = isPrivate,
             isDesktopMode = isDesktopMode,
             adBlockEnabled = adBlockEnabled,
+            adScriptEnabled = adScriptEnabled,
             floatingToolbarVisible = floatingToolbarVisible,
             currentUrl = currentUrl,
             sitePermissions = sitePermissions,
@@ -1604,6 +1705,7 @@ private fun TopChrome(
             onOpenExternal = onOpenExternal,
             onToggleDesktop = onToggleDesktop,
             onToggleAdBlock = onToggleAdBlock,
+            onToggleAdScriptBlock = onToggleAdScriptBlock,
             onToggleFloatingToolbar = onToggleFloatingToolbar,
             onShowDownloads = onShowDownloads,
             onShowPasswords = onShowPasswords,
@@ -1626,66 +1728,93 @@ private fun BrowserTabStrip(
     onOpenOverview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Remade tabs bar — pill-shaped expressive chips, active = primaryContainer, inactive = surfaceContainerHigh
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            .height(48.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            LazyRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                items(tabs, key = { it.id }) { tab ->
+            // One tab at a time, horizontal swiping via HorizontalPager (no free scroll)
+            val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+                initialPage = (tabs.indexOfFirst { it.id == activeTabId }.takeIf { it >= 0 } ?: 0),
+                pageCount = { tabs.size.coerceAtLeast(1) }
+            )
+            androidx.compose.runtime.LaunchedEffect(activeTabId, tabs.size) {
+                val idx = tabs.indexOfFirst { it.id == activeTabId }
+                if (idx >= 0 && pagerState.currentPage != idx) {
+                    try { pagerState.animateScrollToPage(idx) } catch (_: Exception) {}
+                }
+            }
+            // Swipe-to-switch removed per bug report: swiping the tab strip was auto-switching the
+            // website and causing tab duplication/override races. Only taps explicitly switch.
+            if (tabs.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).height(36.dp), contentAlignment = Alignment.Center) {
+                    Text("No tabs", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.weight(1f).height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                    pageSpacing = 8.dp,
+                    userScrollEnabled = false,
+                ) { page ->
+                    if (page >= tabs.size) return@HorizontalPager
+                    val tab = tabs[page]
                     val isActive = tab.id == activeTabId
                     Surface(
                         onClick = { onSwitchTab(tab.id) },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isActive) MaterialTheme.colorScheme.surfaceContainerHighest
-                                else MaterialTheme.colorScheme.surfaceContainerLow,
-                        border = if (isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (isActive) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = if (isActive) 2.dp else 0.dp,
+                        shadowElevation = if (isActive) 1.dp else 0.dp,
+                        border = if (!isActive) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f)) else null,
                         modifier = Modifier
-                            .height(30.dp)
-                            .widthIn(min = 90.dp, max = 150.dp),
+                            .fillMaxWidth()
+                            .height(36.dp)
+                            .padding(horizontal = 2.dp),
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            PrivacyFaviconImage(url = tab.url, size = 14.dp)
+                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), modifier = Modifier.size(20.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    PrivacyFaviconImage(url = tab.url, size = 14.dp)
+                                }
+                            }
                             Text(
                                 text = tab.title.ifBlank { safeHostFromUrl(tab.url) },
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
-                                color = if (isActive) MaterialTheme.colorScheme.onSurface
+                                color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             if (tabs.size > 1) {
-                                IconButton(
+                                Surface(
                                     onClick = { onCloseTab(tab.id) },
-                                    modifier = Modifier.size(16.dp),
+                                    shape = CircleShape,
+                                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.size(20.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.Close,
-                                        contentDescription = "Close tab",
-                                        modifier = Modifier.size(12.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Rounded.Close, "Close tab", modifier = Modifier.size(12.dp), tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                         }
@@ -1693,35 +1822,33 @@ private fun BrowserTabStrip(
                 }
             }
 
-            // Tab count overview button
+            // Tab count overview — tonal pill with count + grid icon
             Surface(
                 onClick = onOpenOverview,
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                modifier = Modifier.size(28.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                tonalElevation = 1.dp,
+                modifier = Modifier.height(36.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Rounded.GridView, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
                     Text(
                         text = tabs.size.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
                 }
             }
 
-            // New tab button
-            IconButton(
+            // New tab — primary tonal 36dp
+            FilledTonalIconButton(
                 onClick = onNewTab,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(36.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
             ) {
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = "New tab",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+                Icon(Icons.Rounded.Add, "New tab", modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -1910,7 +2037,7 @@ private fun BrowserNavigationBar(
     onForward: () -> Unit,
     onAddress: () -> Unit,
     onTabs: () -> Unit,
-    onNewTab: () -> Unit,
+    onHome: () -> Unit,
     onSwipeDown: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -1946,8 +2073,8 @@ private fun BrowserNavigationBar(
             }
             IconButton(onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onNewTab()
-            }) { Icon(Icons.Rounded.Add, "New tab") }
+                onHome()
+            }) { Icon(Icons.Rounded.Home, "Home") }
         }
     }
 }
@@ -1968,6 +2095,7 @@ private fun BrowserOptionsSheet(
     isPrivate: Boolean,
     isDesktopMode: Boolean,
     adBlockEnabled: Boolean,
+    adScriptEnabled: Boolean = false,
     floatingToolbarVisible: Boolean,
     currentUrl: String = "",
     sitePermissions: Map<com.frerox.toolz.data.browser.BrowserPermissionType, BrowserSitePermission> = emptyMap(),
@@ -1983,6 +2111,7 @@ private fun BrowserOptionsSheet(
     onOpenExternal: () -> Unit,
     onToggleDesktop: () -> Unit,
     onToggleAdBlock: () -> Unit,
+    onToggleAdScriptBlock: () -> Unit = {},
     onToggleFloatingToolbar: () -> Unit,
     onShowDownloads: () -> Unit,
     onShowPasswords: () -> Unit,
@@ -2025,7 +2154,7 @@ private fun BrowserOptionsSheet(
                     modifier = Modifier.weight(1f)
                 )
                 OptionQuickAction(
-                    icon = if (canGoForward) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowForward,
+                    icon = Icons.AutoMirrored.Filled.ArrowForward,
                     label = stringResource(R.string.st_WebViewScreen_5f6e),
                     enabled = canGoForward,
                     onClick = { onForward(); onDismiss() },
@@ -2039,16 +2168,17 @@ private fun BrowserOptionsSheet(
                     modifier = Modifier.weight(1f)
                 )
                 OptionQuickAction(
-                    icon = Icons.Rounded.Key,
-                    label = stringResource(R.string.st_WebViewScreen_6a1b),
-                    onClick = { onShowPasswords(); onDismiss() },
+                    icon = Icons.Rounded.AutoStories,
+                    label = "Reader",
+                    onClick = { onOpenReader(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            OptionSectionTitle("View")
 
-            // Toggles section
+            // View section
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -2063,6 +2193,27 @@ private fun BrowserOptionsSheet(
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     OptionToggleRow(
+                        icon = Icons.Rounded.ViewStream,
+                        label = stringResource(R.string.st_WebViewScreen_5d6e),
+                        checked = floatingToolbarVisible,
+                        onCheckedChange = { onToggleFloatingToolbar(); onDismiss() }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionActionRow(stringResource(R.string.st_AiAssistantScreen_9f0a), Icons.Rounded.Search, onToggleFind, onDismiss)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            OptionSectionTitle("Privacy & Security")
+
+            // Privacy section
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            ) {
+                Column {
+                    OptionToggleRow(
                         icon = Icons.Rounded.Shield,
                         label = stringResource(R.string.st_WebViewScreen_3c4d),
                         checked = adBlockEnabled,
@@ -2070,15 +2221,26 @@ private fun BrowserOptionsSheet(
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     OptionToggleRow(
-                        icon = Icons.Rounded.ViewStream,
-                        label = stringResource(R.string.st_WebViewScreen_5d6e),
-                        checked = floatingToolbarVisible,
-                        onCheckedChange = { onToggleFloatingToolbar(); onDismiss() }
+                        icon = Icons.Rounded.Code,
+                        label = "Ad scripts block",
+                        checked = adScriptEnabled,
+                        onCheckedChange = { onToggleAdScriptBlock(); onDismiss() }
                     )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionActionRow("New private tab", Icons.Rounded.VisibilityOff, onNewPrivateTab, onDismiss)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionActionRow("Close private tabs", Icons.Rounded.DeleteSweep, onClosePrivateTabs, onDismiss)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionActionRow("Clear browsing data", Icons.Rounded.DeleteSweep, onClearBrowsingData, onDismiss)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    OptionActionRow(stringResource(R.string.st_WebViewScreen_6a1b), Icons.Rounded.Key, onShowPasswords, onDismiss)
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+
+            Spacer(Modifier.height(20.dp))
+            OptionSectionTitle("This Site")
 
             // Permission Card — shows current site granted permissions
             val host = remember(currentUrl) { com.frerox.toolz.ui.screens.search.components.safeHostFromUrl(currentUrl) }
@@ -2160,12 +2322,11 @@ private fun BrowserOptionsSheet(
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            OptionSectionTitle("Actions")
 
             // Actions list
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OptionActionRow("New private tab", Icons.Rounded.VisibilityOff, onNewPrivateTab, onDismiss)
-                OptionActionRow("Close private tabs", Icons.Rounded.DeleteSweep, onClosePrivateTabs, onDismiss)
                 if (!isPrivate) {
                     OptionActionRow(
                         if (isSavedForLater) "Remove from read later" else "Read later",
@@ -2174,10 +2335,6 @@ private fun BrowserOptionsSheet(
                         onDismiss,
                     )
                 }
-                OptionActionRow("Reader view", Icons.Rounded.AutoStories, onOpenReader, onDismiss)
-                OptionActionRow("Clear browsing data", Icons.Rounded.DeleteSweep, onClearBrowsingData, onDismiss)
-                OptionActionRow("Reset site permissions", Icons.Rounded.Security, onResetSitePermissions, onDismiss)
-                OptionActionRow(stringResource(R.string.st_AiAssistantScreen_9f0a), Icons.Rounded.Search, onToggleFind, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_7e8f), Icons.Rounded.Download, onShowDownloads, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_9f0a), Icons.Rounded.Share, onShare, onDismiss)
                 OptionActionRow(stringResource(R.string.st_WebViewScreen_a1b2), Icons.Rounded.ContentCopy, onCopy, onDismiss)
@@ -2185,6 +2342,17 @@ private fun BrowserOptionsSheet(
             }
         }
     }
+}
+
+@Composable
+private fun OptionSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+    )
 }
 
 @Composable

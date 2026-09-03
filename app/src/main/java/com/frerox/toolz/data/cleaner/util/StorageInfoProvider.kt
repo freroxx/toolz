@@ -17,9 +17,10 @@
 
 package com.frerox.toolz.data.cleaner.util
 
+import android.app.usage.StorageStatsManager
 import android.content.Context
-import android.os.Environment
 import android.os.StatFs
+import android.os.storage.StorageManager
 import com.frerox.toolz.data.cleaner.StorageInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -28,10 +29,26 @@ import javax.inject.Singleton
 @Singleton
 class StorageInfoProvider @Inject constructor(@ApplicationContext private val context: Context) {
     fun getStorageInfo(cleanableBytes: Long = 0): StorageInfo = try {
-        val stat = StatFs(Environment.getExternalStorageDirectory().path)
+        val info = queryViaStorageStatsManager() ?: queryViaStatFs()
+        (info ?: StorageInfo(totalBytes = 0L, usedBytes = 0L, freeBytes = 0L, cleanableBytes = 0L))
+            .copy(cleanableBytes = cleanableBytes)
+    } catch (_: Exception) { StorageInfo(totalBytes = 0L, usedBytes = 0L, freeBytes = 0L, cleanableBytes = cleanableBytes) }
+    /** Primary: whole-volume totals via StorageStatsManager (API 26+). Null on any failure. */
+    private fun queryViaStorageStatsManager(): StorageInfo? = try {
+        val stats = context.getSystemService(StorageStatsManager::class.java) ?: return null
+        val total = stats.getTotalBytes(StorageManager.UUID_DEFAULT)
+        val free = stats.getFreeBytes(StorageManager.UUID_DEFAULT)
+        if (total <= 0) return null
+        StorageInfo(totalBytes = total, usedBytes = (total - free).coerceAtLeast(0), freeBytes = free, cleanableBytes = 0L)
+    } catch (_: Exception) { null }
+    /** Fallback: StatFs on the app-accessible external files dir (scoped-storage safe), else internal. */
+    private fun queryViaStatFs(): StorageInfo? = try {
+        // Prefer app-accessible external files dir (scoped-storage safe), fallback to legacy path.
+        val base: java.io.File = context.getExternalFilesDirs(null).firstOrNull { it != null } ?: context.filesDir
+        val stat = StatFs(base.path)
         val total = stat.totalBytes
         val free = stat.availableBytes
-        StorageInfo(totalBytes = total, usedBytes = total - free, freeBytes = free, cleanableBytes = cleanableBytes)
-    } catch (_: Exception) { StorageInfo(cleanableBytes = cleanableBytes) }
+        StorageInfo(totalBytes = total, usedBytes = (total - free).coerceAtLeast(0), freeBytes = free, cleanableBytes = 0L)
+    } catch (_: Exception) { null }
     fun refresh(cleanableBytes: Long = 0): StorageInfo = getStorageInfo(cleanableBytes)
 }

@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,8 +100,8 @@ private fun AppearanceHeader() {
             }
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text("Greeting & Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Customize home pulse cards and visual styling", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -123,15 +124,15 @@ private fun GreetingCardPreview(cardRadius: Float) {
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Good day", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Text("Browser pulse preview", style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = 0.75f))
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_preview_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_preview_sub), style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = 0.75f))
                 }
                 Icon(Icons.Rounded.Shield, null, modifier = Modifier.size(18.dp), tint = LocalContentColor.current.copy(alpha = 0.8f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 PreviewStat(label = "tabs", value = "4", weight = 1f)
                 PreviewStat(label = "saved", value = "12", weight = 1f)
-                PreviewStat(label = "engine", value = "Meta", weight = 1.2f)
+                PreviewStat(label = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appear_preview_engine), value = "Meta", weight = 1.2f)
             }
         }
     }
@@ -162,8 +163,8 @@ private fun AppearanceSettings(
                 ToggleRow(
                     icon = Icons.Rounded.WavingHand,
                     active = showGreetingCard,
-                    title = "Greeting & Stats Pulse",
-                    subtitle = "Display metrics overview on home",
+                    title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appear_pulse_title),
+                    subtitle = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appear_pulse_sub),
                     checked = showGreetingCard,
                     onCheckedChange = onToggleGreetingCard,
                 )
@@ -173,8 +174,8 @@ private fun AppearanceSettings(
             ToggleRow(
                 icon = Icons.Rounded.DensityMedium,
                 active = isCompact,
-                title = "Compact Density",
-                subtitle = "Tighter padding for search results",
+                title = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appear_compact_title),
+                subtitle = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appear_compact_sub),
                 checked = isCompact,
                 onCheckedChange = onToggleCompact,
             )
@@ -185,9 +186,9 @@ private fun AppearanceSettings(
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Icon(Icons.Rounded.RoundedCorner, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text("Card Corner Radius", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_radius), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                     }
-                    Text("${cardRadius.toInt()} dp", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_appearance_radius_value, cardRadius.toInt()), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
                 Slider(value = cardRadius, onValueChange = onRadiusChange, valueRange = 12f..32f, steps = 9)
             }

@@ -1,23 +1,9 @@
 /*
  * Copyright (C) 2026 Toolz Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.data.cleaner.engine
 
-import com.frerox.toolz.data.cleaner.CleanCategory
 import java.io.File
 
 data class CleanScanConfig(
@@ -32,18 +18,22 @@ data class CleanScanConfig(
     val maxMediaFiles: Int = 150
 )
 
+/** Everything an analyzer needs besides the shared index. */
+data class ScanCtx(
+    val root: File,
+    val installed: Set<String>,
+    val exclusions: Set<String>,
+    val config: CleanScanConfig,
+    val isActive: () -> Boolean,
+    val progress: (String) -> Unit
+)
+
 interface CleanerAnalyzer {
     val categoryId: String
     val categoryName: String
     val categoryIcon: String
     val description: String
     val isSafeToClean: Boolean
-    suspend fun analyze(
-        root: File,
-        installedPackages: Set<String>,
-        progress: (String) -> Unit,
-        exclusions: Set<String>,
-        isActive: () -> Boolean,
-        config: CleanScanConfig
-    ): CleanCategory
+    /** Pure-ish: read ONLY from [index]; no filesystem walks. Hashing/manifest parses allowed. */
+    suspend fun analyze(index: FileIndex, ctx: ScanCtx): com.frerox.toolz.data.cleaner.CleanCategory
 }

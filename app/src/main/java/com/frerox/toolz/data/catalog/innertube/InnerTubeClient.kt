@@ -160,6 +160,60 @@ class InnerTubeClient @Inject constructor(
         }
     }
 
+    suspend fun resolveVideoStream(videoId: String, maxHeight: Int = 720): String? = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext null
+        val endpoint = "$baseUrl/player?key=$apiKey"
+
+        val requestBody = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    put("clientName", "ANDROID")
+                    put("clientVersion", "19.29.37")
+                    put("androidSdkVersion", 34)
+                    put("hl", "en")
+                    put("gl", "US")
+                }
+            }
+            put("videoId", videoId)
+            put("playbackContext", buildJsonObject {
+                putJsonObject("contentPlaybackContext") {
+                    put("signatureTimestamp", 20000)
+                }
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody)
+            .header("User-Agent", "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip")
+            .header("X-Goog-Api-Format-Version", "2")
+            .build()
+
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val body = response.body?.string() ?: return@withContext null
+            val playerResponse = json.decodeFromString<InnerTubePlayerResponse>(body)
+
+            if (playerResponse.playabilityStatus?.status != "OK") {
+                android.util.Log.w("InnerTubeClient", "Video stream not playable: ${playerResponse.playabilityStatus?.reason}")
+                return@withContext null
+            }
+
+            // formats are muxed video + audio
+            val formats = playerResponse.streamingData?.formats ?: emptyList()
+            val matched = formats
+                .filter { it.url != null && (it.mimeType?.contains("video/mp4") == true || it.mimeType?.contains("video/") == true) }
+                .filter { (it.height ?: 0) <= maxHeight }
+                .maxByOrNull { it.height ?: 0 }
+                ?: formats.firstOrNull { it.url != null }
+
+            matched?.url
+        } catch (e: Exception) {
+            android.util.Log.e("InnerTubeClient", "Video stream resolution failed: ${e.message}")
+            null
+        }
+    }
+
     suspend fun getRelatedArtists(videoId: String): List<String> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext emptyList<String>()
         val endpoint = "$baseUrl/next?key=$apiKey"

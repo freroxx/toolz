@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.BrokenImage
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.HideImage
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.OndemandVideo
@@ -40,12 +41,15 @@ import androidx.compose.material.icons.rounded.VideocamOff
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -56,6 +60,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,7 +90,6 @@ private val KnownSourceColors: Map<String, Color> = mapOf(
     "QWANT" to Color(0xFFF75708),
     "MARGINALIA" to Color(0xFF4C7A2E),
     "META" to Color(0xFF6750A4),
-    "DUCKDUCKGO" to Color(0xFFDE5833),
 )
 
 private val KnownSourceLabels: Map<String, String> = mapOf(
@@ -200,7 +204,7 @@ fun SearchResultCard(
                                 // Compact consensus badge: "✓3 · Yahoo" — shows the count
                                 // plus the primary (highest-ranked) engine so the user can
                                 // see WHICH engine without opening the long-press sheet.
-                                text = "✓${result.engines.size} · ${sourceLabel(result.source)}",
+                                text = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_engines_count, result.engines.size, sourceLabel(result.source)),
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 fontWeight = FontWeight.Bold,
@@ -269,7 +273,7 @@ fun SearchResultCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
-                        lineHeight = 17.sp,
+                        lineHeight = 18.sp,
                     )
                 }
             }
@@ -332,7 +336,11 @@ fun SyntheticCategoryCard(
             ) {
                 Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Open ${if (isVideo) "Videos" else "Images"} in Browser")
+                Text(stringResource(
+                    com.frerox.toolz.R.string.st_SearchScreen_ws_open_in_browser,
+                    if (isVideo) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_videos)
+                    else stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_cat_images),
+                ))
             }
         }
     }
@@ -347,18 +355,29 @@ fun NativeImageCard(
     result: SearchResult,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownload: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val haptic = LocalHapticFeedback.current
     val accent = sourceAccentColor(result.source)
     Surface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().height(200.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick?.let { lc ->
+                    {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        lc()
+                    }
+                },
+            ),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
         tonalElevation = 1.dp,
         shadowElevation = 1.dp,
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
             Box(
                 modifier = Modifier.fillMaxWidth().height(140.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh),
                 contentAlignment = Alignment.Center,
@@ -377,22 +396,29 @@ fun NativeImageCard(
                         .align(Alignment.BottomCenter)
                         .background(Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.35f))),
                 )
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = accent.copy(alpha = 0.92f),
-                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
-                ) {
-                    Text(
-                        text = sourceLabel(result.source).ifBlank { "Web" },
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
+                if (onDownload != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp),
+                    ) {
+                        IconButton(onClick = onDownload, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Rounded.Download, stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_download_image_desc),
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
+                // Engine tag intentionally removed here: it shared the TopEnd corner
+                // with the download button. Engine attribution stays available via
+                // the long-press "Found on" sheet.
             }
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (result.title.isNotBlank()) {
@@ -400,12 +426,12 @@ fun NativeImageCard(
                         text = result.title,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        lineHeight = 18.sp,
+                        lineHeight = 16.sp,
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                     PrivacyFaviconImage(url = result.url, size = 14.dp)
                     Text(
                         text = result.displayUrl,
@@ -415,14 +441,6 @@ fun NativeImageCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (result.engines.size >= 2) {
-                        Text(
-                            text = "• ${result.engines.size} sources",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = accent,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
                 }
             }
         }
@@ -438,10 +456,31 @@ fun NativeVideoCard(
     result: SearchResult,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownload: (() -> Unit)? = null,
+    isPlaying: Boolean = false,
+    videoId: String? = null,
+    onClosePlayer: (() -> Unit)? = null,
 ) {
     val accentColor = sourceAccentColor(result.source)
+    // Prefer native ExoPlayer to avoid WebView black screen (no audio/video) — WebView is fallback
+    var useNative by remember(videoId, isPlaying) { mutableStateOf(true) }
+    var nativeUrl by remember(videoId) { mutableStateOf<String?>(null) }
+    var nativeLoading by remember(videoId) { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(useNative, videoId, isPlaying) {
+        if (isPlaying && useNative && nativeUrl == null && videoId != null && !nativeLoading) {
+            nativeLoading = true
+            val extracted = kotlinx.coroutines.withTimeoutOrNull(10_000L) {
+                com.frerox.toolz.util.YouTubeStreamExtractor.extractYouTubeStreamUrl(videoId, 720, context)
+            }
+            nativeUrl = extracted
+            nativeLoading = false
+            if (nativeUrl == null) useNative = false
+        }
+    }
+    // If native fails quickly, WebView will be shown as fallback; if WebView black screen detected via hasError153, it will auto offer native again (circular fallback handled by YouTubeInlinePlayer)
     Surface(
-        onClick = onClick,
+        onClick = if (isPlaying) { {} } else onClick,
         modifier = modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
         shape = LargeExpressiveShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -449,35 +488,86 @@ fun NativeVideoCard(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(210.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                modifier = Modifier.fillMaxWidth().height(210.dp).background(Color.Black),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!result.imageUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = result.imageUrl,
-                        contentDescription = result.title,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                        error = rememberVectorPainter(Icons.Rounded.OndemandVideo),
-                    )
-                }
-                Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.65f), modifier = Modifier.size(48.dp)) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(28.dp))
-                    }
-                }
-                if (!result.date.isNullOrBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color.Black.copy(alpha = 0.75f),
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
-                    ) {
-                        Text(
-                            text = result.date,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                if (isPlaying && videoId != null && onClosePlayer != null) {
+                    if (useNative && nativeUrl != null) {
+                        YouTubeNativePlayer(
+                            streamUrl = nativeUrl!!,
+                            thumbnailUrl = result.imageUrl,
+                            modifier = Modifier.fillMaxSize(),
+                            onClose = { useNative=false; nativeUrl=null; onClosePlayer() },
+                            onError = { useNative = false; nativeUrl = null }
                         )
+                    } else if (useNative && nativeLoading) {
+                        YouTubeNativeLoading(thumbnailUrl = result.imageUrl, modifier = Modifier.fillMaxSize(), onClose = { useNative=false; nativeLoading=false; onClosePlayer() })
+                    } else {
+                        YouTubeInlinePlayer(
+                            videoId = videoId,
+                            modifier = Modifier.fillMaxSize(),
+                            onClose = { useNative=false; nativeUrl=null; onClosePlayer() },
+                            thumbnailUrl = result.imageUrl,
+                            onTryNative = { useNative = true },
+                            onOpenInBrowser = { try { val i = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$videoId")); context.startActivity(i) } catch (_: Exception){} },
+                        )
+                    }
+                } else {
+                    if (!result.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = result.imageUrl,
+                            contentDescription = result.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            error = rememberVectorPainter(Icons.Rounded.OndemandVideo),
+                        )
+                    }
+                    // Bottom gradient scrim for play button / date badge contrast on bright thumbnails
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(90.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f))
+                            )
+                    )
+                    Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.65f), modifier = Modifier.size(48.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_play), tint = Color.White, modifier = Modifier.size(28.dp))
+                        }
+                    }
+                    // Inline download action — YouTube videos get the quality sheet.
+                    if (onDownload != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(10.dp),
+                        ) {
+                            IconButton(onClick = onDownload, modifier = Modifier.size(34.dp)) {
+                                Icon(
+                                    Icons.Rounded.Download, stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_download_video_desc),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(19.dp),
+                                )
+                            }
+                        }
+                    }
+                    if (!result.date.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.Black.copy(alpha = 0.75f),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                        ) {
+                            Text(
+                                text = result.date,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -497,7 +587,7 @@ fun NativeVideoCard(
                     Text(result.displayUrl, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     Surface(shape = RoundedCornerShape(8.dp), color = accentColor.copy(alpha = 0.15f)) {
                         Text(
-                            text = sourceLabel(result.source).ifBlank { "Video" },
+                            text = sourceLabel(result.source).ifBlank { stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_video_fallback) },
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                             fontWeight = FontWeight.Bold,
                             color = accentColor,
@@ -538,18 +628,18 @@ fun ProviderUnavailableCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
             Text(
-                text = if (category == SearchCategory.VIDEOS) "No videos available" else "No images available",
+                text = if (category == SearchCategory.VIDEOS) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_no_videos) else stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_no_images),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "No media results found for this query across maintained providers.",
+                text = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_no_media),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             FilledTonalButton(onClick = onSearchAll, shape = RoundedCornerShape(12.dp)) {
-                Text("Search All Web Results")
+                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_all))
             }
         }
     }

@@ -53,11 +53,11 @@ fun SearchOptionsSheet(
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("Search options", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Browsing, privacy & search in one place", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.st_SearchScreen_ws_options_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SearchScreen_ws_options_subtitle), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
 
-            Text("SEARCH ENGINE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SearchScreen_ws_options_engine_section), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             val engines = listOf("META" to "Meta (Yahoo • Qwant • Marginalia • DDG)", "YAHOO" to "Yahoo", "QWANT" to "Qwant", "MARGINALIA" to "Marginalia", "BING" to "Bing", "DUCKDUCKGO" to "DuckDuckGo")
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -85,7 +85,7 @@ fun SearchOptionsSheet(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                                if (isSelected) Text("Selected", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                if (isSelected) Text(stringResource(R.string.st_SearchScreen_ws_options_selected), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
                             if (isSelected) Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         }
@@ -97,30 +97,30 @@ fun SearchOptionsSheet(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             Spacer(Modifier.height(8.dp))
 
-            Text("SAFETY & PRIVACY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.st_SearchScreen_ws_options_safety_section), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                listOf("LOW" to "Low", "BASIC" to "Balanced", "MAX" to "Max").forEach { (k, l) ->
+                listOf("LOW" to R.string.st_SearchScreen_ws_opt_low, "BASIC" to R.string.st_SearchScreen_ws_opt_balanced, "MAX" to R.string.st_SearchScreen_ws_opt_max).forEach { (k, labelRes) ->
                     FilledTonalButton(
                         onClick = { onPresetSelect(k) },
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f),
-                    ) { Text(l, style = MaterialTheme.typography.labelMedium) }
+                    ) { Text(stringResource(labelRes), style = MaterialTheme.typography.labelMedium) }
                 }
             }
             Spacer(Modifier.height(8.dp))
 
             SettingsToggleRow(
-                title = "Show Greeting & Stats",
-                subtitle = "Display greeting card on home",
+                title = stringResource(R.string.st_SearchScreen_ws_opt_greeting_title),
+                subtitle = stringResource(R.string.st_SearchScreen_ws_opt_greeting_sub),
                 checked = showGreetingCard,
                 onCheckedChange = onGreetingCardToggle,
                 leadingIcon = { Icon(Icons.Rounded.WavingHand, null, modifier = Modifier.size(20.dp)) }
             )
             SettingsToggleRow(
-                title = "Safe search",
-                subtitle = "Filter explicit results",
+                title = stringResource(R.string.st_SearchScreen_s7s8),
+                subtitle = stringResource(R.string.st_SearchScreen_ws_opt_safesearch_sub),
                 checked = safeSearch,
                 onCheckedChange = onSafeSearchToggle,
                 leadingIcon = { Icon(Icons.Rounded.FamilyRestroom, null, modifier = Modifier.size(20.dp)) }
@@ -136,7 +136,7 @@ fun SearchOptionsSheet(
                 TextButton(onClick = onCustomizeAdBlock, modifier = Modifier.padding(start = 54.dp)) {
                     Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Customize block lists", style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.st_SearchScreen_ws_options_customize_lists), style = MaterialTheme.typography.labelLarge)
                 }
             }
             SettingsToggleRow(
@@ -175,7 +175,7 @@ fun SearchOptionsSheet(
                         }
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("DNS provider", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.st_SearchScreen_ws_options_dns), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                         Text(currentDns.lowercase().replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                     Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
@@ -200,8 +200,8 @@ fun SearchOptionsSheet(
                         }
                     }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Site permissions", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                        Text("Camera, mic, notifications, location", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.st_SearchScreen_ws_options_permissions), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.st_SearchScreen_ws_options_permissions_sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                 }

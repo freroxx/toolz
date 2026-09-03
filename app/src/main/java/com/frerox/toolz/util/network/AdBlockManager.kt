@@ -82,7 +82,17 @@ class AdBlockManager @Inject constructor(
                 }
             }
             
-            // 4. Observe changes for live updates
+            // 4. Load ad script blocking flag
+            AdBlockList.isAdScriptBlockingEnabled = settingsRepository.searchAdBlockScriptEnabled.first()
+            // Observe ad script toggle
+            launch {
+                settingsRepository.searchAdBlockScriptEnabled.collect { enabled ->
+                    AdBlockList.isAdScriptBlockingEnabled = enabled
+                    android.util.Log.d("AdBlockManager", "AdScript blocking -> $enabled")
+                }
+            }
+
+            // 5. Observe changes for live updates
             combine(
                 settingsRepository.searchAdBlockBlocklists,
                 settingsRepository.searchAdBlockAllowlists

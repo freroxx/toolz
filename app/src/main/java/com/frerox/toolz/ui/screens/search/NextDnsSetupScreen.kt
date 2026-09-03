@@ -20,6 +20,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
@@ -57,7 +58,7 @@ fun NextDnsSetupScreen(
                 viewModel.setNextDnsUrl(dohMatch)
                 // Apply config: enables NEXTDNS provider
                 viewModel.applyNextDnsConfig()
-                snackbarHost.showSnackbar("NextDNS $id auto-configured ✓")
+                snackbarHost.showSnackbar(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_nextdns_autoconfig, id))
                 kotlinx.coroutines.delay(900)
                 onBack()
             }
@@ -67,10 +68,10 @@ fun NextDnsSetupScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("NextDNS Setup") },
+                title = { Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_nextdns_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_nextdns_back))
                     }
                 }
             )

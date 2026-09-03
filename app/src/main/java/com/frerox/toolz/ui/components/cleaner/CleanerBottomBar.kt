@@ -17,8 +17,8 @@ import androidx.compose.ui.unit.sp
     Surface(modifier=modifier.fillMaxWidth().navigationBarsPadding(), shape=RoundedCornerShape(20.dp), color=MaterialTheme.colorScheme.surfaceContainerHigh, tonalElevation=2.dp){
         Row(modifier=Modifier.padding(horizontal=14.dp, vertical=10.dp), verticalAlignment=Alignment.CenterVertically){
             Column(modifier=Modifier.weight(1f)){
-                Text(if(selectedBytes==0L) "No selection" else Formatter.formatFileSize(context,selectedBytes)+" selected", style=MaterialTheme.typography.titleSmall.copy(fontWeight=FontWeight.Medium, fontSize=13.sp))
-                if (cleanableBytes>0) Text("$itemCount items • ${Formatter.formatFileSize(context,cleanableBytes)} total", style=MaterialTheme.typography.labelSmall.copy(fontSize=11.sp), color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if(selectedBytes==0L) "Nothing selected yet" else Formatter.formatFileSize(context,selectedBytes)+" selected", style=MaterialTheme.typography.titleSmall.copy(fontWeight=FontWeight.Medium, fontSize=13.sp))
+                if (cleanableBytes>0) Text(if(selectedBytes==0L) "Tap a category to review, then pick what goes" else "$itemCount items • ${Formatter.formatFileSize(context,cleanableBytes)} total", style=MaterialTheme.typography.labelSmall.copy(fontSize=11.sp), color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
             TextButton(onClick=onToggleSelectAll, contentPadding=PaddingValues(horizontal=10.dp)) { Text(if(isAllSelected) "Deselect" else "Select all", style=MaterialTheme.typography.labelSmall.copy(fontSize=12.sp)) }
             Spacer(Modifier.width(8.dp))

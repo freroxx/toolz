@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,10 +63,10 @@ fun RecentSearchTimeline(
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Recent searches", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
             if (filtered.isNotEmpty()) {
                 TextButton(onClick = onClearAll, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)) {
-                    Text("Clear all", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_clear), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -84,7 +85,12 @@ fun RecentSearchTimeline(
                 grouped.forEach { (label, entries) ->
                     item(key = "header_$label") {
                         Text(
-                            label,
+                            text = when (label) {
+                                "Today" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_time_today)
+                                "Yesterday" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_time_yesterday)
+                                "This week" -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_time_week)
+                                else -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_time_older)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold,
@@ -146,7 +152,7 @@ private fun EmptyTimeline(modifier: Modifier = Modifier) {
                 Icon(Icons.AutoMirrored.Rounded.ManageSearch, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
             }
         }
-        Text("No recent searches", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Your search history will appear here", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+        Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_empty_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_recent_empty_sub), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
     }
 }

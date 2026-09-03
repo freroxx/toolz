@@ -100,16 +100,17 @@ class WebSearchRepository @Inject constructor(
 
     suspend fun fetchSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
-            val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
-            val candidateUrls = listOf(
-                "https://api.bing.com/osjson.aspx?query=$encoded",
-                "https://api.qwant.com/v3/suggest?q=$encoded&client=opensearch",
-            )
-            for (url in candidateUrls) {
-                val suggestions = fetchSuggestionsFrom(url)
-                if (suggestions.isNotEmpty()) return@withContext suggestions
-            }
-            emptyList()
+        val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8.name())
+        val bingUrl = "https://api.bing.com/osjson.aspx?query=$encoded"
+        val qwantUrl = "https://api.qwant.com/v3/suggest?q=$encoded&client=opensearch"
+
+        coroutineScope {
+            val bingDeferred = async { fetchSuggestionsFrom(bingUrl) }
+            val qwantDeferred = async { fetchSuggestionsFrom(qwantUrl) }
+            val bingRes = bingDeferred.await()
+            if (bingRes.isNotEmpty()) return@coroutineScope bingRes
+            qwantDeferred.await()
+        }
     }
 
     private suspend fun fetchSuggestionsFrom(url: String): List<String> {
@@ -156,15 +157,22 @@ class WebSearchRepository @Inject constructor(
         adBlockEnabled: Boolean,
     ): List<SearchResult> = coroutineScope {
         val candidateEngines = mediaEnginesFor(engine)
+        val perEngineOffset = if ((engine == EngineId.META || engine == EngineId.MARGINALIA) && offset > 0) offset / 2 else offset
         val primary = candidateEngines.first()
-        var results = fetchFromEngine(primary, encodedQuery, offset, category, safeSearch, adBlockEnabled)
+        var results = fetchFromEngine(primary, encodedQuery, perEngineOffset, category, safeSearch, adBlockEnabled)
 
-        // Media engines rate-limit far more aggressively than web search (image/video
-        // endpoints are bot-challenge magnets) — rotate through the other media-capable
-        // engines rather than showing the user an empty media tab.
-        if (results.isEmpty()) {
+        // Media engines rate-limit far more aggressively — rotate only on initial page (offset==0)
+        // to avoid mixing engines mid-pagination which breaks load-more continuity.
+        if (offset == 0 && results.isEmpty()) {
             for (alt in candidateEngines.drop(1)) {
                 results = fetchFromEngine(alt, encodedQuery, offset, category, safeSearch, adBlockEnabled)
+                if (results.isNotEmpty()) break
+            }
+        } else if (offset > 0 && results.isEmpty()) {
+            // For pagination, try perEngineOffset fallback for media too (in case primary paginated out)
+            // but keep same perEngineOffset
+            for (alt in candidateEngines.drop(1)) {
+                results = fetchFromEngine(alt, encodedQuery, perEngineOffset, category, safeSearch, adBlockEnabled)
                 if (results.isNotEmpty()) break
             }
         }
@@ -196,9 +204,13 @@ class WebSearchRepository @Inject constructor(
         adBlockEnabled: Boolean,
     ): List<SearchResult> = coroutineScope {
         val queryEngines = if (engine == EngineId.META) EngineId.META_MEMBERS else listOf(engine)
+        // META pagination: global offset is total merged results; per-engine offset must be scaled down
+        // to avoid skipping 3-4 pages per engine (global 40 => each engine would skip to page 4).
+        // Dividing by member count gives overlapping pages (safe via dedupe) instead of gaps.
+        val perEngineOffset = if (engine == EngineId.META && offset > 0) offset / queryEngines.size.coerceAtLeast(1) else offset
 
         val resultsByEngine = queryEngines
-        .map { eng -> async { eng to fetchFromEngine(eng, encodedQuery, offset, category, safeSearch, adBlockEnabled) } }
+        .map { eng -> async { eng to fetchFromEngine(eng, encodedQuery, perEngineOffset, category, safeSearch, adBlockEnabled) } }
         .awaitAll()
         .filter { (_, results) -> results.isNotEmpty() }
         .toMap()
@@ -206,7 +218,8 @@ class WebSearchRepository @Inject constructor(
 
         // Single-engine mode: if the chosen engine came back empty, rotate through the
         // other maintained engines rather than showing the user a dead search.
-        if (engine != EngineId.META && resultsByEngine[engine].isNullOrEmpty()) {
+        // Only for initial page (offset==0); for load-more (offset>0) do not mix engines mid-pagination.
+        if (offset == 0 && engine != EngineId.META && resultsByEngine[engine].isNullOrEmpty()) {
             val fallbackEngine = EngineId.CONCRETE
             .filter { it != engine && healthTracker.isAvailable(it) }
             .firstNotNullOfOrNull { alt ->
@@ -355,6 +368,8 @@ class WebSearchRepository @Inject constructor(
             "vimeo.com",
             "twitch.tv",
             "dailymotion.com",
+            "reddit.com",
+            "odysee.com",
         )
 
         fun isAllowedVideoTarget(url: String): Boolean {

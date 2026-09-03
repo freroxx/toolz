@@ -88,6 +88,7 @@ class WebViewViewModel @Inject constructor(
     }
 
     val adBlockEnabled = settingsRepository.searchAdBlockEnabled
+    val adScriptEnabled = settingsRepository.searchAdBlockScriptEnabled
     val floatingToolbarVisible = settingsRepository.searchFloatingToolbarVisible
     val dnsProvider = settingsRepository.searchDnsProvider
     val customDns = settingsRepository.searchCustomDns
@@ -113,9 +114,10 @@ class WebViewViewModel @Inject constructor(
     }
 
     fun ensureTabExists(url: String) {
+        if (url.equals("about:blank", ignoreCase = true)) return
         val active = tabManager.activeTabId.value?.let { id -> tabManager.tabs.value.find { it.id == id } }
         if (active?.url == url) return
-        if (tabManager.tabs.value.isEmpty() || url != "about:blank") {
+        if (tabManager.tabs.value.isEmpty() || url.isNotBlank()) {
             tabManager.addTab(url)
         }
     }
@@ -235,6 +237,13 @@ class WebViewViewModel @Inject constructor(
     fun setAdBlockEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setSearchAdBlockEnabled(enabled)
+        }
+    }
+
+    fun setAdScriptBlockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setSearchAdBlockScriptEnabled(enabled)
+            com.frerox.toolz.data.browser.AdBlockList.isAdScriptBlockingEnabled = enabled
         }
     }
 

@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -145,21 +146,21 @@ fun ErrorState(
                         ToolzExpressiveButton(onClick = onReturnToDashboard, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Go home")
+                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_error_go_home))
                         }
                     }
                     errorType == ErrorType.DNS_ERROR && onOpenDnsSettings != null -> {
                         ToolzExpressiveButton(onClick = onOpenDnsSettings, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                             Icon(Icons.Rounded.Dns, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Fix DNS settings")
+                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_error_fix_dns))
                         }
                     }
                     errorType == ErrorType.RATE_LIMITED && onOpenEngineSettings != null -> {
                         ToolzExpressiveButton(onClick = onOpenEngineSettings, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                             Icon(Icons.Rounded.Tune, null, modifier = Modifier.size(17.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Switch search engine")
+                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_error_switch_engine))
                         }
                     }
                     else -> Unit
@@ -199,11 +200,12 @@ private fun iconFor(type: ErrorType): ImageVector = when (type) {
     ErrorType.GENERIC -> Icons.Rounded.ErrorOutline
 }
 
+@Composable
 private fun retryLabelFor(type: ErrorType): String = when (type) {
-    ErrorType.OFFLINE -> "Retry connection"
-    ErrorType.NETWORK_ERROR -> "Check connection"
-    ErrorType.DNS_ERROR -> "Retry DNS query"
-    ErrorType.RATE_LIMITED -> "Try again"
-    ErrorType.NO_RESULTS -> "Try again"
-    ErrorType.GENERIC -> "Try again"
+    ErrorType.OFFLINE -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_retry_conn)
+    ErrorType.NETWORK_ERROR -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_check_conn)
+    ErrorType.DNS_ERROR -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_retry_dns)
+    ErrorType.RATE_LIMITED -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_try_again)
+    ErrorType.NO_RESULTS -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_try_again)
+    ErrorType.GENERIC -> stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_err_try_again)
 }

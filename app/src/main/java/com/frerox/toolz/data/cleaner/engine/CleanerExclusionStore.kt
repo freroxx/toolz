@@ -51,7 +51,6 @@ class CleanerExclusionStore @Inject constructor(
         dataStore.edit { it.remove(KEY_EXCLUSIONS) }
     }
     fun isExcluded(path: String, exclusions: Set<String>): Boolean {
-        if (exclusions.isEmpty()) return false
-        return exclusions.any { ex -> path == ex || path.startsWith(ex + "/") || path.contains(ex) }
+        return com.frerox.toolz.data.cleaner.util.FileUtils.isExcluded(path, exclusions)
     }
 }

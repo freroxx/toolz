@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -150,7 +151,7 @@ private fun NewTabButton(onNewTab: () -> Unit) {
         tonalElevation = 4.dp,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Add, "New Tab", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(30.dp))
+            Icon(Icons.Rounded.Add, stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dock_new_tab), tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(30.dp))
         }
     }
 }
@@ -173,7 +174,7 @@ private fun UrlPill(currentUrl: String?, pulseAlpha: Float, onClick: () -> Unit)
         ) {
             Icon(Icons.Rounded.Search, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
             Text(
-                text = currentUrl?.let { safeHostFromUrl(it) } ?: "Search or type URL",
+                text = currentUrl?.let { safeHostFromUrl(it) } ?: stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_hint),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -248,7 +249,7 @@ private fun TabManagerButton(tabCount: Int, onClick: () -> Unit) {
         modifier = Modifier.size(54.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.Layers, "Tabs", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(26.dp))
+            Icon(Icons.Rounded.Layers, stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dock_tabs), tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(26.dp))
             if (tabCount > 0) {
                 Surface(
                     shape = CircleShape,

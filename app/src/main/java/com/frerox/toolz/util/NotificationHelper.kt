@@ -39,6 +39,8 @@ object NotificationHelper {
     const val CHANNEL_TASK_REMINDERS = "task_reminders"
     const val CHANNEL_EVENT_REMINDERS = "event_reminders"
     const val CHANNEL_MUSIC_DOWNLOADS = "music_downloads"
+    const val CHANNEL_IMAGE_DOWNLOADS = "toolz_image_downloads"
+    const val CHANNEL_VIDEO_DOWNLOADS = "toolz_video_downloads"
     const val CHANNEL_BACKUPS = "backups_channel"
 
     // Notification IDs
@@ -146,6 +148,26 @@ object NotificationHelper {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = context.getString(R.string.st_Channel_MusicDownloads_Desc)
+                setShowBadge(false)
+                enableVibration(false)
+            },
+            NotificationChannel(
+                CHANNEL_IMAGE_DOWNLOADS,
+                "Image Downloads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Image downloads from search — polished Toolz notifications"
+                setShowBadge(false)
+                enableVibration(false)
+            },
+            NotificationChannel(
+                CHANNEL_VIDEO_DOWNLOADS,
+                "Video Downloads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "YouTube video downloads"
+                setShowBadge(false)
+                enableVibration(false)
             },
             NotificationChannel(
                 CHANNEL_BACKUPS,
@@ -160,8 +182,10 @@ object NotificationHelper {
     }
 
     fun baseBuilder(context: Context, channelId: String): NotificationCompat.Builder {
+        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // Default icon
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setLargeIcon(large)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
     }
@@ -209,4 +233,37 @@ object NotificationHelper {
             .build()
         manager.notify(ID_BACKUP_OPERATION, notification)
     }
+
+    fun toolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
+        val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_logo)
+            ?: android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
+        if (raw == null) null
+        else {
+            val size = minOf(raw.width, raw.height)
+            val output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(output)
+            val paint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                shader = android.graphics.BitmapShader(raw, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                val scale = size.toFloat() / minOf(raw.width, raw.height).toFloat()
+                val dx = (size - raw.width * scale) / 2f
+                val dy = (size - raw.height * scale) / 2f
+                shader?.let {
+                    val m = android.graphics.Matrix()
+                    m.setScale(scale, scale)
+                    m.postTranslate(dx, dy)
+                    it.setLocalMatrix(m)
+                }
+            }
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+            val borderPaint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                style = android.graphics.Paint.Style.STROKE
+                color = android.graphics.Color.WHITE
+                strokeWidth = size * 0.03f
+            }
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f - borderPaint.strokeWidth / 2, borderPaint)
+            output
+        }
+    } catch (_: Exception) { null }
 }

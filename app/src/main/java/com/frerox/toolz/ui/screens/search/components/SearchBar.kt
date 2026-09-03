@@ -47,6 +47,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -136,7 +137,7 @@ fun SearchPill(
                     Box {
                         if (query.isEmpty()) {
                             Text(
-                                text = if (isIncognito) "Incognito search…" else "Search or type a URL",
+                                text = if (isIncognito) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_hint_incognito) else stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_hint),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                             )
@@ -155,7 +156,7 @@ fun SearchPill(
                 IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(30.dp)) {
                     Icon(
                         Icons.Rounded.Cancel,
-                        contentDescription = "Clear",
+                        contentDescription = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_clear),
                         modifier = Modifier.size(17.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
@@ -165,7 +166,7 @@ fun SearchPill(
             IconButton(onClick = onSettingsClick, modifier = Modifier.size(30.dp)) {
                 Icon(
                     Icons.Rounded.Tune,
-                    contentDescription = "Search options",
+                    contentDescription = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_search_options_desc),
                     modifier = Modifier.size(17.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                 )

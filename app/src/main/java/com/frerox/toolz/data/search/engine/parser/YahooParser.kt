@@ -23,8 +23,8 @@ class YahooParser @Inject constructor() : EngineParser {
         val b = OffsetBasedPagination.offsetParam(offset, id)
         return when (category) {
             SearchCategory.NEWS -> listOf("https://news.search.yahoo.com/search?p=$query$b$vm")
-            SearchCategory.IMAGES -> listOf("https://images.search.yahoo.com/search/images?p=$query$vm")
-            SearchCategory.VIDEOS -> listOf("https://video.search.yahoo.com/search/video?p=$query$vm")
+            SearchCategory.IMAGES -> listOf("https://images.search.yahoo.com/search/images?p=$query$b$vm")
+            SearchCategory.VIDEOS -> listOf("https://video.search.yahoo.com/search/video?p=$query$b$vm")
             SearchCategory.ALL -> listOf("https://search.yahoo.com/search?p=$query$b$vm")
         }
     }

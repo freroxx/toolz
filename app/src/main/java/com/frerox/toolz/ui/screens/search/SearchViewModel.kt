@@ -19,6 +19,8 @@ package com.frerox.toolz.ui.screens.search
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.browser.TabEntry
@@ -31,6 +33,7 @@ import com.frerox.toolz.data.search.SearchHistoryEntry
 import com.frerox.toolz.data.search.SearchResult
 import com.frerox.toolz.data.search.WebSearchRepository
 import com.frerox.toolz.data.search.engine.MetaMerger
+import com.frerox.toolz.ui.screens.search.components.youTubeVideoId
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -315,6 +318,17 @@ class SearchViewModel @Inject constructor(
 
         suggestionJob?.cancel()
         if (newQuery.length >= 2 && mathRes == null) {
+            // Immediate local history matches on keystroke (0ms delay)
+            viewModelScope.launch {
+                val localMatches = repository.history.first()
+                    .map { it.query }
+                    .filter { it.contains(newQuery, ignoreCase = true) && !it.equals(newQuery, ignoreCase = true) }
+                    .take(3)
+                if (_query.value.query == newQuery && _query.value.suggestions.isEmpty()) {
+                    _query.update { it.copy(suggestions = localMatches) }
+                }
+            }
+
             suggestionJob = viewModelScope.launch {
                 delay(280)
                 // Merge remote suggestions with matching local history so the user's own
@@ -337,10 +351,10 @@ class SearchViewModel @Inject constructor(
     private fun tryEvaluateMath(query: String): MathResult? {
         val trimmed = query.trim()
         if (trimmed.length < 3) return null
-        val mathCharsRegex = Regex("""^[0-9\s\+\-\*\/\^\(\)\.\%]+$|^sqrt\([0-9\.\s]+\)$""", RegexOption.IGNORE_CASE)
+        val mathCharsRegex = Regex("""^[0-9\s\+\-\*\/\^\(\)\.\%]+$|^[0-9\s\+\-\*\/\^\(\)\.\%]*sqrt\([0-9\s\+\-\*\/\^\(\)\.\%]+\)[0-9\s\+\-\*\/\^\(\)\.\%]*$""", RegexOption.IGNORE_CASE)
         if (!mathCharsRegex.matches(trimmed)) return null
         if (!trimmed.any { it.isDigit() }) return null
-        if (!trimmed.any { it in "+-*/^%" } && !trimmed.startsWith("sqrt", ignoreCase = true)) return null
+        if (!trimmed.any { it in "+-*/^%" } && !trimmed.contains("sqrt", ignoreCase = true)) return null
 
         return try {
             val sanitized = trimmed.replace("%", "/100")
@@ -449,12 +463,23 @@ class SearchViewModel @Inject constructor(
         _query.update { it.copy(siteFilter = null) }
     }
 
+    private val cdnHosts = setOf(
+        "googleusercontent.com",
+        "amazonaws.com",
+        "akamaihd.net",
+        "cloudfront.net",
+        "fastly.net",
+        "cloudflare.com",
+        "ytimg.com",
+        "ggpht.com"
+    )
+
     /** Distinct hosts across the current results, most frequent first — powers the quick filter chips. */
     fun siteFilterCandidates(results: List<SearchResult>): List<String> =
         results.asSequence()
             .map { runCatching { java.net.URI(it.url).host?.removePrefix("www.") }.getOrNull() }
             .filterNotNull()
-            .filter { it.isNotBlank() }
+            .filter { host -> host.isNotBlank() && cdnHosts.none { host.endsWith(it) } }
             .groupBy { it }
             .map { (host, urls) -> host to urls.size }
             .sortedByDescending { it.second }
@@ -464,38 +489,41 @@ class SearchViewModel @Inject constructor(
     // ─── Load More ────────────────────────────────────────────────────────────
 
     fun loadMore() {
-        val q = _query.value
-        if (q.phase == SearchPhase.LoadingMore || !q.canLoadMore || q.query.isEmpty()) return
-        if (q.results.size >= 500) { _query.update { it.copy(canLoadMore = false) }; return }
+        val snapshot = _query.value
+        if (snapshot.phase == SearchPhase.LoadingMore || !snapshot.canLoadMore || snapshot.query.isEmpty()) return
+        if (snapshot.results.size >= 500) { _query.update { it.copy(canLoadMore = false) }; return }
 
         _query.update { it.copy(phase = SearchPhase.LoadingMore) }
 
         viewModelScope.launch {
-            runCatching { repository.search(q.query, q.results.size, q.category) }
+            runCatching { repository.search(snapshot.query, snapshot.results.size, snapshot.category) }
                 .onSuccess { newResults ->
                     if (newResults.isEmpty()) {
                         _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
                     } else {
-                        // Canonical dedupe (not raw-URL): engines return the same page
-                        // with different tracking params across pages. MetaMerger's
-                        // canonicalUrl strips www/scheme/tracking params, so page-2
-                        // repeats of page-1 results collapse here too.
-                        val seen = q.results.mapTo(mutableSetOf()) { metaMerger.canonical(it.url) }
-                        val combined = (q.results + newResults)
-                            .filter { seen.add(metaMerger.canonical(it.url)) }
-                            .take(500)
+                        val base = snapshot.results
+                        val seen = base.mapTo(mutableSetOf()) { metaMerger.canonical(it.url) }
+                        val dedupedNew = newResults.filter { seen.add(metaMerger.canonical(it.url)) }
+                        // If all newResults were duplicates, treat as no new page rather than infinite loop
+                        if (dedupedNew.isEmpty()) {
+                            _query.update { it.copy(phase = SearchPhase.Results, canLoadMore = false) }
+                            return@onSuccess
+                        }
+                        val combined = (base + dedupedNew).take(500)
                         _query.update {
                             it.copy(
                                 results     = combined,
                                 phase       = SearchPhase.Results,
-                                // Stop load-more when a page yields nothing new — avoids
-                                // hammering a drained engine with identical pages.
-                                canLoadMore = combined.size < 500 && combined.size > q.results.size,
+                                // Keep canLoadMore true unless we hit 500 or new page yielded zero unique
+                                canLoadMore = combined.size < 500 && dedupedNew.isNotEmpty(),
                             )
                         }
                     }
                 }
-                .onFailure { _query.update { it.copy(phase = SearchPhase.Results) } }
+                .onFailure {
+                    // Do not clear canLoadMore on transient failure — allow retry
+                    _query.update { it.copy(phase = SearchPhase.Results) }
+                }
         }
     }
 
@@ -627,6 +655,279 @@ class SearchViewModel @Inject constructor(
 
     /** Search results inherit the current privacy context instead of leaking out of it. */
     fun openTab(url: String)  { tabManager.addTab(url, isPrivate = _settings.value.isIncognito) }
+
+    /** Currently playing YouTube embed (video id), or null when no play-mode is active. */
+    private val _activeVideoId = mutableStateOf<String?>(null)
+    val activeVideoId: State<String?> = _activeVideoId
+
+    /** Result whose thumbnail started the current embed — used for the banner label. */
+    private val _activeVideoResult = mutableStateOf<SearchResult?>(null)
+    val activeVideoResult: State<SearchResult?> = _activeVideoResult
+
+    /** Download-sheet target (YouTube video result), or null when the sheet is closed. */
+    private val _videoDownloadTarget = mutableStateOf<SearchResult?>(null)
+    val videoDownloadTarget: State<SearchResult?> = _videoDownloadTarget
+
+    fun playVideo(result: SearchResult) {
+        youTubeVideoId(result.url)?.let { id ->
+            _activeVideoResult.value = result
+            _activeVideoId.value = id
+        }
+    }
+
+    fun stopVideoPlayback() {
+        // Clearing both leaves no dangling state: the overlay composable leaves the
+        // composition, destroying the WebView player; the card list renders as before.
+        _activeVideoId.value = null
+        _activeVideoResult.value = null
+    }
+
+    fun showVideoDownloadSheet(result: SearchResult) { _videoDownloadTarget.value = result }
+    fun dismissVideoDownloadSheet() { _videoDownloadTarget.value = null }
+
+    /**
+     * Downloads a YouTube video as MP3 via dedicated MP3 worker (Catalog pattern).
+     * Falls back to Video worker MP3 path if dedicated worker unavailable.
+     */
+    fun downloadYouTubeMp3(videoUrl: String, title: String, thumbnailUrl: String?, context: android.content.Context) {
+        viewModelScope.launch {
+            val appContext = context.applicationContext
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                try {
+                    val perm = androidx.core.content.ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        android.util.Log.w("SearchViewModel", "POST_NOTIFICATIONS not granted — mp3 download will proceed but notification may be suppressed")
+                    }
+                } catch (_: Exception) {}
+            }
+            try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_mp3_downloading), android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+            try {
+                // Prefer dedicated MP3 worker (uses CatalogRepository fallback like Music)
+                val mp3Request = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.YouTubeMp3DownloadWorker>()
+                    .setInputData(
+                        androidx.work.workDataOf(
+                            com.frerox.toolz.worker.YouTubeMp3DownloadWorker.KEY_SOURCE_URL to videoUrl,
+                            com.frerox.toolz.worker.YouTubeMp3DownloadWorker.KEY_TITLE to title,
+                            com.frerox.toolz.worker.YouTubeMp3DownloadWorker.KEY_THUMBNAIL_URL to thumbnailUrl,
+                        )
+                    )
+                    .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                    .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                    .addTag(com.frerox.toolz.worker.YouTubeMp3DownloadWorker.TAG_MP3_DOWNLOAD)
+                    .build()
+                androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
+                    "mp3_download_${title.hashCode()}_${System.currentTimeMillis()}",
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    mp3Request,
+                )
+                android.util.Log.d("SearchViewModel", "MP3 download enqueued: $videoUrl id=${mp3Request.id}")
+                kotlinx.coroutines.delay(600)
+                try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_mp3_queued, title), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.e("SearchViewModel", "MP3 enqueue failed, fallback to Video worker MP3", e)
+                // Fallback to Video worker MP3 path
+                downloadYouTubeVideo(videoUrl, title, thumbnailUrl, "MP3", context)
+            }
+        }
+    }
+
+    /**
+     * Downloads a YouTube video through the music player tool's yt-dlp pipeline,
+     * routed at the requested quality (240p–1080p + MP3 audio).
+     */
+    fun downloadYouTubeVideo(videoUrl: String, title: String, thumbnailUrl: String?, quality: String, context: android.content.Context) {
+        viewModelScope.launch {
+            val appContext = context.applicationContext
+            // Check notification permission on Android 13+ — do not block download, just log and toast fallback
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                try {
+                    val perm = androidx.core.content.ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        android.util.Log.w("SearchViewModel", "POST_NOTIFICATIONS not granted — download will proceed but notification may be suppressed")
+                    }
+                    val nm = androidx.core.app.NotificationManagerCompat.from(appContext)
+                    if (!nm.areNotificationsEnabled()) {
+                        android.util.Log.w("SearchViewModel", "Notifications disabled globally — download enqueued without visible notification")
+                    }
+                } catch (_: Exception) {}
+            }
+            try {
+                android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_video_downloading, quality), android.widget.Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {}
+            try {
+                val request = androidx.work.OneTimeWorkRequestBuilder<com.frerox.toolz.worker.VideoDownloadWorker>()
+                    .setInputData(
+                        androidx.work.workDataOf(
+                            com.frerox.toolz.worker.VideoDownloadWorker.KEY_SOURCE_URL to videoUrl,
+                            com.frerox.toolz.worker.VideoDownloadWorker.KEY_TITLE to title,
+                            com.frerox.toolz.worker.VideoDownloadWorker.KEY_THUMBNAIL_URL to thumbnailUrl,
+                            com.frerox.toolz.worker.VideoDownloadWorker.KEY_QUALITY to quality,
+                        )
+                    )
+                    .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                    .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                    .addTag(com.frerox.toolz.worker.VideoDownloadWorker.TAG_VIDEO_DOWNLOAD)
+                    .build()
+                androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
+                    "video_download_${title.hashCode()}_${System.currentTimeMillis()}",
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    request,
+                )
+                android.util.Log.d("SearchViewModel", "Video download enqueued: $videoUrl $quality id=${request.id}")
+                kotlinx.coroutines.delay(600)
+                try {
+                    android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_video_queued, title, quality), android.widget.Toast.LENGTH_LONG).show()
+                } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.e("SearchViewModel", "Video download enqueue failed", e)
+                try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_queue_failed, e.message ?: ""), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+                // Fallback notification if enqueue fails
+                try {
+                    val nm = appContext.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                    nm?.notify((System.currentTimeMillis()%Int.MAX_VALUE).toInt(), androidx.core.app.NotificationCompat.Builder(appContext, com.frerox.toolz.util.NotificationHelper.CHANNEL_VIDEO_DOWNLOADS)
+                        .setContentTitle(appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_queue_failed_title)).setContentText(e.message?.take(60) ?: appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown)).setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground).setAutoCancel(true).build())
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    /**
+     * Downloads an image result into Pictures/Toolz via MediaStore. Uses a direct
+     * OkHttp fetch instead of DownloadManager: search-engine thumbnail proxies
+     * (imgs.search.brave.com, ts*.mm.bing.net) reject DownloadManager's requests
+     * (missing headers → error pages silently saved as 0-byte files).
+     */
+    fun downloadImage(imageUrl: String, context: android.content.Context) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Polished image download with Toolz branding and correct progress
+            val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            val channelId = "toolz_image_downloads"
+            val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            fun createImageChannel() {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    val channel = android.app.NotificationChannel(channelId, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_img_channel), android.app.NotificationManager.IMPORTANCE_LOW).apply {
+                        description = context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_img_channel_desc)
+                        setShowBadge(false)
+                        enableVibration(false)
+                    }
+                    try { notificationManager?.createNotificationChannel(channel) } catch (_: Exception) {}
+                }
+            }
+            fun showImageNotification(title: String, progress: Int, ongoing: Boolean) {
+                try {
+                    val large = com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context)
+                    val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                        .setContentTitle(title)
+                        .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
+                        .setLargeIcon(large)
+                        .setOngoing(ongoing)
+                        .setOnlyAlertOnce(true)
+                        .setAutoCancel(!ongoing)
+                        .setProgress(100, progress.coerceIn(0,100), progress==0 && ongoing)
+                        .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+                        .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
+                    if (progress in 1..99) builder.setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_progress, progress))
+                    else if (!ongoing) builder.setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_tap_gallery))
+                    // Rounded corners via largeIcon is already circular foreground
+                    notificationManager?.notify(notificationId, builder.build())
+                } catch (_: Exception) {}
+            }
+            createImageChannel()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_image_downloading), android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+                showImageNotification(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_image_downloading), 0, true)
+            }
+            showImageNotification(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_image_downloading), 15, true)
+            val result = runCatching {
+                val normalizedUrl = when {
+                    imageUrl.startsWith("//") -> "https:$imageUrl"
+                    imageUrl.startsWith("/") -> imageUrl // shouldn't happen for image search but guard
+                    else -> imageUrl
+                }
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                    .followRedirects(true)
+                    .followSslRedirects(true)
+                    .build()
+                val request = okhttp3.Request.Builder()
+                    .url(normalizedUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                    .header("Accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+                    .header("Referer", "https://www.google.com/")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    check(response.isSuccessful) { "HTTP ${response.code}" }
+                    val bytes = response.body?.bytes() ?: error("Empty body")
+                    check(bytes.size > 512) { "Response too small (${bytes.size}B) — likely an error page" }
+
+                    val mime = response.header("Content-Type")?.substringBefore(";")
+                        ?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+                    val ext = when (mime) {
+                        "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"
+                        "image/jpeg" -> "jpg"; "image/jpg" -> "jpg"
+                        else -> "jpg"
+                    }
+                    val name = "toolz_${System.currentTimeMillis()}.$ext"
+
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, mime)
+                        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                            android.os.Environment.DIRECTORY_PICTURES + "/Toolz")
+                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                    val resolver = context.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        ?: error("MediaStore insert failed")
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("Stream open failed")
+                    values.clear()
+                    values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                }
+            }
+            // Progress 60% while saving
+            try { showImageNotification(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_saving_image), 60, true) } catch (_: Exception) {}
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                result.onSuccess {
+                    try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_image_saved), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+                    try {
+                        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, com.frerox.toolz.R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
+                        val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                            .setContentTitle(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_saved_title))
+                            .setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_saved_gallery))
+                            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
+                            .setLargeIcon(large)
+                            .setAutoCancel(true)
+                            .setOnlyAlertOnce(false)
+                            .setOngoing(false)
+                            .setProgress(0,0,false)
+                            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+                            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
+                        notificationManager?.notify(notificationId, builder.build())
+                        // Auto-dismiss after 3s to polished UX — cancel progress notification
+                        kotlinx.coroutines.delay(3000)
+                        try { notificationManager?.cancel(notificationId) } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                    android.util.Log.d("SearchViewModel", "Image download success: $imageUrl")
+                }.onFailure {
+                    try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_download_failed, it.message ?: ""), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
+                    try {
+                        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, com.frerox.toolz.R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
+                        val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
+                            .setContentTitle(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_failed_title))
+                            .setContentText(it.message?.take(80) ?: context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown))
+                            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
+                            .setLargeIcon(large)
+                            .setAutoCancel(true)
+                            .setOnlyAlertOnce(false)
+                        notificationManager?.notify(notificationId, builder.build())
+                    } catch (_: Exception) {}
+                    android.util.Log.w("SearchViewModel", "Image download failed for $imageUrl: ${it.message}", it)
+                }
+            }
+        }
+    }
     fun closeTab(id: String)  { tabManager.removeTab(id) }
     fun switchTab(id: String) { tabManager.switchTab(id) }
     fun removeBrowserHistory(url: String) { browserHistoryStore.remove(url) }

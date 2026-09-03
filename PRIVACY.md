@@ -15,3 +15,8 @@ Toolz does not require accounts. Toolz does not sell data.
 - Whisper encryption: end-to-end (X3DH + Double Ratchet); every text message carries per-message forward secrecy, so compromised long-term keys cannot decrypt past traffic. Only ciphertext is stored on servers and on device.
 
 All network features degrade gracefully without Shizuku (deep-link to `Settings.ACTION_WIFI_SETTINGS` / `Settings.ACTION_PRIVATE_DNS_SETTINGS`).
+
+**File Cleaner — accessibility & privileged access (only when you enable them):**
+- “Toolz Cleaner Auto-clear” accessibility service: OFF by default. When you tap Auto-clear and enable it, the service opens each selected app’s system Settings page and taps “Clear cache” for you. It runs only during a run you start, can be stopped anytime, and can be revoked in system Accessibility settings. It never reads screen content, never runs in the background, and no data leaves the device.
+- Shizuku (optional): used for read-only privileged listing (finding leftovers in `Android/obb`) and system cache trimming (`pm trim-caches`). No data deletion ever happens over Shizuku — deletes always go through the app’s trash/restore pipeline.
+- Permissions: All-files access (finding leftovers/junk), media access (media cleanup), Usage access (per-app cache sizes). Each is requested with an in-app explanation and the cleaner degrades gracefully without optional ones.

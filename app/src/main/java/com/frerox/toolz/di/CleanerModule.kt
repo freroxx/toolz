@@ -18,7 +18,6 @@
 package com.frerox.toolz.di
 
 import android.content.Context
-import com.frerox.toolz.data.cleaner.CleanerRepository
 import com.frerox.toolz.data.cleaner.engine.CleanerExclusionStore
 import dagger.Module
 import dagger.Provides
@@ -30,12 +29,6 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object CleanerModule {
-
-    @Provides
-    @Singleton
-    fun provideCleanerRepository(
-        @ApplicationContext context: Context
-    ): CleanerRepository = CleanerRepository(context)
 
     @Provides
     @Singleton

@@ -72,6 +72,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Toolz"
         android:localeConfig="@xml/locales_config"
+        android:hardwareAccelerated="true"
         android:enableOnBackInvokedCallback="true">
 
         <activity
@@ -81,6 +82,7 @@
             android:theme="@style/Theme.Toolz"
             android:windowSoftInputMode="adjustResize"
             android:supportsPictureInPicture="true"
+            android:hardwareAccelerated="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation">
             <meta-data
                 android:name="android.app.shortcuts"
@@ -239,6 +241,19 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_purgeshot_config" />
+        </service>
+
+        <service
+            android:name=".service.CleanerAccessibilityService"
+            android:label="Toolz Cleaner Auto-clear"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_cleaner_config" />
         </service>
 
         <service

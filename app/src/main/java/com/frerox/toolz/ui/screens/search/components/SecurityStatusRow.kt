@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,7 +70,7 @@ fun SecurityStatusRow(
             SecurityDot(color = if (isProtected) ColorGood else ColorBad)
 
             Text(
-                text = if (isNextDns) "NextDNS Protection" else "Ad Block Enabled",
+                text = if (isNextDns) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_status_nextdns) else stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_status_adblock),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.ExtraBold,
                 color = if (isProtected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
@@ -107,7 +108,7 @@ fun SecurityStatusRow(
                         else -> ColorBad
                     }
                     Text(
-                        "${latency}ms",
+                        stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_status_latency, latency),
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
                         fontWeight = FontWeight.Bold,
                         color = color.copy(alpha = 0.8f),
@@ -123,7 +124,7 @@ fun SecurityStatusRow(
             if (isIncognito) {
                 SecurityDot(color = MaterialTheme.colorScheme.tertiary)
                 Text(
-                    "Private",
+                    stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_status_private),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
