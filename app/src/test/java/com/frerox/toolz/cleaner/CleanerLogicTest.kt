@@ -8,7 +8,9 @@ import com.frerox.toolz.data.cleaner.MediaType
 import com.frerox.toolz.data.cleaner.analyzer.MediaClutterAnalyzer
 import com.frerox.toolz.data.cleaner.engine.AppCacheOutcome
 import com.frerox.toolz.data.cleaner.engine.IndexedFile
+import com.frerox.toolz.data.cleaner.engine.TRIM_CACHES_TARGET_BYTES
 import com.frerox.toolz.data.cleaner.engine.accumulateDirSizes
+import com.frerox.toolz.data.cleaner.engine.appCacheRmCommand
 import com.frerox.toolz.data.cleaner.engine.decideAppCacheOutcome
 import com.frerox.toolz.data.cleaner.shizuku.ShizukuFileLister
 import org.junit.Assert.*
@@ -102,5 +104,41 @@ class CleanerLogicTest {
         assertEquals(MediaType.DCIM, MediaClutterAnalyzer.classifyMediaPath("DCIM/Camera/"))
         assertNull(MediaClutterAnalyzer.classifyMediaPath("Music/My Band/"))
         assertNull(MediaClutterAnalyzer.classifyMediaPath(""))
+    }
+
+    // --- AppCache trim/rm pins (S1.1.2) ---
+
+    @Test fun trimTargetIsMaximal() {
+        assertTrue(TRIM_CACHES_TARGET_BYTES >= 10_000_000_000_000L)
+    }
+
+    @Test fun rmCommandValidPkgs() {
+        for (pkg in listOf("com.example.app", "org.telegram.messenger")) {
+            val cmd = appCacheRmCommand(pkg)
+            assertNotNull(cmd)
+            assertEquals("rm -rf '/data/data/$pkg/cache' '/data/data/$pkg/code_cache'", cmd)
+            assertFalse(cmd!!.contains(".."))
+            assertFalse(cmd.contains(";"))
+            assertFalse(cmd.contains("&&"))
+            assertTrue(cmd.startsWith("rm -rf '/data/data/"))
+        }
+    }
+
+    @Test fun rmCommandRejectsBad() {
+        for (bad in listOf("", "foo", "../x", "com.a'; rm -rf / #", "com.a b", "/data/data/x", "com..a")) {
+            assertNull(appCacheRmCommand(bad))
+        }
+    }
+
+    @Test fun rmCommandConfinedDirs() {
+        val pkg = "com.example.app"
+        val cmd = appCacheRmCommand(pkg)!!
+        assertTrue(cmd.contains("/cache'"))
+        assertTrue(cmd.contains("/code_cache'"))
+        assertEquals(2, cmd.split("'/data/data/").size - 1)
+    }
+
+    @Test fun outcomeTableUntouched() {
+        assertEquals(AppCacheOutcome.NEEDS_AUTO, decideAppCacheOutcome(false, false, 0L, 5_000_000L, 0L))
     }
 }

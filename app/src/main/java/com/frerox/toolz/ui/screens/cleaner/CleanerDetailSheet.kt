@@ -47,7 +47,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CleanerDetailSheet(category: CleanCategory, onToggleItem:(String)->Unit, onToggleDuplicate:(String,String)->Unit, onSelectAll:(Boolean)->Unit = {}, allSelected: Boolean = false, onAutoClear: (() -> Unit)? = null, onAutoClearApp: ((String, String) -> Unit)? = null, onOpenAppSettings: ((String) -> Unit)? = null, onExcludeApp: ((String) -> Unit)? = null, onClean: (() -> Unit)? = null, onOpenFile:(String)->Unit, onDismiss:()->Unit) {
+fun CleanerDetailSheet(category: CleanCategory, onToggleItem:(String)->Unit, onToggleDuplicate:(String,String)->Unit, onAutoClear: (() -> Unit)? = null, onAutoClearApp: ((String, String) -> Unit)? = null, onOpenAppSettings: ((String) -> Unit)? = null, onExcludeApp: ((String) -> Unit)? = null, onClean: (() -> Unit)? = null, onOpenFile:(String)->Unit, onDismiss:()->Unit) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     val filtered = remember(category.items, query) {
@@ -87,7 +87,6 @@ fun CleanerDetailSheet(category: CleanCategory, onToggleItem:(String)->Unit, onT
                 IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) { Icon(Icons.Rounded.Close, null, Modifier.size(18.dp)) }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = allSelected, onClick = { onSelectAll(!allSelected) }, label = { Text(if (allSelected) "Clear all" else "Select all", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)) })
                 if (onAutoClear != null && category.id == "app_cache" && category.items.isNotEmpty()) {
                     AssistChip(onClick = onAutoClear, leadingIcon = { Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(14.dp)) },
                         label = { Text("Auto-clear", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)) })

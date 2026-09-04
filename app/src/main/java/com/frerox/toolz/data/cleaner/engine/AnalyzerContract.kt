@@ -25,7 +25,11 @@ data class ScanCtx(
     val exclusions: Set<String>,
     val config: CleanScanConfig,
     val isActive: () -> Boolean,
-    val progress: (String) -> Unit
+    val progress: (String) -> Unit,
+    // Gates snapshot at scan start; analyzers must NEVER tell the user to grant
+    // something already granted — banner only for still-missing capabilities.
+    val allFilesGranted: Boolean = true,
+    val shizukuUsable: Boolean = false
 )
 
 interface CleanerAnalyzer {

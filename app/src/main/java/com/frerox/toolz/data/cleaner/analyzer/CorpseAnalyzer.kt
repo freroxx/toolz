@@ -35,7 +35,7 @@ class CorpseAnalyzer @Inject constructor(
         var accessDenied = 0
         var usedShell = false
         var obbBlind = false
-        val shizukuMissing = try { !shizukuLister.isUsable() } catch (_: Exception) { true }
+        val shizukuMissing = !ctx.shizukuUsable
         val bases = listOf("Android/data" to CorpseType.DATA, "Android/obb" to CorpseType.OBB, "Android/media" to CorpseType.MEDIA)
         // Immediate children come from the shared index — no walks.
         val childrenByBase = HashMap<String, MutableList<String>>()
@@ -120,14 +120,19 @@ class CorpseAnalyzer @Inject constructor(
         val total = sorted.sumOf { it.sizeBytes }
         val selected = items.sumOf { (it as CleanItem.Corpse).let { c -> if (c.entry.isSelected) c.entry.sizeBytes else 0L } }
         val blocked = when {
-            obbBlind && shizukuMissing -> "Android/obb is hidden without Shizuku — privileged leftovers skipped"
-            entries.isEmpty() && accessDenied > 0 ->
-                "Some app folders are hidden — grant All-files access" + if (usedShell) "" else " or use Shizuku"
+            obbBlind && shizukuMissing -> "Android/obb can't be inspected without Shizuku"
+            entries.isEmpty() && accessDenied > 0 && !ctx.allFilesGranted ->
+                "Some app folders are hidden — grant All-files access"
             else -> null
+        }
+        val blockedFix: String? = when {
+            blocked == null -> null
+            obbBlind && shizukuMissing -> "Set up Shizuku"
+            else -> "Grant"
         }
         return CleanCategory(categoryId, categoryName, categoryIcon, items, total, selected, isSafeToClean,
             description = description, blockedReason = blocked,
-            blockedFixLabel = if (blocked != null) "Fix" else null,
+            blockedFixLabel = blockedFix,
             skippedCount = accessDenied,
             emptyHint = if (entries.isEmpty() && blocked == null) "No leftovers — every app owns its folders" else null)
     }

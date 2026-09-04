@@ -150,6 +150,8 @@ class CleanerViewModel @Inject constructor(
 
     fun consumeUndo() { _undoEvent.value = null }
 
+    fun postNotice(text: String) { _undoEvent.value = text }
+
     val exclusions: kotlinx.coroutines.flow.Flow<Set<String>> = exclusionStore.exclusionsFlow
 
     fun exclude(path: String) { viewModelScope.launch { try { exclusionStore.addExclusion(path) } catch (_: Exception) {} } }
@@ -196,10 +198,13 @@ class CleanerViewModel @Inject constructor(
             .map { it.entry.packageName to it.entry.appName }
     }
 
-    fun startAutoClear(pkgs: List<String>): Boolean {
+    fun startAutoClearApps(apps: List<Pair<String, String>>): Boolean {
         val svc = com.frerox.toolz.service.CleanerAccessibilityService.instance ?: return false
-        return try { svc.startAutoClear(pkgs) } catch (_: Exception) { false }
+        return try { svc.startAutoClear(apps) } catch (_: Exception) { false }
     }
+
+    fun startAutoClear(pkgs: List<String>): Boolean =
+        startAutoClearApps(pkgs.map { it to it })
 
     fun stopAutoClear() {
         try { com.frerox.toolz.service.CleanerAccessibilityService.instance?.stopAutoClear() } catch (_: Exception) {}

@@ -10,11 +10,15 @@
 package com.frerox.toolz.service
 
 import android.accessibilityservice.AccessibilityService
+import android.app.usage.StorageStatsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Process
 import android.provider.Settings
+import android.text.format.Formatter
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,15 +30,26 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+
+/** Reason an app could not be auto-cleared. */
+data class FailedApp(
+    val pkg: String,
+    val label: String,
+    val reason: String
+)
 
 /** Observable auto-clear run state for the UI. */
 data class AutoClearState(
     val running: Boolean = false,
     val current: String = "",
+    val currentPkg: String = "",
+    val index: Int = 0,
+    val total: Int = 0,
     val log: List<String> = emptyList(),
     val cleared: List<String> = emptyList(),
-    val failed: List<String> = emptyList(),
+    val failedApps: List<FailedApp> = emptyList(),
     val done: Boolean = false
 )
 
@@ -88,33 +103,76 @@ class CleanerAccessibilityService : AccessibilityService() {
         )
     }
 
+    /** Legacy overload: label falls back to the package name. */
+    @Deprecated("Use pairs overload with labels")
+    fun startAutoClear(packages: List<String>): Boolean =
+        startAutoClear(packages.map { it to it })
+
     /** Starts a guided run. Returns false when a run is already active. */
-    fun startAutoClear(packages: List<String>): Boolean {
+    @JvmName("startAutoClearWithLabels")
+    fun startAutoClear(apps: List<Pair<String, String>>): Boolean {
         if (job?.isActive == true) return false
-        val queue = packages.distinct().take(50)
-        _autoState.value = AutoClearState(running = true, current = "", log = listOf("Starting auto-clear for ${queue.size} app(s)…"))
+        val queue = apps.distinctBy { it.first }.take(50)
+        _autoState.value = AutoClearState(
+            running = true, current = "", currentPkg = "", index = 0, total = queue.size,
+            log = listOf("Starting auto-clear for ${queue.size} app(s)…")
+        )
         job?.cancel()
         job = scope.launch {
             val ok = mutableListOf<String>()
-            val bad = mutableListOf<String>()
-            for (pkg in queue) {
+            val bad = mutableListOf<FailedApp>()
+            for ((i, entry) in queue.withIndex()) {
+                if (!isActive) break
+                val (pkg, label) = entry
+                _autoState.value = _autoState.value.copy(current = label, currentPkg = pkg, index = i, total = queue.size)
                 if (!isEnabled(this@CleanerAccessibilityService)) { appendLog("Service disabled — stopping"); break }
-                appendLog("Opening $pkg…", current = pkg)
+                val before = cacheBytes(pkg)
+                appendLog("[${i + 1}/${queue.size}] Opening $label…", current = label)
+                _autoState.value = _autoState.value.copy(current = label, currentPkg = pkg, index = i, total = queue.size)
                 try { openAppStorage(this@CleanerAccessibilityService, pkg) } catch (_: Exception) {
-                    bad.add(pkg); appendLog("$pkg: couldn't open settings"); continue
+                    bad.add(FailedApp(pkg, label, "couldn't open settings"))
+                    appendLog("[${i + 1}/${queue.size}] $label: couldn't open settings")
+                    _autoState.value = _autoState.value.copy(index = i + 1)
+                    try { backNav() } catch (_: Exception) {}
+                    continue
                 }
                 var tapped = false
-                // Bounded: ~15s per app, then move on and report honestly.
-                repeat(30) {
+                // Bounded: ~15s per app, stop polling as soon as the tap lands.
+                for (attempt in 0 until 30) {
                     delay(500)
                     val root = try { rootInActiveWindow } catch (_: Exception) { null }
-                    if (tapClearCache(root)) { tapped = true; return@repeat }
-                    if (it % 2 == 1) scrollFirstScrollable(root)
+                    if (tapClearCache(root)) { tapped = true; break }
+                    if (attempt % 2 == 1) scrollFirstScrollable(root)
                 }
-                if (tapped) { ok.add(pkg); appendLog("$pkg: cache cleared ✓") }
-                else { bad.add(pkg); appendLog("$pkg: needs a manual tap") }
+                delay(1000)
+                val after = cacheBytes(pkg)
+                val b = before ?: 0L
+                if (b <= 0L) {
+                    ok.add(label)
+                    appendLog("[${i + 1}/${queue.size}] $label: already clean")
+                } else if (after != null && after < b) {
+                    ok.add(label)
+                    val freed = Formatter.formatShortFileSize(this@CleanerAccessibilityService, b - after)
+                    appendLog("[${i + 1}/${queue.size}] $label: cache cleared ✓ (freed $freed)")
+                } else if (after == null) {
+                    if (tapped) {
+                        ok.add(label)
+                        appendLog("[${i + 1}/${queue.size}] $label: tap sent, couldn't verify")
+                    } else {
+                        bad.add(FailedApp(pkg, label, "no tap target found"))
+                        appendLog("[${i + 1}/${queue.size}] $label: needs a manual tap")
+                    }
+                } else {
+                    val still = Formatter.formatShortFileSize(this@CleanerAccessibilityService, after)
+                    bad.add(FailedApp(pkg, label, "still $still — needs a manual tap"))
+                    appendLog("[${i + 1}/${queue.size}] $label: still $still — needs a manual tap")
+                }
+                _autoState.value = _autoState.value.copy(index = i + 1, current = label, currentPkg = pkg)
+                // Pop the Settings stack so activities don't pile up.
+                try { backNav() } catch (_: Exception) {}
             }
-            _autoState.value = _autoState.value.copy(running = false, current = "", done = true, cleared = ok, failed = bad,
+            _autoState.value = _autoState.value.copy(running = false, current = "", currentPkg = "", done = true,
+                cleared = ok, failedApps = bad,
                 log = _autoState.value.log + "Done — ${ok.size} cleared, ${bad.size} need attention")
         }
         return true
@@ -146,6 +204,24 @@ class CleanerAccessibilityService : AccessibilityService() {
                 if (s.done) break
             }
         }
+    }
+
+    private fun cacheBytes(pkg: String): Long? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+        return try {
+            val ai = packageManager.getApplicationInfo(pkg, 0)
+            val ssm = getSystemService(Context.STORAGE_STATS_SERVICE) as? StorageStatsManager ?: return null
+            ssm.queryStatsForPackage(ai.storageUuid, pkg, Process.myUserHandle()).cacheBytes
+        } catch (_: Exception) { null }
+    }
+
+    private suspend fun backNav() {
+        try {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            delay(400)
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            delay(400)
+        } catch (_: Exception) {}
     }
 
     private fun tapClearCache(root: AccessibilityNodeInfo?): Boolean {

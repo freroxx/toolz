@@ -20,6 +20,7 @@ import com.frerox.toolz.data.cleaner.FailedItem
 import com.frerox.toolz.data.cleaner.ScanState
 import com.frerox.toolz.data.cleaner.StorageInfo
 import com.frerox.toolz.data.cleaner.analyzer.*
+import com.frerox.toolz.data.cleaner.access.AccessGate
 import com.frerox.toolz.util.shizuku.ShizukuHelper
 import com.frerox.toolz.util.shizuku.ShizukuShellExecutor
 import com.frerox.toolz.data.cleaner.trash.CleanerTrashDao
@@ -38,6 +39,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import android.util.Log
 
+/** Max target so `pm trim-caches` releases everything the system can (a small target stops early). */
+internal const val TRIM_CACHES_TARGET_BYTES = 999999999999999L
+
+// Regex forbids quotes/slashes so interpolation is safe; confined to the two well-known cache dirs;
+// deliberately NOT routed through FileUtils.isSafeToDelete (that gate is for shared storage,
+// /data paths are handled here by strict construction).
+internal fun appCacheRmCommand(pkg: String): String? {
+    if (!pkg.matches(Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$"))) return null
+    return "rm -rf '/data/data/$pkg/cache' '/data/data/$pkg/code_cache'"
+}
+
 @Singleton
 class CleanerEngine @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -53,7 +65,8 @@ class CleanerEngine @Inject constructor(
     private val trashManager: TrashManager,
     private val shizukuExecutor: ShizukuShellExecutor,
     private val crawlEngine: CrawlEngine,
-    private val exclusionStore: CleanerExclusionStore
+    private val exclusionStore: CleanerExclusionStore,
+    private val accessGate: AccessGate
 ) {
     private val _scanState = MutableStateFlow<ScanState>(ScanState.Idle)
     val scanState: StateFlow<ScanState> = _scanState.asStateFlow()
@@ -117,6 +130,9 @@ class CleanerEngine @Inject constructor(
 
                 // Phase 2: analyzers read the index (0.45 → 0.9). Only duplicates
                 // touches disk again (hashing); everything else is in-memory.
+                // Gate snapshot at scan start so analyzers banner only still-missing capabilities.
+                val allFiles = try { accessGate.allFilesGranted() } catch (_: Exception) { true }
+                val shizukuUsable = try { ShizukuHelper.isAuthorized() } catch (_: Exception) { false }
                 val defs: List<Pair<CleanerAnalyzer, Float>> = listOf(
                     corpseAnalyzer to 0.50f, appCacheAnalyzer to 0.58f, mediaAnalyzer to 0.66f,
                     systemJunkAnalyzer to 0.72f, largeAnalyzer to 0.78f, apkAnalyzer to 0.82f,
@@ -132,7 +148,8 @@ class CleanerEngine @Inject constructor(
                                     config = scanConfig, isActive = { isActive },
                                     progress = { msg ->
                                         _scanState.value = ScanState.Scanning(msg, index.scannedFiles, 0L, weight)
-                                    }
+                                    },
+                                    allFilesGranted = allFiles, shizukuUsable = shizukuUsable
                                 )
                                 analyzer.categoryId to Result.success(analyzer.analyze(index, ctx))
                             } catch (e: CancellationException) { throw e }
@@ -156,7 +173,9 @@ class CleanerEngine @Inject constructor(
                 val deduped = mutableListOf<CleanCategory>()
                 for (cat in ordered) {
                     if (cat.items.isEmpty()) {
-                        if (cat.blockedReason != null) deduped.add(cat)
+                        // Keep blocked-empty cards only when actionable: a banner with no fix
+                        // action is unactionable noise; analyzers needing user action set a fix label.
+                        if (cat.blockedReason != null && cat.blockedFixLabel != null) deduped.add(cat)
                         continue
                     }
                     val kept = cat.items.filter { item ->
@@ -167,7 +186,8 @@ class CleanerEngine @Inject constructor(
                         owned
                     }
                     if (kept.isEmpty()) {
-                        if (cat.blockedReason != null) deduped.add(cat)
+                        // Same honesty filter: drop unactionable blocked cards (no fix label).
+                        if (cat.blockedReason != null && cat.blockedFixLabel != null) deduped.add(cat)
                         continue
                     }
                     val total = kept.sumOf { itemSize(it) }
@@ -356,12 +376,13 @@ class CleanerEngine @Inject constructor(
                 deleteOne(path, label, size, "dir")
             }
             if (appCacheCount > 0) {
-                _scanState.value = ScanState.Cleaning(0.95f, "Clearing app caches…")
+                var trimRan = false
+                _scanState.value = ScanState.Cleaning(0.95f, "Trimming system caches…")
                 if (ShizukuHelper.isAuthorized()) {
                     try {
-                        val free = try { storageInfoProvider.getStorageInfo().freeBytes } catch (_: Exception) { 0L }
-                        val target = (free + 1024L * 1024 * 1024).coerceAtLeast(2L * 1024 * 1024 * 1024)
-                        shizukuExecutor.executeForResult("pm trim-caches $target")
+                        val result = shizukuExecutor.executeForResult("pm trim-caches $TRIM_CACHES_TARGET_BYTES", timeoutMs = 90_000)
+                        trimRan = true
+                        Log.d("CleanerEngine", "trim-caches exit=${result.exitCode} out=${result.combinedOutput}")
                     } catch (_: Exception) {}
                 }
                 for (item in state.categories.flatMap { it.items }.filterIsInstance<CleanItem.AppCache>().filter { it.entry.isSelected }) {
@@ -371,6 +392,7 @@ class CleanerEngine @Inject constructor(
                     if (!pkg.matches(Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$"))) {
                         failedItems.add(FailedItem(pkg, appLabel, "Unrecognized package name — skipped for safety")); continue
                     }
+                    _scanState.value = ScanState.Cleaning(0.95f, "Clearing $appLabel…")
                     var extCleared = false
                     var extSize = 0L
                     var extExisted = false
@@ -385,6 +407,9 @@ class CleanerEngine @Inject constructor(
                             else if (extCache.deleteRecursively()) { extCleared = true; extSize = sz }
                         }
                     } catch (_: Exception) {}
+                    appCacheRmCommand(pkg)?.let { cmd ->
+                        try { shizukuExecutor.executeForResult(cmd, timeoutMs = 15_000) } catch (_: Exception) {}
+                    }
                     val after = queryCacheBytes(pkg)
                     val delta = if (after != null) (before - after).coerceAtLeast(0L) else 0L
                     when (decideAppCacheOutcome(extExisted, extCleared, extSize, before, delta)) {
@@ -397,7 +422,8 @@ class CleanerEngine @Inject constructor(
                         AppCacheOutcome.ALREADY_CLEAN -> alreadyCleanCount++
                         AppCacheOutcome.NEEDS_AUTO -> failedItems.add(FailedItem(
                             pkg, appLabel,
-                            "Internal cache only — needs Auto-clear or system Clear cache",
+                            if (trimRan) "System trim couldn't free this app's internal cache — try Auto-clear"
+                            else "Internal cache only — needs Auto-clear or system Clear cache",
                             CleanFix.ENABLE_AUTO_CLEAR, pkg))
                         AppCacheOutcome.FAILED -> failedItems.add(FailedItem(
                             pkg, appLabel,
