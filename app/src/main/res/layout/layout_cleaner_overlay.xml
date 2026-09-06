@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/overlay_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#E80D1117"
+    android:clickable="true"
+    android:focusable="false"
+    android:importantForAccessibility="no"
+    android:keepScreenOn="true">
+
+    <LinearLayout
+        android:id="@+id/card_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:background="@drawable/bg_cleaner_overlay_card"
+        android:clickable="true"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:orientation="vertical"
+        android:padding="26dp">
+
+        <!-- Top Badge -->
+        <LinearLayout
+            android:id="@+id/layout_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/bg_cleaner_overlay_chip"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="6dp">
+
+            <ImageView
+                android:id="@+id/iv_badge_icon"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:contentDescription="Icon"
+                android:src="@drawable/ic_shortcut_file_cleaner"
+                android:tint="#7BA7F7" />
+
+            <TextView
+                android:id="@+id/tv_overlay_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:letterSpacing="0.08"
+                android:text="TOOLZ CACHE CLEANER"
+                android:textColor="#7BA7F7"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- App Icon -->
+        <ImageView
+            android:id="@+id/iv_app_icon"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="20dp"
+            android:contentDescription="App Icon" />
+
+        <!-- App Title -->
+        <TextView
+            android:id="@+id/tv_app_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="1"
+            android:text="App Name"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- Subtitle / Status -->
+        <TextView
+            android:id="@+id/tv_app_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text="Clearing cache…"
+            android:textColor="#98A2B3"
+            android:textSize="13sp" />
+
+        <!-- Progress Bar -->
+        <ProgressBar
+            android:id="@+id/pb_clean_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginTop="16dp"
+            android:max="100"
+            android:progress="0" />
+
+        <!-- Progress Count / Percentage -->
+        <TextView
+            android:id="@+id/tv_progress_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="Preparing…"
+            android:textColor="#667085"
+            android:textSize="11sp" />
+
+        <!-- Touch Shield Notice -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="13dp"
+                android:layout_height="13dp"
+                android:contentDescription="Lock"
+                android:src="@android:drawable/ic_lock_lock"
+                android:tint="#667085" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="Touches paused to protect cleaning"
+                android:textColor="#667085"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Exit Action Button (Only Exit button, no pause) -->
+        <Button
+            android:id="@+id/btn_exit"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="22dp"
+            android:background="@drawable/bg_cleaner_overlay_btn_filled"
+            android:letterSpacing="0.03"
+            android:text="Stop &amp; Exit"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+</FrameLayout>
