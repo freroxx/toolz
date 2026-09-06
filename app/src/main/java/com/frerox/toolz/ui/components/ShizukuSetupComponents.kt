@@ -27,6 +27,11 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,10 +43,15 @@ import com.frerox.toolz.util.shizuku.ShizukuHelper
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShizukuSetupBottomSheet(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onAuthorized: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val isInstalled = ShizukuHelper.isAvailable()
+    var refreshTick by remember { mutableIntStateOf(0) }
+    val installed = remember(refreshTick) { ShizukuHelper.isInstalled(context) }
+    val running = remember(refreshTick) { ShizukuHelper.isRunning() }
+    val authorized = remember(refreshTick) { ShizukuHelper.isAuthorized() }
+    var denied by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -60,10 +70,27 @@ fun ShizukuSetupBottomSheet(
             
             Spacer(Modifier.height(24.dp))
 
-            if (!isInstalled) {
+            if (!installed) {
                 ShizukuNotInstalledView(context)
-            } else {
+            } else if (!running) {
                 ShizukuNotRunningView(context)
+            } else if (!authorized) {
+                ShizukuAllowView(
+                    context = context,
+                    denied = denied,
+                    onGrant = {
+                        ShizukuHelper.requestAuthorization { granted ->
+                            if (granted) {
+                                refreshTick++
+                                onAuthorized()
+                            } else {
+                                denied = true
+                            }
+                        }
+                    }
+                )
+            } else {
+                ShizukuDoneView()
             }
 
             Spacer(Modifier.height(32.dp))
@@ -169,5 +196,62 @@ private fun ShizukuNotRunningView(context: Context) {
         ) {
             Text("OPEN SHIZUKU")
         }
+    }
+}
+
+@Composable
+private fun ShizukuAllowView(
+    context: Context,
+    denied: Boolean,
+    onGrant: () -> Unit
+) {
+    Column {
+        Text(
+            "Shizuku is running — allow Toolz to use it for fast cache clearing and leftover scans.",
+            style = MaterialTheme.typography.bodyLarge
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        ToolzExpressiveButton(
+            onClick = onGrant,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MediumExpressiveShape
+        ) {
+            Text("ALLOW SHIZUKU")
+        }
+
+        if (denied) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Denied — enable Toolz manually inside the Shizuku app.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.height(12.dp))
+            ToolzOutlinedExpressiveButton(
+                onClick = {
+                    val intent = context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                    if (intent != null) {
+                        context.startActivity(intent)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MediumExpressiveShape
+            ) {
+                Text("MANAGE")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShizukuDoneView() {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "Shizuku is connected ✓",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }

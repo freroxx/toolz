@@ -79,16 +79,15 @@ class MediaClutterAnalyzer @Inject constructor(@ApplicationContext private val c
                         val size = try { c.getLong(iSize) } catch (_: Exception) { 0L }
                         val mod = try { c.getLong(iDate) * 1000L } catch (_: Exception) { 0L }
                         val type = classifyMediaPath(rel) ?: continue
-                        if (type == MediaType.DCIM) continue // camera roll untouched
+                        if (type == MediaType.DCIM || type == MediaType.SCREENSHOT) continue // DCIM untouched, screenshots have dedicated category
                         val ext = name.substringAfterLast('.', "").lowercase()
                         val isOld = mod in 1..<oldThr
                         val isVideo = collection == MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                         val isLargeVideo = isVideo && size > 50 * 1024 * 1024L
-                        val isScreenshotOld = type == MediaType.SCREENSHOT && mod in 1..<week
                         val relLower = rel.lowercase()
                         val isSentClutter = type == MediaType.WHATSAPP &&
                             (relLower.contains("/sent") || relLower.contains("status"))
-                        if (!(isOld || isLargeVideo || isScreenshotOld || isSentClutter ||
+                        if (!(isOld || isLargeVideo || isSentClutter ||
                                 (type == MediaType.TELEGRAM && (relLower.contains("cache") || relLower.contains("thumb") || isOld)))) continue
                         val id = try { c.getLong(iId) } catch (_: Exception) { continue }
                         val uri = ContentUris.withAppendedId(collection, id).toString()
@@ -110,13 +109,12 @@ class MediaClutterAnalyzer @Inject constructor(@ApplicationContext private val c
         for (f in index.files) {
             if (!ctx.isActive()) break
             val type = classifyMediaPath(f.parentDir) ?: continue
-            if (type == MediaType.DCIM) continue
+            if (type == MediaType.DCIM || type == MediaType.SCREENSHOT) continue
             val isOld = f.lastModified in 1..<oldThr
             val isLargeVideo = f.ext in setOf("mp4", "mkv", "mov") && f.size > 50 * 1024 * 1024L
-            val isScreenshotOld = type == MediaType.SCREENSHOT && f.lastModified in 1..<week
             val lower = f.parentDir.lowercase()
             val isSentClutter = type == MediaType.WHATSAPP && (lower.contains("/sent") || lower.contains("status"))
-            if (!(isOld || isLargeVideo || isScreenshotOld || isSentClutter ||
+            if (!(isOld || isLargeVideo || isSentClutter ||
                     (type == MediaType.TELEGRAM && (lower.contains("cache") || lower.contains("thumb") || isOld)))) continue
             out.add(MediaEntry(f.name, f.path, f.size, f.lastModified, f.ext, type,
                 isSelected = false, thumbnailUri = FileUtils.getMediaStoreUri(context, f.path, f.ext)))

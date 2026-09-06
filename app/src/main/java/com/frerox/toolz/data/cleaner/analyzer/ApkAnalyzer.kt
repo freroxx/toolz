@@ -28,26 +28,68 @@ class ApkAnalyzer @Inject constructor(@ApplicationContext private val context: C
         val pm = context.packageManager
         for (f in index.files) {
             if (!ctx.isActive()) break
-            if (f.ext != "apk" && f.ext != "apks" && f.ext != "xapk") continue
+            val extLower = f.ext.lowercase()
+            if (extLower != "apk" && extLower != "apks" && extLower != "xapk") continue
             hits++
             // Only plain APKs can be parsed; bundles are flagged by extension alone.
-            var pkg: String? = null; var ver: String? = null
-            if (f.ext == "apk") {
+            var pkg: String? = null
+            var ver: String? = null
+            var installedVer: String? = null
+            var isRedundant = false
+            if (extLower == "apk") {
                 try {
                     val info = pm.getPackageArchiveInfo(f.path, 0)
-                    pkg = info?.packageName; ver = info?.versionName
+                    pkg = info?.packageName
+                    ver = info?.versionName
+                    if (pkg != null && ctx.installed.contains(pkg)) {
+                        try {
+                            val installedInfo = pm.getPackageInfo(pkg, 0)
+                            installedVer = installedInfo.versionName
+                            val installedCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                installedInfo.longVersionCode
+                            } else {
+                                @Suppress("DEPRECATION") installedInfo.versionCode.toLong()
+                            }
+                            val apkCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                info?.longVersionCode ?: 0L
+                            } else {
+                                @Suppress("DEPRECATION") (info?.versionCode ?: 0).toLong()
+                            }
+                            if (installedCode >= apkCode && apkCode > 0L) {
+                                isRedundant = true
+                            }
+                        } catch (_: Exception) {}
+                    }
                 } catch (_: Exception) {}
             }
-            val e = ApkEntry(f.name, f.path, f.size, f.lastModified, pkg, ver, isSelected = false)
+            // Auto-select redundant APKs (app already installed with same or newer version)
+            val e = ApkEntry(
+                name = f.name,
+                path = f.path,
+                sizeBytes = f.size,
+                lastModified = f.lastModified,
+                packageName = pkg,
+                versionName = ver,
+                isSelected = isRedundant,
+                installedVersionName = installedVer,
+                isRedundant = isRedundant
+            )
             if (heap.size < ctx.config.maxApkFiles) heap.add(e)
             else if (f.size > (heap.peek()?.sizeBytes ?: 0L)) { heap.poll(); heap.add(e) }
         }
         val sorted = heap.sortedByDescending { it.sizeBytes }
         val stale = sorted.count { it.packageName == null || !ctx.installed.contains(it.packageName) }
+        val redundant = sorted.count { it.isRedundant }
         val items = sorted.map { CleanItem.ApkFile(it) }
         val total = sorted.sumOf { it.sizeBytes }
-        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, 0L, isSafeToClean,
-            description = "$stale of ${sorted.size} look stale (not installed) — review before deleting",
+        val selected = sorted.filter { it.isSelected }.sumOf { it.sizeBytes }
+        val desc = when {
+            redundant > 0 && stale > 0 -> "$redundant redundant (installed) • $stale not installed"
+            redundant > 0 -> "$redundant redundant installer(s) (already installed)"
+            else -> "$stale of ${sorted.size} look stale (not installed) — review before deleting"
+        }
+        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, selected, isSafeToClean = false,
+            description = desc,
             truncatedCount = (hits - sorted.size).coerceAtLeast(0))
     }
 }

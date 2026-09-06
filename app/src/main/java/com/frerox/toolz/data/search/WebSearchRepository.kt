@@ -180,9 +180,8 @@ class WebSearchRepository @Inject constructor(
         // Restrict video clicks to playable embeddable domains, but never let the
         // filter wipe out the whole result set: if nothing survived (e.g. the engine
         // returned non-allowlisted hosts), show the unfiltered list rather than a
-        // dead "no videos" tab.
-        val allowed = results.filter { isAllowedVideoTarget(it.url) }
-        val filtered = if (allowed.isNotEmpty() || results.isEmpty()) allowed else results
+        // dead "no videos" tab. Image searches bypass this filter entirely.
+        val filtered = filterMediaResults(category, results)
         filtered.distinctBy { metaMerger.canonicalUrl(it.url) }.take(500)
     }
 
@@ -335,7 +334,7 @@ class WebSearchRepository @Inject constructor(
             val doc = Jsoup.parse(html, url)
             doc.select("script,style,nav,footer,header,aside,.ads,.sidebar,#cookie-banner").remove()
             val text = (doc.select("article,main,.content,.post-content,#content,.article-body").firstOrNull()
-            ?: doc.body())?.text() ?: ""
+                ?: doc.body()).text()
             if (text.length > 4_000) text.take(4_000) + "… [truncated]" else text
         } catch (e: Exception) {
             "Error: ${e.message}"
@@ -375,6 +374,15 @@ class WebSearchRepository @Inject constructor(
         fun isAllowedVideoTarget(url: String): Boolean {
             val host = try { java.net.URI(url).host?.lowercase().orEmpty() } catch (_: Exception) { "" }
             return ALLOWED_VIDEO_DOMAINS.any { domain -> host == domain || host.endsWith(".$domain") }
+        }
+
+        fun filterMediaResults(category: SearchCategory, results: List<SearchResult>): List<SearchResult> {
+            return if (category == SearchCategory.VIDEOS) {
+                val allowed = results.filter { isAllowedVideoTarget(it.url) }
+                if (allowed.isNotEmpty() || results.isEmpty()) allowed else results
+            } else {
+                results
+            }
         }
     }
 }

@@ -11,7 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.Cached
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.StopCircle
@@ -41,7 +41,7 @@ fun AutoClearDisclosure(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) },
+        icon = { Icon(Icons.Rounded.Cached, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) },
         title = { Text("Auto-clear internal caches?", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium, fontSize = 15.sp), textAlign = TextAlign.Center) },
         text = {
             Text(
@@ -89,6 +89,7 @@ fun AutoClearProgressDialog(
                     Column(Modifier.weight(1f)) {
                         Text(
                             when {
+                                state.paused -> "Paused"
                                 state.running -> "Auto-clearing…"
                                 state.failedApps.isEmpty() -> "Auto-cleared ${state.cleared.size}"
                                 else -> "Finished — ${state.cleared.size} cleared"
@@ -175,8 +176,14 @@ fun AutoClearProgressDialog(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (state.running) {
-                        OutlinedButton(onClick = onStop, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).height(46.dp)) {
-                            Icon(Icons.Rounded.StopCircle, null, Modifier.size(16.dp)); Spacer(Modifier.width(8.dp)); Text("Stop")
+                        Button(
+                            onClick = onStop,
+                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.fillMaxWidth().height(46.dp)
+                        ) {
+                            Icon(Icons.Rounded.StopCircle, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Stop & Exit")
                         }
                     } else {
                         OutlinedButton(onClick = onClose, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f).height(46.dp)) { Text("Close") }

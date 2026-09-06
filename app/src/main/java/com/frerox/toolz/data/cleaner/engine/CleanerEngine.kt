@@ -12,13 +12,7 @@ import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Environment
 import android.os.SystemClock
-import com.frerox.toolz.data.cleaner.CleanCategory
-import com.frerox.toolz.data.cleaner.CleanFix
-import com.frerox.toolz.data.cleaner.CleanItem
-import com.frerox.toolz.data.cleaner.CleanResult
-import com.frerox.toolz.data.cleaner.FailedItem
-import com.frerox.toolz.data.cleaner.ScanState
-import com.frerox.toolz.data.cleaner.StorageInfo
+import com.frerox.toolz.data.cleaner.*
 import com.frerox.toolz.data.cleaner.analyzer.*
 import com.frerox.toolz.data.cleaner.access.AccessGate
 import com.frerox.toolz.util.shizuku.ShizukuHelper
@@ -50,6 +44,22 @@ internal fun appCacheRmCommand(pkg: String): String? {
     return "rm -rf '/data/data/$pkg/cache' '/data/data/$pkg/code_cache'"
 }
 
+/**
+ * S1.1.2: parse `du -sbc` output — return the leading number of the line whose
+ * last whitespace-token is exactly "total", else null. Pure, null-safe.
+ */
+internal fun parseDuTotal(output: String): Long? {
+    for (line in output.lines()) {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) continue
+        val tokens = trimmed.split(Regex("\\s+"))
+        if (tokens.size < 2) continue
+        if (tokens.last() != "total") continue
+        return tokens.first().toLongOrNull() ?: return null
+    }
+    return null
+}
+
 @Singleton
 class CleanerEngine @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -61,6 +71,7 @@ class CleanerEngine @Inject constructor(
     private val largeAnalyzer: LargeFilesAnalyzer,
     private val apkAnalyzer: ApkAnalyzer,
     private val mediaAnalyzer: MediaClutterAnalyzer,
+    private val screenshotAnalyzer: ScreenshotAnalyzer,
     private val trashDao: CleanerTrashDao,
     private val trashManager: TrashManager,
     private val shizukuExecutor: ShizukuShellExecutor,
@@ -84,7 +95,9 @@ class CleanerEngine @Inject constructor(
         _storageInfo.value = info
     }
 
-    fun analyzerCount(): Int = 6
+    val trash: TrashManager get() = trashManager
+
+    fun analyzerCount(): Int = 8
 
     /** Last crawl, kept so cleaning can auto-tidy truly-empty folders. */
     private var lastIndex: FileIndex? = null
@@ -134,9 +147,9 @@ class CleanerEngine @Inject constructor(
                 val allFiles = try { accessGate.allFilesGranted() } catch (_: Exception) { true }
                 val shizukuUsable = try { ShizukuHelper.isAuthorized() } catch (_: Exception) { false }
                 val defs: List<Pair<CleanerAnalyzer, Float>> = listOf(
-                    corpseAnalyzer to 0.50f, appCacheAnalyzer to 0.58f, mediaAnalyzer to 0.66f,
-                    systemJunkAnalyzer to 0.72f, largeAnalyzer to 0.78f, apkAnalyzer to 0.82f,
-                    duplicateAnalyzer to 0.90f
+                    corpseAnalyzer to 0.48f, appCacheAnalyzer to 0.55f, mediaAnalyzer to 0.62f,
+                    screenshotAnalyzer to 0.68f, systemJunkAnalyzer to 0.74f, largeAnalyzer to 0.80f,
+                    apkAnalyzer to 0.84f, duplicateAnalyzer to 0.90f
                 )
                 val results = supervisorScope {
                     defs.map { (analyzer, weight) ->
@@ -162,11 +175,15 @@ class CleanerEngine @Inject constructor(
                 }
                 ensureActive()
                 val byId = results.mapNotNull { (_, r) -> r.getOrNull() }.associateBy { it.id }
-                // Installers + media review share one card.
-                val merged = mergeInstallMedia(byId["apk"], byId["media_clutter"])
                 val ordered = listOfNotNull(
-                    byId["corpse"], byId["dupes"], byId["large"], merged,
-                    byId["system_junk"], byId["app_cache"]
+                    byId["corpse"],
+                    byId["dupes"],
+                    byId["screenshots"],
+                    byId["large"],
+                    byId["apk"],
+                    byId["media_clutter"],
+                    byId["system_junk"],
+                    byId["app_cache"]
                 )
                 // Phase 3: ownership dedup — one path, one card, honest totals.
                 var foundSize = 0L
@@ -267,8 +284,9 @@ class CleanerEngine @Inject constructor(
         is CleanItem.UnusedApp -> if (item.entry.isSelected) item.entry.sizeBytes else 0L
     }
 
-    /** Paths the system won't let us delete even with All-files access. */
+    /** Paths the system won't let us delete without root/Shizuku privilege. */
     private fun needsPrivilegedDelete(path: String): Boolean {
+        if (ShizukuHelper.isAuthorized()) return false
         val p = try { File(path).canonicalPath } catch (_: Exception) { path }
         return p.contains("/Android/obb/")
     }
@@ -357,6 +375,15 @@ class CleanerEngine @Inject constructor(
                         // No trash row: direct deletes are unrestorable by design;
                         // only moveToTrash() records restorable entries.
                         notifyMediaChanged(path)
+                    } else if (ShizukuHelper.isAuthorized()) {
+                        val safePath = path.replace("'", "'\\''")
+                        val res = shizukuExecutor.executeForResult("rm -rf '$safePath'", timeoutMs = 15_000)
+                        if (res.isSuccess && !file.exists()) {
+                            deletedCount++; clearedCount++; freed += size
+                            notifyMediaChanged(path)
+                        } else {
+                            failedItems.add(FailedItem(path, label, "Couldn't delete — it may be in use or protected"))
+                        }
                     } else {
                         failedItems.add(FailedItem(path, label, "Couldn't delete — it may be in use or protected"))
                         Log.w("CleanerEngine", "Failed delete $path")
@@ -380,7 +407,8 @@ class CleanerEngine @Inject constructor(
                 _scanState.value = ScanState.Cleaning(0.95f, "Trimming system caches…")
                 if (ShizukuHelper.isAuthorized()) {
                     try {
-                        val result = shizukuExecutor.executeForResult("pm trim-caches $TRIM_CACHES_TARGET_BYTES", timeoutMs = 90_000)
+                        val result = shizukuExecutor.executeForResult("pm trim-caches $TRIM_CACHES_TARGET_BYTES", timeoutMs = 30_000)
+                        shizukuExecutor.executeForResult("pm trim-caches $TRIM_CACHES_TARGET_BYTES default", timeoutMs = 30_000)
                         trimRan = true
                         Log.d("CleanerEngine", "trim-caches exit=${result.exitCode} out=${result.combinedOutput}")
                     } catch (_: Exception) {}
@@ -407,11 +435,25 @@ class CleanerEngine @Inject constructor(
                             else if (extCache.deleteRecursively()) { extCleared = true; extSize = sz }
                         }
                     } catch (_: Exception) {}
+                    if (ShizukuHelper.isAuthorized()) {
+                        try {
+                            val safePkg = pkg.replace("'", "")
+                            shizukuExecutor.executeForResult(
+                                "rm -rf '/storage/emulated/0/Android/data/$safePkg/cache' '/storage/emulated/0/Android/data/$safePkg/code_cache' '/storage/emulated/0/Android/media/$safePkg/cache'",
+                                timeoutMs = 10_000
+                            )
+                            extCleared = true
+                        } catch (_: Exception) {}
+                    }
+                    val duBefore = shizukuDuTotal(pkg)
                     appCacheRmCommand(pkg)?.let { cmd ->
                         try { shizukuExecutor.executeForResult(cmd, timeoutMs = 15_000) } catch (_: Exception) {}
                     }
-                    val after = queryCacheBytes(pkg)
-                    val delta = if (after != null) (before - after).coerceAtLeast(0L) else 0L
+                    val duAfter = shizukuDuTotal(pkg)
+                    val shizFreed: Long? = if (duBefore != null && duBefore > 0) (duBefore - (duAfter ?: 0L)).coerceAtLeast(0L) else null
+                    val shizDelta = if (shizFreed != null && shizFreed > 0) shizFreed else null
+                    val statsDelta = settledStatsDelta(pkg, before, trimRan)
+                    val delta = maxOf(shizDelta ?: 0L, statsDelta)
                     when (decideAppCacheOutcome(extExisted, extCleared, extSize, before, delta)) {
                         AppCacheOutcome.CLEARED -> {
                             val freedApp = maxOf(if (extCleared) extSize else 0L, delta)
@@ -476,6 +518,34 @@ class CleanerEngine @Inject constructor(
         } catch (_: Exception) {}
     }
 
+    /** S1.1.2: shell-side immediate measure of an app's internal caches; null when unavailable. */
+    private suspend fun shizukuDuTotal(pkg: String): Long? {
+        if (!pkg.matches(Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$"))) return null
+        if (!ShizukuHelper.isAuthorized()) return null
+        return try {
+            val res = shizukuExecutor.executeForResult(
+                "du -sbc '/data/data/$pkg/cache' '/data/data/$pkg/code_cache' 2>/dev/null",
+                timeoutMs = 12_000
+            )
+            parseDuTotal(res.stdout)
+        } catch (_: Exception) { null }
+    }
+
+    /** S1.1.2: settled StorageStatsManager delta — re-read up to 3x ~3s apart on stale zero-drop. */
+    private suspend fun settledStatsDelta(pkg: String, before: Long, trimRan: Boolean): Long {
+        val first = queryCacheBytes(pkg)
+        var statsDelta = if (first != null) (before - first).coerceAtLeast(0L) else 0L
+        if (before > 0 && statsDelta <= 0 && trimRan) {
+            repeat(3) {
+                try { delay(3000) } catch (_: Exception) { return statsDelta }
+                val cur = try { queryCacheBytes(pkg) } catch (_: Exception) { null } ?: return@repeat
+                statsDelta = (before - cur).coerceAtLeast(0L)
+                if (statsDelta > 0) return statsDelta
+            }
+        }
+        return statsDelta
+    }
+
     /** Re-read an app's cache size after clearing; null when stats are unavailable. */
     private fun queryCacheBytes(pkg: String): Long? = try {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return null
@@ -525,6 +595,51 @@ class CleanerEngine @Inject constructor(
         val updated = state.categories.map { cat ->
             val newItems = applySelection(cat.items, selected)
             cat.copy(items = newItems, selectedSize = calcSelected(newItems))
+        }
+        updateState(state, updated)
+    }
+
+    /** Selects 100% safe items (Caches, System junk, Corpses, Duplicates copies, Redundant APKs) and deselects risky/manual-review items. */
+    fun selectSafeOnly() {
+        val state = _scanState.value as? ScanState.Results ?: return
+        val updated = state.categories.map { cat ->
+            val newItems = cat.items.map { item ->
+                when (item) {
+                    is CleanItem.Corpse -> CleanItem.Corpse(item.entry.copy(isSelected = true))
+                    is CleanItem.AppCache -> CleanItem.AppCache(item.entry.copy(isSelected = true))
+                    is CleanItem.EmptyDir -> CleanItem.EmptyDir(item.entry.copy(isSelected = true))
+                    is CleanItem.GenericFile -> {
+                        val isSafeJunk = cat.id == "system_junk"
+                        CleanItem.GenericFile(item.file.copy(isSelected = isSafeJunk))
+                    }
+                    is CleanItem.Duplicate -> {
+                        val files = item.group.files.mapIndexed { idx, f -> f.copy(isSelected = idx > 0) }
+                        CleanItem.Duplicate(item.group.copy(files = files))
+                    }
+                    is CleanItem.ApkFile -> {
+                        CleanItem.ApkFile(item.entry.copy(isSelected = item.entry.isRedundant))
+                    }
+                    is CleanItem.MediaFile -> CleanItem.MediaFile(item.entry.copy(isSelected = false))
+                    is CleanItem.UnusedApp -> CleanItem.UnusedApp(item.entry.copy(isSelected = false))
+                }
+            }
+            cat.copy(items = newItems, selectedSize = calcSelected(newItems))
+        }
+        updateState(state, updated)
+    }
+
+    /** Removes cleared app caches from the scan results and recalculates reclaimed storage. */
+    fun removeClearedAppCaches(clearedLabelsOrPkgs: List<String>) {
+        val state = _scanState.value as? ScanState.Results ?: return
+        val set = clearedLabelsOrPkgs.toSet()
+        val updated = state.categories.map { cat ->
+            if (cat.id != "app_cache") return@map cat
+            val remaining = cat.items.filterNot { item ->
+                item is CleanItem.AppCache && (item.entry.packageName in set || item.entry.appName in set)
+            }
+            val total = remaining.sumOf { itemSize(it) }
+            val sel = remaining.sumOf { itemSelectedSize(it) }
+            cat.copy(items = remaining, totalSize = total, selectedSize = sel)
         }
         updateState(state, updated)
     }
@@ -581,6 +696,76 @@ class CleanerEngine @Inject constructor(
                 }
                 cat.copy(items = newItems, selectedSize = calcSelected(newItems))
             } else cat
+        }
+        updateState(state, updated)
+    }
+
+    /** Reorders duplicates so the given path becomes the kept original (at index 0), keeping it unselected. */
+    fun setDuplicateKeeper(categoryId: String, groupHash: String, keeperPath: String) {
+        val state = _scanState.value as? ScanState.Results ?: return
+        val updated = state.categories.map { cat ->
+            if (cat.id == categoryId) {
+                val newItems = cat.items.map { item ->
+                    if (item is CleanItem.Duplicate && item.group.hash == groupHash) {
+                        val target = item.group.files.find { it.path == keeperPath } ?: return@map item
+                        val others = item.group.files.filter { it.path != keeperPath }
+                        val reordered = listOf(target.copy(isSelected = false)) + others.map { it.copy(isSelected = true) }
+                        CleanItem.Duplicate(item.group.copy(files = reordered))
+                    } else item
+                }
+                cat.copy(items = newItems, selectedSize = calcSelected(newItems))
+            } else cat
+        }
+        updateState(state, updated)
+    }
+
+    /** Batch sets the keeper for all duplicate groups to either newest or oldest. */
+    fun setAllDuplicateKeepers(categoryId: String = "dupes", newest: Boolean) {
+        val state = _scanState.value as? ScanState.Results ?: return
+        val updated = state.categories.map { cat ->
+            if (cat.id == categoryId) {
+                val newItems = cat.items.map { item ->
+                    if (item is CleanItem.Duplicate) {
+                        val sorted = if (newest) {
+                            item.group.files.sortedByDescending { it.lastModified }
+                        } else {
+                            item.group.files.sortedBy { it.lastModified }
+                        }
+                        val keeper = sorted.firstOrNull() ?: return@map item
+                        val others = sorted.drop(1)
+                        val reordered = listOf(keeper.copy(isSelected = false)) + others.map { it.copy(isSelected = true) }
+                        CleanItem.Duplicate(item.group.copy(files = reordered))
+                    } else item
+                }
+                cat.copy(items = newItems, selectedSize = calcSelected(newItems))
+            } else cat
+        }
+        updateState(state, updated)
+    }
+
+    /** Batch select or deselect specific items within a category (e.g. filtered items). */
+    fun setItemsSelected(categoryId: String, itemStableIds: Set<String>, selected: Boolean) {
+        val state = _scanState.value as? ScanState.Results ?: return
+        val updated = state.categories.map { cat ->
+            if (cat.id != categoryId) return@map cat
+            val newItems = cat.items.map { item ->
+                if (item.stableId() in itemStableIds) {
+                    when (item) {
+                        is CleanItem.Corpse -> CleanItem.Corpse(item.entry.copy(isSelected = selected))
+                        is CleanItem.GenericFile -> CleanItem.GenericFile(item.file.copy(isSelected = selected))
+                        is CleanItem.EmptyDir -> CleanItem.EmptyDir(item.entry.copy(isSelected = selected))
+                        is CleanItem.MediaFile -> CleanItem.MediaFile(item.entry.copy(isSelected = selected))
+                        is CleanItem.ApkFile -> CleanItem.ApkFile(item.entry.copy(isSelected = selected))
+                        is CleanItem.AppCache -> CleanItem.AppCache(item.entry.copy(isSelected = selected))
+                        is CleanItem.UnusedApp -> CleanItem.UnusedApp(item.entry.copy(isSelected = selected))
+                        is CleanItem.Duplicate -> {
+                            val files = item.group.files.mapIndexed { idx, f -> f.copy(isSelected = if (selected) idx > 0 else false) }
+                            CleanItem.Duplicate(item.group.copy(files = files))
+                        }
+                    }
+                } else item
+            }
+            cat.copy(items = newItems, selectedSize = calcSelected(newItems))
         }
         updateState(state, updated)
     }

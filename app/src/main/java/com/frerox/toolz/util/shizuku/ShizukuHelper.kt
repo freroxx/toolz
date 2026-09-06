@@ -17,11 +17,29 @@
 
 package com.frerox.toolz.util.shizuku
 
+import android.content.Context
 import android.content.pm.PackageManager
 import rikka.shizuku.Shizuku
 
 object ShizukuHelper {
     fun isAvailable(): Boolean {
+        return try {
+            Shizuku.pingBinder()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun isInstalled(context: Context): Boolean {
+        return try {
+            context.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun isRunning(): Boolean {
         return try {
             Shizuku.pingBinder()
         } catch (e: Exception) {
@@ -41,5 +59,22 @@ object ShizukuHelper {
         if (isAvailable()) {
             Shizuku.requestPermission(requestCode)
         }
+    }
+
+    fun requestAuthorization(onResult: (Boolean) -> Unit) {
+        if (!isRunning() || isAuthorized()) {
+            onResult(false)
+            return
+        }
+        val listener = object : Shizuku.OnRequestPermissionResultListener {
+            override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+                if (requestCode == 4646) {
+                    Shizuku.removeRequestPermissionResultListener(this)
+                    onResult(grantResult == PackageManager.PERMISSION_GRANTED)
+                }
+            }
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        Shizuku.requestPermission(4646)
     }
 }

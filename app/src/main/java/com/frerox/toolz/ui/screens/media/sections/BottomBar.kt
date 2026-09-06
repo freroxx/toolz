@@ -94,13 +94,19 @@ fun ScreenBottomBar(
 ) {
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
 
-    Column(modifier = Modifier.navigationBarsPadding().animateContentSize(animationSpec = tween(260, easing = FastOutSlowInEasing))) {
+    // NOTE: no animateContentSize here on purpose. The outer Column holds both
+    // the MiniPlayer (which grows when expanded to show lyrics) and the PillTabRow
+    // dock below it. Animating this container's size with a different spec than the
+    // inner lyrics expandVertically made the dock dip downwards first and then rise
+    // with the mini player. Without it, the dock stays pinned to the bottom and the
+    // mini player grows upwards — the inner AnimatedVisibility already animates.
+    Column(modifier = Modifier.navigationBarsPadding()) {
         // MiniPlayer
         AnimatedVisibility(
             visible = state.currentTrack != null || isResolving,
             enter = fadeIn(tween(300)) + slideInVertically(
                 animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow),
-                initialOffsetY = { -it }
+                initialOffsetY = { it }
             ),
             exit = fadeOut(tween(200)) + slideOutVertically(
                 animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow),
@@ -691,17 +697,21 @@ fun MiniPlayer(
                 }
 
                 // ── Expandable lyrics + progress section ──────────────────────
+                // Expands upwards: the dock below stays pinned, the compact row above
+                // is pushed up. expandFrom/shrinkTowards = Bottom keeps the bottom
+                // edge (adjacent to the dock) fixed. Top-anchored expansion did the
+                // opposite — it pushed the dock down first, then the whole bar rose.
                 AnimatedVisibility(
                     visible = isExpanded,
                     enter = if (performanceMode) fadeIn() + expandVertically() else
                         fadeIn(tween(280)) + expandVertically(
                             spring(dampingRatio = miniPlayerDamping, stiffness = miniPlayerStiffness),
-                            expandFrom = Alignment.Top
+                            expandFrom = Alignment.Bottom
                         ),
                     exit = if (performanceMode) fadeOut() + shrinkVertically() else
                         fadeOut(tween(200)) + shrinkVertically(
                             spring(dampingRatio = miniPlayerDamping, stiffness = miniPlayerStiffness),
-                            shrinkTowards = Alignment.Top
+                            shrinkTowards = Alignment.Bottom
                         )
                 ) {
                     Column(

@@ -78,8 +78,6 @@ import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -293,13 +291,12 @@ fun MusicPlayerScreen(
     }
     val currentTabLabel = tabs.getOrNull(currentTab)
 
-    // Auto-refresh library every time the user opens the tool, and periodically while active
+    // Instant cached render + throttled background delta sync. Live updates arrive
+    // via the repository's MediaStore ContentObserver (event-driven); no polling
+    // loop — the old 45s full-scan poll janked the UI mid-use, and the blocking
+    // scan-on-every-open caused the entry lag.
     LaunchedEffect(Unit) {
-        viewModel.refreshLibraryOnOpen()
-        while (isActive) {
-            delay(45_000)
-            viewModel.refreshLibrarySilent()
-        }
+        viewModel.onScreenOpened()
     }
 
     LaunchedEffect(state.currentTrack) {
@@ -389,7 +386,6 @@ fun MusicPlayerScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .fadingEdges(top = 20.dp, bottom = 24.dp)
-                .animateContentSize(animationSpec = tween(260, easing = FastOutSlowInEasing))
         ) {
             when {
                 // P1-09 fix: music only needs READ_MEDIA_AUDIO; MANAGE_ALL_FILES is optional

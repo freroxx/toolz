@@ -85,7 +85,17 @@ data class AppCacheEntry(val packageName: String, val appName: String, val sizeB
 data class EmptyDirEntry(val path: String, val name: String, val isSelected: Boolean = true)
 data class MediaEntry(val name: String, val path: String, val sizeBytes: Long, val lastModified: Long, val extension: String, val type: MediaType, val isSelected: Boolean = false, val thumbnailUri: String? = null)
 enum class MediaType { SCREENSHOT, DOWNLOAD, WHATSAPP, TELEGRAM, DCIM, OTHER }
-data class ApkEntry(val name: String, val path: String, val sizeBytes: Long, val lastModified: Long, val packageName: String? = null, val versionName: String? = null, val isSelected: Boolean = false)
+data class ApkEntry(
+    val name: String,
+    val path: String,
+    val sizeBytes: Long,
+    val lastModified: Long,
+    val packageName: String? = null,
+    val versionName: String? = null,
+    val isSelected: Boolean = false,
+    val installedVersionName: String? = null,
+    val isRedundant: Boolean = false
+)
 data class StorageInfo(val totalBytes: Long = 0L, val usedBytes: Long = 0L, val freeBytes: Long = 0L, val cleanableBytes: Long = 0L)
 
 /** Per-item fix action for failed clean operations. */

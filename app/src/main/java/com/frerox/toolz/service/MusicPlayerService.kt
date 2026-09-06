@@ -104,6 +104,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // updates stale. 2s keeps bar smooth and queue fresh with minimal
         // battery impact (Glance throttles per widgetId).
         private const val PROGRESS_CORRECTION_INTERVAL_MS = 2_000L
+
+        // Pocket-resume persistence: while playing we checkpoint the exact
+        // position every 5s (was 30s — up to 30s of drift if the process died).
+        // Pauses/seeks/task-removed/destroy also checkpoint immediately, so the
+        // last song resumes at the exact second even with the phone in a pocket.
+        private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
     }
 
     private var mediaSession: MediaSession? = null
@@ -242,7 +248,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     val state = intent.getIntExtra("state", -1)
                     if (state == 1) { // Plugged
                         if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
-                    } else if (state == 0) { // Unplugged
+                    } else if (state == 0) { // Unplugged — checkpoint exact second, then pause
+                        savePlaybackState()
                         if (player.isPlaying) player.pause()
                     }
                 }
@@ -251,6 +258,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 }
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                     // Audio becoming noisy usually handles this, but we can be safe
+                    savePlaybackState()
+                    if (player.isPlaying) player.pause()
+                }
+                AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
+                    // Wired/BT output lost (earphones unplugged, BT dropped):
+                    // persist the exact position first so pocket-resume is exact.
+                    savePlaybackState()
                     if (player.isPlaying) player.pause()
                 }
             }
@@ -304,6 +318,21 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             // widget's Up Next list doesn't go stale.
             updateWidget()
             savePlaybackState()
+        }
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            // Seeks (user scrub, skip, BT jump) must checkpoint immediately —
+            // otherwise a kill before the next 5s tick resumes from a stale second.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT ||
+                reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION ||
+                reason == Player.DISCONTINUITY_REASON_SKIP
+            ) {
+                savePlaybackState()
+            }
         }
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { updateWidget() }
         override fun onRepeatModeChanged(repeatMode: Int) { updateWidget() }
@@ -384,6 +413,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             addAction(Intent.ACTION_HEADSET_PLUG)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(headsetReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -415,6 +445,27 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     android.view.KeyEvent.KEYCODE_HEADSETHOOK,
                     android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                         handleMediaButtonClick()
+                        return true
+                    }
+                    // Pocket / lockscreen / BT-remote resume without opening Toolz:
+                    // single PLAY/PAUSE keys must also wake + restore the last song.
+                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                        resumeLastIfEmptyOrPlay()
+                        return true
+                    }
+                    android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        savePlaybackState()
+                        if (player.isPlaying) player.pause()
+                        return true
+                    }
+                    android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                        else player.seekToNext()
+                        return true
+                    }
+                    android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                        else player.seekToPrevious()
                         return true
                     }
                 }
@@ -469,6 +520,16 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 }
             }
             return setter
+        }
+    }
+
+    // Shared pocket-resume path: if the process was killed, the queue is empty —
+    // restore the last song at its exact saved second and play. Otherwise toggle.
+    private fun resumeLastIfEmptyOrPlay() {
+        if (player.mediaItemCount == 0) {
+            restorePlaybackState(autoPlay = true)
+        } else {
+            if (player.isPlaying) player.pause() else player.play()
         }
     }
 
@@ -706,7 +767,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         statePersistenceJob?.cancel()
         statePersistenceJob = serviceScope.launch {
             while (isActive) {
-                delay(30_000L) // Save state every 30s while playing
+                delay(POSITION_PERSIST_INTERVAL_MS) // Checkpoint exact second every 5s while playing
                 savePlaybackState()
             }
         }
@@ -907,12 +968,40 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Save state one last time
+        // Save state one last time — swiping the app away must not lose the second.
         savePlaybackState()
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
+        // Best-effort synchronous checkpoint: the async savePlaybackState() posts to
+        // serviceScope, which we cancel below — so capture the exact position first
+        // and persist it blocking (short timeout) before teardown.
+        runCatching {
+            val item = try { player.currentMediaItem } catch (_: Exception) { null }
+            if (item != null) {
+                val uri = item.mediaId
+                val pos = try { player.currentPosition } catch (_: Exception) { -1L }
+                if (pos >= 0) {
+                    val queueUris = mutableListOf<String>()
+                    runCatching {
+                        for (i in 0 until player.mediaItemCount) {
+                            queueUris.add(player.getMediaItemAt(i).mediaId)
+                        }
+                    }
+                    val queueJson = runCatching {
+                        moshi.adapter<List<String>>(
+                            Types.newParameterizedType(List::class.java, String::class.java)
+                        ).toJson(queueUris)
+                    }.getOrNull()
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(1_500L) {
+                            settingsRepository.setMusicLastPlayedState(uri, pos, queueJson)
+                        }
+                    }
+                }
+            }
+        }
         runCatching { unregisterReceiver(headsetReceiver) }
         unregisterShakeListener()
         abandonAudioFocus()

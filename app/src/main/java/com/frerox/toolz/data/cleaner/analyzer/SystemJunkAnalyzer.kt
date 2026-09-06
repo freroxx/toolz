@@ -25,15 +25,24 @@ class SystemJunkAnalyzer @Inject constructor(@ApplicationContext private val con
     override val categoryIcon = "DeleteSweep"
     override val description = "Logs, temp files, crash reports and stale caches — your files are never touched"
     override val isSafeToClean = true
-    private val packLogExt = setOf("log","logcat","stacktrace","dmp","hprof","crash")
-    private val packTempExt = setOf("tmp","temp","part","crdownload","chk","old","bak")
-    private val packCacheExt = setOf("cache","exo","fb_temp","thumbdata","thumb")
-    private val cacheDirNames = setOf("cache","code_cache",".cache","tmp",".tmp","temp",".temp","logs","log","crash_reports","crashlytics","bugly","leakcanary","fresco_cache","glide","image_cache","video_cache",".fabric","diagnostics","bugreport","bugreports")
+    private val packLogExt = setOf("log","logcat","stacktrace","dmp","hprof","crash","trace","out")
+    private val packTempExt = setOf("tmp","temp","part","partial","crdownload","chk","old","bak","downloading","swp")
+    private val packCacheExt = setOf("cache","exo","fb_temp","thumbdata","thumb","thumbnails")
+    private val packOsJunkNames = setOf("thumbs.db", "desktop.ini", ".ds_store", "ehthumbs.db")
+    private val cacheDirNames = setOf(
+        "cache","code_cache",".cache","tmp",".tmp","temp",".temp","logs","log",
+        "crash_reports","crashlytics","bugly","leakcanary","fresco_cache","glide",
+        "image_cache","video_cache",".fabric","diagnostics","bugreport","bugreports",
+        ".thumbnails",".glide_cache",".fresco_cache",".trash",".Shared","app_webview",
+        "org.chromium.android_webview","view_cache","disk_cache"
+    )
     private val userDirs = setOf("dcim","pictures","movies","music","documents","download","downloads","whatsapp","telegram")
 
     override suspend fun analyze(index: FileIndex, ctx: ScanCtx): CleanCategory {
         val entries = ArrayList<FileEntry>(512)
         var denied = 0
+        val now = System.currentTimeMillis()
+        val staleTempThreshold = now - 24 * 60 * 60 * 1000L // 24h old incomplete downloads/tmp
         // Orphan companion DBs need a sibling check against the index.
         val byParent = HashMap<String, MutableMap<String, Long>>(1024)
         // Thumbnail-orphan check needs live originals — built lazily, index-only.
@@ -50,6 +59,7 @@ class SystemJunkAnalyzer @Inject constructor(@ApplicationContext private val con
             if (!ctx.isActive()) break
             try {
                 val abs = f.path
+                val lowerName = f.name.lowercase()
                 if (f.name == ".nomedia" || f.name == ".gitkeep") continue
                 if (FileUtils.isExcluded(abs, ctx.exclusions)) continue
                 if (f.size !in 1..500_000_000L) continue
@@ -58,16 +68,36 @@ class SystemJunkAnalyzer @Inject constructor(@ApplicationContext private val con
                     if (thumbOrphan(f)) entries.add(f.toEntry(true))
                     continue
                 }
+                // OS garbage files synced from PC or USB
+                if (lowerName in packOsJunkNames) {
+                    entries.add(f.toEntry(true))
+                    continue
+                }
+                // Lingering Android MediaStore trashed files
+                if (lowerName.startsWith(".trashed-") || lowerName.startsWith(".trash-")) {
+                    entries.add(f.toEntry(true))
+                    continue
+                }
+                // Temporary APK download fragments
+                if (lowerName.endsWith(".apk.tmp") || lowerName.endsWith(".tmp.apk")) {
+                    entries.add(f.toEntry(true))
+                    continue
+                }
                 val hit = when {
-                    f.ext in packLogExt -> inCacheDir(abs) || abs.lowercase().contains("crash")
-                    f.ext in packTempExt -> true
+                    f.ext in packLogExt -> inCacheDir(abs) || abs.lowercase().contains("crash") || abs.lowercase().contains("leakcanary")
+                    f.ext in packTempExt -> {
+                        // Incomplete downloads older than 24h or temp files in cache/work directories
+                        if (f.ext == "crdownload" || f.ext == "part" || f.ext == "partial") {
+                            f.lastModified < staleTempThreshold
+                        } else true
+                    }
                     f.ext in packCacheExt -> inCacheDir(abs)
                     f.ext in setOf("db-journal","tombstone") -> inCacheDir(abs)
                     isOrphanDbCompanion(f, byParent, index) -> true
                     else -> false
                 }
                 if (!hit) continue
-                if (inUserDir(abs) && f.ext !in packLogExt && !inCacheDir(abs)) continue
+                if (inUserDir(abs) && f.ext !in packLogExt && !inCacheDir(abs) && f.ext != "crdownload" && f.ext != "part" && f.ext != "tmp") continue
                 entries.add(f.toEntry(true))
             } catch (e: Exception) { Log.w("SystemJunk", "skip ${f.path}", e); denied++ }
             if (entries.size >= 800) break

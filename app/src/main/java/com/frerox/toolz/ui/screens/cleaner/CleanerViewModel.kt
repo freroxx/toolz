@@ -26,6 +26,7 @@ import com.frerox.toolz.data.cleaner.CleanCategory
 import com.frerox.toolz.data.cleaner.ScanState
 import com.frerox.toolz.data.cleaner.StorageInfo
 import com.frerox.toolz.data.cleaner.engine.CleanerEngine
+import com.frerox.toolz.data.cleaner.trash.CleanerTrashEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,10 +67,17 @@ class CleanerViewModel @Inject constructor(
     private val _isCleaning = MutableStateFlow(false)
     val isCleaning: StateFlow<Boolean> = _isCleaning.asStateFlow()
 
+    private val _trashEntries = MutableStateFlow<List<CleanerTrashEntity>>(emptyList())
+    val trashEntries: StateFlow<List<CleanerTrashEntity>> = _trashEntries.asStateFlow()
+
+    private val _trashTotalBytes = MutableStateFlow(0L)
+    val trashTotalBytes: StateFlow<Long> = _trashTotalBytes.asStateFlow()
+
     init {
         checkPermission()
         engine.refreshShizuku()
         engine.refreshStorageInfo()
+        loadTrash()
         viewModelScope.launch {
             scanState.collect { state ->
                 if (state is ScanState.Results) {
@@ -78,6 +86,13 @@ class CleanerViewModel @Inject constructor(
                     }
                 } else if (state !is ScanState.Results) {
                     _gridCategory.value = null
+                }
+            }
+        }
+        viewModelScope.launch {
+            com.frerox.toolz.service.CleanerAccessibilityService.autoState.collect { s ->
+                if (s.done && s.cleared.isNotEmpty()) {
+                    engine.removeClearedAppCaches(s.cleared)
                 }
             }
         }
@@ -122,9 +137,15 @@ class CleanerViewModel @Inject constructor(
 
     fun toggleDuplicateFile(categoryId: String, groupHash: String, path: String) { engine.toggleDuplicateFile(categoryId, groupHash, path) }
 
+    fun setDuplicateKeeper(categoryId: String, groupHash: String, keeperPath: String) { engine.setDuplicateKeeper(categoryId, groupHash, keeperPath) }
+
+    fun setItemsSelected(categoryId: String, itemStableIds: Set<String>, selected: Boolean) { engine.setItemsSelected(categoryId, itemStableIds, selected) }
+
     fun setCategorySelected(categoryId: String, selected: Boolean) { engine.setCategorySelected(categoryId, selected) }
 
     fun setAllSelected(selected: Boolean) { engine.setAllSelected(selected) }
+    fun selectSafeOnly() { engine.selectSafeOnly() }
+    fun setAllDuplicateKeepers(newest: Boolean) { engine.setAllDuplicateKeepers("dupes", newest) }
 
     fun isCategorySelected(cat: CleanCategory): Boolean = engine.isCategoryFullySelected(cat)
 
@@ -136,7 +157,10 @@ class CleanerViewModel @Inject constructor(
         if (_isCleaning.value) return
         _isCleaning.value = true
         viewModelScope.launch {
-            try { engine.deleteSelected() } finally { _isCleaning.value = false }
+            try {
+                engine.deleteSelected()
+                loadTrash()
+            } finally { _isCleaning.value = false }
         }
     }
 
@@ -144,6 +168,74 @@ class CleanerViewModel @Inject constructor(
         viewModelScope.launch {
             val n = try { engine.undoLastClean() } catch (_: Exception) { 0 }
             _undoEvent.value = "Restored $n item(s)"
+            loadTrash()
+            engine.refreshStorageInfo()
+        }
+    }
+
+    fun loadTrash() {
+        viewModelScope.launch {
+            _trashEntries.value = engine.trash.getTrashEntries()
+            _trashTotalBytes.value = engine.trash.getTrashTotalBytes()
+        }
+    }
+
+    fun restoreTrashItem(id: Long) {
+        viewModelScope.launch {
+            val ok = engine.trash.restoreItem(id)
+            if (ok) {
+                _undoEvent.value = "Restored 1 item"
+                loadTrash()
+                engine.refreshStorageInfo()
+            }
+        }
+    }
+
+    fun restoreAllTrash() {
+        viewModelScope.launch {
+            val count = engine.trash.restoreAll()
+            _undoEvent.value = "Restored $count item(s)"
+            loadTrash()
+            engine.refreshStorageInfo()
+        }
+    }
+
+    fun restoreSelectedTrash(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val count = engine.trash.restoreItems(ids)
+            _undoEvent.value = "Restored $count item(s)"
+            loadTrash()
+            engine.refreshStorageInfo()
+        }
+    }
+
+    fun deleteTrashItemPermanently(id: Long) {
+        viewModelScope.launch {
+            val ok = engine.trash.deletePermanently(id)
+            if (ok) {
+                _undoEvent.value = "Permanently deleted"
+                loadTrash()
+                engine.refreshStorageInfo()
+            }
+        }
+    }
+
+    fun deleteSelectedTrashPermanently(ids: Set<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val count = engine.trash.deletePermanently(ids)
+            _undoEvent.value = "Permanently deleted $count item(s)"
+            loadTrash()
+            engine.refreshStorageInfo()
+        }
+    }
+
+    fun emptyTrash() {
+        viewModelScope.launch {
+            val count = engine.trash.emptyTrash()
+            _undoEvent.value = "Emptied trash ($count items)"
+            loadTrash()
             engine.refreshStorageInfo()
         }
     }
@@ -205,6 +297,18 @@ class CleanerViewModel @Inject constructor(
 
     fun startAutoClear(pkgs: List<String>): Boolean =
         startAutoClearApps(pkgs.map { it to it })
+
+    private var pendingAutoClearQueue: List<Pair<String, String>>? = null
+
+    fun setPendingAutoClear(apps: List<Pair<String, String>>) {
+        pendingAutoClearQueue = apps
+    }
+
+    fun pollPendingAutoClear(): List<Pair<String, String>>? {
+        val q = pendingAutoClearQueue
+        pendingAutoClearQueue = null
+        return q
+    }
 
     fun stopAutoClear() {
         try { com.frerox.toolz.service.CleanerAccessibilityService.instance?.stopAutoClear() } catch (_: Exception) {}

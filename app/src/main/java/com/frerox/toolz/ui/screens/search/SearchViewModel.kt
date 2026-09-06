@@ -873,17 +873,21 @@ class SearchViewModel @Inject constructor(
                     val values = android.content.ContentValues().apply {
                         put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
                         put(android.provider.MediaStore.Images.Media.MIME_TYPE, mime)
-                        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
-                            android.os.Environment.DIRECTORY_PICTURES + "/Toolz")
-                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                                android.os.Environment.DIRECTORY_PICTURES + "/Toolz")
+                            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                        }
                     }
                     val resolver = context.contentResolver
                     val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                         ?: error("MediaStore insert failed")
                     resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("Stream open failed")
-                    values.clear()
-                    values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
-                    resolver.update(uri, values, null, null)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        values.clear()
+                        values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(uri, values, null, null)
+                    }
                 }
             }
             // Progress 60% while saving

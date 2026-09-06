@@ -454,7 +454,10 @@ class MusicPlayerViewModel @Inject constructor(
                 MusicData(tracks, playlists, favorites, recent, most)
             }
 
-            combinedFlow.combine(
+            // Debounce before the heavy sort/group/folder work so a scan burst
+            // (one DB emission per inserted track) coalesces into a single UI
+            // recompute instead of N full re-sorts while the user is on screen.
+            combinedFlow.debounce(250).combine(
                 combine(
                     _uiState.map { it.sortOrder }.distinctUntilChanged(),
                     _uiState.map { it.isOnline }.distinctUntilChanged(),
@@ -631,25 +634,46 @@ class MusicPlayerViewModel @Inject constructor(
     fun onSliderChange(position: Long) = playbackTransport.onSliderChange(position)
     fun onSliderChangeFinished() = playbackTransport.onSliderChangeFinished()
 
-    fun refreshLibraryOnOpen() {
-        if (repository.hasAudioPermission()) {
-            scanMusic()
+    // Throttled silent entry sync — the lag-free replacement for the old
+    // "full scan + thumbnail pass on every open". Cached Room Flows render
+    // instantly; this only tops up the delta in the background (no isLoading
+    // spinner, no fixAllThumbnails pass, concurrency-guarded, max once/10min).
+    // True live-refresh comes from startLiveObserver's MediaStore ContentObserver
+    // (event-driven, 1200ms debounced), not from polling.
+    private var lastAutoScanMs = 0L
+    private var autoScanJob: Job? = null
+
+    fun onScreenOpened() {
+        if (!repository.hasAudioPermission()) return
+        val now = System.currentTimeMillis()
+        if (lastAutoScanMs != 0L && now - lastAutoScanMs < 10 * 60 * 1000L) return
+        if (autoScanJob?.isActive == true) return
+        lastAutoScanMs = now
+        autoScanJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.scanDeviceForMusic() }
         }
     }
+
+    @Deprecated("Use onScreenOpened() — throttled, no spinner.", ReplaceWith("onScreenOpened()"))
+    fun refreshLibraryOnOpen() = onScreenOpened()
 
     fun refreshLibrarySilent() {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (repository.hasAudioPermission()) {
-                repository.scanDeviceForMusic()
-            }
+        if (!repository.hasAudioPermission()) return
+        if (autoScanJob?.isActive == true) return
+        autoScanJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.scanDeviceForMusic() }
         }
     }
 
+    // Manual pull-to-refresh keeps the full pass (scan + thumbnails + spinner).
+    // Cancels any background delta scan first so the two never contend on IO/DB.
     fun scanMusic() {
+        autoScanJob?.cancel()
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            repository.scanDeviceForMusic()
-            repository.fixAllThumbnails()
+            runCatching { repository.scanDeviceForMusic() }
+            runCatching { repository.fixAllThumbnails() }
+            lastAutoScanMs = System.currentTimeMillis()
             _uiState.update { it.copy(isLoading = false) }
             hapticSuccess()
         }

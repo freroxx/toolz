@@ -569,8 +569,8 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
-                // offset below the top chrome — estimate 120dp for status+pill+security
-                .padding(top = 120.dp)
+                .statusBarsPadding()
+                .padding(top = 74.dp)
                 .padding(horizontal = 12.dp),
         ) {
             Surface(

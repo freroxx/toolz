@@ -72,7 +72,7 @@ class AppCacheAnalyzer @Inject constructor(
         var scanned=0; var denied=0
         for (app in installed) {
             if (!isActive()) break
-            if (app.packageName==context.packageName) continue
+            if (!isManageableUserApp(app, pm, context.packageName)) continue
             if (exclusions.contains(app.packageName)) continue
             scanned++; if (scanned%25==0) progress("App cache — $scanned/${installed.size}")
             try {
@@ -109,17 +109,36 @@ class AppCacheAnalyzer @Inject constructor(
         for (d in dirs) {
             if (!isActive()) break
             if (exclusions.contains(d.name)) continue
+            val appInfo = try { pm.getApplicationInfo(d.name, 0) } catch (_: Exception) { null }
+            if (appInfo == null || !isManageableUserApp(appInfo, pm, context.packageName)) continue
             val cache = File(d, "cache")
             if (!cache.exists()) continue
             var sz = 0L
             try { sz = com.frerox.toolz.data.cleaner.util.FileUtils.calculateDirSize(cache) } catch (_: Exception) {}
             if (sz > 2*1024*1024L) {
-                val label = try { pm.getApplicationLabel(pm.getApplicationInfo(d.name, 0)).toString() } catch (_: Exception) { d.name }
+                val label = try { pm.getApplicationLabel(appInfo).toString() } catch (_: Exception) { d.name }
                 out.add(AppCacheEntry(d.name, label, sz, sz, null, isSelected=true))
             }
             if (++n % 40 == 0) progress("App cache (external) — $n")
             if (out.size >= 60) break
         }
         return out.sortedByDescending { it.cacheBytes }
+    }
+
+    companion object {
+        fun isManageableUserApp(app: ApplicationInfo, pm: PackageManager, myPackageName: String): Boolean {
+            if (app.packageName == myPackageName) return false
+            if (!app.enabled) return false
+            if (app.packageName == "android" ||
+                app.packageName.startsWith("com.android.overlay") ||
+                app.packageName.startsWith("android.auto_generated_rro_") ||
+                app.packageName.startsWith("com.android.providers.settings") ||
+                app.packageName.startsWith("com.android.keychain")
+            ) return false
+            val isUserApp = (app.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+            val isUpdatedSystem = (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+            val hasLaunchIntent = try { pm.getLaunchIntentForPackage(app.packageName) != null } catch (_: Exception) { false }
+            return isUserApp || isUpdatedSystem || hasLaunchIntent
+        }
     }
 }

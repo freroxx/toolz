@@ -110,7 +110,7 @@ class SearchHttpClient @Inject constructor(
     private suspend fun attemptFetch(url: String, timeoutMs: Long, formFields: Map<String, String>? = null): FetchResult {
         val client = dohClientFactory.getClient()
         val formBody = formFields?.takeIf { it.isNotEmpty() }?.let { fields ->
-            okhttp3.FormBody.Builder().apply { fields.forEach { (k, v) -> add(k, v) } }.build()
+            okhttp3.FormBody.Builder().apply { fields.forEach { (k, v) -> addEncoded(k, v) } }.build()
         }
         val request = buildRequest(url, formBody)
         val response = try {

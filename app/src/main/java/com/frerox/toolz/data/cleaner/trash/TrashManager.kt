@@ -73,7 +73,11 @@ class TrashManager @Inject constructor(
                     val src = File(tp); if (!src.exists()) { trashDao.deleteById(e.id); continue }
                     val dest = File(e.originalPath)
                     try { dest.parentFile?.mkdirs() } catch (_: Exception) {}
-                    if (tryRestore(src, dest)) { trashDao.deleteById(e.id); restored++ }
+                    if (tryRestore(src, dest)) {
+                        trashDao.deleteById(e.id)
+                        notifyMediaScan(dest.absolutePath)
+                        restored++
+                    }
                 } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
@@ -118,5 +122,76 @@ class TrashManager @Inject constructor(
             }
         } catch (_: Exception) {}
         purged
+    }
+
+    suspend fun getTrashEntries(): List<CleanerTrashEntity> = withContext(Dispatchers.IO) {
+        try { trashDao.getAll() } catch (_: Exception) { emptyList() }
+    }
+
+    suspend fun getTrashTotalBytes(): Long = withContext(Dispatchers.IO) {
+        try {
+            trashDao.getAll().sumOf { it.sizeBytes }
+        } catch (_: Exception) { 0L }
+    }
+
+    suspend fun restoreItem(id: Long): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val entry = trashDao.getAll().firstOrNull { it.id == id } ?: return@withContext false
+            val tp = entry.trashPath ?: run { trashDao.deleteById(id); return@withContext false }
+            val src = File(tp)
+            if (!src.exists()) { trashDao.deleteById(id); return@withContext false }
+            val dest = File(entry.originalPath)
+            dest.parentFile?.mkdirs()
+            if (tryRestore(src, dest)) {
+                trashDao.deleteById(id)
+                notifyMediaScan(dest.absolutePath)
+                true
+            } else false
+        } catch (_: Exception) { false }
+    }
+
+    private fun notifyMediaScan(path: String) {
+        try {
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+        } catch (_: Exception) {}
+    }
+
+    suspend fun deletePermanently(id: Long): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val entry = trashDao.getAll().firstOrNull { it.id == id } ?: return@withContext false
+            entry.trashPath?.let { File(it).deleteRecursively() }
+            trashDao.deleteById(id)
+            true
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun restoreItems(ids: Set<Long>): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (id in ids) {
+            if (restoreItem(id)) count++
+        }
+        count
+    }
+
+    suspend fun deletePermanently(ids: Set<Long>): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        for (id in ids) {
+            if (deletePermanently(id)) count++
+        }
+        count
+    }
+
+    suspend fun emptyTrash(): Int = withContext(Dispatchers.IO) {
+        var count = 0
+        try {
+            val all = trashDao.getAll()
+            count = all.size
+            for (e in all) {
+                try { e.trashPath?.let { File(it).deleteRecursively() } } catch (_: Exception) {}
+            }
+            trashDao.clearAll()
+            try { trashRoot().listFiles()?.forEach { it.deleteRecursively() } } catch (_: Exception) {}
+        } catch (_: Exception) {}
+        count
     }
 }
