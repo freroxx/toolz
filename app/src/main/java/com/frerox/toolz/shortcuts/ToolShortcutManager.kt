@@ -10,10 +10,10 @@ import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 
 /**
- * Manages Tool Shortcuts – 48 tools pinnable to home screen.
+ * Manages Tool Shortcuts – 49 tools pinnable to home screen.
  *
  * Static shortcuts (res/xml/shortcuts.xml) cover 4 most-used tools and appear on long-press of launcher.
- * This manager enables the remaining 44 (and all 48) as **pinned shortcuts** – uncapped by OS,
+ * This manager enables the remaining 45 (and all 49) as **pinned shortcuts** – uncapped by OS,
  * user explicitly pins via "Add to Home Screen" in the app. Each pinned shortcut deep-links directly
  * to the tool via MainActivity.EXTRA_NAVIGATE_TO + EXTRA_FROM_SHORTCUT (triggers exit confirmation).
  */

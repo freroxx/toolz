@@ -68,6 +68,12 @@ android {
         // and easy rotation without code change. If blank, InnerTube is disabled and NewPipe extractor is used.
         // See local.properties.example
         buildConfigField("String", "INNER_TUBE_API_KEY", "\"${localProperties.getProperty("INNER_TUBE_API_KEY", "")}\"")
+        // Media Downloader — toolz-downloadz-api (TikTok / Instagram / remote YouTube extraction).
+        // DOWNLOADZ_API_URL must be the deployed api base (no trailing slash).
+        // DOWNLOADZ_API_KEY must match API_SECRET_KEY of the api. If blank, TikTok/IG show setup hint
+        // and YouTube falls back to the on-device engine (InnerTube + NewPipe + yt-dlp).
+        buildConfigField("String", "DOWNLOADZ_API_URL", "\"${localProperties.getProperty("DOWNLOADZ_API_URL", "https://toolz-downloadz-api.vercel.app")}\"")
+        buildConfigField("String", "DOWNLOADZ_API_KEY", "\"${localProperties.getProperty("DOWNLOADZ_API_KEY", "")}\"")
     }
 
     splits {

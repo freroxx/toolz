@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Static app shortcuts – max 4 (OS caps at 5). These appear on long-press of launcher icon. -->
-    <!-- 48 total tools are provided via pinned shortcuts (ToolShortcutManager), user can pin any tool to home screen from inside the app. -->
+    <!-- 49 total tools are provided via pinned shortcuts (ToolShortcutManager), user can pin any tool to home screen from inside the app. -->
     <shortcut
         android:shortcutId="shortcut_ai_assistant"
         android:enabled="true"

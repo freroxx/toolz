@@ -489,6 +489,7 @@ class DashboardViewModel @Inject constructor(
             com.frerox.toolz.R.string.st_Dashboard_Cat_Media,
             listOf(
                 ToolItem(com.frerox.toolz.R.string.st_Tool_MusicPlayer, Icons.Rounded.MusicNote, Screen.MusicPlayer.createRoute(0), com.frerox.toolz.R.string.st_Tool_MusicPlayer_Desc, Color(0xFFD81B60)),
+                ToolItem(com.frerox.toolz.R.string.st_Tool_MediaDownloader, Icons.Rounded.Download, Screen.MediaDownloader.homeRoute, com.frerox.toolz.R.string.st_Tool_MediaDownloader_Desc, Color(0xFF00ACC1)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_VoiceRecorder, Icons.Rounded.Mic, Screen.VoiceRecorder.route, com.frerox.toolz.R.string.st_Tool_VoiceRecorder_Desc, Color(0xFFE53935)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_FileConverter, Icons.Rounded.Transform, Screen.FileConverter.createRoute(), com.frerox.toolz.R.string.st_Tool_FileConverter_Desc, Color(0xFFFB8C00)),
                 ToolItem(com.frerox.toolz.R.string.st_Tool_SoundMeter, Icons.Rounded.GraphicEq, Screen.SoundMeter.route, com.frerox.toolz.R.string.st_Tool_SoundMeter_Desc, Color(0xFF00B0FF)),

@@ -138,7 +138,7 @@ fun ToolShortcutsScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         ExpressiveStatePill(
-                            text = if (searchQuery.isBlank()) "All 48" else "Filtered",
+                            text = if (searchQuery.isBlank()) "All ${allShortcuts.size}" else "Filtered",
                             icon = Icons.Rounded.Search,
                             color = MaterialTheme.colorScheme.primary
                         )

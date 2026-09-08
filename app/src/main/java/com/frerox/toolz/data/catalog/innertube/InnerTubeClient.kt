@@ -161,6 +161,68 @@ class InnerTubeClient @Inject constructor(
     }
 
     suspend fun resolveVideoStream(videoId: String, maxHeight: Int = 720): String? = withContext(Dispatchers.IO) {
+        // Prefer an exact muxed match first (fast path, no merge needed).
+        resolveMuxedStream(videoId, maxHeight)
+    }
+
+    /**
+     * HD pair for on-device merge: best DASH video (mp4/h264 preferred) at or below
+     * [maxHeight] plus the best audio stream. Returns null when no adaptive pair exists
+     * (caller falls back to legacy muxed-only behaviour).
+     */
+    data class AdaptivePair(val videoUrl: String, val audioUrl: String, val height: Int)
+
+    suspend fun resolveAdaptivePair(videoId: String, maxHeight: Int = 720): AdaptivePair? =
+        withContext(Dispatchers.IO) {
+            if (!isConfigured()) return@withContext null
+            try {
+                val player = fetchPlayer(videoId, clientName = "ANDROID", clientVersion = "19.29.37") ?: return@withContext null
+                if (player.playabilityStatus?.status != "OK") return@withContext null
+                val adaptive = player.streamingData?.adaptiveFormats ?: return@withContext null
+
+                val video = adaptive
+                    .filter { it.url != null && (it.mimeType?.contains("video/") == true) && (it.height ?: 0) > 0 }
+                    .filter { (it.height ?: 0) <= maxHeight }
+                    // Prefer mp4/avc1 (plays everywhere, muxes cleanly), then any video, highest first.
+                    .sortedWith(
+                        compareByDescending<AdaptiveFormat> {
+                            when {
+                                it.mimeType?.contains("video/mp4") == true -> 2
+                                it.mimeType?.contains("avc1") == true -> 1
+                                else -> 0
+                            }
+                        }.thenByDescending { it.height ?: 0 }
+                         .thenByDescending { it.bitrate ?: 0L }
+                    )
+                    .firstOrNull() ?: return@withContext null
+
+                val audio = adaptive
+                    .filter { it.url != null && (it.mimeType?.contains("audio/") == true) }
+                    .maxByOrNull { it.bitrate ?: 0L } ?: return@withContext null
+
+                AdaptivePair(videoUrl = video.url!!, audioUrl = audio.url!!, height = video.height ?: 0)
+            } catch (e: Exception) {
+                android.util.Log.e("InnerTubeClient", "Adaptive pair resolution failed: ${e.message}")
+                null
+            }
+        }
+
+    /** All muxed heights available (for quality sheets), capped for display. */
+    suspend fun listMuxedHeights(videoId: String): List<Int> = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext emptyList()
+        try {
+            val player = fetchPlayer(videoId, clientName = "ANDROID", clientVersion = "19.29.37") ?: return@withContext emptyList()
+            (player.streamingData?.formats.orEmpty() + player.streamingData?.adaptiveFormats.orEmpty())
+                .filter { it.url != null && it.mimeType?.contains("video/") == true }
+                .mapNotNull { it.height?.takeIf { h -> h > 0 } }
+                .distinct().sorted()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun resolveMuxedStream(videoId: String, maxHeight: Int): String? =
+        withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext null
         val endpoint = "$baseUrl/player?key=$apiKey"
 
@@ -210,6 +272,46 @@ class InnerTubeClient @Inject constructor(
             matched?.url
         } catch (e: Exception) {
             android.util.Log.e("InnerTubeClient", "Video stream resolution failed: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun fetchPlayer(
+        videoId: String,
+        clientName: String,
+        clientVersion: String,
+    ): InnerTubePlayerResponse? = withContext(Dispatchers.IO) {
+        if (!isConfigured()) return@withContext null
+        val endpoint = "$baseUrl/player?key=$apiKey"
+        val requestBody = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    put("clientName", clientName)
+                    put("clientVersion", clientVersion)
+                    put("androidSdkVersion", 34)
+                    put("hl", "en")
+                    put("gl", "US")
+                }
+            }
+            put("videoId", videoId)
+            put("playbackContext", buildJsonObject {
+                putJsonObject("contentPlaybackContext") {
+                    put("signatureTimestamp", 20000)
+                }
+            })
+        }.toString().toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody)
+            .header("User-Agent", "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip")
+            .header("X-Goog-Api-Format-Version", "2")
+            .build()
+        try {
+            val response = okHttpClient.newCall(request).execute()
+            val body = response.body?.string() ?: return@withContext null
+            json.decodeFromString<InnerTubePlayerResponse>(body)
+        } catch (e: Exception) {
+            android.util.Log.w("InnerTubeClient", "fetchPlayer failed: ${e.message}")
             null
         }
     }

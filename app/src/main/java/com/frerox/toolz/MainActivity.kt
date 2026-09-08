@@ -1134,6 +1134,17 @@ fun ToolzNavHost(
             )
         }
         composable(
+            route = Screen.MediaDownloader.route,
+            arguments = listOf(navArgument("url") { type = NavType.StringType; nullable = true; defaultValue = null })
+        ) { backStackEntry ->
+            val rawUrl = backStackEntry.arguments?.getString("url")
+            val initialUrl = rawUrl?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            com.frerox.toolz.ui.screens.media.downloader.MediaDownloaderScreen(
+                onBack = { toolOnBack() },
+                initialUrl = initialUrl,
+            )
+        }
+        composable(
             route = Screen.FileConverter.route,
             arguments = listOf(
                 navArgument("uri") { type = NavType.StringType; nullable = true; defaultValue = null },
@@ -1507,7 +1518,14 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
     if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
         val sharedUrl = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(sharedText)?.value
-        if (sharedUrl != null) return Screen.Browser.createRoute(sharedUrl)
+        if (sharedUrl != null) {
+            val lower = sharedUrl.lowercase()
+            // Shared social-media links open directly in the Media Downloader tool.
+            if ("youtube.com" in lower || "youtu.be" in lower || "tiktok.com" in lower || "instagram.com" in lower) {
+                return Screen.MediaDownloader.createRoute(sharedUrl)
+            }
+            return Screen.Browser.createRoute(sharedUrl)
+        }
     }
 
     if (intent.getBooleanExtra(MainActivity.EXTRA_SHOW_UPDATE, false) ||

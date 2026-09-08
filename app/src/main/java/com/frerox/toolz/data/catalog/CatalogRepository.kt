@@ -263,6 +263,73 @@ class CatalogRepository @Inject constructor(
     }
 
     /**
+     * HD video+audio pair for on-device merge (true 1080p+ with audio).
+     * InnerTube adaptive first, then NewPipe videoOnly+audio fallback.
+     */
+    data class HdVideoPair(val videoUrl: String, val audioUrl: String, val height: Int)
+
+    suspend fun resolveHdVideoPair(sourceUrl: String, maxHeight: Int = 1080): HdVideoPair? =
+        withContext(Dispatchers.IO) {
+            val videoId = sourceUrl.substringAfter("v=", "")
+                .substringBefore("&")
+                .ifBlank { sourceUrl.substringAfterLast("/", "").substringBefore("?") }
+
+            // 1) InnerTube adaptive (fastest, no page scrape)
+            try {
+                val adaptive = innerTubeClient.resolveAdaptivePair(videoId, maxHeight)
+                if (adaptive != null) {
+                    android.util.Log.i("CatalogRepo", "HD pair via InnerTube ${adaptive.height}p for $videoId")
+                    return@withContext HdVideoPair(adaptive.videoUrl, adaptive.audioUrl, adaptive.height)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CatalogRepo", "InnerTube HD pair failed: ${e.message}")
+            }
+
+            // 2) NewPipe videoOnly + audio fallback
+            try {
+                val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
+                val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
+                val videoOnly = streamInfo.videoOnlyStreams?.filter {
+                    (it.resolution?.replace("p", "")?.toIntOrNull() ?: 0) <= maxHeight
+                }?.maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
+                val audio = streamInfo.audioStreams?.sortedByDescending { it.averageBitrate }?.firstOrNull()
+                if (videoOnly?.content != null && audio?.content != null) {
+                    val h = videoOnly.resolution?.replace("p", "")?.toIntOrNull() ?: 0
+                    android.util.Log.i("CatalogRepo", "HD pair via NewPipe ${h}p for $videoId")
+                    return@withContext HdVideoPair(videoOnly.content, audio.content, h)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CatalogRepo", "NewPipe HD pair failed: ${e.message}")
+            }
+            null
+        }
+
+    /**
+     * Available video heights for quality sheets (muxed + adaptive, distinct sorted).
+     * Used to show/hide 1080p/1440p/2160p rows without over-promising.
+     */
+    suspend fun availableVideoHeights(sourceUrl: String): List<Int> = withContext(Dispatchers.IO) {
+        val videoId = sourceUrl.substringAfter("v=", "")
+            .substringBefore("&")
+            .ifBlank { sourceUrl.substringAfterLast("/", "").substringBefore("?") }
+        val heights = mutableSetOf<Int>()
+        try {
+            heights += innerTubeClient.listMuxedHeights(videoId)
+        } catch (_: Exception) {}
+        if (heights.isEmpty()) {
+            try {
+                val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
+                val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
+                streamInfo.videoStreams?.mapNotNullTo(heights) { it.resolution?.replace("p", "")?.toIntOrNull() }
+                streamInfo.videoOnlyStreams?.mapNotNullTo(heights) { it.resolution?.replace("p", "")?.toIntOrNull() }
+            } catch (_: Exception) {}
+        }
+        // Always offer the classic ladder; HD rows get gated by callers via_hdAvailable_.
+        val classic = listOf(240, 360, 480, 720, 1080)
+        (heights + classic).distinct().sorted()
+    }
+
+    /**
      * Resolves a direct playable and downloadable video stream URL (MP4) for a YouTube video.
      * Uses InnerTube first, then falls back to NewPipeExtractor muxed/video streams.
      */

@@ -16,6 +16,7 @@ import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.data.catalog.CatalogRepository
 import com.frerox.toolz.util.NotificationHelper
+import com.frerox.toolz.util.YtVideoMerge
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -51,6 +52,10 @@ class VideoDownloadWorker @AssistedInject constructor(
         const val KEY_THUMBNAIL_URL = "thumbnail_url"
         const val KEY_QUALITY = "quality"
         const val KEY_PROGRESS = "progress"
+        /** Output Data keys on success — shared values across all download workers. */
+        const val KEY_FILE_URI = "file_uri"
+        const val KEY_DISPLAY_NAME = "display_name"
+        const val KEY_MIME_TYPE = "mime_type"
         const val CHANNEL_ID = NotificationHelper.CHANNEL_VIDEO_DOWNLOADS
         const val NOTIFICATION_ID_BASE = 2000
     }
@@ -79,6 +84,39 @@ class VideoDownloadWorker @AssistedInject constructor(
             }
 
             var downloaded: File? = null
+            val wantsHd = !isMp3 && maxHeight > 720
+
+            // HD path first for 1080p+ requests: muxed streams cap at 720p, so a direct
+            // resolve would silently return the wrong (lower) quality. Resolve the DASH
+            // video+audio pair and mux on-device for true HD with audio.
+            if (wantsHd) {
+                publishProgress(notificationId, "Preparing HD $safeTitle ($quality)...", 0.06f)
+                try {
+                    val pair = catalogRepository.resolveHdVideoPair(sourceUrl, maxHeight)
+                    if (pair != null) {
+                        val hdOut = File(applicationContext.cacheDir, "toolz_hd_${System.currentTimeMillis()}.mp4")
+                        publishProgress(notificationId, "Downloading HD $safeTitle (${pair.height}p)...", 0.08f)
+                        val muxed = YtVideoMerge.downloadAndMux(
+                            applicationContext, okHttpClient,
+                            pair.videoUrl, pair.audioUrl,
+                            File(applicationContext.cacheDir, "hd_merge"), hdOut,
+                        ) { progress ->
+                            val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
+                            val progressInt = (normalized * 100).toInt()
+                            notificationManager.notify(notificationId, createNotification(notificationId, "Downloading HD $safeTitle...", progressInt))
+                            progressChannel.trySend(normalized)
+                        }
+                        if (muxed && hdOut.exists() && hdOut.length() > 1024) {
+                            downloaded = hdOut
+                            android.util.Log.i("VideoDownloadWorker", "HD merge succeeded (${pair.height}p): ${hdOut.length()} bytes")
+                        } else {
+                            try { hdOut.delete() } catch (_: Exception) {}
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("VideoDownloadWorker", "HD merge path failed, falling back", e)
+                }
+            }
 
             // Primary: High-speed direct stream resolution via CatalogRepository
             val directStreamUrl = try {
@@ -110,6 +148,36 @@ class VideoDownloadWorker @AssistedInject constructor(
                 }
             }
 
+            // HD merge fallback for SD requests too: if the direct muxed resolve failed,
+            // a DASH pair at the same ceiling often still works (then muxed with audio).
+            if ((downloaded == null || downloaded.length() < 1024) && !isMp3 && !wantsHd) {
+                try {
+                    val pair = catalogRepository.resolveHdVideoPair(sourceUrl, maxHeight)
+                    if (pair != null) {
+                        val hdOut = File(applicationContext.cacheDir, "toolz_hd_${System.currentTimeMillis()}.mp4")
+                        publishProgress(notificationId, "Downloading $safeTitle (${pair.height}p)...", 0.08f)
+                        val muxed = YtVideoMerge.downloadAndMux(
+                            applicationContext, okHttpClient,
+                            pair.videoUrl, pair.audioUrl,
+                            File(applicationContext.cacheDir, "hd_merge"), hdOut,
+                        ) { progress ->
+                            val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
+                            val progressInt = (normalized * 100).toInt()
+                            notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
+                            progressChannel.trySend(normalized)
+                        }
+                        if (muxed && hdOut.exists() && hdOut.length() > 1024) {
+                            downloaded = hdOut
+                            android.util.Log.i("VideoDownloadWorker", "HD merge fallback succeeded (${pair.height}p)")
+                        } else {
+                            try { hdOut.delete() } catch (_: Exception) {}
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("VideoDownloadWorker", "HD merge fallback failed", e)
+                }
+            }
+
             // Secondary fallback: yt-dlp reflection if direct resolution was not available
             if (downloaded == null || downloaded.length() < 1024) {
                 android.util.Log.w("VideoDownloadWorker", "Attempting secondary fallback for $sourceUrl")
@@ -134,7 +202,9 @@ class VideoDownloadWorker @AssistedInject constructor(
                         addOption.invoke(request, "-f", "bestaudio[ext=m4a]/bestaudio")
                         addOption.invoke(request, "-o", outputTemplate)
                     } else {
-                        val format = "best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
+                        // Merged format: DASH video+audio when available (true HD with audio —
+                        // the bundled yt-dlp ffmpeg handles the merge), else best progressive.
+                        val format = "bestvideo[height<=$maxHeight][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=$maxHeight]+bestaudio/best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
                         addOption.invoke(request, "-f", format)
                         addOption.invoke(request, "-o", outputTemplate)
                         addFlag?.invoke(request, "--no-playlist")
@@ -170,18 +240,26 @@ class VideoDownloadWorker @AssistedInject constructor(
             }
 
             publishProgress(notificationId, "Saving file...", 0.92f)
-            val saved = if (isMp3) {
-                saveToMusic(downloaded, "$safeTitle.mp3", safeTitle)
+            val displayName = if (isMp3) "$safeTitle.mp3" else "$safeTitle.mp4"
+            val mime = if (isMp3) "audio/mpeg" else "video/mp4"
+            val savedUri = if (isMp3) {
+                saveToMusic(downloaded, displayName, safeTitle)
             } else {
-                saveToMovies(downloaded, "$safeTitle.mp4")
+                saveToMovies(downloaded, displayName)
             }
 
             try { downloaded.delete() } catch (_: Exception) {}
 
-            if (saved) {
+            if (savedUri != null) {
                 publishProgress(notificationId, "Download complete", 1.0f)
                 showCompletedNotification(notificationId, safeTitle, isMp3)
-                Result.success()
+                Result.success(
+                    workDataOf(
+                        KEY_FILE_URI to savedUri,
+                        KEY_DISPLAY_NAME to displayName,
+                        KEY_MIME_TYPE to mime,
+                    )
+                )
             } else {
                 showErrorNotification(notificationId, safeTitle, "Could not save file to gallery")
                 Result.failure()
@@ -201,7 +279,7 @@ class VideoDownloadWorker @AssistedInject constructor(
             val addOption = requestClass.methods.firstOrNull { it.name == "addOption" && it.parameterTypes.size == 2 } ?: return@withContext null
             val addFlag = requestClass.methods.firstOrNull { it.name == "addOption" && it.parameterTypes.size == 1 }
             try { addFlag?.invoke(request, "--no-playlist") } catch (_: Exception) {}
-            val fmt = if (isMp3) "bestaudio[ext=m4a]/bestaudio" else "best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
+            val fmt = if (isMp3) "bestaudio[ext=m4a]/bestaudio" else "bestvideo[height<=$maxHeight][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=$maxHeight]+bestaudio/best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
             addOption.invoke(request, "-f", fmt)
             try { addOption.invoke(request, "--print", "urls") } catch (_: Exception) {
                 try { addFlag?.invoke(request, "-g") ?: addOption.invoke(request, "-g", "") } catch (_: Exception) {}
@@ -249,7 +327,7 @@ class VideoDownloadWorker @AssistedInject constructor(
         }
     }
 
-    private fun saveToMovies(source: File, displayName: String): Boolean = try {
+    private fun saveToMovies(source: File, displayName: String): String? = try {
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -257,23 +335,23 @@ class VideoDownloadWorker @AssistedInject constructor(
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val resolver = applicationContext.contentResolver
-        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
         try {
-            resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } } ?: return false
+            resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } } ?: return null
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-            true
+            uri.toString()
         } catch (e: Exception) {
             try { resolver.delete(uri, null, null) } catch (_: Exception) {}
             throw e
         }
     } catch (e: Exception) {
         android.util.Log.e("VideoDownloadWorker", "MediaStore save failed", e)
-        false
+        null
     }
 
-    private fun saveToMusic(source: File, displayName: String, title: String): Boolean = try {
+    private fun saveToMusic(source: File, displayName: String, title: String): String? = try {
         val resolver = applicationContext.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -283,13 +361,13 @@ class VideoDownloadWorker @AssistedInject constructor(
                 put(MediaStore.Audio.Media.IS_MUSIC, 1)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
-            val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+            val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return null
             try {
-                resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } } ?: return false
+                resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } } ?: return null
                 values.clear()
                 values.put(MediaStore.Audio.Media.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
-                true
+                uri.toString()
             } catch (e: Exception) {
                 try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                 throw e
@@ -299,11 +377,11 @@ class VideoDownloadWorker @AssistedInject constructor(
             val finalFile = File(musicDir, displayName)
             source.copyTo(finalFile, overwrite = true)
             android.media.MediaScannerConnection.scanFile(applicationContext, arrayOf(finalFile.absolutePath), arrayOf("audio/mpeg"), null)
-            true
+            android.net.Uri.fromFile(finalFile).toString()
         }
     } catch (e: Exception) {
         android.util.Log.e("VideoDownloadWorker", "MediaStore mp3 save failed", e)
-        false
+        null
     }
 
     private fun createNotificationChannel() {

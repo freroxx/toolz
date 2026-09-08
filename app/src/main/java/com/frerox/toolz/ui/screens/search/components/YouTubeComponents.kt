@@ -321,6 +321,11 @@ fun YouTubeEmbedOverlay(
 /**
  * YouTube video download quality sheet — M3 expressive. Ranges 1080p (max) down
  * to 240p (min); the chosen quality routes into the yt-dlp video worker.
+ *
+ * HD rows (1080p+) merge DASH video+audio on-device via FFmpegKit for true HD
+ * with audio — muxed-only streams cap at 720p, which caused the old low-quality
+ * output. 1440p/2160p rows appear only when [hdAvailable] confirms the source
+ * offers them (see CatalogRepository.availableVideoHeights).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -328,15 +333,29 @@ fun YouTubeDownloadSheet(
     title: String,
     onDismiss: () -> Unit,
     onDownload: (String) -> Unit,
+    hdAvailable: Boolean = false,
+    availableHeights: List<Int> = emptyList(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val qualities = listOf(
-        "1080p" to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_fullhd),
-        "720p" to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_hd),
-        "480p" to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_sd),
-        "360p" to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_low),
-        "240p" to stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_saver),
-    )
+    val hdSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_hd)
+    val sdSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_sd)
+    val lowSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_low)
+    val saverSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_saver)
+    val mergedFullHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_fullhd_merged)
+    val quadHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_quadhd)
+    val ultraHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_ultrahd)
+    val qualities = buildList {
+        // Ultra HD rows only when the source actually offers them.
+        if (hdAvailable || 2160 in availableHeights) add("2160p" to ultraHd)
+        if (hdAvailable || 1440 in availableHeights) add("1440p" to quadHd)
+        // 1080p is always offered: the worker merges DASH video+audio on-device,
+        // falling back to 720p muxed only if no HD pair resolves.
+        add("1080p" to mergedFullHd)
+        add("720p" to hdSub)
+        add("480p" to sdSub)
+        add("360p" to lowSub)
+        add("240p" to saverSub)
+    }
     var isDownloading by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -468,7 +487,12 @@ fun YouTubeDownloadSheet(
                     )
                 }
             }
-            // Size disclaimer — file sizes depend on video duration and cannot be predicted
+            // HD + size disclaimers
+            Text(
+                text = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_yt_hd_note),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+            )
             Text(
                 text = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_yt_filesize_note),
                 style = MaterialTheme.typography.labelSmall,

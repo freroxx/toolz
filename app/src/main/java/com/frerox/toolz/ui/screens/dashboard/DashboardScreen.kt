@@ -3081,7 +3081,7 @@ fun ToolDetailSheet(
 
             Spacer(Modifier.height(14.dp))
 
-            // Add to Home Screen (Pinned Shortcut) – 48 tools
+            // Add to Home Screen (Pinned Shortcut) – 49 tools
             val context = LocalContext.current
             val shortcutDef = remember(tool.route) {
                 com.frerox.toolz.shortcuts.ToolShortcutDefinitions.findByRoute(tool.route)

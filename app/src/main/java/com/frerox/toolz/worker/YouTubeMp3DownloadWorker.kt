@@ -44,6 +44,10 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         const val KEY_TITLE = "title"
         const val KEY_THUMBNAIL_URL = "thumbnail_url"
         const val KEY_PROGRESS = "progress"
+        /** Output Data keys on success — shared values across all download workers. */
+        const val KEY_FILE_URI = "file_uri"
+        const val KEY_DISPLAY_NAME = "display_name"
+        const val KEY_MIME_TYPE = "mime_type"
         const val CHANNEL_ID = "music_downloads"
         const val NOTIFICATION_ID_BASE = 3000
     }
@@ -146,7 +150,13 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
 
             publishProgress(notificationId, "MP3 complete", 1f)
             showCompletedNotification(notificationId, title)
-            Result.success()
+            Result.success(
+                androidx.work.workDataOf(
+                    KEY_FILE_URI to storedUri,
+                    KEY_DISPLAY_NAME to "$safeTitle.mp3",
+                    KEY_MIME_TYPE to "audio/mpeg",
+                )
+            )
         } catch (e: Exception) {
             android.util.Log.e("YouTubeMp3DownloadWorker", "MP3 failed", e)
             try { showErrorNotification(notificationId, title, e.message ?: "Error") } catch (_: Exception) {}

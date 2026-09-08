@@ -16,5 +16,12 @@ SUPABASE_ANON_KEY=your-anon-key
 # or reuse the well-known public key: AIzaSyAOghZGza2MQSZkY_zfZ370N-PUdXEo8AI
 INNER_TUBE_API_KEY=
 
+# --- Media Downloader (toolz-downloadz-api) ---
+# Base URL of your deployed toolz-downloadz-api (no trailing slash).
+DOWNLOADZ_API_URL=https://toolz-downloadz-api.vercel.app
+# Must match API_SECRET_KEY from toolz-downloadz-api env. Required for TikTok/Instagram extraction.
+# If blank, the Media Downloader uses on-device YouTube engine only (TikTok/IG show a setup hint).
+DOWNLOADZ_API_KEY=
+
 # --- Optional: signing ---
 # See keystore.properties for release signing

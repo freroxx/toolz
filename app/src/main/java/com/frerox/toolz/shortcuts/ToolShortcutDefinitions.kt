@@ -7,7 +7,7 @@ import com.frerox.toolz.ui.navigation.Screen
 
 /**
  * Central definitions for Tool Shortcuts.
- * Derived from DashboardViewModel.getDashboardCategories() – 48 tools.
+ * Derived from DashboardViewModel.getDashboardCategories() – 49 tools.
  * This is the single source of truth for shortcuts (static + pinned).
  *
  * Each shortcut maps to a route understood by MainActivity.resolveExternalNavigationRoute
@@ -28,7 +28,7 @@ object ToolShortcutDefinitions {
     const val EXTRA_FROM_SHORTCUT = "from_shortcut"
     const val EXTRA_SHORTCUT_ID = "shortcut_id"
 
-    // All 48 tools in dashboard order (6+5+5+8+11+13)
+    // All 49 tools in dashboard order (6+5+6+8+11+13)
     val all: List<ToolShortcutDef> = listOf(
         // SmartFlow & AI (6)
         ToolShortcutDef(
@@ -131,7 +131,16 @@ object ToolShortcutDefinitions {
             route = Screen.WorldClock.route,
             rank = 11
         ),
-        // Media & Audio (5)
+        // Media & Audio (6)
+        ToolShortcutDef(
+            id = "shortcut_media_downloader",
+            labelRes = R.string.st_Tool_MediaDownloader,
+            shortLabelRes = R.string.st_Tool_MediaDownloader,
+            descriptionRes = R.string.st_Tool_MediaDownloader_Desc,
+            iconRes = R.drawable.ic_shortcut_media_downloader,
+            route = Screen.MediaDownloader.homeRoute,
+            rank = 12
+        ),
         ToolShortcutDef(
             id = "shortcut_music_player",
             labelRes = R.string.st_Tool_MusicPlayer,
@@ -139,7 +148,7 @@ object ToolShortcutDefinitions {
             descriptionRes = R.string.st_Tool_MusicPlayer_Desc,
             iconRes = R.drawable.ic_shortcut_music_player,
             route = Screen.MusicPlayer.createRoute(0),
-            rank = 12
+            rank = 13
         ),
         ToolShortcutDef(
             id = "shortcut_voice_recorder",
@@ -148,7 +157,7 @@ object ToolShortcutDefinitions {
             descriptionRes = R.string.st_Tool_VoiceRecorder_Desc,
             iconRes = R.drawable.ic_shortcut_voice_recorder,
             route = Screen.VoiceRecorder.route,
-            rank = 13
+            rank = 14
         ),
         ToolShortcutDef(
             id = "shortcut_file_converter",
@@ -157,7 +166,7 @@ object ToolShortcutDefinitions {
             descriptionRes = R.string.st_Tool_FileConverter_Desc,
             iconRes = R.drawable.ic_shortcut_file_converter,
             route = Screen.FileConverter.createRoute(),
-            rank = 14
+            rank = 15
         ),
         ToolShortcutDef(
             id = "shortcut_sound_meter",
@@ -166,7 +175,7 @@ object ToolShortcutDefinitions {
             descriptionRes = R.string.st_Tool_SoundMeter_Desc,
             iconRes = R.drawable.ic_shortcut_sound_meter,
             route = Screen.SoundMeter.route,
-            rank = 15
+            rank = 16
         ),
         ToolShortcutDef(
             id = "shortcut_background_remover",
@@ -175,7 +184,7 @@ object ToolShortcutDefinitions {
             descriptionRes = R.string.st_Tool_BackgroundRemover_Desc,
             iconRes = R.drawable.ic_shortcut_background_remover,
             route = Screen.BackgroundRemover.createRoute(),
-            rank = 16
+            rank = 17
         ),
         // Utilities & Math (8)
         ToolShortcutDef(
