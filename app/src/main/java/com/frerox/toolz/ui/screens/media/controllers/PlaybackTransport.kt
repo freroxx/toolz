@@ -181,22 +181,40 @@ class PlaybackTransport(
             } else {
                 tracks
             }
+            if (effectiveTracks.isEmpty()) {
+                android.util.Log.w("MusicPlayerVM", "executePlay: nothing to play")
+                return@launch
+            }
             val trackUris = effectiveTracks.map { it.uri }
-            val isSameQueue = trackUris == queueManager.currentQueueUris
+            val isSameQueue = trackUris == queueManager.currentQueueUris && trackUris.isNotEmpty()
             val mediaItems = effectiveTracks.map { t -> t.toMediaItem() }
+            if (mediaItems.isEmpty()) {
+                android.util.Log.w("MusicPlayerVM", "executePlay: no media items built")
+                return@launch
+            }
             val startIndex = effectiveTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+                .coerceIn(0, mediaItems.size - 1)
 
             withContext(Dispatchers.Main) {
                 val p: Player = playerOrController()
                 uiState.update { it.copy(isKaraokeActive = false) }
-                if (isSameQueue) {
-                    val idx = trackUris.indexOf(track.uri)
-                    if (idx != -1) { p.seekTo(idx, 0L); p.play(); return@withContext }
+                runCatching {
+                    if (isSameQueue && p.mediaItemCount == mediaItems.size) {
+                        val idx = trackUris.indexOf(track.uri)
+                        if (idx in 0 until p.mediaItemCount) {
+                            p.seekTo(idx, 0L)
+                            p.prepare()
+                            p.play()
+                            return@withContext
+                        }
+                    }
+                    p.stop()
+                    p.setMediaItems(mediaItems, startIndex, 0L)
+                    p.prepare()
+                    p.play()
+                }.onFailure {
+                    android.util.Log.e("MusicPlayerVM", "executePlay failed", it)
                 }
-                p.stop()
-                p.setMediaItems(mediaItems, startIndex, 0L)
-                p.prepare()
-                p.play()
             }
         }
     }
@@ -239,10 +257,14 @@ class PlaybackTransport(
             withContext(Dispatchers.Main) {
                 val p: Player = playerOrController()
                 uiState.update { it.copy(isKaraokeActive = false) }
-                p.stop()
-                p.setMediaItem(item)
-                p.prepare()
-                p.play()
+                runCatching {
+                    p.stop()
+                    p.setMediaItem(item)
+                    p.prepare()
+                    p.play()
+                }.onFailure {
+                    android.util.Log.e("MusicPlayerVM", "playUri failed for $uri", it)
+                }
             }
         }
     }
@@ -263,6 +285,7 @@ class PlaybackTransport(
     fun playCatalogTracks(tracks: List<CatalogTrack>, startIndex: Int = 0) {
         onStartService()
         hapticClick()
+        if (tracks.isEmpty()) return
         scope.launch {
             uiState.update { it.copy(isResolvingCatalog = true) }
             try {
@@ -290,13 +313,25 @@ class PlaybackTransport(
                         .setMediaId(track.sourceUrl).setUri(playableUri.toUri())
                         .setMediaMetadata(meta).build()
                 }
+                if (items.isEmpty()) {
+                    android.util.Log.w("MusicPlayerVM", "playCatalogTracks: no items")
+                    return@launch
+                }
+                val safeIndex = startIndex.coerceIn(0, items.size - 1)
 
                 withContext(Dispatchers.Main) {
                     val p: Player = playerOrController()
-                    p.stop(); p.setMediaItems(items, startIndex, 0L); p.prepare(); p.play()
+                    runCatching {
+                        p.stop()
+                        p.setMediaItems(items, safeIndex, 0L)
+                        p.prepare()
+                        p.play()
+                    }.onFailure {
+                        android.util.Log.e("MusicPlayerVM", "playCatalogTracks failed", it)
+                    }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MusicPlayerVM", "playCatalogTracks failed", e)
             } finally {
                 uiState.update { it.copy(isResolvingCatalog = false) }
             }
@@ -364,21 +399,57 @@ class PlaybackTransport(
     fun togglePlayPause() {
         onStartService()
         val p: Player = playerOrController()
-        if (p.isPlaying) p.pause() else p.play()
+        runCatching {
+            if (p.mediaItemCount == 0) {
+                // Empty after process death: rebuild from the visible library so
+                // the button never looks dead. Prefer the last current track.
+                val tracks = uiState.value.tracks
+                if (tracks.isNotEmpty()) {
+                    val anchor = uiState.value.currentTrack?.let { cur ->
+                        tracks.indexOfFirst { it.uri == cur.uri }.coerceAtLeast(0)
+                    } ?: 0
+                    val safeAnchor = anchor.coerceIn(0, tracks.size - 1)
+                    p.setMediaItems(tracks.map { it.toMediaItem() }, safeAnchor, 0L)
+                    p.prepare()
+                    p.play()
+                    hapticClick()
+                    return@runCatching
+                }
+            }
+            if (p.isPlaying) p.pause() else p.play()
+        }.onFailure {
+            android.util.Log.e("MusicPlayerVM", "togglePlayPause failed", it)
+        }
         hapticClick()
     }
 
     fun play() {
         onStartService()
         val p: Player = playerOrController()
-        if (!p.isPlaying) {
-            p.volume = 0f
-            p.play()
-            if (!uiState.value.isMutedByAi) {
-                fadeVolume(1f, 100)
-            } else {
-                p.volume = 0f
+        runCatching {
+            if (p.mediaItemCount == 0) {
+                val tracks = uiState.value.tracks
+                if (tracks.isNotEmpty()) {
+                    val anchor = uiState.value.currentTrack?.let { cur ->
+                        tracks.indexOfFirst { it.uri == cur.uri }.coerceAtLeast(0)
+                    } ?: 0
+                    p.setMediaItems(tracks.map { it.toMediaItem() }, anchor.coerceIn(0, tracks.size - 1), 0L)
+                    p.prepare()
+                } else {
+                    return@runCatching
+                }
             }
+            if (!p.isPlaying) {
+                p.volume = 0f
+                p.play()
+                if (!uiState.value.isMutedByAi) {
+                    fadeVolume(1f, 100)
+                } else {
+                    p.volume = 0f
+                }
+            }
+        }.onFailure {
+            android.util.Log.e("MusicPlayerVM", "play failed", it)
         }
         hapticClick()
     }

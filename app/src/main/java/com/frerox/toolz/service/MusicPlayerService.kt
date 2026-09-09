@@ -243,30 +243,41 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private val headsetReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                Intent.ACTION_HEADSET_PLUG -> {
-                    val state = intent.getIntExtra("state", -1)
-                    if (state == 1) { // Plugged
-                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
-                    } else if (state == 0) { // Unplugged — checkpoint exact second, then pause
-                        savePlaybackState()
-                        if (player.isPlaying) player.pause()
+            runCatching {
+                when (intent?.action) {
+                    Intent.ACTION_HEADSET_PLUG -> {
+                        val state = intent.getIntExtra("state", -1)
+                        if (state == 1) { // Plugged
+                            if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
+                        } else if (state == 0) { // Unplugged — checkpoint exact second, then pause
+                            savePlaybackState()
+                            if (player.isPlaying) player.pause()
+                        }
                     }
+                    BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
+                    }
+                    BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                        // Audio becoming noisy usually handles this, but be safe.
+                        // Guard isPlaying so a stray disconnect can't pause a
+                        // fresh play() that raced the broadcast.
+                        if (player.isPlaying) {
+                            savePlaybackState()
+                            player.pause()
+                        }
+                    }
+                    AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
+                        // Wired/BT output lost (earphones unplugged, BT dropped):
+                        // persist the exact position first so pocket-resume is exact.
+                        if (player.isPlaying) {
+                            savePlaybackState()
+                            player.pause()
+                        }
+                    }
+                    else -> Unit
                 }
-                BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                    if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
-                }
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                    // Audio becoming noisy usually handles this, but we can be safe
-                    savePlaybackState()
-                    if (player.isPlaying) player.pause()
-                }
-                AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
-                    // Wired/BT output lost (earphones unplugged, BT dropped):
-                    // persist the exact position first so pocket-resume is exact.
-                    savePlaybackState()
-                    if (player.isPlaying) player.pause()
-                }
+            }.onFailure {
+                Log.w("MusicPlayerService", "headsetReceiver failed", it)
             }
         }
     }
@@ -340,6 +351,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
             Log.e("MusicPlayerService", "Playback error in background: ${error.errorCodeName}", error)
+            // User-first: skip the dead file silently so background playback
+            // never stalls on one moved/deleted song. No toast, no scan loop.
+            runCatching {
+                if (player.hasNextMediaItem()) {
+                    player.seekToNext()
+                    player.prepare()
+                    if (!player.isPlaying) player.play()
+                } else {
+                    player.pause()
+                }
+            }.onFailure {
+                Log.w("MusicPlayerService", "error-skip failed", it)
+            }
         }
     }
 
@@ -459,13 +483,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         return true
                     }
                     android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                        else player.seekToNext()
+                        runCatching {
+                            if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                            else if (player.hasNextMediaItem()) player.seekToNext()
+                            else if (player.repeatMode == Player.REPEAT_MODE_ALL) player.seekTo(0, 0L)
+                        }
                         return true
                     }
                     android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                        else player.seekToPrevious()
+                        runCatching {
+                            if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                            else if (player.currentPosition > 3_000) player.seekTo(0L)
+                            else if (player.hasPreviousMediaItem()) player.seekToPrevious()
+                        }
                         return true
                     }
                 }
@@ -490,33 +520,31 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
             val setter = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
-                val uri = settingsRepository.musicLastPlayedUri.first()
-                val pos = settingsRepository.musicLastPlayedPosition.first()
-                val queueJson = settingsRepository.musicLastPlayedQueue.first()
-                
-                if (uri != null) {
-                    val track = musicRepository.getTrackByUri(uri)
-                    if (track != null) {
-                        val items = mutableListOf<MediaItem>()
-                        if (queueJson != null) {
-                            val uris = try {
-                                moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
-                                    .fromJson(queueJson) ?: emptyList()
-                            } catch (e: Exception) { emptyList() }
-                            
-                            val tracks = uris.mapNotNull { musicRepository.getTrackByUri(it) }
-                            items.addAll(tracks.map { it.toMediaItem() })
-                        } else {
-                            items.add(track.toMediaItem())
+                runCatching {
+                    val uri = settingsRepository.musicLastPlayedUri.first()
+                    val pos = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
+                    val queueJson = settingsRepository.musicLastPlayedQueue.first()
+
+                    if (uri != null) {
+                        val saved = readPersistedQueue(queueJson)
+                        var items = resolveQueueTracks(saved)
+                        if (items.isEmpty()) {
+                            val single = musicRepository.getTrackByUri(uri)
+                                ?: musicRepository.getTrackBySourceUrl(uri)
+                            if (single != null) items = mutableListOf(single.toMediaItem())
                         }
-                        
-                        val startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                        if (items.isEmpty()) {
+                            setter.setException(Exception("No playable tracks"))
+                            return@launch
+                        }
+                        var startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                            .coerceIn(0, items.size - 1)
                         setter.set(MediaSession.MediaItemsWithStartPosition(items, startIndex, pos))
                     } else {
-                        setter.setException(Exception("Track not found"))
+                        setter.setException(Exception("No last played track"))
                     }
-                } else {
-                    setter.setException(Exception("No last played track"))
+                }.onFailure {
+                    runCatching { setter.setException(it as? Exception ?: Exception(it)) }
                 }
             }
             return setter
@@ -535,7 +563,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private fun handleMediaButtonClick() {
         val now = System.currentTimeMillis()
-        if (now - lastMediaButtonClickTime > 500) {
+        // User-first timing: 400ms grouping + 250ms settle keeps single-press
+        // snappy (~250ms) while double/triple (next/prev) still register.
+        // The old 500ms + 350ms made every earphone press feel dead.
+        if (now - lastMediaButtonClickTime > 400) {
             mediaButtonClickCount = 1
         } else {
             mediaButtonClickCount++
@@ -544,17 +575,28 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
         mediaButtonCheckJob?.cancel()
         mediaButtonCheckJob = serviceScope.launch {
-            delay(350)
-            when (mediaButtonClickCount) {
-                1 -> {
-                    if (player.mediaItemCount == 0) {
-                        restorePlaybackState(autoPlay = true)
-                    } else {
-                        if (player.isPlaying) player.pause() else player.play()
+            delay(250)
+            runCatching {
+                when (mediaButtonClickCount) {
+                    1 -> {
+                        if (player.mediaItemCount == 0) {
+                            restorePlaybackState(autoPlay = true)
+                        } else {
+                            if (player.isPlaying) player.pause() else player.play()
+                        }
                     }
+                    2 -> {
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                        else if (player.hasNextMediaItem()) player.seekToNext()
+                        else player.play()
+                    }
+                    3 -> {
+                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                        else if (player.hasPreviousMediaItem()) player.seekToPrevious()
+                        else player.play()
+                    }
+                    else -> Unit
                 }
-                2 -> player.seekToNext()
-                3 -> player.seekToPrevious()
             }
             mediaButtonClickCount = 0
         }
@@ -695,19 +737,31 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_TOGGLE_PLAY -> {
-                if (player.isPlaying) player.pause() else player.play()
-            }
-            ACTION_SKIP_NEXT -> player.seekToNext()
-            ACTION_SKIP_PREV -> player.seekToPrevious()
-            ACTION_SEEK_TO_QUEUE_INDEX -> {
-                val index = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
-                if (index in 0 until player.mediaItemCount) {
-                    player.seekTo(index, 0L)
-                    if (!player.isPlaying) player.play()
+        try {
+            when (intent?.action) {
+                ACTION_TOGGLE_PLAY -> {
+                    if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                    else if (player.isPlaying) player.pause() else player.play()
                 }
-            }
+                ACTION_SKIP_NEXT -> {
+                    if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                    else if (player.hasNextMediaItem()) player.seekToNext()
+                    else if (player.repeatMode == Player.REPEAT_MODE_ALL) player.seekTo(0, 0L)
+                    else Unit
+                }
+                ACTION_SKIP_PREV -> {
+                    if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
+                    else if (player.currentPosition > 3_000) player.seekTo(0L)
+                    else if (player.hasPreviousMediaItem()) player.seekToPrevious()
+                    else Unit
+                }
+                ACTION_SEEK_TO_QUEUE_INDEX -> {
+                    val index = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
+                    if (index in 0 until player.mediaItemCount) {
+                        player.seekTo(index, 0L)
+                        if (!player.isPlaying) player.play()
+                    }
+                }
             ACTION_TOGGLE_FAVORITE -> {
                 serviceScope.launch {
                     val currentMediaId = player.currentMediaItem?.mediaId
@@ -732,8 +786,15 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }
             ACTION_SEEK_TO_POSITION -> {
                 val pos = intent.getLongExtra(com.frerox.toolz.widget.glance.MusicActionCallback.EXTRA_POSITION_MS, -1L)
-                if (pos >= 0) player.seekTo(pos)
+                val dur = try { player.duration } catch (_: Exception) { -1L }
+                if (pos >= 0 && (dur <= 0 || pos <= dur)) {
+                    runCatching { player.seekTo(pos) }
+                }
             }
+                else -> Unit
+            }
+        } catch (e: Exception) {
+            Log.w("MusicPlayerService", "onStartCommand failed for ${intent?.action}", e)
         }
         updateWidget()
         super.onStartCommand(intent, flags, startId)
@@ -779,52 +840,162 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     }
 
     private fun savePlaybackState() {
-        val currentItem = player.currentMediaItem ?: return
-        val position = player.currentPosition
+        val currentItem = try { player.currentMediaItem } catch (_: Exception) { return }
+            ?: return
+        val position = try { player.currentPosition } catch (_: Exception) { return }
         val uri = currentItem.mediaId
-        
-        val queueUris = mutableListOf<String>()
-        for (i in 0 until player.mediaItemCount) {
-            queueUris.add(player.getMediaItemAt(i).mediaId)
+        if (uri.isBlank()) return
+
+        // Persist rich entries (uri + stableId + sourceUrl) so a MediaStore
+        // re-index (content:// ID change) can still re-resolve. Reader stays
+        // backward-compatible with the legacy List<String> format.
+        val entries = mutableListOf<Map<String, String?>>()
+        for (i in 0 until try { player.mediaItemCount } catch (_: Exception) { 0 }) {
+            runCatching {
+                val item = player.getMediaItemAt(i)
+                val extras = item.mediaMetadata.extras
+                entries.add(
+                    mapOf(
+                        "uri" to item.mediaId,
+                        "stable_id" to extras?.getString("stable_id"),
+                        "source_url" to extras?.getString("source_url")
+                    )
+                )
+            }
         }
-        val queueJson = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
-            .toJson(queueUris)
+        val queueJson = runCatching {
+            moshi.adapter<List<Map<String, String?>>>(
+                Types.newParameterizedType(
+                    List::class.java,
+                    Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+                )
+            ).toJson(entries)
+        }.getOrNull() ?: runCatching {
+            moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+                .toJson(entries.mapNotNull { it["uri"] })
+        }.getOrNull()
 
         serviceScope.launch {
-            settingsRepository.setMusicLastPlayedState(uri, position, queueJson)
+            runCatching { settingsRepository.setMusicLastPlayedState(uri, position, queueJson) }
         }
+    }
+
+    /** Reads both the new rich queue format and the legacy List<String> format. */
+    private suspend fun readPersistedQueue(queueJson: String?): List<Triple<String, String?, String?>> {
+        if (queueJson.isNullOrBlank()) return emptyList()
+        // New: List<Map<uri, stable_id, source_url>>
+        runCatching {
+            val adapter = moshi.adapter<List<Map<String, String?>>>(
+                Types.newParameterizedType(
+                    List::class.java,
+                    Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+                )
+            )
+            val parsed = adapter.fromJson(queueJson)
+            if (parsed != null) {
+                val mapped = parsed.mapNotNull { m ->
+                    val u = m["uri"] ?: return@mapNotNull null
+                    Triple(u, m["stable_id"], m["source_url"])
+                }
+                // Distinguish from legacy: rich saves always contain the keys,
+                // legacy parses as garbage — only accept if at least one entry
+                // actually carried metadata or the raw json looks like objects.
+                if (mapped.isNotEmpty() && queueJson.trimStart().startsWith("[")) {
+                    // If entries have no metadata at all, fall through to legacy parse
+                    // to avoid misreading; otherwise accept.
+                    if (mapped.any { it.second != null || it.third != null } || queueJson.contains("stable_id") || queueJson.contains("source_url")) {
+                        return mapped
+                    }
+                } else if (mapped.isNotEmpty()) {
+                    return mapped
+                }
+            }
+        }
+        // Legacy: List<String>
+        runCatching {
+            val uris = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
+                .fromJson(queueJson) ?: emptyList()
+            return uris.map { Triple(it, null, null) }
+        }
+        return emptyList()
+    }
+
+    private suspend fun resolveQueueTracks(
+        saved: List<Triple<String, String?, String?>>
+    ): List<MediaItem> {
+        if (saved.isEmpty()) return emptyList()
+        val resolved = mutableListOf<MediaItem>()
+        var missing = 0
+        for ((uri, stableId, sourceUrl) in saved) {
+            val track = musicRepository.resolveTrackForPlayback(uri, sourceUrl, stableId)
+            if (track != null) resolved.add(track.toMediaItem())
+            else missing++
+        }
+        if (missing > 0) {
+            Log.w("MusicPlayerService", "restore resolved ${resolved.size}/${saved.size} (pruned $missing deleted)")
+        }
+        return resolved
     }
 
     private fun restorePlaybackState(autoPlay: Boolean = false) {
         serviceScope.launch {
             val uri = settingsRepository.musicLastPlayedUri.first()
-            val position = settingsRepository.musicLastPlayedPosition.first()
+            val position = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
             val queueJson = settingsRepository.musicLastPlayedQueue.first()
 
             if (uri != null) {
-                val track = musicRepository.getTrackByUri(uri)
-                if (track != null) {
-                    val items = mutableListOf<MediaItem>()
-                    if (queueJson != null) {
-                        val uris = try {
-                            moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
-                                .fromJson(queueJson) ?: emptyList()
-                        } catch (e: Exception) { emptyList() }
-                        
-                        val tracks = uris.mapNotNull { musicRepository.getTrackByUri(it) }
-                        if (tracks.size < uris.size) {
-                            Log.w("MusicPlayerService", "restorePlaybackState pruned ${uris.size - tracks.size} missing tracks (deleted)")
-                        }
-                        items.addAll(tracks.map { it.toMediaItem() })
-                    } else {
-                        items.add(track.toMediaItem())
+                // Resolve the last track itself with stable fallbacks first so we
+                // always have at least one playable item even if the queue is stale.
+                val lastTrack = musicRepository.getTrackByUri(uri)
+                    ?: musicRepository.getTrackBySourceUrl(uri)
+                val saved = readPersistedQueue(queueJson)
+                var items = resolveQueueTracks(saved)
+                if (items.isEmpty() && lastTrack != null) {
+                    items = mutableListOf(lastTrack.toMediaItem())
+                }
+                if (items.isEmpty()) {
+                    // Best for the user: never leave the player empty when the
+                    // library still has songs. Fall back to the most recent
+                    // library track so a headset PLAY press does something.
+                    // If the library itself is empty (fresh install / permission
+                    // revoked), stay empty silently — nothing to play.
+                    val fallback = runCatching {
+                        musicRepository.getAllTracksSyncForBackfill().firstOrNull()
+                    }.getOrNull()
+                    if (fallback != null) {
+                        Log.w("MusicPlayerService", "restore queue empty, falling back to most recent library track")
+                        items = mutableListOf(fallback.toMediaItem())
                     }
+                }
+                if (items.isEmpty()) {
+                    Log.w("MusicPlayerService", "restorePlaybackState: nothing playable, staying empty")
+                    return@launch
+                }
 
-                    withContext(Dispatchers.Main) {
-                        val startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
-                        player.setMediaItems(items, startIndex, position)
+                val safePosition = position
+                withContext(Dispatchers.Main) {
+                    runCatching {
+                        var startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                        // If the exact URI is gone (re-index), the resolved list
+                        // holds the same song under a new URI — anchor on the
+                        // last track's current URI instead of index 0 guess.
+                        if (startIndex == 0 && lastTrack != null && items.none { it.mediaId == uri }) {
+                            startIndex = items.indexOfFirst { it.mediaId == lastTrack.uri }.coerceAtLeast(0)
+                        }
+                        startIndex = startIndex.coerceIn(0, items.size - 1)
+                        // Don't clobber a queue the user just built while we
+                        // were resolving (tap raced restore): if the player
+                        // gained items meanwhile, keep them.
+                        if (player.mediaItemCount != 0) {
+                            Log.w("MusicPlayerService", "restore skipped: player gained queue during resolve")
+                            if (autoPlay && !player.isPlaying) player.play()
+                            return@withContext
+                        }
+                        player.setMediaItems(items, startIndex, safePosition)
                         player.prepare()
                         if (autoPlay) player.play()
+                    }.onFailure {
+                        Log.e("MusicPlayerService", "restorePlaybackState failed", it)
                     }
                 }
             }
@@ -977,22 +1148,34 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // Best-effort synchronous checkpoint: the async savePlaybackState() posts to
         // serviceScope, which we cancel below — so capture the exact position first
         // and persist it blocking (short timeout) before teardown.
+        // Rich format (uri + stable_id + source_url), backward-compatible reader.
         runCatching {
             val item = try { player.currentMediaItem } catch (_: Exception) { null }
             if (item != null) {
                 val uri = item.mediaId
                 val pos = try { player.currentPosition } catch (_: Exception) { -1L }
-                if (pos >= 0) {
-                    val queueUris = mutableListOf<String>()
+                if (uri.isNotBlank() && pos >= 0) {
+                    val entries = mutableListOf<Map<String, String?>>()
                     runCatching {
                         for (i in 0 until player.mediaItemCount) {
-                            queueUris.add(player.getMediaItemAt(i).mediaId)
+                            val it = player.getMediaItemAt(i)
+                            val extras = it.mediaMetadata.extras
+                            entries.add(
+                                mapOf(
+                                    "uri" to it.mediaId,
+                                    "stable_id" to extras?.getString("stable_id"),
+                                    "source_url" to extras?.getString("source_url")
+                                )
+                            )
                         }
                     }
                     val queueJson = runCatching {
-                        moshi.adapter<List<String>>(
-                            Types.newParameterizedType(List::class.java, String::class.java)
-                        ).toJson(queueUris)
+                        moshi.adapter<List<Map<String, String?>>>(
+                            Types.newParameterizedType(
+                                List::class.java,
+                                Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
+                            )
+                        ).toJson(entries)
                     }.getOrNull()
                     kotlinx.coroutines.runBlocking {
                         kotlinx.coroutines.withTimeoutOrNull(1_500L) {

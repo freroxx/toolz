@@ -54,8 +54,8 @@ android {
         applicationId = "com.frerox.toolz"
         minSdk = 31
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.1.4"
+        versionCode = 16
+        versionName = "1.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

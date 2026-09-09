@@ -721,7 +721,7 @@ fun UpdateOverlayContent(
 fun UpdateOverlayPreview() {
     ToolzTheme {
         UpdateOverlayContent(
-            availableVersion = "1.1.4",
+            availableVersion = "1.1.5",
             changelog = """
                 # Major Update: Expressive UI
                 

@@ -325,12 +325,8 @@ fun MusicPlayerScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(state.queueWarning) {
-        state.queueWarning?.let { msg ->
-            snackbarHostState.showSnackbar(msg)
-            viewModel.consumeQueueWarning()
-        }
-    }
+    // Queue-mismatch toast removed: mismatches are Logcat-only so playback never
+    // gets interrupted by a snackbar. Host is kept for future non-queue messages.
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {

@@ -125,7 +125,10 @@ class MusicPlayerViewModel @Inject constructor(
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var isConnecting = false
-    private var pendingAction: (() -> Unit)? = null
+    private val pendingActions = mutableListOf<() -> Unit>()
+    private val _isControllerReady = MutableStateFlow(false)
+    val isControllerReady: StateFlow<Boolean> = _isControllerReady.asStateFlow()
+    private var lastErrorScanMs = 0L
 
     private fun hapticClick() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateClick() }
     private fun hapticSuccess() { if (!_uiState.value.isKaraokeActive) vibrationManager.vibrateSuccess() }
@@ -254,27 +257,40 @@ class MusicPlayerViewModel @Inject constructor(
             Log.e("MusicPlayerViewModel", "Playback error: ${error.errorCodeName}", error)
             _uiState.update { it.copy(isResolvingCatalog = false, isPlaying = false, isLoading = false) }
 
-            viewModelScope.launch(Dispatchers.IO) {
-                runCatching { repository.scanDeviceForMusic() }
-            }
-
+            // User-first: never toast-loop or full-scan on every bad file.
+            // Silently skip to the next playable item; kick a debounced
+            // background re-scan (max 1/5min) only for IO errors so a moved
+            // file can re-resolve without janking the UI mid-tap.
             if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
                 || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
             ) {
-                player.prepare()
+                runCatching { player.prepare() }
             } else {
                 viewModelScope.launch(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Playback error: ${error.localizedMessage ?: "File moved or unplayable. Skipping."}",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                    val p: Player = controller ?: player
-                    if (p.hasNextMediaItem()) {
-                        p.seekToNext()
-                        p.prepare()
+                    runCatching {
+                        val p: Player = controller ?: player
+                        if (p.hasNextMediaItem()) {
+                            p.seekToNext()
+                            p.prepare()
+                            p.play()
+                        } else {
+                            p.pause()
+                        }
+                    }
+                }
+                val isIoError = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+                if (isIoError) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastErrorScanMs > 5 * 60 * 1000L) {
+                        lastErrorScanMs = now
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { repository.scanDeviceForMusic() }
+                        }
                     } else {
-                        p.pause()
+                        Log.w("MusicPlayerVM", "Skipping error-triggered rescan (debounced)")
                     }
                 }
             }
@@ -530,12 +546,18 @@ class MusicPlayerViewModel @Inject constructor(
     private fun connectToMediaController() {
         if (isConnecting || controller != null) return
         isConnecting = true
+        // The MediaSessionService must be warmed before the controller binds,
+        // otherwise buildAsync can hang and every tap gets deferred forever
+        // (the "see songs but nothing plays" bug). Foreground-capable start
+        // works from background on O+; plain startService() throws there.
+        startPlayerService()
         val token = SessionToken(context, ComponentName(context, MusicPlayerService::class.java))
         controllerFuture = MediaController.Builder(context, token).buildAsync()
         controllerFuture?.addListener({
             runCatching {
                 isConnecting = false
                 controller = controllerFuture?.get()
+                _isControllerReady.value = controller != null
                 
                 // P0-02 fix: media controller acts as the single source of truth for UI events
                 // to prevent double listener execution when controller is available.
@@ -585,9 +607,17 @@ class MusicPlayerViewModel @Inject constructor(
 
                 playbackTransport.updateDuration(dur)
                 queueManager.updateQueue()
-                pendingAction?.invoke()
-                pendingAction = null
-            }.onFailure { it.printStackTrace() }
+                val queued = synchronized(pendingActions) {
+                    val copy = pendingActions.toList()
+                    pendingActions.clear()
+                    copy
+                }
+                queued.forEach { action -> runCatching { action() } }
+            }.onFailure {
+                isConnecting = false
+                _isControllerReady.value = false
+                Log.w("MusicPlayerVM", "MediaController connect failed, will retry on next tap", it)
+            }
         }, MoreExecutors.directExecutor())
     }
 
@@ -598,9 +628,18 @@ class MusicPlayerViewModel @Inject constructor(
     private var playerServiceStarted = false
     private fun startPlayerService() {
         if (playerServiceStarted) return
-        runCatching {
-            context.startService(Intent(context, MusicPlayerService::class.java))
+        try {
+            val intent = Intent(context, MusicPlayerService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                androidx.core.content.ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.startService(intent)
+            }
             playerServiceStarted = true
+        } catch (e: Exception) {
+            // Don't latch the flag: a background-start throw must be retryable
+            // on the next tap, otherwise playback stays dead for the session.
+            Log.w("MusicPlayerVM", "startPlayerService failed, will retry", e)
         }
     }
 
@@ -608,7 +647,8 @@ class MusicPlayerViewModel @Inject constructor(
     // Facade delegations — Queue
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun consumeQueueWarning() = queueManager.consumeQueueWarning()
+    @Deprecated("Queue warning toast removed; no-op.", ReplaceWith(""))
+    fun consumeQueueWarning() { /* no-op: kept for binary compat */ }
     fun seekToQueueIndex(index: Int) = queueManager.seekToQueueIndex(index)
     fun moveQueueItem(fromIndex: Int, toIndex: Int) = queueManager.moveQueueItem(fromIndex, toIndex)
     fun removeQueueItem(index: Int) = queueManager.removeQueueItem(index)
@@ -712,9 +752,16 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack>? = null) {
         val effectiveTracks = tracks ?: _uiState.value.tracks
-        if (controller == null) {
-            pendingAction = { playTrack(track, tracks) }
-            connectToMediaController()
+        // Best for the user: never make a tap a no-op. The transport already
+        // falls back to the local ExoPlayer when the controller isn't bound yet,
+        // so play NOW and let the controller attach in the background for
+        // headset/notification/queue sync. Only defer when there is literally
+        // nothing to play.
+        startPlayerService()
+        if (controller == null && !isConnecting) connectToMediaController()
+        if (effectiveTracks.isEmpty()) {
+            // Library snapshot not loaded yet — still play the tapped song.
+            playbackTransport.playTrack(track, listOf(track))
             return
         }
         playbackTransport.playTrack(track, effectiveTracks)
@@ -727,11 +774,8 @@ class MusicPlayerViewModel @Inject constructor(
         thumbUrl: String? = null,
         sourceUrl: String? = null
     ) {
-        if (controller == null) {
-            pendingAction = { playUri(uri, title, artist, thumbUrl, sourceUrl) }
-            connectToMediaController()
-            return
-        }
+        startPlayerService()
+        if (controller == null && !isConnecting) connectToMediaController()
         playbackTransport.playUri(uri, title, artist, thumbUrl, sourceUrl)
     }
 
@@ -740,11 +784,9 @@ class MusicPlayerViewModel @Inject constructor(
     fun playNext(track: MusicTrack) = playbackTransport.playNext(track)
 
     fun playCatalogTracks(tracks: List<CatalogTrack>, startIndex: Int = 0) {
-        if (controller == null) {
-            pendingAction = { playCatalogTracks(tracks, startIndex) }
-            connectToMediaController()
-            return
-        }
+        if (tracks.isEmpty()) return
+        startPlayerService()
+        if (controller == null && !isConnecting) connectToMediaController()
         playbackTransport.playCatalogTracks(tracks, startIndex)
     }
 
@@ -946,5 +988,7 @@ class MusicPlayerViewModel @Inject constructor(
         controller?.removeListener(playerListener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controller = null
+        _isControllerReady.value = false
+        synchronized(pendingActions) { pendingActions.clear() }
     }
 }

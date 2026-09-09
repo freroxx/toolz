@@ -127,6 +127,30 @@ class MusicRepository @Inject constructor(
         musicDao.getTrackBySourceUrl(sourceUrl)
     }
 
+    suspend fun getTrackByStableId(stableId: String): MusicTrack? = withContext(Dispatchers.IO) {
+        if (stableId.isBlank()) null else musicDao.getTrackByStableId(stableId)
+    }
+
+    /**
+     * User-first queue resolution: MediaStore re-index changes content:// IDs,
+     * so a saved URI alone is not enough. Try URI → sourceUrl → stableId, in
+     * that order, so pocket-resume and widget restores survive re-index.
+     */
+    suspend fun resolveTrackForPlayback(
+        uri: String,
+        sourceUrl: String? = null,
+        stableId: String? = null
+    ): MusicTrack? = withContext(Dispatchers.IO) {
+        musicDao.getTrackByUri(uri)?.let { return@withContext it }
+        if (!sourceUrl.isNullOrBlank()) {
+            musicDao.getTrackBySourceUrl(sourceUrl)?.let { return@withContext it }
+        }
+        if (!stableId.isNullOrBlank()) {
+            musicDao.getTrackByStableId(stableId)?.let { return@withContext it }
+        }
+        null
+    }
+
     suspend fun getPlaylistById(id: Int): Playlist? = withContext(Dispatchers.IO) {
         musicDao.getPlaylistById(id)
     }

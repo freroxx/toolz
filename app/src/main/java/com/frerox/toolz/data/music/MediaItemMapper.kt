@@ -40,13 +40,25 @@ fun MusicTrack.toMediaItem(): MediaItem {
         .setIsPlayable(true)
         .setArtworkUri(thumbnailUri?.toUri())
         .apply {
-            sourceUrl?.let { setExtras(Bundle().apply { putString("source_url", it) }) }
+            val extras = Bundle()
+            sourceUrl?.let { extras.putString("source_url", it) }
+            // Stable business key survives MediaStore re-index (content:// ID
+            // changes) so restore can re-resolve even when the saved URI is stale.
+            if (stableId.isNotBlank()) extras.putString("stable_id", stableId)
+            if (!extras.isEmpty) setExtras(extras)
         }
         .build()
+    // Prefer the content:// URI: it is granted via MediaStore and survives
+    // file-path moves. Raw File(path) breaks under scoped storage and after
+    // re-index (DATA column stale) — the old order caused "visible but
+    // unplayable" queues. Only use File() when the URI itself is a raw path.
     val playableUri = when {
-        path != null && File(path).exists() -> Uri.fromFile(File(path)).toString()
         uri.startsWith("content://") || uri.startsWith("file://") -> uri
+        uri.startsWith("http://") || uri.startsWith("https://") -> uri
         path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
+        path != null && (path.startsWith("http://") || path.startsWith("https://")) -> path
+        uri.startsWith("/") -> Uri.fromFile(File(uri)).toString()
+        path != null && path.startsWith("/") && File(path).exists() -> Uri.fromFile(File(path)).toString()
         path != null && path.startsWith("/") -> Uri.fromFile(File(path)).toString()
         else -> uri
     }

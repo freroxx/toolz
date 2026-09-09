@@ -29,8 +29,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Owns currentQueueUris, queue warning, and queue mutations.
+ * Owns currentQueueUris and queue mutations.
  * Consumes MusicRepository via UiState flows + ExoPlayer controller.
+ * Note: queue mismatch is only logged to Logcat (no user toast) — the player
+ * keeps whatever MediaItems it has so taps always do something.
  */
 class QueueManager(
     private val scope: CoroutineScope,
@@ -91,17 +93,15 @@ class QueueManager(
             val missingCount = uris.count { uri ->
                 trackMap[uri] == null && uri.startsWith("content://")
             }
-            // P0-01 fix: suppress warning if library is still scanning (isLoading=true)
-            val warning = if (missingCount > 0 && !uiState.value.isLoading) {
-                android.util.Log.w("MusicPlayerVM", "Queue pruned $missingCount missing tracks (deleted/moved)")
-                "$missingCount track(s) unavailable — removed from queue"
-            } else null
-            uiState.update { it.copy(queue = entries, currentQueueIndex = p.currentMediaItemIndex.coerceAtLeast(0), queueWarning = warning) }
+            if (missingCount > 0) {
+                android.util.Log.w("MusicPlayerVM", "Queue has $missingCount items not in library snapshot (stale ID / scanning) — keeping queue as-is")
+            }
+            uiState.update { it.copy(queue = entries, currentQueueIndex = p.currentMediaItemIndex.coerceAtLeast(0)) }
         }
     }
 
+    @Deprecated("No-op: queue warning toast was removed; mismatches are Logcat-only.", ReplaceWith(""))
     fun consumeQueueWarning() {
-        uiState.update { it.copy(queueWarning = null) }
     }
 
     fun seekToQueueIndex(index: Int) {

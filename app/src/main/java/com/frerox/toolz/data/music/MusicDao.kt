@@ -61,6 +61,9 @@ interface MusicDao {
     @Query("SELECT * FROM music_tracks WHERE uri = :uri")
     suspend fun getTrackByUri(uri: String): MusicTrack?
 
+    @Query("SELECT * FROM music_tracks WHERE stableId = :stableId LIMIT 1")
+    suspend fun getTrackByStableId(stableId: String): MusicTrack?
+
     @Query("SELECT * FROM music_tracks WHERE sourceUrl = :sourceUrl ORDER BY CASE WHEN path IS NULL THEN 1 ELSE 0 END LIMIT 1")
     suspend fun getTrackBySourceUrl(sourceUrl: String): MusicTrack?
 
