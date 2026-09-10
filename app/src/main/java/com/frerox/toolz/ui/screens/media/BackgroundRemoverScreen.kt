@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AddAPhoto
@@ -145,7 +146,10 @@ fun BackgroundRemoverScreen(
     LaunchedEffect(uiState.saveSuccess) {
         if (uiState.saveSuccess) {
             haptic.success()
-            snackbar.showSnackbar("Saved to Pictures/Toolz", withDismissAction = true)
+            snackbar.showSnackbar(
+                context.getString(R.string.st_BackgroundRemover_SavedTo),
+                withDismissAction = true,
+            )
             viewModel.dismissSaveSuccess()
         }
     }
@@ -175,17 +179,21 @@ fun BackgroundRemoverScreen(
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_Tool_BackgroundRemover),
                 subtitle = when {
-                    !uiState.isModelDownloaded -> "Set up AI model"
+                    !uiState.isModelDownloaded -> stringResource(R.string.st_BackgroundRemover_SetupModel)
                     else -> uiState.selectedModel?.displayName
                 },
                 navigationIcon = {
                     ToolzTonalExpressiveIconButton(onClick = onNavigateBack, shape = SquircleShape) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.cd_Back))
                     }
                 },
                 actions = {
                     ToolzTonalExpressiveIconButton(onClick = { isHubOpen = true }, shape = SquircleShape) {
-                        Icon(Icons.Rounded.Memory, "AI models", modifier = Modifier.size(20.dp))
+                        Icon(
+                            Icons.Rounded.Memory,
+                            stringResource(R.string.st_BackgroundRemover_Models),
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                     Spacer(Modifier.width(8.dp))
                 },
@@ -228,7 +236,12 @@ fun BackgroundRemoverScreen(
                     onShare = {
                         uiState.resultBitmap?.let { bmp ->
                             viewModel.getShareIntent(bmp)?.let {
-                                context.startActivity(Intent.createChooser(it, "Share cutout"))
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        it,
+                                        context.getString(R.string.st_BackgroundRemover_ShareCutout),
+                                    ),
+                                )
                             }
                         }
                     },
@@ -299,8 +312,10 @@ fun BackgroundRemoverScreen(
                 downloadProgress = uiState.downloadProgress,
                 downloadSpeed = formatSpeed(uiState.downloadSpeedBps),
                 downloadedIds = uiState.downloadedIds,
-                meteredNow = viewModel.isMeteredNow(),
-                onModelSelect = { viewModel.selectModel(it) },
+                onModelSelect = {
+                    viewModel.selectModel(it)
+                    if (uiState.downloadedIds.contains(it.id)) isHubOpen = false
+                },
                 onDownloadClick = ::requestDownload,
                 onDeleteClick = { model ->
                     viewModel.deleteModel(model)
@@ -382,7 +397,7 @@ private fun HeroPane(
 
                 Spacer(Modifier.height(32.dp))
                 Text(
-                    "Remove any\nbackground",
+                    stringResource(R.string.st_BackgroundRemover_HeroTitle),
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
@@ -400,7 +415,8 @@ private fun HeroPane(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        if (hasModel) "Choose a photo" else "Set up AI model",
+                        if (hasModel) stringResource(R.string.st_BackgroundRemover_ChooseAPhoto)
+                        else stringResource(R.string.st_BackgroundRemover_SetupModel),
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -408,11 +424,16 @@ private fun HeroPane(
                 if (!hasModel) {
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = onPick) {
-                        Text("Or pick a photo first", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            stringResource(R.string.st_BackgroundRemover_PickFirst),
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
                 } else {
                     Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onBrowseModels) { Text("AI models") }
+                    TextButton(onClick = onBrowseModels) {
+                        Text(stringResource(R.string.st_BackgroundRemover_Models))
+                    }
                 }
             }
         }
@@ -462,7 +483,10 @@ private fun EditorPane(
             if (hasResult && !working) {
                 ToolzConnectedButtonGroup(
                     selectedIndex = if (showOriginal) 1 else 0,
-                    options = listOf("Isolated", "Original"),
+                    options = listOf(
+                        stringResource(R.string.st_BackgroundRemover_Isolated),
+                        stringResource(R.string.st_BackgroundRemover_Original),
+                    ),
                     unCheckedIcons = listOf(Icons.Rounded.ContentCut, Icons.Rounded.Image),
                     checkedIcons = listOf(Icons.Rounded.ContentCut, Icons.Rounded.Image),
                     onOptionSelected = {
@@ -488,14 +512,17 @@ private fun EditorPane(
             // Working scrim — names the stage, offers cancellation
             if (working) {
                 Box(
-                    Modifier.fillMaxSize().padding(0.dp),
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         ToolzWavyCircularProgressIndicator(modifier = Modifier.size(56.dp))
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            if (uiState.stage == BgStage.MATTING) "Refining edges" else "Removing background",
+                            if (uiState.stage == BgStage.MATTING) stringResource(R.string.st_BackgroundRemover_WorkingEdge)
+                            else stringResource(R.string.st_BackgroundRemover_WorkingBg),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -512,7 +539,10 @@ private fun EditorPane(
                         TextButton(onClick = onCancelWork) {
                             Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Cancel", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                stringResource(R.string.st_Common_Cancel),
+                                fontWeight = FontWeight.SemiBold,
+                            )
                         }
                     }
                 }
@@ -555,8 +585,8 @@ private fun EditorPane(
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     when (uiState.failure?.retry) {
-                                        RetryAction.OPEN_HUB -> "Open AI models"
-                                        RetryAction.PICK_IMAGE -> "Choose another photo"
+                                        RetryAction.OPEN_HUB -> stringResource(R.string.st_BackgroundRemover_OpenModels)
+                                        RetryAction.PICK_IMAGE -> stringResource(R.string.st_BackgroundRemover_ChooseAnother)
                                         else -> stringResource(R.string.st_BackgroundRemover_Retry)
                                     },
                                     fontWeight = FontWeight.Bold,
@@ -585,15 +615,18 @@ private fun EditorPane(
                 }
             }
 
-            // No model yet → gentle gate (sheet no longer auto-opens and hijacks first run)
+            // No model yet → gentle gate over a dim (sheet no longer auto-opens on first run)
             if (!uiState.isModelDownloaded && !working && !failed && uiState.stage != BgStage.DOWNLOADING) {
                 Box(
-                    Modifier.fillMaxSize().padding(24.dp),
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "AI model needed",
+                            stringResource(R.string.st_BackgroundRemover_ModelNeeded),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
                         )
@@ -601,7 +634,10 @@ private fun EditorPane(
                         ToolzExpressiveButton(onClick = onOpenHub, shape = SquircleShape, modifier = Modifier.height(48.dp)) {
                             Icon(Icons.Rounded.Memory, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Open AI models", fontWeight = FontWeight.Bold)
+                            Text(
+                                stringResource(R.string.st_BackgroundRemover_OpenModels),
+                                fontWeight = FontWeight.Bold,
+                            )
                         }
                     }
                 }
@@ -617,7 +653,12 @@ private fun EditorPane(
                     onClick = onOpenHub,
                     shape = SquircleShape,
                     modifier = Modifier.size(56.dp),
-                ) { Icon(Icons.Rounded.Memory, "AI models") }
+                ) {
+                    Icon(
+                        Icons.Rounded.Memory,
+                        stringResource(R.string.st_BackgroundRemover_Models),
+                    )
+                }
 
                 ToolzExpressiveButton(
                     onClick = onChangePhoto,
@@ -627,14 +668,17 @@ private fun EditorPane(
                 ) {
                     Icon(Icons.Rounded.AddAPhoto, null, Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text("Choose photo", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        stringResource(R.string.st_BackgroundRemover_ChooseAPhoto),
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                 }
             } else {
                 ToolzTonalExpressiveIconButton(
                     onClick = onReset,
                     shape = SquircleShape,
                     modifier = Modifier.size(56.dp),
-                ) { Icon(Icons.Rounded.Refresh, "Reset") }
+                ) { Icon(Icons.Rounded.Refresh, stringResource(R.string.st_BackgroundRemover_Reset)) }
 
                 ToolzExpressiveButton(
                     onClick = onSave,
@@ -644,7 +688,10 @@ private fun EditorPane(
                 ) {
                     Icon(Icons.Rounded.SaveAlt, null, Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text("Save PNG", fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        stringResource(R.string.st_BackgroundRemover_SavePng),
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                 }
 
                 ToolzTonalExpressiveIconButton(
@@ -652,7 +699,12 @@ private fun EditorPane(
                     enabled = !working,
                     shape = SquircleShape,
                     modifier = Modifier.size(56.dp),
-                ) { Icon(Icons.Rounded.Share, "Share") }
+                ) {
+                    Icon(
+                        Icons.Rounded.Share,
+                        stringResource(R.string.st_BackgroundRemover_Share),
+                    )
+                }
             }
         }
 

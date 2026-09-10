@@ -23,6 +23,7 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_1024
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_320
@@ -176,7 +177,8 @@ class BackgroundRemoverViewModel @Inject constructor(
                     }
                 }
                 if (result.isFailure) {
-                    val msg = result.exceptionOrNull()?.message ?: "Download failed"
+                    val msg = result.exceptionOrNull()?.message
+                        ?: context.getString(R.string.st_BackgroundRemover_DownloadFailed)
                     val failure = BgFailure(msg, RetryAction.RETRY_DOWNLOAD)
                     _uiState.update {
                         it.copy(
@@ -206,7 +208,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 _uiState.update { it.copy(stage = BgStage.IDLE, isProcessing = false) }
             } catch (e: Exception) {
                 Log.e("BgRemoverVM", "downloadModel failed", e)
-                val msg = "Download failed: ${e.localizedMessage}"
+                val msg = e.message ?: context.getString(R.string.st_BackgroundRemover_ProcessingFailed)
                 _uiState.update {
                     it.copy(
                         stage = BgStage.FAILED,
@@ -255,7 +257,7 @@ class BackgroundRemoverViewModel @Inject constructor(
             true
         } catch (e: Throwable) {
             Log.e("BgRemoverVM", "Interpreter init failed for ${model.id}", e)
-            fail("Couldn't start the AI engine. Open AI models and re-download it.", RetryAction.OPEN_HUB)
+            fail(context.getString(R.string.st_BackgroundRemover_EngineStartFail), RetryAction.OPEN_HUB)
             false
         }
     }
@@ -272,7 +274,7 @@ class BackgroundRemoverViewModel @Inject constructor(
             true
         } catch (e: Throwable) {
             Log.e("BgRemoverVM", "ONNX session failed for ${model.id}", e)
-            fail("Couldn't start the AI engine. Open AI models and re-download it.", RetryAction.OPEN_HUB)
+            fail(context.getString(R.string.st_BackgroundRemover_EngineStartFail), RetryAction.OPEN_HUB)
             false
         }
     }
@@ -316,7 +318,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 val bitmap = loadBitmapRobust(uri)
                 if (bitmap == null) {
                     fail(
-                        "Couldn't read that photo. If it was shared from another app, try picking it from the gallery.",
+                        context.getString(R.string.st_BackgroundRemover_UnreadablePhoto),
                         RetryAction.PICK_IMAGE,
                     )
                     return@launch
@@ -325,15 +327,15 @@ class BackgroundRemoverViewModel @Inject constructor(
                 if (_uiState.value.isModelDownloaded) {
                     processImage(bitmap)
                 } else {
-                    fail("Download a model from the hub to get started", RetryAction.OPEN_HUB)
+                    fail(context.getString(R.string.st_BackgroundRemover_NeedModel), RetryAction.OPEN_HUB)
                 }
             } catch (e: SecurityException) {
                 Log.w("BgRemoverVM", "photo access revoked", e)
-                fail("Photo access was revoked — pick the image again.", RetryAction.PICK_IMAGE)
+                fail(context.getString(R.string.st_BackgroundRemover_AccessRevoked), RetryAction.PICK_IMAGE)
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     Log.e("BgRemoverVM", "onImageSelected", e)
-                    fail("Couldn't load image: ${e.localizedMessage}", RetryAction.PICK_IMAGE)
+                    fail(context.getString(R.string.st_BackgroundRemover_LoadFailed), RetryAction.PICK_IMAGE)
                 }
             }
         }
@@ -417,7 +419,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 )
             }
             if (_uiState.value.isModelDownloaded) processImage(bitmap)
-            else fail("Download a model from the hub to get started", RetryAction.OPEN_HUB)
+            else fail(context.getString(R.string.st_BackgroundRemover_NeedModel), RetryAction.OPEN_HUB)
         }
     }
 
@@ -426,7 +428,7 @@ class BackgroundRemoverViewModel @Inject constructor(
     private suspend fun processImage(bitmap: Bitmap) {
         if (!ensureBackendReady()) {
             if (_uiState.value.stage != BgStage.FAILED) {
-                fail("AI engine not ready — try re-downloading the model", RetryAction.OPEN_HUB)
+                fail(context.getString(R.string.st_BackgroundRemover_EngineNotReady), RetryAction.OPEN_HUB)
             }
             return
         }
@@ -447,11 +449,11 @@ class BackgroundRemoverViewModel @Inject constructor(
             }
         } catch (e: OutOfMemoryError) {
             Log.e("BgRemoverVM", "processImage OOM", e)
-            fail("Photo is too large for this device's memory — try a smaller one.", RetryAction.PICK_IMAGE)
+            fail(context.getString(R.string.st_BackgroundRemover_TooLarge), RetryAction.PICK_IMAGE)
         } catch (e: Exception) {
             if (e !is CancellationException) {
                 Log.e("BgRemoverVM", "processImage failed", e)
-                fail("Processing error: ${e.localizedMessage}", RetryAction.RETRY_PROCESS)
+                fail(context.getString(R.string.st_BackgroundRemover_ProcessingFailed), RetryAction.RETRY_PROCESS)
             }
         }
     }
@@ -574,7 +576,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true) }
             val success = withContext(Dispatchers.IO) { saveImageToGallery(bitmap, withBackground = false) }
-            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
+            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) context.getString(R.string.st_BackgroundRemover_SaveFailed) else null) }
             if (success) {
                 kotlinx.coroutines.delay(2500)
                 _uiState.update { it.copy(saveSuccess = false) }
@@ -604,7 +606,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     if (wroteCustom) toSave.recycle()
                 }
             }
-            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) "Save failed." else null) }
+            _uiState.update { it.copy(isProcessing = false, saveSuccess = success, error = if (!success) context.getString(R.string.st_BackgroundRemover_SaveFailed) else null) }
             if (success) { kotlinx.coroutines.delay(2500); _uiState.update { it.copy(saveSuccess = false) } }
         }
     }

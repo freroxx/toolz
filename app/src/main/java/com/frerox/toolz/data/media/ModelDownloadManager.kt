@@ -12,6 +12,7 @@ package com.frerox.toolz.data.media
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.frerox.toolz.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -137,7 +138,11 @@ class ModelDownloadManager(
         withContext(Dispatchers.IO) {
             // Metered-network gate for large models (user confirms in UI).
             if (model.gatedOnWifi && !allowMetered && isMeteredConnection()) {
-                val msg = "“${model.shortName}” is large (${model.sizeLabel}) — connect to Wi-Fi or allow mobile download."
+                val msg = context.getString(
+                    R.string.st_BackgroundRemover_MeteredBlocked,
+                    model.shortName,
+                    model.sizeLabel,
+                )
                 synchronized(lock) {
                     _states.getOrPut(model.id) { MutableStateFlow(DownloadState.Idle) }.value =
                         DownloadState.Failed(msg, retryable = true)

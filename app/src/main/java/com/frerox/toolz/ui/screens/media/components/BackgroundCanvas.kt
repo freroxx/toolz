@@ -24,7 +24,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.screens.media.PreviewBackground
 import com.frerox.toolz.ui.theme.SquircleShape
 import androidx.compose.ui.draw.clip
@@ -141,7 +143,8 @@ fun BackgroundCanvas(
         }
 
         if (active != null) {
-            val description = if (showOriginal) "Original photo" else "Isolated subject, pinch to zoom"
+            val description = if (showOriginal) stringResource(R.string.st_BackgroundRemover_CanvasOriginal)
+            else stringResource(R.string.st_BackgroundRemover_CanvasResult)
             Crossfade(
                 targetState = active,
                 animationSpec = tween(180),

@@ -73,16 +73,13 @@ class OnnxInferenceEngine : AutoCloseable {
         height: Int,
         width: Int,
     ): SingleMask {
-        // Prefer the 4-D image input explicitly — never assume graph input order.
-        val inputName = try {
-            session.inputInfo.entries
-                .firstOrNull { (_, info) ->
-                    (info.info as? ai.onnxruntime.TensorInfo)?.getShape()?.size == 4
-                }?.key
-        } catch (_: Exception) {
-            null
-        } ?: session.inputNames.firstOrNull()
-        ?: throw OrtException("ONNX graph has no inputs")
+        // NOTE: intentionally NOT using session.inputInfo here. ORT's native
+        // getInputInfo calls back into the NodeInfo Java constructor, which R8
+        // can strip (ORT 1.29 consumer rules don't keep it) causing a fatal
+        // abort in release builds. getInputNames is a pure-Java path and safe.
+        // All pinned models are single-image-input; first name is the tensor.
+        val inputName = session.inputNames.firstOrNull()
+            ?: throw OrtException("ONNX graph has no inputs")
         OnnxTensor.createTensor(env, FloatBuffer.wrap(chw), longArrayOf(1, channels.toLong(), height.toLong(), width.toLong())).use { input ->
             session.run(mapOf(inputName to input)).use { result ->
                 val raw = result.get(0).value

@@ -32,8 +32,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.frerox.toolz.R
 import com.frerox.toolz.ui.screens.media.PreviewBackground
 import com.frerox.toolz.ui.theme.SquircleShape
 
@@ -60,17 +62,17 @@ fun BackgroundOptionsBar(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
         ) {
             ModeChip(
-                icon = Icons.Rounded.GridOn, label = "None",
+                icon = Icons.Rounded.GridOn, label = stringResource(R.string.st_BackgroundRemover_ModeNone),
                 selected = selected is PreviewBackground.Transparent,
                 onClick = { onSelect(PreviewBackground.Transparent) },
             )
             ModeChip(
-                icon = Icons.Rounded.Circle, label = "White",
+                icon = Icons.Rounded.Circle, label = stringResource(R.string.st_BackgroundRemover_ModeWhite),
                 selected = selected is PreviewBackground.White,
                 onClick = { onSelect(PreviewBackground.White) },
             )
             ModeChip(
-                icon = Icons.Rounded.BlurOn, label = "Blur",
+                icon = Icons.Rounded.BlurOn, label = stringResource(R.string.st_BackgroundRemover_ModeBlur),
                 selected = selected is PreviewBackground.Blur,
                 onClick = { onSelect(PreviewBackground.Blur) },
             )

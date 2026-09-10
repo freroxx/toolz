@@ -4,11 +4,6 @@
 
 package com.frerox.toolz.ui.screens.media.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,8 +24,6 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Diamond
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.WifiOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,12 +41,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.R
 import com.frerox.toolz.data.media.BackgroundModel
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.theme.SquircleShape
 
 /**
- * AI model picker — honest store rows: what it is, what it costs (size/speed),
- * its license, and its exact state. No marketing fluff, no dead code.
+ * AI model picker. One card per model, one action per card — the trailing icon
+ * downloads, deletes, or shows progress. Tapping a ready card selects it and
+ * closes the sheet. No duplicated CTA, no guessed timings: only facts
+ * (download size, input resolution) plus the license, always visible.
  */
 @Composable
 fun ModelHubContent(
@@ -62,7 +56,6 @@ fun ModelHubContent(
     downloadProgress: Float,
     downloadSpeed: String?,
     downloadedIds: Set<String>,
-    meteredNow: Boolean,
     onModelSelect: (BackgroundModel) -> Unit,
     onDownloadClick: (BackgroundModel) -> Unit,
     onDeleteClick: (BackgroundModel) -> Unit,
@@ -114,7 +107,6 @@ fun ModelHubContent(
                     isDownloading = downloadingId == model.id,
                     downloadProgress = downloadProgress,
                     downloadSpeed = downloadSpeed,
-                    meteredNow = meteredNow,
                     onClick = { onModelSelect(model) },
                     onDownload = { onDownloadClick(model) },
                     onCancel = onCancelDownload,
@@ -123,64 +115,7 @@ fun ModelHubContent(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        AnimatedVisibility(
-            visible = selectedModel != null,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            selectedModel?.let { model ->
-                val isDownloaded = downloadedIds.contains(model.id)
-                val isDownloading = downloadingId == model.id
-
-                ToolzExpressiveButton(
-                    onClick = { if (isDownloaded) onProceed() else onDownloadClick(model) },
-                    enabled = !isDownloading,
-                    shape = SquircleShape,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                ) {
-                    if (isDownloading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Icon(
-                            if (isDownloaded) Icons.Rounded.CheckCircle else Icons.Rounded.CloudDownload,
-                            null, modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        when {
-                            isDownloading -> stringResource(R.string.st_BackgroundRemover_Downloading)
-                            isDownloaded -> stringResource(R.string.st_BackgroundRemover_UseModel, model.shortName)
-                            else -> stringResource(R.string.st_BackgroundRemover_DownloadSize, model.sizeLabel)
-                        },
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                if (!isDownloaded && !isDownloading && model.gatedOnWifi && meteredNow) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            Icons.Rounded.WifiOff, null,
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            stringResource(R.string.st_BackgroundRemover_WifiNote, model.sizeLabel),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-            }
-        }
+        Spacer(Modifier.height(4.dp))
     }
 }
 
@@ -192,7 +127,6 @@ private fun ModelCard(
     isDownloading: Boolean,
     downloadProgress: Float,
     downloadSpeed: String?,
-    meteredNow: Boolean,
     onClick: () -> Unit,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -254,16 +188,11 @@ private fun ModelCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SpecDot(iconFor(model), model.sizeLabel)
-                        SpecDot(Icons.Rounded.Bolt, speedText(model))
-                        SpecDot(Icons.Rounded.Diamond, qualityText(model))
-                    }
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        model.licenseName,
+                        "${model.sizeLabel} · ${model.inputSize}px · ${model.licenseName}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     )
                 }
 
@@ -280,10 +209,10 @@ private fun ModelCard(
                         )
                     }
                 } else {
-                    IconButton(onClick = onDownload, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = onDownload, modifier = Modifier.size(44.dp)) {
                         Icon(
                             Icons.Rounded.CloudDownload, stringResource(R.string.st_BackgroundRemover_DownloadSize, model.sizeLabel),
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -308,33 +237,6 @@ private fun ModelCard(
             }
         }
     }
-}
-
-@Composable
-private fun SpecDot(icon: ImageVector, text: String) {
-    Icon(icon, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-    Spacer(Modifier.width(3.dp))
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.width(10.dp))
-}
-
-private fun speedText(model: BackgroundModel): String = when (model.id) {
-    "fast_general" -> "≈1–2s"
-    "portrait_rvm" -> "≈2–4s"
-    "pro_detail" -> "≈10–30s"
-    else -> "Instant"
-}
-
-private fun qualityText(model: BackgroundModel): String = when (model.id) {
-    "fast_general" -> "Good"
-    "portrait_rvm" -> "Great hair"
-    "pro_detail" -> "Max"
-    else -> "Rough"
 }
 
 private fun iconFor(model: BackgroundModel): ImageVector = when (model.id) {

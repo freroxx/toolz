@@ -232,6 +232,12 @@
 -keep class com.caverock.androidsvg.** { *; }
 -keep class com.google.zxing.** { *; }
 
+# ONNX Runtime — native code calls back into Java constructors (e.g. NodeInfo),
+# which R8 cannot see. ORT 1.29 consumer rules don't cover them (fatal abort in
+# release). Keep the whole package, same as Shizuku above.
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 # ------------------------------------------------------------------------------
 # 9. PROJECT-SPECIFIC DATA & UI (SAFETY OVERRIDE)
 # ------------------------------------------------------------------------------
