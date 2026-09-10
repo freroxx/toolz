@@ -121,10 +121,11 @@ fun BackgroundCanvas(
                     is PreviewBackground.White -> Box(Modifier.fillMaxSize().background(Color.White))
                     is PreviewBackground.Color -> Box(Modifier.fillMaxSize().background(Color(previewBackground.color)))
                     is PreviewBackground.Blur -> {
-                        if (blurredOriginal != null) {
+                        val blur = blurredOriginal
+                        if (blur != null && !blur.isRecycled) {
                             // Same Fit + padding + zoom as the cutout foreground — keeps them perfectly aligned
                             Image(
-                                bitmap = blurredOriginal.asImageBitmap(),
+                                bitmap = blur.asImageBitmap(),
                                 contentDescription = null,
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -179,19 +180,11 @@ fun BackgroundCanvas(
                         translationY = offset.y,
                     )
                     .pointerInput(active) {
-                        detectTransformGestures(
-                            onGestureEnd = {
-                                // Magnetize near-1x releases — kills drift without
-                                // fighting the user's intentional zoom-out.
-                                if (scale in 0.94f..1.06f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                }
-                                // Re-clamp to the floor/ceiling (safety limits).
-                                scale = scale.coerceIn(MIN_SCALE, MAX_SCALE)
-                            },
-                        ) { _, pan, zoom, _ ->
-                            val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            var newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                            // Magnetize near-1x: kills drift without fighting intent
+                            // (deliberate sub-1x holds stay put once past the band).
+                            if (newScale in 0.97f..1.03f) newScale = 1f
                             scale = newScale
                             if (newScale > 1.02f) {
                                 val bound = maxOffsetNow
