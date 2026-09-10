@@ -101,7 +101,7 @@ class ModelDownloadManager(
         return try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                 ?: return false
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return true
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
             !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         } catch (_: Exception) {
             false
@@ -130,10 +130,15 @@ class ModelDownloadManager(
     fun tmpFile(model: BackgroundModel): File =
         File(File(context.filesDir, "models"), "${model.fileName}.tmp")
 
+    /**
+     * @param onProgress invoked with (bytesRead, totalBytes) on every meaningful
+     * chunk — including when the server hides the total (totalBytes = -1), so the
+     * UI can NEVER freeze at 1%. Throttled to ~10 emissions/sec.
+     */
     suspend fun download(
         model: BackgroundModel,
         allowMetered: Boolean = false,
-        onProgress: (Float) -> Unit = {},
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
     ): Result<Unit> =
         withContext(Dispatchers.IO) {
             // Metered-network gate for large models (user confirms in UI).
@@ -166,6 +171,9 @@ class ModelDownloadManager(
                 val requestBuilder = Request.Builder()
                     .url(model.downloadUrl)
                     .header("Accept", "*/*")
+                    // identity: OkHttp's transparent gzip would otherwise hide the
+                    // true Content-Length (reported as -1 after decode).
+                    .header("Accept-Encoding", "identity")
                     .header("User-Agent", "Toolz-ModelHub/1.0")
                 if (resumeFrom > 0) requestBuilder.header("Range", "bytes=$resumeFrom-")
                 val request = requestBuilder.build()
@@ -205,35 +213,34 @@ class ModelDownloadManager(
                     }
                     FileOutputStream(tmp, resumed).use { out ->
                         val ins = body.byteStream()
-                        val buf = ByteArray(16384)
+                        val buf = ByteArray(32768)
                         var read: Int
                         var totalRead = if (resumed) resumeFrom else 0L
                         var lastEmit = 0L
                         var lastBytes = 0L
                         val t0 = System.currentTimeMillis()
                         val startBytes = totalRead
+                        // Emit once immediately so the UI leaves 1% on the first chunk.
+                        onProgress(totalRead, total)
                         while (ins.read(buf).also { read = it } != -1) {
                             // Cooperative cancellation check — if flow was reset elsewhere, abort via exception
                             if (Thread.interrupted()) throw InterruptedException("Download cancelled")
                             out.write(buf, 0, read)
                             totalRead += read
-                            if (total > 0) {
-                                val p = (totalRead.toFloat() / total).coerceIn(0f, 1f)
-                                // throttle emissions to 100ms
-                                val now = System.currentTimeMillis()
-                                if (now - lastEmit > 100 || p >= 1f) {
-                                    val bps = if (now > t0) (totalRead - startBytes) * 1000 / (now - t0 + 1) else 0L
-                                    flow.value = DownloadState.Downloading(p, bps)
-                                    onProgress(p)
-                                    lastEmit = now
-                                    lastBytes = totalRead
-                                }
-                            } else {
-                                // indeterminate — pulse
-                                if (totalRead - lastBytes > 256 * 1024) {
-                                    flow.value = DownloadState.Downloading(0.5f, 0L)
-                                    lastBytes = totalRead
-                                }
+                            // throttle emissions to 100ms
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit > 100 || (total > 0 && totalRead >= total)) {
+                                val bps = if (now > t0) (totalRead - startBytes) * 1000 / (now - t0 + 1) else 0L
+                                val p = if (total > 0) (totalRead.toFloat() / total).coerceIn(0f, 1f) else 0.5f
+                                flow.value = DownloadState.Downloading(p, bps)
+                                onProgress(totalRead, total)
+                                lastEmit = now
+                                lastBytes = totalRead
+                            } else if (totalRead - lastBytes > 256 * 1024) {
+                                // Unknown total: still report bytes so the UI shows
+                                // live MB instead of a frozen bar.
+                                onProgress(totalRead, total)
+                                lastBytes = totalRead
                             }
                         }
                     }
@@ -277,7 +284,7 @@ class ModelDownloadManager(
                     }
                     if (pinned != null) writeHashMarker(model)
                     flow.value = DownloadState.Done
-                    onProgress(1f)
+                    onProgress(dest.length(), dest.length())
                     return@withContext Result.success(Unit)
                 }
             } catch (ce: InterruptedException) {

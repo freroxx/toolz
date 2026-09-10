@@ -135,6 +135,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         downloadManager.delete(model)
         if (_uiState.value.selectedModel == model) {
             closeBackends()
+            recyclePhotoLocked()
             val remaining = downloadManager.allDownloadedIds()
             _uiState.update {
                 it.copy(
@@ -162,16 +163,21 @@ class BackgroundRemoverViewModel @Inject constructor(
                     it.copy(
                         stage = BgStage.DOWNLOADING,
                         isProcessing = true,
-                        downloadProgress = 0.01f,
+                        downloadingId = model.id,
+                        downloadProgress = 0f,
+                        downloadedBytes = 0L,
+                        totalBytes = -1L,
                         downloadSpeedBps = 0L,
                         failure = null,
                         error = null,
                     )
                 }
-                val result = downloadManager.download(model, allowMetered) { p ->
+                val result = downloadManager.download(model, allowMetered) { bytes, total ->
                     _uiState.update {
                         it.copy(
-                            downloadProgress = p,
+                            downloadedBytes = bytes,
+                            totalBytes = total,
+                            downloadProgress = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else 0f,
                             downloadSpeedBps = downloadManager.lastSpeedBps(model),
                         )
                     }
@@ -184,6 +190,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                         it.copy(
                             stage = BgStage.FAILED,
                             isProcessing = false,
+                            downloadingId = null,
                             failure = failure,
                         )
                     }
@@ -195,6 +202,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     it.copy(
                         stage = BgStage.IDLE,
                         isProcessing = false,
+                        downloadingId = null,
                         selectedModel = model,
                         isModelDownloaded = true,
                         downloadedIds = verified,
@@ -205,7 +213,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 // Auto-run if an image is already loaded
                 _uiState.value.originalBitmap?.let { bmp -> processImage(bmp) }
             } catch (ce: CancellationException) {
-                _uiState.update { it.copy(stage = BgStage.IDLE, isProcessing = false) }
+                _uiState.update { it.copy(stage = BgStage.IDLE, isProcessing = false, downloadingId = null) }
             } catch (e: Exception) {
                 Log.e("BgRemoverVM", "downloadModel failed", e)
                 val msg = e.message ?: context.getString(R.string.st_BackgroundRemover_ProcessingFailed)
@@ -213,6 +221,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     it.copy(
                         stage = BgStage.FAILED,
                         isProcessing = false,
+                        downloadingId = null,
                         failure = BgFailure(msg, RetryAction.RETRY_DOWNLOAD),
                     )
                 }            }
@@ -221,7 +230,7 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     fun cancelActive() {
         activeJob?.cancel()
-        _uiState.update { it.copy(stage = BgStage.IDLE, isProcessing = false) }
+        _uiState.update { it.copy(stage = BgStage.IDLE, isProcessing = false, downloadingId = null) }
     }
 
     // ── Backends ──
@@ -302,13 +311,36 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     // ── Image intake ──
 
+    /**
+     * The current original ONLY when we decoded it ourselves (loadBitmapRobust).
+     * Caller-owned bitmaps (camera/share via onBitmapSelected) are never recycled —
+     * recycling someone else's bitmap is a use-after-free crash.
+     */
+    private var internalOriginal: Bitmap? = null
+
+    private fun recycleBitmap(bmp: Bitmap?) {
+        try {
+            if (bmp != null && !bmp.isRecycled) bmp.recycle()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Drop the current photo + result, freeing their native/heap pixels now (not at GC). */
+    private fun recyclePhotoLocked() {
+        recycleBitmap(internalOriginal)
+        internalOriginal = null
+        recycleBitmap(_uiState.value.resultBitmap)
+    }
+
     fun onImageSelected(uri: Uri) {
         activeJob?.cancel()
         activeJob = viewModelScope.launch {
+            recyclePhotoLocked()
             _uiState.update {
                 it.copy(
                     stage = BgStage.SEGMENTING,
                     isProcessing = true,
+                    originalBitmap = null,
                     resultBitmap = null,
                     failure = null,
                     error = null,
@@ -323,6 +355,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     )
                     return@launch
                 }
+                internalOriginal = bitmap
                 _uiState.update { it.copy(originalBitmap = bitmap) }
                 if (_uiState.value.isModelDownloaded) {
                     processImage(bitmap)
@@ -345,9 +378,9 @@ class BackgroundRemoverViewModel @Inject constructor(
      * Stream-first decoder: works with every ContentProvider (photo picker, share sheet,
      * cloud-backed gallery apps) — unlike decodeFileDescriptor which fails on several
      * providers/HEIC encoders. Falls back to the descriptor path, then fixes EXIF rotation.
-     * maxDim is capped for the 256 MB heap: 3400px ≈ 35 MB/array worst case.
+     * maxDim is capped for the 256 MB heap: 3072px ≈ 36 MB per ARGB buffer worst case.
      */
-    private suspend fun loadBitmapRobust(uri: Uri, maxDim: Int = 3400): Bitmap? = withContext(Dispatchers.IO) {
+    private suspend fun loadBitmapRobust(uri: Uri, maxDim: Int = 3072): Bitmap? = withContext(Dispatchers.IO) {
         try {
             // Pass 1 — bounds
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -408,6 +441,9 @@ class BackgroundRemoverViewModel @Inject constructor(
     fun onBitmapSelected(bitmap: Bitmap) {
         activeJob?.cancel()
         activeJob = viewModelScope.launch {
+            recyclePhotoLocked()
+            // Not ours — never recycle (see internalOriginal).
+            internalOriginal = null
             _uiState.update {
                 it.copy(
                     stage = BgStage.SEGMENTING,
@@ -444,9 +480,12 @@ class BackgroundRemoverViewModel @Inject constructor(
             }
             _uiState.update { it.copy(stage = BgStage.MATTING) }
             val resultBitmap = runMatting(bitmap, mask, maskW, maskH)
+            val superseded = _uiState.value.resultBitmap
             _uiState.update {
                 it.copy(stage = BgStage.DONE, isProcessing = false, resultBitmap = resultBitmap)
             }
+            // Free the previous cutout now — a stale 40 MB bitmap must not linger.
+            if (superseded !== resultBitmap) recycleBitmap(superseded)
         } catch (e: OutOfMemoryError) {
             Log.e("BgRemoverVM", "processImage OOM", e)
             fail(context.getString(R.string.st_BackgroundRemover_TooLarge), RetryAction.PICK_IMAGE)
@@ -589,7 +628,9 @@ class BackgroundRemoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessing = true) }
             val success = withContext(Dispatchers.IO) {
-                val original = _uiState.value.originalBitmap
+                // Snapshot + recycled-guard: the user may pick a new photo mid-save,
+                // which recycles the old original on another thread.
+                val original = _uiState.value.originalBitmap?.takeUnless { it.isRecycled }
                 val toSave = when (background) {
                     is PreviewBackground.White -> compositeOnColor(bitmap, 0xFFFFFFFF.toInt())
                     is PreviewBackground.Color -> compositeOnColor(bitmap, background.color)
@@ -623,7 +664,11 @@ class BackgroundRemoverViewModel @Inject constructor(
     private fun compositeOnBlur(fg: Bitmap, original: Bitmap): Bitmap {
         val out = Bitmap.createBitmap(fg.width, fg.height, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(out)
-        c.drawBitmap(coverFit(blurForBackdrop(original), fg.width, fg.height), 0f, 0f, null)
+        val blurred = blurForBackdrop(original)
+        val bg = coverFit(blurred, fg.width, fg.height)
+        c.drawBitmap(bg, 0f, 0f, null)
+        if (bg !== blurred) recycleBitmap(bg)
+        if (blurred !== original) recycleBitmap(blurred)
         c.drawBitmap(fg, 0f, 0f, null)
         return out
     }
@@ -631,7 +676,9 @@ class BackgroundRemoverViewModel @Inject constructor(
     private fun compositeOnImage(fg: Bitmap, backdrop: Bitmap): Bitmap {
         val out = Bitmap.createBitmap(fg.width, fg.height, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(out)
-        c.drawBitmap(coverFit(backdrop, fg.width, fg.height), 0f, 0f, null)
+        val bg = coverFit(backdrop, fg.width, fg.height)
+        c.drawBitmap(bg, 0f, 0f, null)
+        if (bg !== backdrop) recycleBitmap(bg)
         c.drawBitmap(fg, 0f, 0f, null)
         return out
     }
@@ -727,6 +774,7 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     fun clearResult() {
         activeJob?.cancel()
+        recyclePhotoLocked()
         _uiState.update {
             BackgroundRemoverUiState(
                 selectedModel = it.selectedModel,
@@ -755,6 +803,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         super.onCleared()
         activeJob?.cancel()
         closeBackends()
+        recyclePhotoLocked()
         runCatching { onnxEngine.close() }
     }
 }
@@ -778,6 +827,10 @@ data class BackgroundRemoverUiState(
     val selectedModel: BackgroundModel? = null,
     val isModelDownloaded: Boolean = false,
     val downloadedIds: Set<String> = emptySet(),
+    /** Byte-accurate download progress. totalBytes = -1 while the server hides it. */
+    val downloadingId: String? = null,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = -1L,
     val downloadProgress: Float = 0f,
     val downloadSpeedBps: Long = 0L,
     val originalBitmap: Bitmap? = null,
