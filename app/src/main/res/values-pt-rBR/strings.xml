@@ -578,6 +578,7 @@
     <string name="st_BackgroundRemover_ProcessingFailed">Falha no processamento — tente com outra foto.</string>
     <string name="st_BackgroundRemover_SaveFailed">Falha ao salvar.</string>
     <string name="st_BackgroundRemover_MeteredBlocked">“%1$s” é grande (%2$s) — conecte-se ao Wi-Fi ou permita o download.</string>
+    <string name="st_BackgroundRemover_NoStorage">Sem espaço suficiente — libere %1$s para baixar este modelo.</string>
     <string name="st_BackgroundRemover_ModeNone">Nenhum</string>
     <string name="st_BackgroundRemover_ModeWhite">Branco</string>
     <string name="st_BackgroundRemover_ModeBlur">Desfoque</string>

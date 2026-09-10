@@ -587,8 +587,13 @@ class BackgroundRemoverViewModel @Inject constructor(
     }
 
     /**
-     * Runs the matting engine with an OOM safety net: on memory pressure the photo is
-     * downscaled once (≤2048px) and matting is retried before giving up.
+     * Runs the matting engine inside a memory budget computed from the live heap.
+     *
+     * Matting holds ~12 bytes/px beyond the source (pixels IntArray + alpha
+     * FloatArray + result Bitmap). Instead of attempting full-res and dying with
+     * "image too big", we downscale to fit BEFORE allocating, then retry at half
+     * size on residual OOM. The cutout may come back smaller than the photo on
+     * tight heaps — honest and useful beats a crash.
      */
     private suspend fun runMatting(
         source: Bitmap,
@@ -596,23 +601,88 @@ class BackgroundRemoverViewModel @Inject constructor(
         maskW: Int,
         maskH: Int,
     ): Bitmap {
+        val budgeted = fitToMemoryBudget(source)
+        val downsized = budgeted !== source
+        if (downsized) {
+            Log.i(
+                "BgRemoverVM",
+                "Memory budget: matting at ${budgeted.width}×${budgeted.height} " +
+                    "instead of ${source.width}×${source.height}",
+            )
+        }
+        try {
+            return try {
+                BackgroundRemoverEngine.removeBackground(budgeted, mask, maskW, maskH)
+            } catch (oom: OutOfMemoryError) {
+                // Budget was optimistic (heap is shared and moving) — halve once more.
+                Log.w("BgRemoverVM", "OOM at ${budgeted.width}×${budgeted.height} — halving", oom)
+                val half = budgeted.halvedForMemory() ?: throw oom
+                try {
+                    BackgroundRemoverEngine.removeBackground(half, mask, maskW, maskH)
+                } finally {
+                    if (half !== budgeted) half.recycle()
+                }
+            }
+        } finally {
+            if (downsized) budgeted.recycle()
+        }
+    }
+
+    /**
+     * Largest bitmap whose matting footprint (~12 B/px transient + result) fits in
+     * half the CURRENT free heap. Uses live headroom, not maxMemory fantasies, so a
+     * busy device budgets tighter than a fresh one.
+     */
+    private fun fitToMemoryBudget(source: Bitmap): Bitmap {
+        val px = source.width.toLong() * source.height
+        if (px <= 0) return source
+        val rt = Runtime.getRuntime()
+        val headroom = (rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())).coerceAtLeast(0)
+        val affordablePx = headroom / 2 / MATTING_BYTES_PER_PX
+        if (affordablePx <= 0) {
+            // Heap is already exhausted — force a small attempt, let the OOM path speak.
+            return source.scaledToLongEdge(768) ?: source
+        }
+        if (px <= affordablePx) return source
+        val s = kotlin.math.sqrt(affordablePx.toDouble() / px)
+        val w = (source.width * s).toInt().coerceAtLeast(1)
+        val h = (source.height * s).toInt().coerceAtLeast(1)
         return try {
-            BackgroundRemoverEngine.removeBackground(source, mask, maskW, maskH)
-        } catch (oom: OutOfMemoryError) {
-            Log.w("BgRemoverVM", "OOM at ${source.width}×${source.height} — retrying at ≤2048px", oom)
-            val scale = 2048f / maxOf(source.width, source.height)
-            val scaled = Bitmap.createScaledBitmap(
-                source,
-                (source.width * scale).toInt().coerceAtLeast(1),
-                (source.height * scale).toInt().coerceAtLeast(1),
+            Bitmap.createScaledBitmap(source, w, h, true)
+        } catch (_: OutOfMemoryError) {
+            source.scaledToLongEdge(768) ?: source
+        }
+    }
+
+    private fun Bitmap.halvedForMemory(): Bitmap? {
+        val w = (width / 2).coerceAtLeast(256)
+        val h = (height / 2).coerceAtLeast(256)
+        if (w >= width && h >= height) return null
+        return try {
+            Bitmap.createScaledBitmap(this, w, h, true)
+        } catch (_: OutOfMemoryError) {
+            null
+        }
+    }
+
+    private fun Bitmap.scaledToLongEdge(edge: Int): Bitmap? {
+        val s = edge.toFloat() / maxOf(width, height).toFloat()
+        if (s >= 1f) return null
+        return try {
+            Bitmap.createScaledBitmap(
+                this,
+                (width * s).toInt().coerceAtLeast(1),
+                (height * s).toInt().coerceAtLeast(1),
                 true,
             )
-            try {
-                BackgroundRemoverEngine.removeBackground(scaled, mask, maskW, maskH)
-            } finally {
-                if (scaled != source) scaled.recycle()
-            }
+        } catch (_: OutOfMemoryError) {
+            null
         }
+    }
+
+    companion object {
+        /** Matting transient + result footprint per source pixel (conservative). */
+        private const val MATTING_BYTES_PER_PX = 12L
     }
 
     // ── Export (honest: every preview mode composites for real) ──
@@ -703,15 +773,10 @@ class BackgroundRemoverViewModel @Inject constructor(
         return cropped
     }
 
-    /** Cheap strong blur for backdrops: downscale hard, upscale smooth. */
+    /** Export backdrop: small stack-blur upscaled smooth. Falls back to src, never crashes save. */
     private fun blurForBackdrop(src: Bitmap): Bitmap {
         return try {
-            val w = (src.width * 0.05f).toInt().coerceIn(1, 64)
-            val h = (src.height * 0.05f).toInt().coerceIn(1, 64)
-            val small = Bitmap.createScaledBitmap(src, w, h, true)
-            Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
-                if (small != it) small.recycle()
-            }
+            com.frerox.toolz.data.media.FastBlur.blurredBackdrop(src) ?: src
         } catch (_: Throwable) {
             src
         }

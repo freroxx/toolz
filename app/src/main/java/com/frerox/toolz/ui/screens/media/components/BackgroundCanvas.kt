@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.R
+import com.frerox.toolz.data.media.FastBlur
 import com.frerox.toolz.ui.screens.media.PreviewBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,7 +83,7 @@ fun BackgroundCanvas(
                 !original.isRecycled
             ) {
                 withContext(Dispatchers.Default) {
-                    runCatching { blurBitmapPreview(original) }.getOrNull()
+                    FastBlur.blurredPreview(original)
                 }
             } else {
                 null
@@ -257,32 +258,3 @@ private fun Checkerboard(checker: ImageBitmap, modifier: Modifier = Modifier) {
 // (unzoom past photo size); 4x caps texture + gesture insanity.
 private const val MIN_SCALE = 0.5f
 private const val MAX_SCALE = 4f
-
-// Preview-only blur: cap the long edge (a blur needs no pixels), downscale hard,
-// upscale smooth. Returns null on failure — callers fall back to checkerboard.
-private fun blurBitmapPreview(src: Bitmap, maxEdge: Int = 512): Bitmap? {
-    return try {
-        if (src.isRecycled) return null
-        val edge = maxOf(src.width, src.height)
-        val base = if (edge > maxEdge) {
-            val s = maxEdge.toFloat() / edge
-            Bitmap.createScaledBitmap(
-                src,
-                (src.width * s).toInt().coerceAtLeast(1),
-                (src.height * s).toInt().coerceAtLeast(1),
-                true,
-            )
-        } else {
-            src
-        }
-        val w = (base.width * 0.12f).toInt().coerceAtLeast(1)
-        val h = (base.height * 0.12f).toInt().coerceAtLeast(1)
-        val small = Bitmap.createScaledBitmap(base, w, h, true)
-        if (base !== src) base.recycle()
-        Bitmap.createScaledBitmap(small, base.width, base.height, true).also {
-            if (small != it) small.recycle()
-        }
-    } catch (_: Throwable) {
-        null
-    }
-}

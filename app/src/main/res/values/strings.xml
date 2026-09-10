@@ -600,6 +600,7 @@
     <string name="st_BackgroundRemover_ProcessingFailed">Processing failed — try again with another photo.</string>
     <string name="st_BackgroundRemover_SaveFailed">Save failed.</string>
     <string name="st_BackgroundRemover_MeteredBlocked">“%1$s” is large (%2$s) — connect to Wi-Fi or allow mobile download.</string>
+    <string name="st_BackgroundRemover_NoStorage">Not enough storage — free %1$s to download this model.</string>
     <string name="st_BackgroundRemover_ModeNone">None</string>
     <string name="st_BackgroundRemover_ModeWhite">White</string>
     <string name="st_BackgroundRemover_ModeBlur">Blur</string>

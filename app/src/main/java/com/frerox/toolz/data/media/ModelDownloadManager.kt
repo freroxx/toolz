@@ -13,15 +13,20 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.frerox.toolz.R
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 sealed interface DownloadState {
     data object Idle : DownloadState
@@ -43,8 +48,45 @@ class ModelDownloadManager(
     private val context: Context,
     private val okHttpClient: OkHttpClient,
 ) {
-    private val _states = mutableMapOf<String, MutableStateFlow<DownloadState>>()
+    /**
+     * Dedicated download client. The shared app client carries
+     * HttpLoggingInterceptor(BODY), which buffers the ENTIRE response into RAM
+     * before we read a byte — progress frozen at ~1% then OOM on 178 MB models.
+     * This client streams straight to disk: no logging, no read timeout (the
+     * user can cancel; cancellation tears down the socket, see below).
+     */
+    private val downloadClient: OkHttpClient by lazy {
+        val stripped = okHttpClient.newBuilder()
+        stripped.interceptors().removeAll {
+            it.javaClass.name.contains("logging", ignoreCase = true)
+        }
+        stripped
+            .connectTimeout(30, TimeUnit.SECONDS)
+            // Bounded, not infinite: a zero-byte stall unblocks on cancel via the
+            // finally-cancel below; 5 silent minutes means a dead route anyway.
+            .readTimeout(5, TimeUnit.MINUTES)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+
     private val lock = Any()
+    private val _states = mutableMapOf<String, MutableStateFlow<DownloadState>>()
+
+    /**
+     * The live socket call, if any. A coroutine-cancelled download can stay
+     * blocked in read() (blocking I/O ignores cancellation), so a fresh attempt
+     * always kills the orphaned socket first — otherwise two writers interleave
+     * into the same .tmp and poison it.
+     */
+    @Volatile
+    private var activeCall: Call? = null
+    /**
+     * Monotonic attempt id. finally-cancel only touches the socket when no newer
+     * attempt has started (generation unchanged) — a stale attempt must never
+     * kill its successor's connection.
+     */
+    @Volatile
+    private var downloadGen = 0L
 
     fun stateFor(model: BackgroundModel): StateFlow<DownloadState> = synchronized(lock) {
         _states.getOrPut(model.id) { MutableStateFlow(IdleOrDoneFor(model)) }
@@ -155,6 +197,11 @@ class ModelDownloadManager(
                 return@withContext Result.failure(Exception(msg))
             }
             val flow = synchronized(lock) { _states.getOrPut(model.id) { MutableStateFlow(DownloadState.Idle) } }
+            // Kill any orphaned socket from a cancelled-but-still-blocked previous
+            // attempt before touching the .tmp it might be appending to.
+            runCatching { activeCall?.cancel() }
+            activeCall = null
+            val myGen = ++downloadGen
             try {
                 flow.value = DownloadState.Downloading(0.01f)
                 val dir = File(context.filesDir, "models")
@@ -168,42 +215,77 @@ class ModelDownloadManager(
                 val resumeFrom = if (tmp.exists() && tmp.length() > 1024) tmp.length() else 0L
                 if (resumeFrom == 0L && tmp.exists()) tmp.delete()
 
-                val requestBuilder = Request.Builder()
-                    .url(model.downloadUrl)
-                    .header("Accept", "*/*")
-                    // identity: OkHttp's transparent gzip would otherwise hide the
-                    // true Content-Length (reported as -1 after decode).
-                    .header("Accept-Encoding", "identity")
-                    .header("User-Agent", "Toolz-ModelHub/1.0")
-                if (resumeFrom > 0) requestBuilder.header("Range", "bytes=$resumeFrom-")
-                val request = requestBuilder.build()
+                // Free-space precheck: a 178 MB model must never die halfway with ENOSPC.
+                val needBytes = if (model.expectedSizeBytes > 0)
+                    (model.expectedSizeBytes - resumeFrom).coerceAtLeast(0)
+                else 64L * 1024 * 1024
+                if (dir.usableSpace < needBytes + 16L * 1024 * 1024) {
+                    val msg = context.getString(
+                        R.string.st_BackgroundRemover_NoStorage,
+                        model.sizeLabel,
+                    )
+                    flow.value = DownloadState.Failed(msg, retryable = true)
+                    return@withContext Result.failure(Exception(msg))
+                }
 
-                okHttpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful && response.code != 206) {
-                        val detail = when (response.code) {
+                fun buildRequest(from: Long): Request {
+                    val b = Request.Builder()
+                        .url(model.downloadUrl)
+                        .header("Accept", "*/*")
+                        // identity: OkHttp's transparent gzip would otherwise hide the
+                        // true Content-Length (reported as -1 after decode).
+                        .header("Accept-Encoding", "identity")
+                        .header("User-Agent", "Toolz-ModelHub/1.0")
+                    if (from > 0) b.header("Range", "bytes=$from-")
+                    return b.build()
+                }
+
+                // NOTE: no invokeOnCancellation hook — blocking read() only exits
+                // via socket timeout or this finally-cancel. The loop below throws
+                // CancellationException promptly whenever bytes are flowing; a
+                // fully stalled socket is bounded by the 5-min read timeout, and a
+                // fresh attempt always kills the orphan first (see above).
+
+                // Signed CDN URLs (GitHub release assets) expire: a resumed Range
+                // against an expired URL answers 403/416. Retry once from scratch —
+                // the redirect yields a fresh signed URL.
+                var effectiveResume = resumeFrom
+                activeCall = downloadClient.newCall(buildRequest(effectiveResume))
+                var response = activeCall!!.execute()
+                if ((response.code == 403 || response.code == 416) && effectiveResume > 0) {
+                    response.close()
+                    tmp.delete()
+                    effectiveResume = 0L
+                    activeCall = downloadClient.newCall(buildRequest(0))
+                    response = activeCall!!.execute()
+                }
+
+                response.use { resp ->
+                    if (!resp.isSuccessful && resp.code != 206) {
+                        val detail = when (resp.code) {
                             404 -> "Model not found on server (404). Try again later."
-                            401, 403 -> "Download blocked (auth ${response.code}). Try again."
+                            401, 403 -> "Download blocked (auth ${resp.code}). Try again."
                             416 -> {
-                                // Range unsatisfiable — stale partial; restart cleanly.
+                                // Range unsatisfiable on a fresh request — stale partial; restart cleanly.
                                 tmp.delete()
                                 "Download interrupted — tap to retry."
                             }
                             429 -> "Server rate-limited (429). Wait a minute and retry."
-                            503, 502 -> "Server busy (${response.code}). Try again shortly."
-                            else -> "Network error ${response.code}: ${response.message}"
+                            503, 502 -> "Server busy (${resp.code}). Try again shortly."
+                            else -> "Network error ${resp.code}: ${resp.message}"
                         }
-                        flow.value = DownloadState.Failed(detail, retryable = response.code != 404)
+                        flow.value = DownloadState.Failed(detail, retryable = resp.code != 404)
                         // don't throw for 404 — caller handles message
                         return@withContext Result.failure(Exception(detail))
                     }
-                    val resumed = response.code == 206 && resumeFrom > 0
+                    val resumed = resp.code == 206 && effectiveResume > 0
                     if (!resumed && tmp.exists()) tmp.delete()
-                    val body = response.body ?: run {
+                    val body = resp.body ?: run {
                         val msg = "Empty response body"
                         flow.value = DownloadState.Failed(msg)
                         return@withContext Result.failure(Exception(msg))
                     }
-                    val total = body.contentLength().let { if (it > 0 && resumed) it + resumeFrom else it }
+                    val total = body.contentLength().let { if (it > 0 && resumed) it + effectiveResume else it }
                     // quick HTML detection via content-type
                     val ct = body.contentType()?.toString()?.lowercase() ?: ""
                     if (ct.contains("text/html")) {
@@ -215,7 +297,7 @@ class ModelDownloadManager(
                         val ins = body.byteStream()
                         val buf = ByteArray(32768)
                         var read: Int
-                        var totalRead = if (resumed) resumeFrom else 0L
+                        var totalRead = if (resumed) effectiveResume else 0L
                         var lastEmit = 0L
                         var lastBytes = 0L
                         val t0 = System.currentTimeMillis()
@@ -223,8 +305,10 @@ class ModelDownloadManager(
                         // Emit once immediately so the UI leaves 1% on the first chunk.
                         onProgress(totalRead, total)
                         while (ins.read(buf).also { read = it } != -1) {
-                            // Cooperative cancellation check — if flow was reset elsewhere, abort via exception
-                            if (Thread.interrupted()) throw InterruptedException("Download cancelled")
+                            // Dead coroutine = dead download: bail fast so Cancel
+                            // is instant even mid-chunk (read() itself is unblocked
+                            // via activeCall.cancel() in the Job hook above).
+                            if (!coroutineContext.isActive) throw CancellationException("Download cancelled")
                             out.write(buf, 0, read)
                             totalRead += read
                             // throttle emissions to 100ms
@@ -289,15 +373,29 @@ class ModelDownloadManager(
                 }
             } catch (ce: InterruptedException) {
                 flow.value = DownloadState.Failed("Download cancelled", retryable = true)
-                // cleanup tmp
-                try { tmpFile(model).delete() } catch (_: Exception) {}
+                // KEEP the partial .tmp — the next attempt resumes instead of restarting.
                 return@withContext Result.failure(ce)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 flow.value = DownloadState.Idle
-                try { tmpFile(model).delete() } catch (_: Exception) {}
+                // KEEP the partial .tmp — resume, don't restart, next tap.
                 throw e
+            } catch (e: IOException) {
+                // Socket torn down by OUR cancel (Job hook above) surfaces here as
+                // IOException — route it to the silent-cancel path, not an error card.
+                if (!coroutineContext.isActive) {
+                    flow.value = DownloadState.Idle
+                    throw CancellationException("Download cancelled", e)
+                }
+                e.printStackTrace()
+                val msg = e.message ?: "Download failed"
+                flow.value = DownloadState.Failed(msg, retryable = true)
+                return@withContext Result.failure(Exception(msg, e))
             } catch (e: Exception) {
                 e.printStackTrace()
+                if (!coroutineContext.isActive) {
+                    flow.value = DownloadState.Idle
+                    throw CancellationException("Download cancelled", e)
+                }
                 val msg = e.localizedMessage ?: "Download failed"
                 // Map common
                 val friendly = when {
@@ -306,8 +404,13 @@ class ModelDownloadManager(
                     else -> msg
                 }
                 flow.value = DownloadState.Failed(friendly, retryable = true)
-                try { tmpFile(model).delete() } catch (_: Exception) {}
+                // KEEP the partial .tmp — a timeout mid-178 MB must resume, not restart.
                 return@withContext Result.failure(Exception(friendly, e))
+            } finally {
+                // Unblock a stalled read so a cancelled download can't leak its
+                // socket past the retry that superseded it. No-op when complete;
+                // skipped when a newer attempt already owns the field.
+                if (downloadGen == myGen) runCatching { activeCall?.cancel() }
             }
         }
 

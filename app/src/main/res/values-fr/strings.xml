@@ -586,6 +586,7 @@
     <string name="st_BackgroundRemover_ProcessingFailed">Échec du traitement — réessayez avec une autre photo.</string>
     <string name="st_BackgroundRemover_SaveFailed">Échec de l\'enregistrement.</string>
     <string name="st_BackgroundRemover_MeteredBlocked">« %1$s » est volumineux (%2$s) : connectez-vous au Wi-Fi ou autorisez le téléchargement.</string>
+    <string name="st_BackgroundRemover_NoStorage">Espace insuffisant — libérez %1$s pour télécharger ce modèle.</string>
     <string name="st_BackgroundRemover_ModeNone">Aucun</string>
     <string name="st_BackgroundRemover_ModeWhite">Blanc</string>
     <string name="st_BackgroundRemover_ModeBlur">Flou</string>
