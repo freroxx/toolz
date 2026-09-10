@@ -557,6 +557,23 @@
     <string name="st_BackgroundRemover_Hint">Select a portrait or selfie to start</string>
     <string name="st_BackgroundRemover_Error">Error</string>
     <string name="st_BackgroundRemover_Success">Saved to gallery</string>
+    <string name="st_Common_Close">Close</string>
+    <string name="st_Common_Cancel">Cancel</string>
+    <string name="st_BackgroundRemover_Models">AI models</string>
+    <string name="st_BackgroundRemover_OfflineNote">Offline after download</string>
+    <string name="st_BackgroundRemover_Downloading">Downloading…</string>
+    <string name="st_BackgroundRemover_UseModel">Use %1$s</string>
+    <string name="st_BackgroundRemover_DownloadSize">Download · %1$s</string>
+    <string name="st_BackgroundRemover_WifiNote">Large file (%1$s) — Wi-Fi recommended</string>
+    <string name="st_BackgroundRemover_Recommended">RECOMMENDED</string>
+    <string name="st_BackgroundRemover_Ready">Ready</string>
+    <string name="st_BackgroundRemover_RemoveModel">Remove %1$s</string>
+    <string name="st_BackgroundRemover_Retry">Retry</string>
+    <string name="st_BackgroundRemover_MeteredTitle">Large download</string>
+    <string name="st_BackgroundRemover_MeteredText">“%1$s” is %2$s. Download it over mobile data?</string>
+    <string name="st_BackgroundRemover_MeteredAllow">Download anyway</string>
+    <string name="st_BackgroundRemover_ModelRemoved">%1$s removed</string>
+    <string name="st_BackgroundRemover_Redownload">Re-download</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Perfect Gray Suggestion</string>

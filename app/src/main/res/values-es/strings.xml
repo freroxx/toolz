@@ -535,6 +535,23 @@
     <string name="st_BackgroundRemover_Hint">Selecciona un retrato para comenzar</string>
     <string name="st_BackgroundRemover_Error">Error</string>
     <string name="st_BackgroundRemover_Success">Guardado en la galería</string>
+    <string name="st_Common_Close">Cerrar</string>
+    <string name="st_Common_Cancel">Cancelar</string>
+    <string name="st_BackgroundRemover_Models">Modelos de IA</string>
+    <string name="st_BackgroundRemover_OfflineNote">Sin conexión tras la descarga</string>
+    <string name="st_BackgroundRemover_Downloading">Descargando…</string>
+    <string name="st_BackgroundRemover_UseModel">Usar %1$s</string>
+    <string name="st_BackgroundRemover_DownloadSize">Descargar · %1$s</string>
+    <string name="st_BackgroundRemover_WifiNote">Archivo grande (%1$s): se recomienda Wi-Fi</string>
+    <string name="st_BackgroundRemover_Recommended">RECOMENDADO</string>
+    <string name="st_BackgroundRemover_Ready">Listo</string>
+    <string name="st_BackgroundRemover_RemoveModel">Quitar %1$s</string>
+    <string name="st_BackgroundRemover_Retry">Reintentar</string>
+    <string name="st_BackgroundRemover_MeteredTitle">Descarga grande</string>
+    <string name="st_BackgroundRemover_MeteredText">“%1$s” pesa %2$s. ¿Descargarlo con datos móviles?</string>
+    <string name="st_BackgroundRemover_MeteredAllow">Descargar igual</string>
+    <string name="st_BackgroundRemover_ModelRemoved">%1$s eliminado</string>
+    <string name="st_BackgroundRemover_Redownload">Descargar de nuevo</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Sugerencia de Gris Perfecto</string>

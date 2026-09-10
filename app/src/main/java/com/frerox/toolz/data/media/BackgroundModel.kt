@@ -18,97 +18,131 @@
 package com.frerox.toolz.data.media
 
 /**
- * Pro Intelligence Lineup for Background Removal.
- * All models are downloaded on-demand through the Model Hub to maintain a compact APK footprint.
+ * Curated lineup for Background Removal (2026 revamp).
  *
- * Revamp 2026: fixed broken tfhub URL, pinned HuggingFace commit, added integrity fields.
- * Keep GCS MediaPipe urls on versioned `latest` (stable) but expose etag for verification.
+ * All models are downloaded on-demand through the Model Hub — nothing ships in the APK.
+ * See MODELS.md (repo root) for the full audit trail: source, license, SHA-256.
+ *
+ * Tiers:
+ * - FAST    — U²-Net+ ONNX: general subjects, small download, CPU-friendly.
+ * - PORTRAIT— Robust Video Matting (MobileNetV3, fp32 ONNX): people/pets, hair-level
+ *             alpha, single-pass still mode with zero recurrent states.
+ * - PRO     — ISNet general-use ONNX: best general quality, large + slow, Wi-Fi gated.
+ * - INSTANT — MediaPipe selfie TFLite: rough person blob, fully offline fallback.
  */
+enum class InferenceRuntime { LITERT, ONNX }
+
 enum class BackgroundModel(
     val id: String,
     val displayName: String,
+    val shortName: String,
     val description: String,
     val sizeLabel: String,
-    val resolution: Int,
     val downloadUrl: String,
     val fileName: String,
+    val runtime: InferenceRuntime,
+    /** Square model input. RVM ([PORTRAIT_RVM]) uses this as a long-edge cap (aspect kept). */
+    val inputSize: Int,
     val features: List<String>,
-    /** Optional expected ETag / size for integrity check (no hard-fail if null) */
-    val expectedEtag: String? = null,
+    /** SHA-256 pin — enforced at download, marker-cached afterwards. Null = legacy (size sniff only). */
+    val expectedSha256: String? = null,
     val expectedSizeBytes: Long = -1L,
-    /** Human-readable recommendation badge */
+    /** True → refuses metered connections unless the user explicitly allows them. */
+    val gatedOnWifi: Boolean = false,
+    val licenseName: String,
+    val licenseUrl: String,
     val isRecommended: Boolean = false,
 ) {
-    SELFIE_PORTRAIT(
-        id = "selfie_portrait",
-        displayName = "Selfie Portrait • Fast",
-        description = "Ultra-fast portrait segmentation. Best for selfies, headshots, and single-person portraits.",
-        sizeLabel = "250 KB",
-        resolution = 256,
-        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
-        fileName = "selfie_segmenter.tflite",
-        features = listOf("Studio Portrait", "Instant Speed", "Low Memory"),
-        expectedEtag = "\"3b2e3e1cfc7d31538caf00ff4e0fba8c\"",
-        expectedSizeBytes = 249537L,
+    FAST_GENERAL(
+        id = "fast_general",
+        displayName = "Fast • General",
+        shortName = "Fast",
+        description = "General subjects — people, pets, products. Small, quick, offline after download.",
+        sizeLabel = "4.4 MB",
+        downloadUrl = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+        fileName = "u2netp.onnx",
+        runtime = InferenceRuntime.ONNX,
+        inputSize = 320,
+        features = listOf("General subjects", "Tiny download", "Fast on CPU"),
+        expectedSha256 = "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+        expectedSizeBytes = 4574861L,
+        licenseName = "Apache-2.0 (U-2-Net)",
+        licenseUrl = "https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE",
         isRecommended = true,
     ),
 
-    SELFIE_LANDSCAPE(
-        id = "selfie_landscape",
-        displayName = "Selfie Landscape • Group",
-        description = "Optimized for widescreen, full-body, and multi-person group shots.",
+    PORTRAIT_RVM(
+        id = "portrait_rvm",
+        displayName = "Portrait • Detail",
+        shortName = "Portrait",
+        description = "People and pets with hair-level alpha. Slightly slower, worth it for portraits.",
+        sizeLabel = "14.3 MB",
+        downloadUrl = "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx",
+        fileName = "rvm_mobilenetv3_fp32.onnx",
+        runtime = InferenceRuntime.ONNX,
+        inputSize = 512,
+        features = listOf("Hair-level alpha", "People & pets", "Studio portraits"),
+        expectedSha256 = "88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828",
+        expectedSizeBytes = 14975696L,
+        licenseName = "GPL-3.0 (RVM)",
+        licenseUrl = "https://github.com/PeterL1n/RobustVideoMatting/blob/master/LICENSE.txt",
+    ),
+
+    PRO_DETAIL(
+        id = "pro_detail",
+        displayName = "Pro • Max detail",
+        shortName = "Pro",
+        description = "Best general quality for tricky edges. Big download, slower — use on Wi-Fi.",
+        sizeLabel = "178 MB",
+        downloadUrl = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+        fileName = "isnet-general-use.onnx",
+        runtime = InferenceRuntime.ONNX,
+        inputSize = 1024,
+        features = listOf("Max detail", "Tricky edges", "Wi-Fi download"),
+        expectedSha256 = "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
+        expectedSizeBytes = 178648008L,
+        gatedOnWifi = true,
+        licenseName = "See MODELS.md (ISNet via rembg)",
+        licenseUrl = "https://github.com/danielgatis/rembg",
+    ),
+
+    INSTANT_SELFIE(
+        id = "instant_selfie",
+        displayName = "Instant • Rough",
+        shortName = "Instant",
+        description = "Rough person cutout in a blink. Offline fallback when nothing else fits.",
         sizeLabel = "250 KB",
-        resolution = 256,
-        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite",
-        fileName = "selfie_segmenter_landscape.tflite",
-        features = listOf("Full-Body & Group", "Widescreen Native", "Fast Speed"),
-        expectedEtag = "\"880c84cde97f80aa20d1b09d09c20113\"",
-        expectedSizeBytes = 250177L,
-    ),
-
-    SELFIE_MULTICLASS(
-        id = "selfie_multiclass",
-        displayName = "Anatomical Matte • 6-Channel",
-        description = "6-channel segmentation isolating body, hair, clothing, and accessories. Best detail.",
-        sizeLabel = "15.6 MB",
-        resolution = 256,
-        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
-        fileName = "selfie_multiclass_256x256.tflite",
-        features = listOf("Anatomical 6-Chan", "Hair & Clothing", "Studio Quality"),
-        expectedEtag = "\"6ca6a40d84bcb910420a1a43a295100a\"",
-        expectedSizeBytes = 16371837L,
-    ),
-
-    DEEPLABV3_OBJECTS(
-        id = "deeplabv3_objects",
-        displayName = "Universal Objects • DeepLabV3",
-        description = "General object matting for pets, products, vehicles, plants and 20+ PASCAL classes.",
-        sizeLabel = "2.7 MB",
-        resolution = 257,
-        // FIX 2026-08: tfhub.dev deprecated (404). Use stable GCS mirror — same model, GPU variant.
-        downloadUrl = "https://storage.googleapis.com/download.tensorflow.org/models/tflite/gpu/deeplabv3_257_mv_gpu.tflite",
-        fileName = "deeplabv3.tflite",
-        features = listOf("Pets & Animals", "Products & Vehicles", "20+ Classes"),
-        expectedEtag = "\"4a24db5a5fb05c47586a1197765e8548\"",
-        expectedSizeBytes = 2779264L,
-    ),
-
-    MODNET_HD(
-        id = "modnet_hd",
-        displayName = "Portrait HD • Detail",
-        description = "Hair & clothing detail via 6-channel matte — best for fine strands. Stable GCS.",
-        sizeLabel = "15.6 MB",
-        resolution = 256,
-        // FIX 2026-08 v2: HF MODNet 24.9 MB proved unstable (redirects/rate-limit). Switch to GCS multiclass (same hair-detail quality, stable).
-        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite",
-        fileName = "modnet.tflite",
-        features = listOf("Hair & Clothing Detail", "6-Channel Matte", "Stable GCS"),
-        expectedEtag = "\"6ca6a40d84bcb910420a1a43a295100a\"",
-        expectedSizeBytes = 16371837L,
+        downloadUrl = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+        fileName = "selfie_segmenter.tflite",
+        runtime = InferenceRuntime.LITERT,
+        inputSize = 256,
+        features = listOf("Instant", "Tiny", "Offline fallback"),
+        expectedSha256 = null,
+        expectedSizeBytes = 249537L,
+        licenseName = "Apache-2.0 (MediaPipe)",
+        licenseUrl = "https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE",
     );
 
     companion object {
         fun fromId(id: String): BackgroundModel? = entries.find { it.id == id }
-        fun default(): BackgroundModel = SELFIE_PORTRAIT
+        fun default(): BackgroundModel = FAST_GENERAL
+
+        /** Retired pre-revamp ids → their migration target (null = default). */
+        fun migrateLegacyId(oldId: String): BackgroundModel = when (oldId) {
+            "selfie_portrait", "selfie_landscape" -> INSTANT_SELFIE
+            "selfie_multiclass", "modnet_hd" -> PORTRAIT_RVM
+            "deeplabv3_objects" -> FAST_GENERAL
+            else -> default()
+        }
+
+        fun isLegacyId(id: String): Boolean = fromId(id) == null
+
+        /** Stale files from the retired lineup, reclaimed once on upgrade. */
+        val LEGACY_FILE_NAMES: List<String> = listOf(
+            "selfie_segmenter_landscape.tflite",
+            "selfie_multiclass_256x256.tflite",
+            "deeplabv3.tflite",
+            "modnet.tflite",
+        )
     }
 }

@@ -38,7 +38,9 @@ import com.frerox.toolz.ui.screens.media.PreviewBackground
 import com.frerox.toolz.ui.theme.SquircleShape
 
 /**
- * Floating background-mode selector. Compact: three labeled modes + color dots.
+ * Floating background-mode selector: three preview modes + a curated tonal palette.
+ * (PreviewBackground.CustomImage stays supported by the canvas/export pipeline for
+ * future use; this bar intentionally offers only the fixed, curated set.)
  */
 @Composable
 fun BackgroundOptionsBar(
@@ -80,18 +82,23 @@ fun BackgroundOptionsBar(
                     .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             )
 
-            ColorDot(Color(0xFF1C1B1F), selected matchesColor Color(0xFF1C1B1F)) {
-                onSelect(PreviewBackground.Color(0xFF1C1B1F.toInt()))
-            }
-            ColorDot(Color(0xFF7C4DFF), selected matchesColor Color(0xFF7C4DFF)) {
-                onSelect(PreviewBackground.Color(0xFF7C4DFF.toInt()))
-            }
-            ColorDot(Color(0xFFFF9800), selected matchesColor Color(0xFFFF9800)) {
-                onSelect(PreviewBackground.Color(0xFFFF9800.toInt()))
+            for (swatch in BackdropPalette) {
+                ColorDot(swatch, selected matchesColor swatch) {
+                    onSelect(PreviewBackground.Color(swatch.toArgb()))
+                }
             }
         }
     }
 }
+
+/** Curated tonal backdrops: ink, two brand-adjacent hues, warmth, and paper. */
+private val BackdropPalette = listOf(
+    Color(0xFF1C1B1F), // ink
+    Color(0xFF3E3A4D), // slate violet
+    Color(0xFF7C4DFF), // brand violet
+    Color(0xFFFF9800), // amber warmth
+    Color(0xFFE8E0D5), // paper
+)
 
 private infix fun PreviewBackground.matchesColor(color: Color): Boolean =
     this is PreviewBackground.Color && this.color == color.toArgb()

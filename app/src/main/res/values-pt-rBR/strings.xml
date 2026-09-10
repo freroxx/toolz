@@ -535,6 +535,23 @@
     <string name="st_BackgroundRemover_Hint">Selecione um retrato para começar</string>
     <string name="st_BackgroundRemover_Error">Erro</string>
     <string name="st_BackgroundRemover_Success">Salvo na galeria</string>
+    <string name="st_Common_Close">Fechar</string>
+    <string name="st_Common_Cancel">Cancelar</string>
+    <string name="st_BackgroundRemover_Models">Modelos de IA</string>
+    <string name="st_BackgroundRemover_OfflineNote">Offline após baixar</string>
+    <string name="st_BackgroundRemover_Downloading">Baixando…</string>
+    <string name="st_BackgroundRemover_UseModel">Usar %1$s</string>
+    <string name="st_BackgroundRemover_DownloadSize">Baixar · %1$s</string>
+    <string name="st_BackgroundRemover_WifiNote">Arquivo grande (%1$s) — Wi-Fi recomendado</string>
+    <string name="st_BackgroundRemover_Recommended">RECOMENDADO</string>
+    <string name="st_BackgroundRemover_Ready">Pronto</string>
+    <string name="st_BackgroundRemover_RemoveModel">Remover %1$s</string>
+    <string name="st_BackgroundRemover_Retry">Tentar de novo</string>
+    <string name="st_BackgroundRemover_MeteredTitle">Download grande</string>
+    <string name="st_BackgroundRemover_MeteredText">“%1$s” tem %2$s. Baixar usando dados móveis?</string>
+    <string name="st_BackgroundRemover_MeteredAllow">Baixar mesmo assim</string>
+    <string name="st_BackgroundRemover_ModelRemoved">%1$s removido</string>
+    <string name="st_BackgroundRemover_Redownload">Baixar de novo</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Sugestão de Cinza Perfeito</string>

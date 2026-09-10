@@ -5,6 +5,8 @@
 package com.frerox.toolz.ui.screens.media.components
 
 import android.graphics.Bitmap
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -15,12 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.screens.media.PreviewBackground
 import com.frerox.toolz.ui.theme.SquircleShape
@@ -28,9 +31,10 @@ import androidx.compose.ui.draw.clip
 
 /**
  * M3 Expressive canvas for Background Remover.
- * - Checkerboard for transparent
- * - Zoom/pan via transform gestures (1x..4x)
- * - Solid color / blur preview modes
+ * - Checkerboard for transparent (drawn once into a cached bitmap, not every frame)
+ * - Zoom/pan via transform gestures (1x..4x), pan bounded by actual content geometry
+ * - Zoom survives result arrival; resets only on a new photo or compare toggle
+ * - Solid color / blur preview modes, crossfaded Isolated ↔ Original
  */
 @Composable
 fun BackgroundCanvas(
@@ -43,8 +47,13 @@ fun BackgroundCanvas(
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    // reset on image change
-    LaunchedEffect(original, result, showOriginal) {
+    // New photo → reset. Result arrival keeps the user's zoom.
+    LaunchedEffect(original) {
+        scale = 1f
+        offset = Offset.Zero
+    }
+    // Toggling compare reframes — deliberate, keeps both views inspectable from 1x.
+    LaunchedEffect(showOriginal) {
         scale = 1f
         offset = Offset.Zero
     }
@@ -61,18 +70,32 @@ fun BackgroundCanvas(
         if (previewBackground is PreviewBackground.Blur && original != null) blurBitmapLight(original) else null
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .clip(SquircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)),
         contentAlignment = Alignment.Center,
     ) {
+        val density = LocalDensity.current
+        // Pan bound derived from real geometry: at scale s the content overflows by
+        // (s − 1) × canvasSize / 2 on each side. No magic constants.
+        val maxOffset = remember(scale, maxWidth, maxHeight, density) {
+            with(density) {
+                val mx = ((scale - 1f) * maxWidth.toPx() / 2f).coerceAtLeast(0f)
+                val my = ((scale - 1f) * maxHeight.toPx() / 2f).coerceAtLeast(0f)
+                Offset(mx, my)
+            }
+        }
+        // Latest bound without restarting the gesture detector mid-pinch.
+        val maxOffsetNow by rememberUpdatedState(maxOffset)
+        val checker = rememberCheckerboard()
+
         // Background layer — blur now shares the exact same Fit geometry + zoom as the foreground
         when {
             showOriginal -> Unit
             result != null -> {
                 when (previewBackground) {
-                    is PreviewBackground.Transparent -> CheckerboardPattern(Modifier.fillMaxSize())
+                    is PreviewBackground.Transparent -> Checkerboard(checker, Modifier.fillMaxSize())
                     is PreviewBackground.White -> Box(Modifier.fillMaxSize().background(Color.White))
                     is PreviewBackground.Color -> Box(Modifier.fillMaxSize().background(Color(previewBackground.color)))
                     is PreviewBackground.Blur -> {
@@ -94,7 +117,7 @@ fun BackgroundCanvas(
                             )
                             // subtle dim, covers whole canvas (not zoomed) to keep blur soft
                             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.06f)))
-                        } else CheckerboardPattern(Modifier.fillMaxSize())
+                        } else Checkerboard(checker, Modifier.fillMaxSize())
                     }
                     is PreviewBackground.CustomImage -> {
                         Image(
@@ -114,13 +137,15 @@ fun BackgroundCanvas(
                     }
                 }
             }
-            else -> CheckerboardPattern(Modifier.fillMaxSize())
+            else -> Checkerboard(checker, Modifier.fillMaxSize())
         }
 
         if (active != null) {
-            Image(
-                bitmap = active.asImageBitmap(),
-                contentDescription = if (showOriginal) "Original photo" else "Isolated subject",
+            val description = if (showOriginal) "Original photo" else "Isolated subject, pinch to zoom"
+            Crossfade(
+                targetState = active,
+                animationSpec = tween(180),
+                label = "compare_crossfade",
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(8.dp)
@@ -133,44 +158,71 @@ fun BackgroundCanvas(
                     .pointerInput(active) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             val newScale = (scale * zoom).coerceIn(1f, 4f)
-                            // only allow pan when zoomed
                             if (newScale > 1.02f) {
                                 scale = newScale
-                                // damp pan
-                                offset += pan
-                                // clamp loosely
-                                val max = 400f * (scale - 1f)
-                                offset = Offset(offset.x.coerceIn(-max, max), offset.y.coerceIn(-max, max))
+                                val bound = maxOffsetNow
+                                offset = Offset(
+                                    (offset.x + pan.x).coerceIn(-bound.x, bound.x),
+                                    (offset.y + pan.y).coerceIn(-bound.y, bound.y),
+                                )
                             } else {
                                 scale = 1f
                                 offset = Offset.Zero
                             }
                         }
                     },
-                contentScale = ContentScale.Fit,
-            )
+            ) { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = description,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
+    }
+}
+
+/** Checker tile bitmap drawn once per theme — Canvas blits it instead of stroking rects per frame. */
+@Composable
+private fun rememberCheckerboard(): ImageBitmap {
+    val c1 = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f)
+    val c2 = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f)
+    val density = LocalDensity.current
+    return remember(c1, c2, density) {
+        val tilePx = with(density) { 22.dp.toPx() }.toInt().coerceAtLeast(8)
+        val size = tilePx * 2
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        val p1 = android.graphics.Paint().apply { color = android.graphics.Color.argb(
+            (c1.alpha * 255).toInt(), (c1.red * 255).toInt(), (c1.green * 255).toInt(), (c1.blue * 255).toInt()) }
+        val p2 = android.graphics.Paint().apply { color = android.graphics.Color.argb(
+            (c2.alpha * 255).toInt(), (c2.red * 255).toInt(), (c2.green * 255).toInt(), (c2.blue * 255).toInt()) }
+        canvas.drawRect(0f, 0f, size.toFloat(), size.toFloat(), p2)
+        canvas.drawRect(0f, 0f, tilePx.toFloat(), tilePx.toFloat(), p1)
+        canvas.drawRect(tilePx.toFloat(), tilePx.toFloat(), size.toFloat(), size.toFloat(), p1)
+        bmp.asImageBitmap()
     }
 }
 
 @Composable
 fun CheckerboardPattern(modifier: Modifier = Modifier) {
-    // M3 tonal checker — contrasts on both light/dark
-    val c1 = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f)
-    val c2 = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.55f)
-    val tile = 22.dp
+    Checkerboard(rememberCheckerboard(), modifier)
+}
+
+@Composable
+private fun Checkerboard(checker: ImageBitmap, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
-        val tilePx = tile.toPx()
-        val cols = (size.width / tilePx).toInt() + 1
-        val rows = (size.height / tilePx).toInt() + 1
-        for (r in 0 until rows) {
-            for (col in 0 until cols) {
-                drawRect(
-                    color = if ((r + col) % 2 == 0) c1 else c2,
-                    topLeft = Offset(col * tilePx, r * tilePx),
-                    size = Size(tilePx, tilePx),
-                )
+        val tile = checker.width.toFloat()
+        if (tile <= 0f) return@Canvas
+        var y = 0f
+        while (y < size.height) {
+            var x = 0f
+            while (x < size.width) {
+                drawImage(checker, topLeft = Offset(x, y))
+                x += tile
             }
+            y += tile
         }
     }
 }

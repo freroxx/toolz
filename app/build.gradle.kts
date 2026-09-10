@@ -231,6 +231,10 @@ dependencies {
     // Services dependency, and ships 16 KB-aligned native libs (Play requirement, Android 15+).
     // Same org.tensorflow.lite package / classic Interpreter API — no code change needed.
     implementation(libs.litert)
+    // ONNX Runtime Mobile — quality-tier segmentation (U2Net/RVM/MODNet/ISNet).
+    // MIT licensed, MavenCentral, per-ABI .so ships via existing ABI splits
+    // (~+32 MB arm64-v8a, ~+23 MB armeabi-v7a). Models stay download-on-demand.
+    implementation(libs.onnxruntime.android)
     // Tesseract4Android — replaces com.google.mlkit:text-recognition-* (F-Droid compliant)
     // Latin script covers English, French, Brazilian Portuguese, and Spanish.
     implementation(libs.tesseract4android)
