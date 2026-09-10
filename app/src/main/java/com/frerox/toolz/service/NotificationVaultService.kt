@@ -33,6 +33,7 @@ import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -209,4 +210,11 @@ class NotificationVaultService : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {}
+
+    override fun onDestroy() {
+        // Stop leaked per-notification coroutines across system rebinds —
+        // orphaned work is what makes the logcat "Bad key" rebinding storms worse.
+        serviceScope.cancel()
+        super.onDestroy()
+    }
 }

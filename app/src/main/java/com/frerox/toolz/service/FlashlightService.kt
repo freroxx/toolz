@@ -43,7 +43,10 @@ import javax.inject.Inject
 
 private const val TAG        = "FlashlightService"
 private const val CHANNEL_ID = "flashlight_v2"
-private const val NOTIF_ID   = 1001
+// NOTE: notification IDs are per-package, not per-service. CaffeinateService owns
+// 1001-1003 — sharing 1001 made the two foreground services overwrite each other's
+// notification (losing FGS status → system kill). Keep this out of that range.
+private const val NOTIF_ID   = 1009
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FlashlightService — redesigned foreground service

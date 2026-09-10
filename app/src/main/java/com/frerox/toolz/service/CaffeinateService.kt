@@ -333,12 +333,22 @@ class CaffeinateService : Service() {
     private fun updateNotificationLoop() {
         notificationJob?.cancel()
         notificationJob = serviceScope.launch {
+            // The in-app UI gets exact seconds via elapsedTimeFlow (still ticked
+            // every second below). The STATUS-BAR notification only reposts when
+            // its minute-granularity text actually changes — reposting every
+            // second spams logcat, fires listener callbacks, and burns battery
+            // for zero user-visible benefit.
+            var lastText: String? = null
             while (isActive && isRunning) {
                 val elapsed = System.currentTimeMillis() - startTimeMillis
                 _elapsedTimeFlow.value = elapsed
-                
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.notify(NOTIFICATION_ID, createNotification(currentNotificationText()))
+
+                val text = currentNotificationText()
+                if (text != lastText) {
+                    lastText = text
+                    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    notificationManager.notify(NOTIFICATION_ID, createNotification(text))
+                }
                 delay(1000)
             }
         }
@@ -387,16 +397,18 @@ class CaffeinateService : Service() {
         )
     }
 
+    // Minute granularity on purpose: the loop above only reposts when this text
+    // changes, turning ~1 notify/sec into ~1 notify/min. Exact seconds stay
+    // available in-app via elapsedTimeFlow.
     private fun currentNotificationText(): String {
         val elapsed = System.currentTimeMillis() - startTimeMillis
         val hours = TimeUnit.MILLISECONDS.toHours(elapsed)
         val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsed) % 60
-        val seconds = TimeUnit.MILLISECONDS.toSeconds(elapsed) % 60
-        
+
         val timeStr = if (hours > 0) {
-            String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+            String.format(Locale.getDefault(), "%02d:%02d h", hours, minutes)
         } else {
-            String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+            String.format(Locale.getDefault(), "%02d min", minutes)
         }
         
         if (isAutoMode) {
@@ -413,8 +425,7 @@ class CaffeinateService : Service() {
             val remaining = TimeUnit.MINUTES.toMillis(reminderIntervalMinutes.toLong()) - elapsed
             if (remaining > 0) {
                 val rMin = TimeUnit.MILLISECONDS.toMinutes(remaining)
-                val rSec = TimeUnit.MILLISECONDS.toSeconds(remaining) % 60
-                "Active for: $timeStr • Ends in ${rMin}m ${rSec}s"
+                "Active for: $timeStr • Ends in ${rMin}m"
             } else {
                 "Active for: $timeStr • Pending action"
             }
