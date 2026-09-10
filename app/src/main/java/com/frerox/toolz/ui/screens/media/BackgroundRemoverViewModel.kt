@@ -123,6 +123,9 @@ class BackgroundRemoverViewModel @Inject constructor(
                 isModelDownloaded = isDownloaded,
                 failure = null,
                 error = null,
+                downloadingId = null,
+                downloadedBytes = 0L,
+                totalBytes = -1L,
                 downloadProgress = if (isDownloaded) 1f else 0f,
             )
         }
@@ -142,6 +145,9 @@ class BackgroundRemoverViewModel @Inject constructor(
                     isModelDownloaded = false,
                     resultBitmap = null,
                     downloadedIds = remaining,
+                    downloadingId = null,
+                    downloadedBytes = 0L,
+                    totalBytes = -1L,
                     downloadProgress = 0f,
                     stage = BgStage.IDLE,
                 )

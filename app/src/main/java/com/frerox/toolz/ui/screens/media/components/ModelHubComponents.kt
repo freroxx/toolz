@@ -53,8 +53,9 @@ import com.frerox.toolz.ui.theme.SquircleShape
 fun ModelHubContent(
     selectedModel: BackgroundModel?,
     downloadingId: String?,
-    downloadProgress: Float,
-    downloadSpeed: String?,
+    downloadedBytes: Long,
+    totalBytes: Long,
+    downloadSpeedBps: Long,
     downloadedIds: Set<String>,
     onModelSelect: (BackgroundModel) -> Unit,
     onDownloadClick: (BackgroundModel) -> Unit,
@@ -105,8 +106,9 @@ fun ModelHubContent(
                     isSelected = selectedModel == model,
                     isDownloaded = downloadedIds.contains(model.id),
                     isDownloading = downloadingId == model.id,
-                    downloadProgress = downloadProgress,
-                    downloadSpeed = downloadSpeed,
+                    downloadedBytes = downloadedBytes,
+                    totalBytes = totalBytes,
+                    downloadSpeedBps = downloadSpeedBps,
                     onClick = { onModelSelect(model) },
                     onDownload = { onDownloadClick(model) },
                     onCancel = onCancelDownload,
@@ -125,8 +127,9 @@ private fun ModelCard(
     isSelected: Boolean,
     isDownloaded: Boolean,
     isDownloading: Boolean,
-    downloadProgress: Float,
-    downloadSpeed: String?,
+    downloadedBytes: Long,
+    totalBytes: Long,
+    downloadSpeedBps: Long,
     onClick: () -> Unit,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
@@ -221,13 +224,19 @@ private fun ModelCard(
 
             if (isDownloading) {
                 Spacer(Modifier.height(10.dp))
-                LinearProgressIndicator(
-                    progress = { downloadProgress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // Byte truth: determinate when the server reports a total, live
+                // MB counter otherwise — the bar can never freeze at 1% again.
+                if (totalBytes > 0) {
+                    LinearProgressIndicator(
+                        progress = { (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    downloadSpeed ?: "${(downloadProgress * 100).toInt()}%",
+                    downloadStatusLine(downloadedBytes, totalBytes, downloadSpeedBps),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
@@ -244,4 +253,22 @@ private fun iconFor(model: BackgroundModel): ImageVector = when (model.id) {
     "portrait_rvm" -> Icons.Rounded.Person
     "pro_detail" -> Icons.Rounded.Diamond
     else -> Icons.Rounded.AutoAwesome
+}
+
+/** Universal byte units — no locale needed. Shared with the editor's thin bar. */
+fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576f)
+    bytes >= 1024 -> "%d KB".format(bytes / 1024)
+    else -> "%d B".format(bytes.coerceAtLeast(0))
+}
+
+/** "42% · 6.3 / 15.0 MB · 3.1 MB/s" or "6.3 MB downloaded · 3.1 MB/s" when total unknown. */
+fun downloadStatusLine(downloaded: Long, total: Long, bps: Long): String {
+    val left = if (total > 0) {
+        "${(downloaded * 100 / total).toInt()}% · ${formatBytes(downloaded)} / ${formatBytes(total)}"
+    } else {
+        "${formatBytes(downloaded)} downloaded"
+    }
+    val speed = if (bps > 0) " · ${formatBytes(bps)}/s" else ""
+    return left + speed
 }

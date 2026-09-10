@@ -90,6 +90,7 @@ import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.screens.media.components.BackgroundCanvas
 import com.frerox.toolz.ui.screens.media.components.BackgroundOptionsBar
 import com.frerox.toolz.ui.screens.media.components.ModelHubContent
+import com.frerox.toolz.ui.screens.media.components.downloadStatusLine
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.SquircleShape
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -131,6 +132,9 @@ fun BackgroundRemoverScreen(
     fun pick() = pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
     fun requestDownload(model: BackgroundModel) {
+        // Select first so progress, naming, and post-download auto-run all refer
+        // to the model the user actually tapped — never a stale selection.
+        if (viewModel.uiState.value.selectedModel != model) viewModel.selectModel(model)
         if (viewModel.downloadNeedsMeteredConsent(model)) meteredAsk = model
         else viewModel.downloadModel(model)
     }
@@ -304,13 +308,12 @@ fun BackgroundRemoverScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             dragHandle = null,
         ) {
-            val downloadingId =
-                if (uiState.stage == BgStage.DOWNLOADING) uiState.selectedModel?.id else null
             ModelHubContent(
                 selectedModel = uiState.selectedModel,
-                downloadingId = downloadingId,
-                downloadProgress = uiState.downloadProgress,
-                downloadSpeed = formatSpeed(uiState.downloadSpeedBps),
+                downloadingId = uiState.downloadingId,
+                downloadedBytes = uiState.downloadedBytes,
+                totalBytes = uiState.totalBytes,
+                downloadSpeedBps = uiState.downloadSpeedBps,
                 downloadedIds = uiState.downloadedIds,
                 onModelSelect = {
                     viewModel.selectModel(it)
@@ -336,15 +339,6 @@ fun BackgroundRemoverScreen(
                     .padding(bottom = 16.dp),
             )
         }
-    }
-}
-
-private fun formatSpeed(bps: Long): String? {
-    if (bps <= 0) return null
-    return when {
-        bps >= 1_048_576 -> "%.1f MB/s".format(bps / 1_048_576f)
-        bps >= 1024 -> "%d KB/s".format(bps / 1024)
-        else -> "%d B/s".format(bps)
     }
 }
 
@@ -597,16 +591,28 @@ private fun EditorPane(
                 }
             }
 
-            // Downloading with a photo loaded — thin truth bar, hub holds the details
-            if (uiState.stage == BgStage.DOWNLOADING) {
+            // Downloading with a photo loaded — byte truth bar, hub holds the details.
+            // Indeterminate while the server hides the total: live MB, never a frozen %.
+            if (uiState.stage == BgStage.DOWNLOADING && uiState.downloadingId != null) {
+                val dlName = BackgroundModel.fromId(uiState.downloadingId)?.shortName.orEmpty()
                 Column(Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 24.dp, end = 24.dp)) {
-                    LinearProgressIndicator(
-                        progress = { uiState.downloadProgress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    if (uiState.totalBytes > 0) {
+                        LinearProgressIndicator(
+                            progress = { uiState.downloadProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "${uiState.selectedModel?.shortName.orEmpty()} · ${(uiState.downloadProgress * 100).toInt()}%",
+                        "$dlName · ${
+                            downloadStatusLine(
+                                uiState.downloadedBytes,
+                                uiState.totalBytes,
+                                uiState.downloadSpeedBps,
+                            )
+                        }",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center,

@@ -28,15 +28,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.screens.media.PreviewBackground
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.frerox.toolz.ui.theme.SquircleShape
 import androidx.compose.ui.draw.clip
 
 /**
  * M3 Expressive canvas for Background Remover.
  * - Checkerboard for transparent (drawn once into a cached bitmap, not every frame)
- * - Zoom/pan via transform gestures (1x..4x), pan bounded by actual content geometry
+ * - Zoom/pan via transform gestures (0.5x..4x, snaps back to 1x near it);
+ *   pan only engages past 1x and is bounded by actual content geometry
  * - Zoom survives result arrival; resets only on a new photo or compare toggle
  * - Solid color / blur preview modes, crossfaded Isolated ↔ Original
+ * - Blur preview is a capped 512px bitmap built off the main thread — a full-res
+ *   blur would double photo memory (OOM) and jank composition
  */
 @Composable
 fun BackgroundCanvas(
@@ -67,9 +72,24 @@ fun BackgroundCanvas(
         else -> original
     }
 
-    // Blur once — cached, computed off main thread via remember
-    val blurredOriginal = remember(original, previewBackground) {
-        if (previewBackground is PreviewBackground.Blur && original != null) blurBitmapLight(original) else null
+    // Blur preview: capped long edge, built on Default so a 12 MP photo never
+    // allocates ~50 MB or blocks composition on the main thread.
+    var blurredOriginal by remember { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(original, previewBackground) {
+        val previous = blurredOriginal
+        blurredOriginal =
+            if (previewBackground is PreviewBackground.Blur && original != null &&
+                !original.isRecycled
+            ) {
+                withContext(Dispatchers.Default) {
+                    runCatching { blurBitmapPreview(original) }.getOrNull()
+                }
+            } else {
+                null
+            }
+        if (previous != null && !previous.isRecycled) {
+            runCatching { previous.recycle() }
+        }
     }
 
     BoxWithConstraints(
@@ -159,17 +179,27 @@ fun BackgroundCanvas(
                         translationY = offset.y,
                     )
                     .pointerInput(active) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            val newScale = (scale * zoom).coerceIn(1f, 4f)
+                        detectTransformGestures(
+                            onGestureEnd = {
+                                // Magnetize near-1x releases — kills drift without
+                                // fighting the user's intentional zoom-out.
+                                if (scale in 0.94f..1.06f) {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                }
+                                // Re-clamp to the floor/ceiling (safety limits).
+                                scale = scale.coerceIn(MIN_SCALE, MAX_SCALE)
+                            },
+                        ) { _, pan, zoom, _ ->
+                            val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
+                            scale = newScale
                             if (newScale > 1.02f) {
-                                scale = newScale
                                 val bound = maxOffsetNow
                                 offset = Offset(
                                     (offset.x + pan.x).coerceIn(-bound.x, bound.x),
                                     (offset.y + pan.y).coerceIn(-bound.y, bound.y),
                                 )
                             } else {
-                                scale = 1f
                                 offset = Offset.Zero
                             }
                         }
@@ -230,16 +260,36 @@ private fun Checkerboard(checker: ImageBitmap, modifier: Modifier = Modifier) {
     }
 }
 
-// Lightweight box blur approximation for preview only
-private fun blurBitmapLight(src: Bitmap): Bitmap {
+// Zoom floor/ceiling: 0.5x lets the whole photo breathe inside the canvas
+// (unzoom past photo size); 4x caps texture + gesture insanity.
+private const val MIN_SCALE = 0.5f
+private const val MAX_SCALE = 4f
+
+// Preview-only blur: cap the long edge (a blur needs no pixels), downscale hard,
+// upscale smooth. Returns null on failure — callers fall back to checkerboard.
+private fun blurBitmapPreview(src: Bitmap, maxEdge: Int = 512): Bitmap? {
     return try {
-        val w = (src.width * 0.12f).toInt().coerceAtLeast(1)
-        val h = (src.height * 0.12f).toInt().coerceAtLeast(1)
-        val small = Bitmap.createScaledBitmap(src, w, h, true)
-        Bitmap.createScaledBitmap(small, src.width, src.height, true).also {
+        if (src.isRecycled) return null
+        val edge = maxOf(src.width, src.height)
+        val base = if (edge > maxEdge) {
+            val s = maxEdge.toFloat() / edge
+            Bitmap.createScaledBitmap(
+                src,
+                (src.width * s).toInt().coerceAtLeast(1),
+                (src.height * s).toInt().coerceAtLeast(1),
+                true,
+            )
+        } else {
+            src
+        }
+        val w = (base.width * 0.12f).toInt().coerceAtLeast(1)
+        val h = (base.height * 0.12f).toInt().coerceAtLeast(1)
+        val small = Bitmap.createScaledBitmap(base, w, h, true)
+        if (base !== src) base.recycle()
+        Bitmap.createScaledBitmap(small, base.width, base.height, true).also {
             if (small != it) small.recycle()
         }
     } catch (_: Throwable) {
-        src
+        null
     }
 }
