@@ -128,6 +128,19 @@ class PdfViewModel @Inject constructor(
     /** Exposed for covers — same singleton the repository uses (shared cache). */
     val pdfRenderEngine: PdfRenderEngine get() = renderEngine
 
+    /** Decode the first covers ahead of the rows so library
+     *  thumbnails are already cached when they scroll into view. */
+    fun warmThumbnails(files: List<PdfFile>, count: Int = 12) {
+        viewModelScope.launch(Dispatchers.IO) {
+            files.take(count).forEach {
+                try {
+                    renderEngine.renderThumbnail(it.uri)
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
     /** Lazy per-file enrichment: fills title/author/pageCount once, then stops. */
     private val prefetching = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 

@@ -89,6 +89,12 @@ fun PdfLibraryScreen(
     val files by viewModel.pdfFiles.collectAsStateWithLifecycle()
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
 
+    // Decode the first covers ahead of the rows so thumbnails are
+    // already cached when they scroll into view.
+    LaunchedEffect(files) {
+        if (files.isNotEmpty()) viewModel.warmThumbnails(files)
+    }
+
     Column(modifier.fillMaxSize()) {
         OutlinedTextField(
             value = query,
@@ -193,7 +199,7 @@ private fun PdfRow(
                     PdfCover(
                         uri = file.uri,
                         renderEngine = viewModel.pdfRenderEngine,
-                        modifier = Modifier.size(width = 44.dp, height = 58.dp),
+                        modifier = Modifier.size(width = 56.dp, height = 72.dp),
                         shape = RoundedCornerShape(12.dp)
                     )
                 },
