@@ -81,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
@@ -511,14 +512,20 @@ private fun AttachToNoteSheet(
                                             if (viewModel.uiState.value is PdfUiState.Viewer) {
                                                 currentPage
                                             } else 0
-                                        val ok = viewModel.attachPdfToNote(note.id, file, page)
+                                        val result = viewModel.attachPdfToNote(note.id, file, page)
                                         busy = false
                                         haptic.click()
-                                        if (ok) {
-                                            onDone("Attached to note")
-                                            onOpenNote(note.id)
-                                        } else {
-                                            onDone("Note already has 10 PDFs")
+                                        when (result) {
+                                            PdfAttachResult.Attached -> {
+                                                onDone("Attached to note")
+                                                onOpenNote(note.id)
+                                            }
+                                            PdfAttachResult.Capped ->
+                                                onDone("Note already has 10 PDFs")
+                                            PdfAttachResult.Unreadable ->
+                                                onDone("Couldn't open that PDF on this device")
+                                            is PdfAttachResult.Failed ->
+                                                onDone("Couldn't attach — try again")
                                         }
                                     }
                                 },

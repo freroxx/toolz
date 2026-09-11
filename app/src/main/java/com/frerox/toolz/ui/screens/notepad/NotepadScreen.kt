@@ -86,6 +86,7 @@ import coil3.compose.AsyncImage
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -2383,6 +2384,7 @@ fun AttachmentPickerDialog(
     onSelect      : (String, String) -> Unit,
     viewModel     : NotepadViewModel,
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
+    emptyText     : String = "Nothing here yet",
 ) {
     val musicState by musicViewModel.uiState.collectAsState()
     val haptic     = rememberToolzHapticFeedback()
@@ -2430,6 +2432,17 @@ fun AttachmentPickerDialog(
                     modifier            = Modifier.weight(1f).fadingEdges(top = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (items.isEmpty()) {
+                        item {
+                            Text(
+                                emptyText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                                modifier = Modifier.padding(vertical = 24.dp).fillMaxWidth(),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
                     lazyItems(items) { (name, uri) ->
                         val isMusic  = title.contains("AUDIO", ignoreCase = true)
                         val track    = if (isMusic) musicState.tracks.find { it.uri == uri } else null
@@ -3997,16 +4010,19 @@ private fun FullExpressiveEditor(
             title = "ATTACH PDF",
             items = availablePdfs.map { it.name to it.uri.toString() },
             onDismiss = { showPdfPicker = false },
+            emptyText = "No PDFs found — import one from the PDF tool first",
             onSelect = { name, uri ->
                 showPdfPicker = false
                 if (currentNote.id != 0) {
-                    // Saved note: persist into multi-attach table (with grant).
+                    // Saved note: persist into multi-attach table (grant verified).
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                        try {
-                            viewModel.attachPdf(currentNote.id, Uri.parse(uri))
-                        } catch (_: Exception) {
-                            currentNote = currentNote.copy(attachedPdfUri = uri)
+                        val msg = when (viewModel.attachPdf(currentNote.id, Uri.parse(uri))) {
+                            PdfAttachResult.Attached -> "PDF attached"
+                            PdfAttachResult.Capped -> "Note already has 10 PDFs"
+                            PdfAttachResult.Unreadable -> "Couldn't open that PDF on this device"
+                            is PdfAttachResult.Failed -> "Couldn't attach — try again"
                         }
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     currentNote = currentNote.copy(attachedPdfUri = uri)

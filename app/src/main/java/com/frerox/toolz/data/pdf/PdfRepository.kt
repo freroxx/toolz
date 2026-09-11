@@ -137,6 +137,32 @@ class PdfRepository @Inject constructor(
     // ── SAF import with persistable permission ───────────────────────────────
 
     /**
+     * Best-effort persistable read grant. Returns false for URIs that don't
+     * do persistable grants (MediaStore, app-private files) — those don't
+     * need one, so false here is NOT a failure, just "nothing to persist".
+     */
+    fun ensurePersistableGrant(uri: Uri): Boolean = try {
+        context.contentResolver.takePersistableUriPermission(
+            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+        )
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    /** True when the bytes behind [uri] can actually be opened right now. */
+    fun isReadable(uri: Uri): Boolean = try {
+        if (uri.scheme == "file") {
+            File(uri.path ?: "").canRead()
+        } else {
+            context.contentResolver.openInputStream(uri)?.close()
+            true
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
      * Persist [sourceUri] (from OpenDocument). Prefers a persistable grant;
      * falls back to an app-private copy so the doc survives reboot.
      * Returns the usable Uri, or null on failure.

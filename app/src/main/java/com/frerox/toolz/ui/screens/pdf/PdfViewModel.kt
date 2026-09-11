@@ -19,6 +19,7 @@ package com.frerox.toolz.ui.screens.pdf
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import android.util.LruCache
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -31,6 +32,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.notepad.NoteAttachment
 import com.frerox.toolz.data.notepad.NoteAttachmentDao
 import com.frerox.toolz.data.notepad.NoteDao
+import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.data.pdf.PdfMetadata
 import com.frerox.toolz.data.pdf.PdfMetadataDao
@@ -61,6 +63,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+
+private const val TAG = "PdfViewModel"
 
 enum class PdfToolMode { NAVIGATE, OCR }
 enum class PdfSortOrder { NAME, SIZE, RECENT }
@@ -641,25 +645,48 @@ class PdfViewModel @Inject constructor(
         emptyList()
     }
 
-    /** Attach [file] to [noteId]; returns false when the 10-PDF cap is hit. */
-    suspend fun attachPdfToNote(noteId: Int, file: PdfFile, page: Int = 0): Boolean =
+    /**
+     * Attach [file] to [noteId], guaranteeing the stored URI stays readable:
+     * persistable grant where supported, verified read, app-private copy as
+     * fallback. Never inserts a dead row.
+     */
+    suspend fun attachPdfToNote(noteId: Int, file: PdfFile, page: Int = 0): PdfAttachResult =
         withContext(Dispatchers.IO) {
             try {
-                val pdfCount = attachmentDao.countByKind(noteId, NoteAttachment.KIND_PDF)
-                if (pdfCount >= 10) return@withContext false
+                if (attachmentDao.countByKind(noteId, NoteAttachment.KIND_PDF) >= 10) {
+                    return@withContext PdfAttachResult.Capped
+                }
+                repository.ensurePersistableGrant(file.uri)
+                var usable = file.uri.toString()
+                if (!repository.isReadable(file.uri)) {
+                    val imported = try {
+                        repository.importPdf(file.uri)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "attachPdfToNote: import copy failed", e)
+                        null
+                    }
+                    if (imported == null || !repository.isReadable(imported)) {
+                        Log.w(TAG, "attachPdfToNote: source unreadable and no copy possible: ${file.uri}")
+                        return@withContext PdfAttachResult.Unreadable
+                    }
+                    usable = imported.toString()
+                }
+                // Re-read display fields from the stored URI so the row is self-consistent.
+                val stored = Uri.parse(usable)
                 attachmentDao.insert(
                     NoteAttachment(
                         noteId = noteId,
                         kind = NoteAttachment.KIND_PDF,
-                        uri = file.uri.toString(),
-                        displayName = file.displayTitle,
-                        sizeBytes = file.size,
+                        uri = usable,
+                        displayName = try { repository.queryDisplayName(stored) } catch (_: Exception) { file.displayTitle },
+                        sizeBytes = try { repository.querySize(stored).takeIf { it > 0 } ?: file.size } catch (_: Exception) { file.size },
                         pageHint = page
                     )
                 )
-                true
-            } catch (_: Exception) {
-                false
+                PdfAttachResult.Attached
+            } catch (e: Exception) {
+                Log.e(TAG, "attachPdfToNote failed for note $noteId", e)
+                PdfAttachResult.Failed(e.message ?: e.javaClass.simpleName)
             }
         }
 

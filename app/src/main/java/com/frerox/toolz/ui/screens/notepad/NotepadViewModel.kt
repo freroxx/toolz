@@ -35,6 +35,7 @@ import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.NoteAttachment
 import com.frerox.toolz.data.notepad.NoteAttachmentDao
 import com.frerox.toolz.data.notepad.NoteDao
+import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.data.pdf.PdfRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -329,34 +330,46 @@ class NotepadViewModel @Inject constructor(
     }
 
     /**
-     * Attach a PDF with a persistable grant. Returns false at the 10-PDF cap.
-     * Image/audio attachers below share the same permission discipline.
+     * Attach a PDF, guaranteeing the stored URI stays readable: persistable
+     * grant where supported, verified read, app-private copy as fallback.
+     * Never inserts a dead row — an unreadable source reports [PdfAttachResult.Unreadable].
      */
-    suspend fun attachPdf(noteId: Int, source: Uri, pageHint: Int = 0): Boolean =
+    suspend fun attachPdf(noteId: Int, source: Uri, pageHint: Int = 0): PdfAttachResult =
         withContext(Dispatchers.IO) {
             try {
-                if (attachmentDao.countByKind(noteId, NoteAttachment.KIND_PDF) >= 10) return@withContext false
-                var usable = source.toString()
-                try {
-                    appContext.contentResolver.takePersistableUriPermission(
-                        source, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: Exception) {
-                    // MediaStore + app-private URIs don't need persist; SAF copy fallback.
-                    val imported = try { pdfRepository.importPdf(source) } catch (_: Exception) { null }
-                    if (imported != null) usable = imported.toString()
+                if (attachmentDao.countByKind(noteId, NoteAttachment.KIND_PDF) >= 10) {
+                    return@withContext PdfAttachResult.Capped
                 }
-                val name = try { pdfRepository.queryDisplayName(Uri.parse(usable)) } catch (_: Exception) { null }
-                val size = try { pdfRepository.querySize(Uri.parse(usable)) } catch (_: Exception) { 0L }
+                // Best effort: keep the grant across reboots where supported.
+                // (MediaStore / app-private URIs throw here — expected, not fatal.)
+                pdfRepository.ensurePersistableGrant(source)
+                var usable = source.toString()
+                if (!pdfRepository.isReadable(source)) {
+                    val imported = try {
+                        pdfRepository.importPdf(source)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "attachPdf: import copy failed", e)
+                        null
+                    }
+                    if (imported == null || !pdfRepository.isReadable(imported)) {
+                        Log.w(TAG, "attachPdf: source unreadable and no copy possible: $source")
+                        return@withContext PdfAttachResult.Unreadable
+                    }
+                    usable = imported.toString()
+                }
+                val usableUri = Uri.parse(usable)
+                val name = try { pdfRepository.queryDisplayName(usableUri) } catch (_: Exception) { null }
+                val size = try { pdfRepository.querySize(usableUri) } catch (_: Exception) { 0L }
                 attachmentDao.insert(
                     NoteAttachment(
                         noteId = noteId, kind = NoteAttachment.KIND_PDF, uri = usable,
                         displayName = name, sizeBytes = size, pageHint = pageHint
                     )
                 )
-                true
-            } catch (_: Exception) {
-                false
+                PdfAttachResult.Attached
+            } catch (e: Exception) {
+                Log.e(TAG, "attachPdf failed for note $noteId", e)
+                PdfAttachResult.Failed(e.message ?: e.javaClass.simpleName)
             }
         }
 
