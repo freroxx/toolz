@@ -89,7 +89,7 @@ fun SettingsScreen(
     val customPrimaryInt by viewModel.customPrimaryColor.collectAsState(initial = null)
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
     val backgroundGradientEnabled by viewModel.backgroundGradientEnabled.collectAsState(initial = true)
-    val pdfAiOcrEnhance by viewModel.pdfAiOcrEnhance.collectAsState(initial = false)
+    val pdfAiToolsEnabled by viewModel.pdfAiToolsEnabled.collectAsState(initial = true)
 
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
 
@@ -598,13 +598,13 @@ fun SettingsScreen(
                                         enabled = !offlineModeEnabled
                                     )
                                 }
-                                if (matches(searchQuery, "pdf", "ocr", "enhance", "ai", "text", "scan")) {
+                                if (matches(searchQuery, "pdf", "ai", "tools", "summarize", "smart", "extract")) {
                                     SettingsToggleItem(
                                         title = stringResource(R.string.st_SettingsScreen_y7z9),
                                         subtitle = stringResource(R.string.st_SettingsScreen_a9b1),
                                         icon = Icons.Rounded.DocumentScanner,
-                                        checked = pdfAiOcrEnhance,
-                                        onCheckedChange = { viewModel.setPdfAiOcrEnhance(it) },
+                                        checked = pdfAiToolsEnabled,
+                                        onCheckedChange = { viewModel.setPdfAiToolsEnabled(it) },
                                         enabled = !offlineModeEnabled
                                     )
                                 }

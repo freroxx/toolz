@@ -168,6 +168,7 @@ fun PdfReaderScreen(
     val pageTexts by viewModel.pageTexts.collectAsStateWithLifecycle()
     val textReady by viewModel.textReady.collectAsStateWithLifecycle()
     val paperMode by viewModel.paperMode.collectAsStateWithLifecycle()
+    val aiEnabled by viewModel.pdfAiEnabled.collectAsStateWithLifecycle(initialValue = true)
     val haptic = rememberToolzHapticFeedback()
     val context = LocalContext.current
 
@@ -320,11 +321,13 @@ fun PdfReaderScreen(
                                         leadingIcon = { Icon(Icons.Rounded.TextFields, null) },
                                         onClick = { showMenu = false; showTextSheet = true }
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("AI tools") },
-                                        leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
-                                        onClick = { showMenu = false; showAiSheet = true }
-                                    )
+                                    if (aiEnabled) {
+                                        DropdownMenuItem(
+                                            text = { Text("AI tools") },
+                                            leadingIcon = { Icon(Icons.Rounded.AutoAwesome, null) },
+                                            onClick = { showMenu = false; showAiSheet = true }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = { Text("Appearance") },
                                         leadingIcon = { Icon(Icons.Rounded.Palette, null) },
@@ -1073,9 +1076,13 @@ private fun AiSheet(
     val enhanced by viewModel.enhancedText.collectAsStateWithLifecycle()
     val enhancing by viewModel.isEnhancing.collectAsStateWithLifecycle()
     val offline by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(initialValue = false)
+    val aiEnabled by viewModel.pdfAiEnabled.collectAsStateWithLifecycle(initialValue = true)
     var askedSummary by remember { mutableStateOf(false) }
     var askedExtract by remember { mutableStateOf(false) }
     val hasText = remember(pageTexts) { pageTexts.any { it.isNotBlank() } }
+    // pdfAiEnabled already folds offline mode in, but keep the explicit
+    // offline hint so the reason is obvious.
+    val runnable = hasText && aiEnabled && !summarizing && !enhancing
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1087,6 +1094,14 @@ private fun AiSheet(
         ) {
             item {
                 Text("AI tools", style = MaterialTheme.typography.titleLarge)
+                if (!aiEnabled && !offline) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "AI tools are turned off — enable them in Settings.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (offline) {
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -1103,7 +1118,7 @@ private fun AiSheet(
                     description = "Short overview of the whole document with key points.",
                     actionLabel = if (summarizing) "Summarizing…" else "Summarize",
                     busy = summarizing,
-                    enabled = hasText && !summarizing && !enhancing,
+                    enabled = runnable,
                     onRun = {
                         askedSummary = true
                         viewModel.summarizeDocument()
@@ -1142,7 +1157,7 @@ private fun AiSheet(
                     description = "The same text, cleaned up and structured for reading.",
                     actionLabel = if (enhancing) "Extracting…" else "Extract",
                     busy = enhancing,
-                    enabled = hasText && !summarizing && !enhancing,
+                    enabled = runnable,
                     onRun = {
                         askedExtract = true
                         viewModel.enhanceDocument()

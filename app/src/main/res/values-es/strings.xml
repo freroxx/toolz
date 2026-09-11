@@ -625,8 +625,8 @@
     <string name="st_SettingsScreen_s1t3">Responder preguntas directamente en la barra de búsqueda</string>
     <string name="st_SettingsScreen_u3v5">Monitoreo de portapapeles por IA</string>
     <string name="st_SettingsScreen_w5x7">Clasificación inteligente y resúmenes</string>
-    <string name="st_SettingsScreen_y7z9">Mejora de OCR por IA</string>
-    <string name="st_SettingsScreen_a9b1">Mejorar el reconocimiento de texto PDF con IA</string>
+    <string name="st_SettingsScreen_y7z9">Herramientas de IA para PDF</string>
+    <string name="st_SettingsScreen_a9b1">Resumir PDF y extraer texto con IA</string>
     <string name="st_SettingsScreen_c1d3">IA Reproduciendo ahora</string>
     <string name="st_SettingsScreen_e3f5">Significados inteligentes de letras y recomendaciones</string>
     <string name="st_SettingsScreen_g5h7">INTERACCION Y HUD</string>

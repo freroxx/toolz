@@ -135,7 +135,7 @@ class SettingsViewModel @Inject constructor(
     val customRingtoneUri = repository.customRingtoneUri
 
     val converterCustomOutputPath = repository.converterCustomOutputPath
-    val pdfAiOcrEnhance = repository.pdfAiOcrEnhance
+    val pdfAiToolsEnabled = repository.pdfAiToolsEnabled
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
@@ -218,7 +218,7 @@ class SettingsViewModel @Inject constructor(
         deviceSpecsRepository.clearCache()
     }
 
-    fun setPdfAiOcrEnhance(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiOcrEnhance(enabled) }
+    fun setPdfAiToolsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiToolsEnabled(enabled) }
     fun setAiClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiClipboardMonitoringEnabled(enabled) }
 
     fun scheduleBackup(frequency: String) {

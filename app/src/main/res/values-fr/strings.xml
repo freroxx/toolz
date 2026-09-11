@@ -633,8 +633,8 @@
     <string name="st_SettingsScreen_s1t3">Répondre aux questions directement dans la barre de recherche</string>
     <string name="st_SettingsScreen_u3v5">Surveillance IA du presse-papiers</string>
     <string name="st_SettingsScreen_w5x7">Classification intelligente et résumés</string>
-    <string name="st_SettingsScreen_y7z9">Amélioration OCR par IA</string>
-    <string name="st_SettingsScreen_a9b1">Améliorer la reconnaissance de texte PDF avec l\'IA</string>
+    <string name="st_SettingsScreen_y7z9">Outils IA pour PDF</string>
+    <string name="st_SettingsScreen_a9b1">Résumer les PDF et extraire le texte avec l\'IA</string>
     <string name="st_SettingsScreen_c1d3">IA Lecture en cours</string>
     <string name="st_SettingsScreen_e3f5">Significations intelligentes des paroles et recommandations</string>
     <string name="st_SettingsScreen_g5h7">INTERACTION &amp; HUD</string>
