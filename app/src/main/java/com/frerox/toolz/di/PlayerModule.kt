@@ -118,6 +118,11 @@ object PlayerModule {
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, false)
             .setHandleAudioBecomingNoisy(true)
+            // Reliable background play: hold a CPU wake lock while playing so the
+            // CPU doesn't sleep with the screen off (which previously stalled
+            // playback and forced a manual resume). Audio keeps playing with the
+            // phone in a pocket / screen off, and headset buttons keep working.
+            .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
     }
 }

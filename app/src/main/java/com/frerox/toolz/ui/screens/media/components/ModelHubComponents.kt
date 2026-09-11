@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Diamond
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -252,6 +253,7 @@ private fun iconFor(model: BackgroundModel): ImageVector = when (model.id) {
     "fast_general" -> Icons.Rounded.Bolt
     "portrait_rvm" -> Icons.Rounded.Person
     "pro_detail" -> Icons.Rounded.Diamond
+    "ultra_birefnet" -> Icons.Rounded.WorkspacePremium
     else -> Icons.Rounded.AutoAwesome
 }
 

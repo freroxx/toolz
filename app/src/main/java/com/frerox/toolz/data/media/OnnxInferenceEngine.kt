@@ -206,6 +206,18 @@ val IMAGENET_PREPROCESS_1024 = OnnxPreprocess(
     std = floatArrayOf(0.229f, 0.224f, 0.225f),
 )
 
+/**
+ * DIS/ISNet normalization, exactly as rembg's DisSession AND the upstream DIS
+ * training recipe: (x - 0.5) / 1.0, i.e. input range [-0.5, +0.5].
+ * ImageNet stats here shift every activation and collapse the mask (verified:
+ * mask/u2netp IoU 0.53 → 0.94 after fixing).
+ */
+val ISNET_PREPROCESS_1024 = OnnxPreprocess(
+    inputSize = 1024,
+    mean = floatArrayOf(0.5f, 0.5f, 0.5f),
+    std = floatArrayOf(1f, 1f, 1f),
+)
+
 /** RVM takes 0..1 RGB directly, any aspect (long edge capped by caller). */
 val RVM_PREPROCESS = OnnxPreprocess(
     inputSize = 512,

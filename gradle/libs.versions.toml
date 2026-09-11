@@ -69,6 +69,7 @@ glance = "1.3.0-alpha02"
 commonmark = "0.30.0"
 androidsvg = "1.4"
 zxing = "3.5.4"
+pdfbox = "2.0.27.0"
 foundation = "1.12.0"
 exifinterface = "1.4.2"
 supabaseBom = "3.7.0"
@@ -182,6 +183,7 @@ jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
 androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "androidsvg" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version = "2.1.5" }
 androidx-palette-ktx = { group = "androidx.palette", name = "palette-ktx", version = "1.0.0" }

@@ -518,37 +518,70 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            val setter = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
-            serviceScope.launch {
-                runCatching {
-                    val uri = settingsRepository.musicLastPlayedUri.first()
-                    val pos = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
-                    val queueJson = settingsRepository.musicLastPlayedQueue.first()
-
-                    if (uri != null) {
-                        val saved = readPersistedQueue(queueJson)
-                        var items = resolveQueueTracks(saved)
-                        if (items.isEmpty()) {
-                            val single = musicRepository.getTrackByUri(uri)
-                                ?: musicRepository.getTrackBySourceUrl(uri)
-                            if (single != null) items = mutableListOf(single.toMediaItem())
-                        }
-                        if (items.isEmpty()) {
-                            setter.setException(Exception("No playable tracks"))
-                            return@launch
-                        }
-                        var startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
-                            .coerceIn(0, items.size - 1)
-                        setter.set(MediaSession.MediaItemsWithStartPosition(items, startIndex, pos))
-                    } else {
-                        setter.setException(Exception("No last played track"))
-                    }
-                }.onFailure {
-                    runCatching { setter.setException(it as? Exception ?: Exception(it)) }
-                }
-            }
-            return setter
+            return buildResumptionFuture()
         }
+
+        // Media3 1.11 calls this 3-arg overload (not the deprecated 2-arg one)
+        // when the process is dead and a headset/BT play button is pressed days
+        // later. Without it, resumption silently fails and the user must reopen
+        // Toolz manually — the exact regression reported. Both overloads share
+        // the same restore path so resume works on every Media3 version.
+        override fun onPlaybackResumption(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            playedFromSearch: Boolean
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            return buildResumptionFuture()
+        }
+    }
+
+    /**
+     * Shared playback-resumption future used by both onPlaybackResumption
+     * overloads. Reads the last-played DataStore checkpoint (uri + position +
+     * queue), re-resolves deleted/re-indexed tracks, and returns the items with
+     * the exact saved start position so the system can resume without Toolz
+     * ever coming to the foreground.
+     */
+    private fun buildResumptionFuture(): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        val setter = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+        serviceScope.launch {
+            runCatching {
+                val uri = settingsRepository.musicLastPlayedUri.first()
+                val pos = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
+                val queueJson = settingsRepository.musicLastPlayedQueue.first()
+
+                if (uri != null) {
+                    val saved = readPersistedQueue(queueJson)
+                    var items = resolveQueueTracks(saved)
+                    if (items.isEmpty()) {
+                        val single = musicRepository.getTrackByUri(uri)
+                            ?: musicRepository.getTrackBySourceUrl(uri)
+                        if (single != null) items = mutableListOf(single.toMediaItem())
+                    }
+                    // Last resort: never return empty when the library still has
+                    // songs — fall back to the most recent track so a headset
+                    // PLAY press days later always does something.
+                    if (items.isEmpty()) {
+                        val fallback = runCatching {
+                            musicRepository.getAllTracksSyncForBackfill().firstOrNull()
+                        }.getOrNull()
+                        if (fallback != null) items = mutableListOf(fallback.toMediaItem())
+                    }
+                    if (items.isEmpty()) {
+                        setter.setException(Exception("No playable tracks"))
+                        return@launch
+                    }
+                    var startIndex = items.indexOfFirst { it.mediaId == uri }.coerceAtLeast(0)
+                        .coerceIn(0, items.size - 1)
+                    setter.set(MediaSession.MediaItemsWithStartPosition(items, startIndex, pos))
+                } else {
+                    setter.setException(Exception("No last played track"))
+                }
+            }.onFailure {
+                runCatching { setter.setException(it as? Exception ?: Exception(it)) }
+            }
+        }
+        return setter
     }
 
     // Shared pocket-resume path: if the process was killed, the queue is empty —

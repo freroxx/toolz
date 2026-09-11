@@ -24,7 +24,9 @@ import com.frerox.toolz.data.CommonConverters
 import com.frerox.toolz.data.catalog.CatalogSearchEntry
 import com.frerox.toolz.data.catalog.CatalogSearchDao
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.notepad.NoteAttachment
 import com.frerox.toolz.data.notepad.NoteDao
+import com.frerox.toolz.data.notepad.NoteAttachmentDao
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.music.MusicDao
@@ -32,8 +34,6 @@ import com.frerox.toolz.data.steps.StepEntry
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistory
 import com.frerox.toolz.data.math.MathHistoryDao
-import com.frerox.toolz.data.pdf.PdfAnnotation
-import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import com.frerox.toolz.data.pdf.PdfMetadata
 import com.frerox.toolz.data.pdf.PdfMetadataDao
 import com.frerox.toolz.data.notifications.NotificationEntry
@@ -83,11 +83,11 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
 @Database(
     entities = [
         Note::class,
+        NoteAttachment::class,
         MusicTrack::class,
         Playlist::class,
         StepEntry::class,
         MathHistory::class,
-        PdfAnnotation::class,
         PdfMetadata::class,
         NotificationEntry::class,
         AppLimit::class,
@@ -122,7 +122,10 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // Music Polished 54 adds music_tracks.lrcOffsetMs + dedup unique stability (see MIGRATION_53_54).
     // Cleaner v2 56 adds cleaner_trash (see MIGRATION_55_56).
     // PurgeShot 55 adds purge_shot_queue (see MIGRATION_54_55).
-    version = 56,
+    // PDF remake 57: drops pdf_annotations, extends pdf_metadata (lastPage/lastZoom/
+    // readingMode/paperMode/title/author/pageCount), adds note_attachments with
+    // backfill from notes.attached* columns (see MIGRATION_56_57).
+    version = 57,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
@@ -131,10 +134,10 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
 @TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
+    abstract fun noteAttachmentDao(): NoteAttachmentDao
     abstract fun musicDao(): MusicDao
     abstract fun stepDao(): StepDao
     abstract fun mathHistoryDao(): MathHistoryDao
-    abstract fun pdfAnnotationDao(): PdfAnnotationDao
     abstract fun pdfMetadataDao(): PdfMetadataDao
     abstract fun notificationDao(): NotificationDao
     abstract fun appLimitDao(): AppLimitDao

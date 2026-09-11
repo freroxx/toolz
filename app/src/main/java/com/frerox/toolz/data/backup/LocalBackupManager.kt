@@ -40,7 +40,6 @@ import com.frerox.toolz.data.music.Playlist
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notifications.NotificationEntry
 import com.frerox.toolz.data.password.PasswordEntity
-import com.frerox.toolz.data.pdf.PdfAnnotation
 import com.frerox.toolz.data.pdf.PdfMetadata
 import com.frerox.toolz.data.search.BookmarkEntry
 import com.frerox.toolz.data.search.QuickLinkEntry
@@ -275,7 +274,6 @@ class LocalBackupManager @Inject constructor(
         if (items.contains(BackupItem.PDF_METADATA)) {
             _progress.value = context.getString(R.string.st_Backup_Progress_Pdf)
             addTextEntry(zip, "data/pdf_metadata.json", listAdapter<PdfMetadata>().toJson(database.pdfMetadataDao().getAllMetadataSync()), entryHashes)
-            addTextEntry(zip, "data/pdf_annotations.json", listAdapter<PdfAnnotation>().toJson(database.pdfAnnotationDao().getAllAnnotationsSync()), entryHashes)
         }
         if (items.contains(BackupItem.CATALOG_DATA)) {
             _progress.value = "Music Catalog Data"
@@ -435,10 +433,9 @@ class LocalBackupManager @Inject constructor(
                 database.pdfMetadataDao().insertMetadataList(listAdapter<PdfMetadata>().fromJson(json).orEmpty())
                 true
             } else false
-            "data/pdf_annotations.json" -> if (itemsToRestore.contains(BackupItem.PDF_METADATA)) {
-                database.pdfAnnotationDao().insertAnnotations(listAdapter<PdfAnnotation>().fromJson(json).orEmpty())
-                true
-            } else false
+            // Remake V2: pdf_annotations dropped — old backups containing the entry
+            // are acknowledged and skipped so restore stays forward-compatible.
+            "data/pdf_annotations.json" -> true
             "data/catalog_search.json" -> if (itemsToRestore.contains(BackupItem.CATALOG_DATA)) {
                 database.catalogSearchDao().insertSearches(listAdapter<CatalogSearchEntry>().fromJson(json).orEmpty())
                 true

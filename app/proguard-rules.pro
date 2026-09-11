@@ -238,6 +238,13 @@
 -keep class ai.onnxruntime.** { *; }
 -dontwarn ai.onnxruntime.**
 
+# PdfBox-Android — JPX (JPEG2000) decoder is an optional dependency that
+# JPXFilter references reflectively; absent on Android, guarded by catch at
+# runtime. Tell R8 not to fail the release build on it.
+-dontwarn com.gemalto.jp2.**
+-dontwarn com.tom_roush.pdfbox.**
+-keep class com.tom_roush.pdfbox.** { *; }
+
 # ------------------------------------------------------------------------------
 # 9. PROJECT-SPECIFIC DATA & UI (SAFETY OVERRIDE)
 # ------------------------------------------------------------------------------

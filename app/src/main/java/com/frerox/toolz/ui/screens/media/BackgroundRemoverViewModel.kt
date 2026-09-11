@@ -26,6 +26,7 @@ import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
 import com.frerox.toolz.data.media.BackgroundModel
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_1024
+import com.frerox.toolz.data.media.ISNET_PREPROCESS_1024
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_320
 import com.frerox.toolz.data.media.InferenceRuntime
 import com.frerox.toolz.data.media.MaskDecoder
@@ -574,16 +575,34 @@ class BackgroundRemoverViewModel @Inject constructor(
                 onnxEngine.runRvm(session, chw, h, w, dsr)
             }
             "pro_detail" -> {
+                // DIS recipe (rembg DisSession + upstream training): (x - 0.5) / 1.0.
+                // ImageNet stats shift every activation and collapse the mask.
+                val chw = ISNET_PREPROCESS_1024.toChw(bitmap)
+                onnxEngine.runSingleMask(session, chw, 3, 1024, 1024)
+            }
+            "ultra_birefnet" -> {
+                // BiRefNet recipe (rembg BiRefNetSessionGeneral): ImageNet norm;
+                // raw logits → sigmoid + min-max handled by the post block below.
                 val chw = IMAGENET_PREPROCESS_1024.toChw(bitmap)
                 onnxEngine.runSingleMask(session, chw, 3, 1024, 1024)
             }
-            else -> { // fast_general + future single-input nets
+            else -> { // fast_general (ImageNet 320); post block below handles sigmoid/min-max
                 val chw = IMAGENET_PREPROCESS_320.toChw(bitmap)
                 onnxEngine.runSingleMask(session, chw, 3, 320, 320)
             }
         }
-        Log.d("BgRemoverVM", "ONNX ${model.id} mask=${single.maskW}x${single.maskH}")
-        return RawMask(single.data, single.maskW, single.maskH)
+        // Post: raw-logit exports (BiRefNet family) need sigmoid first — rembg does
+        // the same explicitly. Then rembg-parity min-max stretch so a weak-but-
+        // correct response never vanishes below the matting thresholds. RVM
+        // returns calibrated alpha and is exempt from both.
+        val cooked = if (model.id == "portrait_rvm") {
+            single
+        } else {
+            val activated = if (model.onnxPostSigmoid) MaskDecoder.sigmoidArray(single.data) else single.data
+            single.copy(data = MaskDecoder.minMaxNormalize(activated))
+        }
+        Log.d("BgRemoverVM", "ONNX ${model.id} mask=${cooked.maskW}x${cooked.maskH}")
+        return RawMask(cooked.data, cooked.maskW, cooked.maskH)
     }
 
     /**

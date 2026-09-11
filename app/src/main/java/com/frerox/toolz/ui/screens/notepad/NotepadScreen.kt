@@ -368,7 +368,7 @@ fun NotepadScreen(
     viewModel     : NotepadViewModel,
     onBack        : () -> Unit,
     onPlayAudio   : (String) -> Unit,
-    onViewPdf     : (String) -> Unit,
+    onViewPdf     : (String, Int) -> Unit,
     initialNoteId : Int? = null,
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
 ) {
@@ -626,6 +626,7 @@ fun NotepadScreen(
                 onImagePickRequest = { imagePickerLauncher.launch("image/*") },
                 newImageUri = lastPickedImageUri,
                 onImageConsumed = { lastPickedImageUri = null },
+                onViewPdf = onViewPdf,
                 viewedNoteId = viewedNoteId,
                 onNoteOptionsRequest = { noteOptionsId = it },
                 offlineMode = offlineMode
@@ -1025,7 +1026,7 @@ fun NotepadScreen(
                                         },
                                         onViewPdf = {
                                             haptic.click()
-                                            note.attachedPdfUri?.let { onViewPdf(it) }
+                                            note.attachedPdfUri?.let { onViewPdf(it, 0) }
                                         },
                                         isHidden = viewedNoteId == note.id,
                                         modifier = Modifier
@@ -1140,8 +1141,9 @@ fun NotepadScreen(
                                             )
                                         }
                                         note.attachedPdfUri?.let { uri ->
-                                            PdfPreview(uri = uri, onClick = { onViewPdf(uri) }, modifier = Modifier.height(150.dp))
+                                            PdfPreview(uri = uri, onClick = { onViewPdf(uri, 0) }, modifier = Modifier.height(150.dp))
                                         }
+                                        NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth())
                                         note.attachedAudioUri?.let { uri ->
                                             val track = musicState.tracks.find { it.uri == uri }
                                 MusicPill(
@@ -1190,7 +1192,8 @@ fun NotepadScreen(
                 availablePdfs = availablePdfs,
                 onImagePickRequest = { imagePickerLauncher.launch("image/*") },
                 newImageUri = lastPickedImageUri,
-                onImageConsumed = { lastPickedImageUri = null }
+                onImageConsumed = { lastPickedImageUri = null },
+                onViewPdf = onViewPdf
             )
         }
     }
@@ -1640,7 +1643,7 @@ fun NoteViewerSheet(
     onDismiss             : () -> Unit,
     onEdit                : () -> Unit,
     onPlayAudio           : (String) -> Unit,
-    onViewPdf             : (String) -> Unit,
+    onViewPdf             : (String, Int) -> Unit,
 ) {
     val haptic          = rememberToolzHapticFeedback()
     val context         = LocalContext.current
@@ -1822,7 +1825,7 @@ fun NoteViewerSheet(
                             }
                             note.attachedPdfUri?.let { uri ->
                                 Surface(
-                                    onClick = { haptic.click(); onViewPdf(uri) },
+                                    onClick = { haptic.click(); onViewPdf(uri, 0) },
                                     color   = onColor.copy(0.12f),
                                     shape   = RoundedCornerShape(22.dp),
                                     border  = BorderStroke(1.5.dp, onColor.copy(0.15f)),
@@ -1856,10 +1859,11 @@ fun NoteViewerSheet(
                     note.attachedPdfUri?.let { uri ->
                         PdfPreview(
                             uri      = uri,
-                            onClick  = { onViewPdf(uri) },
+                            onClick  = { onViewPdf(uri, 0) },
                             modifier = Modifier.height(160.dp).padding(bottom = 20.dp),
                         )
                     }
+                    NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp))
 
                     // ── Note content (markdown) ────────────────────────────
                     val segments = remember(note.content) { parseMarkdownToSegments(note.content) }
@@ -2671,10 +2675,10 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
     val context = LocalContext.current
     ExpressiveCard(
         onClick = onClick,
-        containerColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(16.dp),
-        elevation = 2.dp,
-        border = BorderStroke(1.dp, Color.Black.copy(0.08f)),
+        elevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         modifier = modifier.fillMaxWidth()
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -2690,7 +2694,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                             val reqWidth     = (constraints.maxWidth.coerceAtLeast(320) * 2).coerceAtMost(2200)
                             val aspectRatio  = if (page.width == 0) 1f else page.height.toFloat() / page.width.toFloat()
                             val reqHeight    = ((reqWidth * aspectRatio).toInt()).coerceAtLeast(constraints.maxHeight.coerceAtLeast(240)).coerceAtMost(3200)
-                            val bmp          = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.ARGB_8888)
+                            val bmp          = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.RGB_565)
                             bmp.eraseColor(android.graphics.Color.WHITE)
                             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                             page.close(); renderer.close(); bmp
@@ -2698,7 +2702,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                     } catch (_: Exception) { null }
                 }
             }
-            
+
             if (bitmap != null) {
                 Box {
                     Image(
@@ -2711,7 +2715,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                         Modifier
                             .align(Alignment.BottomEnd)
                             .padding(12.dp),
-                        color = Color.White.copy(0.92f),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
                         shape = RoundedCornerShape(8.dp),
                         shadowElevation = 4.dp,
                     ) {
@@ -2724,13 +2728,13 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                                 Icons.Rounded.PictureAsPdf,
                                 null,
                                 Modifier.size(14.dp),
-                                tint = Color(0xFFD32F2F)
+                                tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
                                 "DOCUMENT",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Black,
-                                color = Color.Black,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 letterSpacing = 0.5.sp
                             )
                         }
@@ -2740,7 +2744,7 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color(0xFFF5F5F5)),
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -2751,13 +2755,85 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                             Icons.Rounded.Description,
                             null,
                             Modifier.size(32.dp),
-                            tint = Color.Gray.copy(0.3f)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         )
                         Text(
                             "Loading PDF...",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray.copy(0.6f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Remake V2 — multi-attachment PDF strip for a saved note.
+ * Observes note_attachments, merges nothing (legacy single-slot card stays
+ * above for compat), opens at the stored page hint, swipe-free remove.
+ */
+@Composable
+fun NotePdfAttachmentStrip(
+    viewModel: NotepadViewModel,
+    note: com.frerox.toolz.data.notepad.Note,
+    onOpenPdf: (String, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val noteId = note.id
+    if (noteId == 0) return
+    val scope = rememberCoroutineScope()
+    val all by viewModel.attachmentsFor(noteId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val items = remember(all) { all.filter { a -> a.kind == "PDF" } }
+    LaunchedEffect(noteId) {
+        try { viewModel.ensureLegacyAttachments(note) } catch (_: Exception) { }
+    }
+    if (items.isEmpty()) return
+    val haptic = rememberToolzHapticFeedback()
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.forEach { att ->
+            androidx.compose.material3.Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.PictureAsPdf, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            (att.displayName?.takeIf { it.isNotBlank() } ?: att.uri.substringAfterLast('/')).take(48),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            if (att.pageHint > 0) "Opens at page ${att.pageHint + 1} · tap to read" else "Tap to read",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    ToolzExpressiveIconButton(
+                        onClick = { haptic.click(); onOpenPdf(att.uri, att.pageHint) },
+                        modifier = Modifier.size(36.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("›", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onPrimary)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    ToolzExpressiveIconButton(
+                        onClick = { scope.launch { viewModel.removeAttachment(att.id) }; haptic.tick() },
+                        modifier = Modifier.size(36.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Close, null, Modifier.size(16.dp))
                     }
                 }
             }
@@ -3113,6 +3189,7 @@ private fun NotepadActionComponent(
     onImagePickRequest: () -> Unit = {},
     newImageUri: Uri? = null,
     onImageConsumed: () -> Unit = {},
+    onViewPdf: (String, Int) -> Unit = { _, _ -> },
     viewedNoteId: Int? = null,
     onNoteOptionsRequest: (Int) -> Unit = {},
     offlineMode: Boolean = false,
@@ -3378,7 +3455,8 @@ private fun NotepadActionComponent(
                         availablePdfs = availablePdfs,
                         onImagePickRequest = onImagePickRequest,
                         newImageUri = newImageUri,
-                        onImageConsumed = onImageConsumed
+                        onImageConsumed = onImageConsumed,
+                        onViewPdf = onViewPdf
                     )
                 }
                 NotepadActionState.AI_TOOLS -> {
@@ -3488,6 +3566,7 @@ private fun FullExpressiveEditor(
     note: Note,
     onDismiss: () -> Unit,
     onMinimize: (Note) -> Unit,
+    onViewPdf: (String, Int) -> Unit = { _, _ -> },
     availableTracks: List<com.frerox.toolz.data.music.MusicTrack> = emptyList(),
     availablePdfs: List<com.frerox.toolz.data.pdf.PdfFile> = emptyList(),
     onImagePickRequest: () -> Unit = {},
@@ -3839,7 +3918,7 @@ private fun FullExpressiveEditor(
                     currentNote.attachedPdfUri?.let { uri ->
                         StaggeredEntrance(index = 3) {
                             Box {
-                                PdfPreview(uri = uri, onClick = { viewModel.refreshPdfs() }, modifier = Modifier.height(150.dp))
+                                PdfPreview(uri = uri, onClick = { onViewPdf(uri, 0) }, modifier = Modifier.height(150.dp))
                                 ToolzExpressiveIconButton(
                                     onClick = { currentNote = currentNote.copy(attachedPdfUri = null) },
                                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(32.dp),
@@ -3866,6 +3945,15 @@ private fun FullExpressiveEditor(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                    }
+                    // V2: saved-note multi-attachments (legacy slots above stay for drafts).
+                    if (currentNote.id != 0) {
+                        NotePdfAttachmentStrip(
+                            viewModel = viewModel,
+                            note = currentNote,
+                            onOpenPdf = onViewPdf,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -3910,8 +3998,19 @@ private fun FullExpressiveEditor(
             items = availablePdfs.map { it.name to it.uri.toString() },
             onDismiss = { showPdfPicker = false },
             onSelect = { name, uri ->
-                currentNote = currentNote.copy(attachedPdfUri = uri)
                 showPdfPicker = false
+                if (currentNote.id != 0) {
+                    // Saved note: persist into multi-attach table (with grant).
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                        try {
+                            viewModel.attachPdf(currentNote.id, Uri.parse(uri))
+                        } catch (_: Exception) {
+                            currentNote = currentNote.copy(attachedPdfUri = uri)
+                        }
+                    }
+                } else {
+                    currentNote = currentNote.copy(attachedPdfUri = uri)
+                }
             },
             viewModel = viewModel
         )

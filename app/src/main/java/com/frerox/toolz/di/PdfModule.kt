@@ -18,7 +18,9 @@
 package com.frerox.toolz.di
 
 import android.content.Context
+import com.frerox.toolz.data.pdf.PdfRenderEngine
 import com.frerox.toolz.data.pdf.PdfRepository
+import com.frerox.toolz.data.pdf.PdfTextEngine
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,10 +31,24 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object PdfModule {
-    
+
     @Provides
     @Singleton
-    fun providePdfRepository(@ApplicationContext context: Context): PdfRepository {
-        return PdfRepository(context)
+    fun providePdfRenderEngine(@ApplicationContext context: Context): PdfRenderEngine =
+        PdfRenderEngine(context)
+
+    @Provides
+    @Singleton
+    fun providePdfTextEngine(@ApplicationContext context: Context): PdfTextEngine =
+        PdfTextEngine(context)
+
+    @Provides
+    @Singleton
+    fun providePdfRepository(
+        @ApplicationContext context: Context,
+        renderEngine: PdfRenderEngine,
+        textEngine: PdfTextEngine
+    ): PdfRepository {
+        return PdfRepository(context, renderEngine, textEngine)
     }
 }

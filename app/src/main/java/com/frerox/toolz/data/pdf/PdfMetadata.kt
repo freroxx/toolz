@@ -26,5 +26,13 @@ data class PdfMetadata(
     val isPinned: Boolean = false,
     val lastAccessed: Long = System.currentTimeMillis(),
     val ocrContent: String? = null, // Plain text for search
-    val structuredOcrData: String? = null // JSON of blocks with coordinates
+    val structuredOcrData: String? = null, // JSON of blocks with coordinates
+    // ── Remake V2: reader state + doc identity (defaults keep old rows valid) ──
+    val lastPage: Int = 0,
+    val lastZoom: Float = 1f,
+    val readingMode: String = "CONTINUOUS", // CONTINUOUS | PAGED
+    val paperMode: String = "PAPER", // PAPER | SEPIA | NIGHT
+    val title: String? = null, // PDDocumentInformation.title
+    val author: String? = null,
+    val pageCount: Int = 0
 )

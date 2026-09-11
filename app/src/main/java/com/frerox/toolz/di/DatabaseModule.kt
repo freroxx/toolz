@@ -23,10 +23,10 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.frerox.toolz.data.AppDatabase
 import com.frerox.toolz.data.notepad.NoteDao
+import com.frerox.toolz.data.notepad.NoteAttachmentDao
 import com.frerox.toolz.data.music.MusicDao
 import com.frerox.toolz.data.steps.StepDao
 import com.frerox.toolz.data.math.MathHistoryDao
-import com.frerox.toolz.data.pdf.PdfAnnotationDao
 import com.frerox.toolz.data.pdf.PdfMetadataDao
 import com.frerox.toolz.data.notifications.NotificationDao
 import com.frerox.toolz.data.focus.AppLimitDao
@@ -199,6 +199,52 @@ object DatabaseModule {
         }
     }
 
+    // PDF remake 56->57: drop dead pdf_annotations; extend pdf_metadata with reader
+    // state + doc identity; add note_attachments + backfill legacy single-slot cols.
+    private val MIGRATION_56_57 = object : Migration(56, 57) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `pdf_annotations`")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN lastPage INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN lastZoom REAL NOT NULL DEFAULT 1.0")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN readingMode TEXT NOT NULL DEFAULT 'CONTINUOUS'")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN paperMode TEXT NOT NULL DEFAULT 'PAPER'")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN title TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN author TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE pdf_metadata ADD COLUMN pageCount INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `note_attachments` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`noteId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `uri` TEXT NOT NULL, " +
+                    "`displayName` TEXT, `sizeBytes` INTEGER NOT NULL, `pageHint` INTEGER NOT NULL, " +
+                    "`createdAt` INTEGER NOT NULL, " +
+                    "FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_attachments_noteId` ON `note_attachments` (`noteId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_attachments_kind` ON `note_attachments` (`kind`)")
+            // Backfill: one row per legacy non-null slot.
+            try {
+                db.execSQL(
+                    "INSERT INTO note_attachments (noteId, kind, uri, displayName, sizeBytes, pageHint, createdAt) " +
+                        "SELECT id, 'PDF', attachedPdfUri, NULL, 0, 0, strftime('%s','now')*1000 FROM notes " +
+                        "WHERE attachedPdfUri IS NOT NULL AND attachedPdfUri != ''"
+                )
+            } catch (_: Exception) { }
+            try {
+                db.execSQL(
+                    "INSERT INTO note_attachments (noteId, kind, uri, displayName, sizeBytes, pageHint, createdAt) " +
+                        "SELECT id, 'IMAGE', attachedImageUri, NULL, 0, 0, strftime('%s','now')*1000 FROM notes " +
+                        "WHERE attachedImageUri IS NOT NULL AND attachedImageUri != ''"
+                )
+            } catch (_: Exception) { }
+            try {
+                db.execSQL(
+                    "INSERT INTO note_attachments (noteId, kind, uri, displayName, sizeBytes, pageHint, createdAt) " +
+                        "SELECT id, 'AUDIO', attachedAudioUri, attachedAudioName, 0, 0, strftime('%s','now')*1000 FROM notes " +
+                        "WHERE attachedAudioUri IS NOT NULL AND attachedAudioUri != ''"
+                )
+            } catch (_: Exception) { }
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -264,7 +310,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -316,7 +362,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-                    .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }
@@ -347,8 +393,8 @@ object DatabaseModule {
     }
 
     @Provides
-    fun providePdfAnnotationDao(database: AppDatabase): PdfAnnotationDao {
-        return database.pdfAnnotationDao()
+    fun provideNoteAttachmentDao(database: AppDatabase): NoteAttachmentDao {
+        return database.noteAttachmentDao()
     }
 
     @Provides

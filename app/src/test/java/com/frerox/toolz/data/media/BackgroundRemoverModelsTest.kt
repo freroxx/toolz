@@ -85,6 +85,22 @@ class BackgroundModelTest {
             assertTrue("${m.id} license url", m.licenseUrl.startsWith("http"))
         }
     }
+
+    @Test
+    fun ultraBirefnetIsPinnedGatedAndLogitBased() {
+        val ultra = BackgroundModel.fromId("ultra_birefnet")
+        assertNotNull(ultra)
+        ultra!!
+        assertEquals(InferenceRuntime.ONNX, ultra.runtime)
+        assertEquals(1024, ultra.inputSize)
+        assertTrue("ultra needs sigmoid first", ultra.onnxPostSigmoid)
+        assertTrue("ultra is wifi-gated", ultra.gatedOnWifi)
+        assertEquals(224005088L, ultra.expectedSizeBytes)
+        assertEquals(
+            "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+            ultra.expectedSha256,
+        )
+    }
 }
 
 /**
@@ -129,5 +145,32 @@ class MaskDecoderTest {
         assertEquals(0f, out[0], 1e-6f)
         assertEquals(127f / 255f, out[1], 1e-3f)
         assertEquals(1f, out[2], 1e-6f)
+    }
+
+    @Test
+    fun minMaxStretchesWeakResponseToFullRange() {
+        // rembg parity: a weak-but-correct response must survive the matting thresholds.
+        val out = MaskDecoder.minMaxNormalize(floatArrayOf(0.10f, 0.12f, 0.20f, 0.14f))
+        assertEquals(0f, out[0], 1e-6f)
+        assertEquals(1f, out[2], 1e-6f)
+        assertEquals((0.12f - 0.10f) / 0.10f, out[1], 1e-5f)
+        assertEquals((0.14f - 0.10f) / 0.10f, out[3], 1e-5f)
+    }
+
+    @Test
+    fun minMaxDegenerateInputReturnsZerosNotNaN() {
+        // Flat response (e.g. no subject found): honest empty, never NaN explosion.
+        val out = MaskDecoder.minMaxNormalize(floatArrayOf(0.3f, 0.3f, 0.3f))
+        assertEquals(3, out.size)
+        for (v in out) assertEquals(0f, v, 0f)
+        assertEquals(0, MaskDecoder.minMaxNormalize(floatArrayOf()).size)
+    }
+
+    @Test
+    fun sigmoidArrayMatchesScalarSigmoid() {
+        val out = MaskDecoder.sigmoidArray(floatArrayOf(0f, 10f, -10f))
+        assertEquals(0.5f, out[0], 1e-6f)
+        assertTrue(out[1] > 0.9999f)
+        assertTrue(out[2] < 0.0001f)
     }
 }

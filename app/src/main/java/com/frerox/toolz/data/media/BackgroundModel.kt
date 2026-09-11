@@ -49,6 +49,12 @@ enum class BackgroundModel(
     val expectedSizeBytes: Long = -1L,
     /** True → refuses metered connections unless the user explicitly allows them. */
     val gatedOnWifi: Boolean = false,
+    /**
+     * True when the ONNX export emits raw logits (BiRefNet family) instead of an
+     * already-sigmoided mask (U²-Net/ISNet rembg exports). rembg applies sigmoid
+     * explicitly for exactly these models — skipping it silently degrades output.
+     */
+    val onnxPostSigmoid: Boolean = false,
     val licenseName: String,
     val licenseUrl: String,
     val isRecommended: Boolean = false,
@@ -104,6 +110,27 @@ enum class BackgroundModel(
         gatedOnWifi = true,
         licenseName = "See MODELS.md (ISNet via rembg)",
         licenseUrl = "https://github.com/danielgatis/rembg",
+    ),
+
+    ULTRA_BIREFNET(
+        id = "ultra_birefnet",
+        displayName = "Ultra • BiRefNet",
+        shortName = "Ultra",
+        description = "Sharpest edges, finest strands. Very slow — Wi-Fi and patience required.",
+        sizeLabel = "224 MB",
+        downloadUrl = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+        fileName = "birefnet-general-bb_swin_v1_tiny-epoch_232.onnx",
+        runtime = InferenceRuntime.ONNX,
+        inputSize = 1024,
+        features = listOf("Sharpest edges", "Fine strands", "Wi-Fi download"),
+        expectedSha256 = "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+        expectedSizeBytes = 224005088L,
+        gatedOnWifi = true,
+        // Swin-tiny export emits raw logits: sigmoid is applied before min-max
+        // (rembg BiRefNetSessionGeneral recipe, verified on desktop).
+        onnxPostSigmoid = true,
+        licenseName = "MIT (BiRefNet)",
+        licenseUrl = "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE",
     ),
 
     INSTANT_SELFIE(

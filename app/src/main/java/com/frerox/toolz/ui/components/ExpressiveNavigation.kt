@@ -288,6 +288,16 @@ fun ToolzFloatingToolbar(
     val todoState by todoViewModel?.uiState?.collectAsState(null) ?: remember { mutableStateOf(null) }
     val focusScore by focusViewModel?.productivityScore?.collectAsState(0) ?: remember { mutableStateOf(0) }
     val isFocusAuthorized by focusViewModel?.isFullyAuthorized?.collectAsState(false) ?: remember { mutableStateOf(false) }
+
+    // Same staleness fix as UniversalPill: this toolbar hosts its own
+    // FocusFlowViewModel scope, so refresh auth on resume. Pill itself is gated
+    // strictly on isFocusAuthorized (see hasAnyPillPage below).
+    val toolbarLifecycleEvent = rememberLifecycleEvent()
+    LaunchedEffect(toolbarLifecycleEvent) {
+        if (toolbarLifecycleEvent == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+            try { focusViewModel?.refreshStats() } catch (_: Exception) { }
+        }
+    }
     
     val pillTodoEnabled by settingsRepository?.pillTodoEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
     val pillFocusEnabled by settingsRepository?.pillFocusEnabled?.collectAsState(true) ?: remember { mutableStateOf(true) }
@@ -311,7 +321,10 @@ fun ToolzFloatingToolbar(
             (pillTodoEnabled && todoState?.tasks?.isNotEmpty() == true) ||
             (pillCaffeinateEnabled && isCaffeinated) ||
             (pillFlashlightEnabled && isFlashlightOn) ||
-            (pillFocusEnabled && isFocusAuthorized && focusScore > 0) ||
+            // Strictly gated on authorization: shows if and only if Focus Flow
+            // permissions are granted and working. Never gated on the numeric
+            // score (initial 0 frame previously hid it even when authorized).
+            (pillFocusEnabled && isFocusAuthorized) ||
             (pillStepsEnabled && stepsState?.isSensorPresent == true && stepsState?.isEnabledInSettings == true)
 
     // Whether any pill is actively running (controls glowing border). Mirrors UniversalPill isActive.

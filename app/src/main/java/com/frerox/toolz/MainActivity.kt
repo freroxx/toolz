@@ -1308,8 +1308,8 @@ fun ToolzNavHost(
                     track?.let { musicViewModel.playTrack(it) }
                     navController.navigate(Screen.MusicPlayer.route)
                 },
-                onViewPdf = { uri ->
-                    pdfViewModel.openPdf(Uri.parse(uri))
+                onViewPdf = { uri, page ->
+                    pdfViewModel.openPdfAtPage(Uri.parse(uri), "Document", page)
                     navController.navigate(Screen.PdfReader.route)
                 },
                 initialNoteId = initialNoteId

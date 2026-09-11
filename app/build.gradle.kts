@@ -215,9 +215,11 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.camera.core)
     implementation(libs.zxing.android.embedded)
-    implementation(libs.androidx.pdf.viewer)
-    implementation(libs.androidx.pdf.viewer.fragment)
     implementation(libs.androidx.fragment.ktx)
+    // PDF text layer — Apache-2.0, embedded-text extraction / TOC / metadata.
+    // Rendering stays on android.graphics.pdf.PdfRenderer (zero native bloat);
+    // androidx.pdf viewer removed (unused beta, duplicated renderer, unthemable).
+    implementation(libs.pdfbox.android)
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp)
     implementation(libs.okhttp.dnsoverhttps)

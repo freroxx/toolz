@@ -28,5 +28,13 @@ data class PdfFile(
     val thumbnail: Bitmap? = null,
     val pageCount: Int = 0,
     val isPinned: Boolean = false,
-    val ocrContent: String? = null
-)
+    val ocrContent: String? = null,
+    // ── Remake V2: enriched lazily via PdfTextEngine / PdfMetadata ──
+    val docTitle: String? = null,
+    val author: String? = null,
+    val lastPage: Int = 0,
+    val lastAccessed: Long = 0L
+) {
+    val displayTitle: String get() = docTitle?.takeIf { it.isNotBlank() } ?: name.removeSuffix(".pdf")
+    val progress: Float get() = if (pageCount > 1) (lastPage + 1).toFloat() / pageCount.toFloat() else 0f
+}

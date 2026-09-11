@@ -32,10 +32,13 @@ import com.frerox.toolz.data.ai.OpenAiRequest
 import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.notepad.Note
+import com.frerox.toolz.data.notepad.NoteAttachment
+import com.frerox.toolz.data.notepad.NoteAttachmentDao
 import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.pdf.PdfRepository
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -85,11 +88,13 @@ data class AiNoteStyle(
 @HiltViewModel
 class NotepadViewModel @Inject constructor(
     private val noteDao          : NoteDao,
+    private val attachmentDao    : NoteAttachmentDao,
     private val musicRepository  : MusicRepository,
     private val pdfRepository    : PdfRepository,
     private val openAiService    : OpenAiService,
     private val aiSettingsManager: AiSettingsManager,
     private val settingsRepository: SettingsRepository,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     // ── DB / repository streams ────────────────────────────────────────────
@@ -282,6 +287,109 @@ class NotepadViewModel @Inject constructor(
             Log.e(TAG, "Failed to persist image", e)
             null
         }
+    }
+
+    // ── Attachments V2 (multi-attach, persisted URIs) ────────────────────────
+
+    fun attachmentsFor(noteId: Int): Flow<List<NoteAttachment>> =
+        attachmentDao.observeForNote(noteId)
+
+    suspend fun listAttachments(noteId: Int): List<NoteAttachment> = try {
+        attachmentDao.listForNote(noteId)
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    /**
+     * One-time legacy merge: copies the old single-slot attached* columns into
+     * the multi-attach table so old notes render in the new UI. Idempotent —
+     * skips when rows already exist or when the note is unsaved (id == 0).
+     */
+    suspend fun ensureLegacyAttachments(note: Note) = withContext(Dispatchers.IO) {
+        try {
+            if (note.id == 0) return@withContext
+            if (attachmentDao.listForNote(note.id).isNotEmpty()) return@withContext
+            val rows = ArrayList<NoteAttachment>()
+            note.attachedPdfUri?.takeIf { it.isNotBlank() }?.let {
+                rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_PDF, uri = it))
+            }
+            note.attachedImageUri?.takeIf { it.isNotBlank() }?.let {
+                rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_IMAGE, uri = it))
+            }
+            note.attachedAudioUri?.takeIf { it.isNotBlank() }?.let {
+                rows.add(
+                    NoteAttachment(
+                        noteId = note.id, kind = NoteAttachment.KIND_AUDIO, uri = it,
+                        displayName = note.attachedAudioName
+                    )
+                )
+            }
+            if (rows.isNotEmpty()) attachmentDao.insertAll(rows)
+        } catch (_: Exception) { }
+    }
+
+    /**
+     * Attach a PDF with a persistable grant. Returns false at the 10-PDF cap.
+     * Image/audio attachers below share the same permission discipline.
+     */
+    suspend fun attachPdf(noteId: Int, source: Uri, pageHint: Int = 0): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                if (attachmentDao.countByKind(noteId, NoteAttachment.KIND_PDF) >= 10) return@withContext false
+                var usable = source.toString()
+                try {
+                    appContext.contentResolver.takePersistableUriPermission(
+                        source, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {
+                    // MediaStore + app-private URIs don't need persist; SAF copy fallback.
+                    val imported = try { pdfRepository.importPdf(source) } catch (_: Exception) { null }
+                    if (imported != null) usable = imported.toString()
+                }
+                val name = try { pdfRepository.queryDisplayName(Uri.parse(usable)) } catch (_: Exception) { null }
+                val size = try { pdfRepository.querySize(Uri.parse(usable)) } catch (_: Exception) { 0L }
+                attachmentDao.insert(
+                    NoteAttachment(
+                        noteId = noteId, kind = NoteAttachment.KIND_PDF, uri = usable,
+                        displayName = name, sizeBytes = size, pageHint = pageHint
+                    )
+                )
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+    suspend fun attachImage(noteId: Int, source: Uri): Boolean = withContext(Dispatchers.IO) {
+        try {
+            try {
+                appContext.contentResolver.takePersistableUriPermission(
+                    source, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) { }
+            attachmentDao.insert(
+                NoteAttachment(noteId = noteId, kind = NoteAttachment.KIND_IMAGE, uri = source.toString())
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun attachAudio(noteId: Int, uri: String, name: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                attachmentDao.insert(
+                    NoteAttachment(noteId = noteId, kind = NoteAttachment.KIND_AUDIO, uri = uri, displayName = name)
+                )
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+    suspend fun removeAttachment(id: Long) {
+        try { attachmentDao.deleteById(id) } catch (_: Exception) { }
     }
 
     // ── AI: Summarize ──────────────────────────────────────────────────────

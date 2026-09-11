@@ -2128,6 +2128,18 @@ fun UniversalPill(
 
     val focusScore by focusViewModel.productivityScore.collectAsStateWithLifecycle()
     val isFocusAuthorized by focusViewModel.isFullyAuthorized.collectAsStateWithLifecycle()
+
+    // Dashboard owns a separate FocusFlowViewModel instance from FocusFlowScreen
+    // (per-destination ViewModelStore), so its cached isFullyAuthorized goes stale
+    // after the user grants permissions inside FocusFlowScreen. Re-check on every
+    // resume so the Focus pill appears immediately once permissions are granted —
+    // and disappears again if they are revoked.
+    val pillLifecycleEvent = rememberLifecycleEvent()
+    LaunchedEffect(pillLifecycleEvent) {
+        if (pillLifecycleEvent == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+            focusViewModel.refreshStats()
+        }
+    }
     
     val flashlightRepository = com.frerox.toolz.MainActivity.LocalFlashlightRepository.current
     val isFlashlightOn by flashlightRepository?.isOn?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(false) }
@@ -2184,7 +2196,12 @@ fun UniversalPill(
             if (pillTodoEnabled && todoState.tasks.isNotEmpty())        add(PillPage.Todo)
             if (pillCaffeinateEnabled && isCaffeinated)                                          add(PillPage.Caffeinate)
             if (pillFlashlightEnabled && isFlashlightOn)                                         add(PillPage.Flashlight)
-            if (pillFocusEnabled && isFocusAuthorized && focusScore > 0)                         add(PillPage.Focus)
+            // Focus pill is strictly gated on authorization (usage + overlay +
+            // accessibility via isFullyAuthorized): it shows whenever Focus Flow
+            // is actually working, regardless of the numeric score. The old
+            // `focusScore > 0` gate hid the pill on the initial 0 frame and whenever
+            // the score hadn't been computed yet, even with permissions granted.
+            if (pillFocusEnabled && isFocusAuthorized)                                           add(PillPage.Focus)
             if (pillStepsEnabled && stepsState.isSensorPresent && stepsState.isEnabledInSettings) add(PillPage.Steps)
             if (isEmpty() && fillThePill) {
                 appTips.forEach { add(PillPage.Tip(it)) }

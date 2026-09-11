@@ -48,4 +48,29 @@ interface PdfMetadataDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMetadataList(entries: List<PdfMetadata>)
+
+    // ── Remake V2 ────────────────────────────────────────────────────────────
+    @Query("UPDATE pdf_metadata SET lastPage = :page, lastAccessed = :accessed WHERE uri = :uri")
+    suspend fun updateLastPage(uri: String, page: Int, accessed: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pdf_metadata SET lastZoom = :zoom WHERE uri = :uri")
+    suspend fun updateLastZoom(uri: String, zoom: Float)
+
+    @Query("UPDATE pdf_metadata SET readingMode = :mode WHERE uri = :uri")
+    suspend fun updateReadingMode(uri: String, mode: String)
+
+    @Query("UPDATE pdf_metadata SET paperMode = :mode WHERE uri = :uri")
+    suspend fun updatePaperMode(uri: String, mode: String)
+
+    @Query("UPDATE pdf_metadata SET title = :title, author = :author, pageCount = :pageCount WHERE uri = :uri")
+    suspend fun updateDocInfo(uri: String, title: String?, author: String?, pageCount: Int)
+
+    @Query("UPDATE pdf_metadata SET lastAccessed = :accessed WHERE uri = :uri")
+    suspend fun touchAccessed(uri: String, accessed: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM pdf_metadata ORDER BY lastAccessed DESC LIMIT :limit")
+    fun getRecents(limit: Int = 10): Flow<List<PdfMetadata>>
+
+    @Query("DELETE FROM pdf_metadata WHERE uri = :uri")
+    suspend fun deleteByUri(uri: String)
 }
