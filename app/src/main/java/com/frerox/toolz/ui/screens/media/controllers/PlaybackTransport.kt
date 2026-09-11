@@ -289,6 +289,7 @@ class PlaybackTransport(
         scope.launch {
             uiState.update { it.copy(isResolvingCatalog = true) }
             try {
+                val quality = settingsRepository.catalogStreamQuality.first()
                 val items = tracks.map { track ->
                     val localTrack = withContext(Dispatchers.IO) {
                         repository.getTrackBySourceUrl(track.sourceUrl)
@@ -319,11 +320,35 @@ class PlaybackTransport(
                 }
                 val safeIndex = startIndex.coerceIn(0, items.size - 1)
 
+                // Resolve the tapped track to a direct stream BEFORE setMediaItems
+                // so the first play() has a playable URL immediately. Without this
+                // the player errors on the watch URL before the service's lazy
+                // resolve lands, error-skips the queue, and no notification shows.
+                val resolvedItems = items.toMutableList()
+                runCatching {
+                    val startTrack = tracks[safeIndex]
+                    val startLocal = withContext(Dispatchers.IO) {
+                        repository.getTrackBySourceUrl(startTrack.sourceUrl)
+                    }
+                    if (startLocal == null || startLocal.uri.isBlank()) {
+                        val streamUrl = withContext(Dispatchers.IO) {
+                            catalogRepository.resolveAudioStream(startTrack.sourceUrl, quality)
+                        }
+                        if (streamUrl.isNotBlank()) {
+                            resolvedItems[safeIndex] = resolvedItems[safeIndex].buildUpon()
+                                .setUri(streamUrl.toUri())
+                                .build()
+                        }
+                    }
+                }.onFailure {
+                    android.util.Log.w("MusicPlayerVM", "playCatalogTracks: start-track resolve failed, lazy resolve will retry", it)
+                }
+
                 withContext(Dispatchers.Main) {
                     val p: Player = playerOrController()
                     runCatching {
                         p.stop()
-                        p.setMediaItems(items, safeIndex, 0L)
+                        p.setMediaItems(resolvedItems, safeIndex, 0L)
                         p.prepare()
                         p.play()
                     }.onFailure {

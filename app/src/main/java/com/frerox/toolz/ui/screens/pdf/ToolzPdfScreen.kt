@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -114,6 +115,18 @@ fun ToolzPdfScreen(
     var attachingFile by remember { mutableStateOf<PdfFile?>(null) }
 
     val isViewer = uiState is PdfUiState.Viewer
+
+    // Vault list position: entering the tool (or coming back from the
+    // reader) always starts at the top instead of a stale offset.
+    val libraryListState = rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(isViewer) {
+        if (!isViewer) {
+            try {
+                libraryListState.scrollToItem(0)
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     val importer = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -303,6 +316,7 @@ fun ToolzPdfScreen(
 
                         else -> PdfLibraryScreen(
                             viewModel = viewModel,
+                            listState = libraryListState,
                             onOpen = { viewModel.openPdf(it.uri, it.displayTitle) },
                             onDelete = { deletingFile = it },
                             onRename = {

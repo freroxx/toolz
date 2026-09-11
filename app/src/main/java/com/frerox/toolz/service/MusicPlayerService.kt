@@ -133,6 +133,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var widgetCorrectionJob: Job? = null
     private var statePersistenceJob: Job? = null
+    private var placeholderDemoteJob: Job? = null
+    private var isPlaceholderActive = false
 
     private var sensorManager: SensorManager? = null
     private var audioManager: AudioManager? = null
@@ -315,6 +317,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updateWidget()
             if (isPlaying) {
+                // Media3 now owns the foreground with the real media notification.
+                // Drop our transient placeholder so "Preparing music…" never sticks
+                // and never competes with (or suppresses) the real notification.
+                cancelPlaceholderKeepForeground()
                 startWidgetCorrectionLoop()
                 startStatePersistenceLoop()
                 observeShakeSetting()
@@ -330,6 +336,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 stopStatePersistenceLoop()
                 unregisterShakeListener()
                 savePlaybackState()
+                // Playback stopped/paused: if our placeholder is still up (e.g. a
+                // restore that never started), drop it now. Never touch Media3's
+                // own paused notification — only clean up OUR id.
+                if (isPlaceholderActive) demoteForegroundIfIdle()
                 // Only abandon if not expecting auto-resume (transient/duck pause)
                 // and not currently ducking (still playing at low volume)
                 if (!shouldResumeOnFocusGain && !isDucking) {
@@ -339,6 +349,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
             updateWidget()
+            // Async restore path: player may hit READY+playing slightly after
+            // onIsPlayingChanged. Belt-and-suspenders: whenever we are actually
+            // playing, the placeholder must be gone so the real media
+            // notification is the only thing the user sees.
+            if (playbackState == Player.STATE_READY) {
+                runCatching { if (player.isPlaying) cancelPlaceholderKeepForeground() }
+            }
         }
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             // The queue itself can change shape (tracks added/removed/
@@ -368,6 +385,22 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
             Log.e("MusicPlayerService", "Playback error in background: ${error.errorCodeName}", error)
+            // Catalog streams are set with the watch URL first and resolved to a
+            // direct stream async in onMediaItemTransition. If the player errors
+            // before that resolve lands, the URL was never playable — retry the
+            // resolve in place instead of skipping a healthy queue item (which
+            // made catalog taps look dead and left the notification empty).
+            runCatching {
+                val current = player.currentMediaItem
+                if (current != null &&
+                    (current.mediaMetadata.extras?.getBoolean("is_catalog") ?: false) &&
+                    (current.localConfiguration?.uri == null ||
+                        current.localConfiguration?.uri.toString() == current.mediaId)
+                ) {
+                    resolveCatalogTrack(current, retryPlay = true)
+                    return
+                }
+            }
             // User-first: skip the dead file silently so background playback
             // never stalls on one moved/deleted song. No toast, no scan loop.
             runCatching {
@@ -384,7 +417,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
     }
 
-    private fun resolveCatalogTrack(item: MediaItem) {
+    private fun resolveCatalogTrack(item: MediaItem, retryPlay: Boolean = false) {
         serviceScope.launch {
             try {
                 val sourceUrl = item.mediaMetadata.extras?.getString("source_url") ?: return@launch
@@ -400,7 +433,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         // Double-check before replacing — bound-check + id check on Main
                         withContext(Dispatchers.Main) {
                             if (i < player.mediaItemCount && player.getMediaItemAt(i).mediaId == item.mediaId) {
+                                val wasCurrent = i == player.currentMediaItemIndex
                                 player.replaceMediaItem(i, updatedItem)
+                                // If this is the current item and we got here via an
+                                // error-retry (or it is still the active item), make
+                                // sure the new stream actually loads instead of
+                                // sitting in error/idle with no notification.
+                                if (wasCurrent && (retryPlay || player.playWhenReady || player.isPlaying)) {
+                                    runCatching {
+                                        player.prepare()
+                                        if (!player.isPlaying) player.play()
+                                    }
+                                }
                             } else {
                                 Log.w("MusicPlayerService", "Skipping stale catalog resolve: queue mutated")
                             }
@@ -789,9 +833,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     /**
      * Synchronously satisfy the startForegroundService() contract. Must do
      * zero suspend/blocking work — just channel + placeholder notification.
+     *
+     * Only posts when a real FGS start needs satisfying: a non-null widget /
+     * media-button action while NOT already playing. Warm-up starts (null
+     * action from MainActivity/ViewModel via plain startService) never need
+     * foreground, and posting a placeholder for them is what caused the
+     * flickering/stuck "Preparing music…" notification on every app open.
      */
-    private fun ensureForegroundForStartCommand() {
+    private fun ensureForegroundForStartCommand(action: String?) {
         try {
+            if (action == null) return
+            if (runCatching { player.isPlaying }.getOrDefault(false)) return
+            if (isPlaceholderActive) return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val nm = getSystemService(NotificationManager::class.java)
                 nm?.createNotificationChannel(
@@ -837,41 +890,75 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 @Suppress("DEPRECATION")
                 startForeground(FGS_NOTIFICATION_ID, notification)
             }
+            isPlaceholderActive = true
         } catch (e: Exception) {
             Log.w("MusicPlayerService", "ensureForeground failed", e)
         }
     }
 
     /**
-     * Drop the placeholder as soon as we know playback isn't active. Uses
-     * DETACH (keep other notifications) + targeted cancel so Media3's own
-     * media notification — different ID — is never dismissed.
+     * Remove ONLY our transient placeholder (id 1101), keeping Media3's own
+     * media notification / foreground state untouched so the real player
+     * notification always shows up once playback starts.
+     */
+    private fun cancelPlaceholderKeepForeground() {
+        if (!isPlaceholderActive) return
+        isPlaceholderActive = false
+        placeholderDemoteJob?.cancel()
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(FGS_NOTIFICATION_ID)
+        }
+    }
+
+    /**
+     * Drop the placeholder when playback isn't active. Only ever touches OUR
+     * id and only exits foreground if WE are the ones holding it (flag set).
+     * Uses REMOVE (not DETACH) so the placeholder can't linger as a stuck
+     * regular notification after demotion.
      */
     private fun demoteForegroundIfIdle() {
         try {
+            if (!isPlaceholderActive) return
             val playing = runCatching { player.isPlaying }.getOrDefault(false)
-            if (!playing) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(false)
-                }
-                runCatching {
-                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    nm.cancel(FGS_NOTIFICATION_ID)
-                }
+            if (playing) {
+                // Media3 owns foreground now — just remove our id.
+                cancelPlaceholderKeepForeground()
+                return
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            runCatching {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(FGS_NOTIFICATION_ID)
+            }
+            isPlaceholderActive = false
+            placeholderDemoteJob?.cancel()
         } catch (e: Exception) {
             Log.w("MusicPlayerService", "demoteForeground failed", e)
         }
     }
 
+    private fun scheduleDemoteIfIdle(delayMs: Long) {
+        placeholderDemoteJob?.cancel()
+        if (!isPlaceholderActive) return
+        placeholderDemoteJob = serviceScope.launch {
+            kotlinx.coroutines.delay(delayMs)
+            demoteForegroundIfIdle()
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ANR fix: promote synchronously BEFORE any async restore/widget work.
-        ensureForegroundForStartCommand()
+        // ANR fix: promote synchronously BEFORE any async restore/widget work,
+        // but only when a real action needs it (see helper — warm-ups skip).
+        val action = intent?.action
+        ensureForegroundForStartCommand(action)
         try {
-            when (intent?.action) {
+            when (action) {
                 ACTION_TOGGLE_PLAY -> {
                     if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
                     else if (player.isPlaying) player.pause() else player.play()
@@ -927,15 +1014,33 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 else -> Unit
             }
         } catch (e: Exception) {
-            Log.w("MusicPlayerService", "onStartCommand failed for ${intent?.action}", e)
+            Log.w("MusicPlayerService", "onStartCommand failed for $action", e)
         }
         updateWidget()
-        super.onStartCommand(intent, flags, startId)
-        // Contract already satisfied above; don't hold FGS + placeholder when idle.
-        // If playback started (or starts async via restore), Media3 re-promotes
-        // with the real media notification on its own.
-        demoteForegroundIfIdle()
-        return START_STICKY
+        val superResult = try {
+            super.onStartCommand(intent, flags, startId)
+        } catch (e: Exception) {
+            Log.w("MusicPlayerService", "super.onStartCommand failed", e)
+            START_STICKY
+        }
+        // Don't hold the placeholder when idle. Playback-triggering actions may
+        // resolve asynchronously (restore from DataStore), so give them a short
+        // grace window before demoting — if playback starts in that window,
+        // onIsPlayingChanged cancels the placeholder and Media3's real media
+        // notification takes over. Non-playback actions demote immediately.
+        val needsGrace = action == ACTION_TOGGLE_PLAY ||
+            action == ACTION_SKIP_NEXT ||
+            action == ACTION_SKIP_PREV ||
+            action == ACTION_SEEK_TO_QUEUE_INDEX
+        val playingNow = runCatching { player.isPlaying }.getOrDefault(false)
+        if (playingNow) {
+            cancelPlaceholderKeepForeground()
+        } else if (needsGrace) {
+            scheduleDemoteIfIdle(1_500L)
+        } else {
+            demoteForegroundIfIdle()
+        }
+        return superResult
     }
 
     /**
@@ -1326,6 +1431,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         unregisterShakeListener()
         abandonAudioFocus()
         try { player.volume = 1.0f } catch (_: Exception) {}
+        placeholderDemoteJob?.cancel()
+        isPlaceholderActive = false
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(FGS_NOTIFICATION_ID)
+        }
         serviceScope.cancel()
         mediaSession?.run {
             release()

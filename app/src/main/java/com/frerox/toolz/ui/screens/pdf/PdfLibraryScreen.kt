@@ -35,7 +35,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Description
@@ -88,6 +90,7 @@ import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.screens.pdf.components.PdfCover
 import com.frerox.toolz.ui.screens.pdf.components.formatPdfDate
 import com.frerox.toolz.ui.screens.pdf.components.formatPdfSize
+import kotlinx.coroutines.launch
 
 /**
  * Document list: search field + plain rows. Nothing else.
@@ -95,6 +98,7 @@ import com.frerox.toolz.ui.screens.pdf.components.formatPdfSize
 @Composable
 fun PdfLibraryScreen(
     viewModel: PdfViewModel,
+    listState: LazyListState = rememberLazyListState(),
     onOpen: (PdfFile) -> Unit,
     onDelete: (PdfFile) -> Unit,
     onRename: (PdfFile) -> Unit,
@@ -107,6 +111,7 @@ fun PdfLibraryScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val haptic = rememberToolzHapticFeedback()
+    val resumeScope = androidx.compose.runtime.rememberCoroutineScope()
 
     // File access gate: without All-files access the OS blocks opening
     // other apps' PDFs, so covers (and the reader) can't load them.
@@ -125,6 +130,15 @@ fun PdfLibraryScreen(
                     coverReload++
                 }
                 hasAccess = now
+                // Entering/opening the tool always starts the vault at the
+                // top instead of a stale offset (covers re-entry onto a
+                // retained destination, where fresh composition doesn't run).
+                resumeScope.launch {
+                    try {
+                        listState.scrollToItem(0)
+                    } catch (_: Exception) {
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
@@ -192,6 +206,7 @@ fun PdfLibraryScreen(
                 val pinned = remember(files) { files.filter { it.isPinned } }
                 val rest = remember(files) { files.filterNot { it.isPinned } }
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
                         .fadingEdges(top = 12.dp, bottom = 32.dp),
