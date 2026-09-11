@@ -134,6 +134,43 @@ class PdfRepository @Inject constructor(
         null
     }
 
+    // ── URI I/O helpers (file:// + content://) ──────────────────────────────
+
+    /** True when [uri] is an app-private file under filesDir (durable, no grant needed). */
+    fun isAppPrivateFile(uri: Uri): Boolean = try {
+        if (uri.scheme != "file") return false
+        val path = uri.path ?: return false
+        val root = context.filesDir.canonicalPath
+        File(path).canonicalPath.startsWith(root)
+    } catch (_: Exception) {
+        false
+    }
+
+    /** Open a byte stream regardless of scheme. Null when unreadable. */
+    fun openInput(uri: Uri): java.io.InputStream? = try {
+        if (uri.scheme == "file") {
+            val f = File(uri.path ?: return null)
+            if (!f.isFile || !f.canRead()) null else java.io.FileInputStream(f)
+        } else {
+            context.contentResolver.openInputStream(uri)
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Open an FD for PdfRenderer regardless of scheme. Caller must close. */
+    fun openFd(uri: Uri): android.os.ParcelFileDescriptor? = try {
+        if (uri.scheme == "file") {
+            val f = File(uri.path ?: return null)
+            if (!f.isFile || !f.canRead()) null
+            else android.os.ParcelFileDescriptor.open(f, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+        } else {
+            context.contentResolver.openFileDescriptor(uri, "r")
+        }
+    } catch (_: Exception) {
+        null
+    }
+
     // ── SAF import with persistable permission ───────────────────────────────
 
     /**
@@ -153,13 +190,80 @@ class PdfRepository @Inject constructor(
     /** True when the bytes behind [uri] can actually be opened right now. */
     fun isReadable(uri: Uri): Boolean = try {
         if (uri.scheme == "file") {
-            File(uri.path ?: "").canRead()
+            val f = File(uri.path ?: return false)
+            f.isFile && f.canRead()
         } else {
-            context.contentResolver.openInputStream(uri)?.close()
+            val stream = try {
+                context.contentResolver.openInputStream(uri) ?: return false
+            } catch (_: Exception) {
+                return false
+            }
+            try {
+                stream.close()
+            } catch (_: Exception) {
+                return false
+            }
             true
         }
     } catch (_: Exception) {
         false
+    }
+
+    /**
+     * Copy [sourceUri] bytes into app-private files/pdfs. Returns the durable
+     * file:// copy, or null when the source can't be read. Works for SAF,
+     * MediaStore (with All-files access) and existing file:// sources.
+     */
+    suspend fun copyToPrivate(sourceUri: Uri): Uri? = withContext(Dispatchers.IO) {
+        try {
+            val input = openInput(sourceUri) ?: return@withContext null
+            val base = queryDisplayName(sourceUri) ?: "imported-${System.currentTimeMillis()}.pdf"
+            val safe = base.takeLast(120).replace(Regex("[^A-Za-z0-9._-]+"), "_")
+                .ifBlank { "imported-${System.currentTimeMillis()}.pdf" }
+            val dir = File(context.filesDir, "pdfs").apply { mkdirs() }
+            var dest = File(dir, if (safe.endsWith(".pdf", true)) safe else "$safe.pdf")
+            // Avoid clobbering an existing import with a different doc.
+            if (dest.exists()) {
+                val stem = dest.nameWithoutExtension.take(80)
+                dest = File(dir, "${stem}_${System.currentTimeMillis()}.pdf")
+            }
+            input.use { ins ->
+                FileOutputStream(dest).use { out -> ins.copyTo(out) }
+            }
+            if (!dest.isFile || dest.length() <= 0L) {
+                try { dest.delete() } catch (_: Exception) { }
+                return@withContext null
+            }
+            Uri.fromFile(dest)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Resolve a durable usable URI for [sourceUri]:
+     * - app-private files are returned as-is (already durable);
+     * - SAF URIs keep their persistable grant when readable;
+     * - MediaStore / fragile URIs are copied into files/pdfs so the
+     *   attachment survives reboot + permission revocation.
+     * Returns null only when the source can't be read at all.
+     */
+    suspend fun resolveDurableUri(sourceUri: Uri): Uri? = withContext(Dispatchers.IO) {
+        if (isAppPrivateFile(sourceUri) && isReadable(sourceUri)) return@withContext sourceUri
+        // Best effort: keep SAF grant where supported.
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                sourceUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: Exception) { }
+        if (!isReadable(sourceUri)) return@withContext null
+        // Fragile non-private URIs (MediaStore, downloads, …) → private copy.
+        if (sourceUri.scheme != "file") {
+            val copy = try { copyToPrivate(sourceUri) } catch (_: Exception) { null }
+            if (copy != null && isReadable(copy)) return@withContext copy
+        }
+        // Copy failed or unnecessary — original is readable, use it.
+        sourceUri
     }
 
     /**
@@ -168,28 +272,28 @@ class PdfRepository @Inject constructor(
      * Returns the usable Uri, or null on failure.
      */
     suspend fun importPdf(sourceUri: Uri): Uri? = withContext(Dispatchers.IO) {
-        // 1) Try persistable grant — zero-copy path.
+        // App-private files need no work.
+        if (isAppPrivateFile(sourceUri) && isReadable(sourceUri)) return@withContext sourceUri
+        // 1) Try persistable grant — zero-copy path (SAF).
         try {
             context.contentResolver.takePersistableUriPermission(
                 sourceUri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
-            // Verify readable.
-            context.contentResolver.openInputStream(sourceUri)?.close()
-            return@withContext sourceUri
+            val stream = context.contentResolver.openInputStream(sourceUri)
+            if (stream != null) {
+                try { stream.close() } catch (_: Exception) { }
+                // SAF grant held — but still prefer a private copy for
+                // MediaStore-style URIs that don't actually persist grants.
+                // Only return zero-copy when the copy fails below.
+            } else {
+                // Null stream = not readable, fall through to copy (which fails → null).
+            }
         } catch (_: Exception) { }
-        // 2) Copy into files/pdfs.
-        try {
-            val name = queryDisplayName(sourceUri) ?: "imported-${System.currentTimeMillis()}.pdf"
-            val safe = name.takeLast(120).replace(Regex("[^A-Za-z0-9._-]+"), "_")
-            val dir = File(context.filesDir, "pdfs").apply { mkdirs() }
-            val dest = File(dir, if (safe.endsWith(".pdf", true)) safe else "$safe.pdf")
-            context.contentResolver.openInputStream(sourceUri)?.use { ins ->
-                FileOutputStream(dest).use { out -> ins.copyTo(out) }
-            } ?: return@withContext null
-            Uri.fromFile(dest)
-        } catch (_: Exception) {
-            null
-        }
+        // 2) Copy into files/pdfs (durable across reboot + permission loss).
+        val copy = try { copyToPrivate(sourceUri) } catch (_: Exception) { null }
+        if (copy != null) return@withContext copy
+        // 3) Last resort: readable original (SAF with grant).
+        if (isReadable(sourceUri)) sourceUri else null
     }
 
     fun queryDisplayName(uri: Uri): String? = try {

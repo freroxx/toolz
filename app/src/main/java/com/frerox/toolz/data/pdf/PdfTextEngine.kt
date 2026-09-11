@@ -75,7 +75,13 @@ class PdfTextEngine @Inject constructor(
 
     private fun loadDoc(uri: Uri): PDDocument? = try {
         ensureInit()
-        val input = context.contentResolver.openInputStream(uri) ?: return null
+        val input = if (uri.scheme == "file") {
+            val f = java.io.File(uri.path ?: return null)
+            if (!f.isFile || !f.canRead()) return null
+            java.io.FileInputStream(f)
+        } else {
+            context.contentResolver.openInputStream(uri) ?: return null
+        }
         input.use { PDDocument.load(it) }
     } catch (_: com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException) {
         null

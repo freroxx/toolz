@@ -55,6 +55,12 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE isDeleted = 0")
     suspend fun getAllNotesSync(): List<Note>
 
+    @Query("SELECT * FROM notes WHERE id = :noteId LIMIT 1")
+    suspend fun getNoteById(noteId: Int): Note?
+
+    @Query("UPDATE notes SET attachedPdfUri = :uri WHERE id = :noteId")
+    suspend fun updateAttachedPdfUri(noteId: Int, uri: String?)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotes(notes: List<Note>)
 }

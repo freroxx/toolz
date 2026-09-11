@@ -85,10 +85,20 @@ fun PdfCover(
             }
         } else {
             // Fallback for previews without DI (notes legacy path): direct render.
+            // Handles file:// via direct FD so app-private copies always preview.
             bitmap = withContext(Dispatchers.IO) {
                 try {
-                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
+                    val pfd = if (uri.scheme == "file") {
+                        val f = java.io.File(uri.path ?: return@withContext null)
+                        if (!f.isFile || !f.canRead()) return@withContext null
+                        android.os.ParcelFileDescriptor.open(
+                            f, android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                        )
+                    } else {
+                        context.contentResolver.openFileDescriptor(uri, "r")
+                    } ?: return@withContext null
+                    pfd.use {
+                        android.graphics.pdf.PdfRenderer(it).use { renderer ->
                             if (renderer.pageCount <= 0) return@withContext null
                             renderer.openPage(0).use { page ->
                                 val w = 320

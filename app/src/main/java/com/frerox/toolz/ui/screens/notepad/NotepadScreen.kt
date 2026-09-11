@@ -1130,7 +1130,8 @@ fun NotepadScreen(
                                     modifier   = Modifier.padding(bottom = 18.dp),
                                 )
 
-                                // Attachments
+                                // Attachments (legacy previews + V2 strip rendered
+                                // independently — a V2-only attach must still show).
                                 if (note.attachedAudioUri != null || note.attachedPdfUri != null || note.attachedImageUri != null) {
                                     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 20.dp)) {
                                         note.attachedImageUri?.let { uri ->
@@ -1144,7 +1145,6 @@ fun NotepadScreen(
                                         note.attachedPdfUri?.let { uri ->
                                             PdfPreview(uri = uri, onClick = { onViewPdf(uri, 0) }, modifier = Modifier.height(150.dp))
                                         }
-                                        NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth())
                                         note.attachedAudioUri?.let { uri ->
                                             val track = musicState.tracks.find { it.uri == uri }
                                 MusicPill(
@@ -1161,6 +1161,14 @@ fun NotepadScreen(
                                         }
                                     }
                                 }
+                                // V2 multi-attach strip — outside the legacy-if so
+                                // V2-only attaches render (self-hides when empty).
+                                NotePdfAttachmentStrip(
+                                    viewModel = viewModel,
+                                    note = note,
+                                    onOpenPdf = onViewPdf,
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)
+                                )
 
                                 Text(
                                     note.content,
@@ -2385,6 +2393,8 @@ fun AttachmentPickerDialog(
     viewModel     : NotepadViewModel,
     musicViewModel: MusicPlayerViewModel = hiltViewModel(),
     emptyText     : String = "Nothing here yet",
+    browseLabel   : String? = null,
+    onBrowse      : (() -> Unit)? = null,
 ) {
     val musicState by musicViewModel.uiState.collectAsState()
     val haptic     = rememberToolzHapticFeedback()
@@ -2530,12 +2540,32 @@ fun AttachmentPickerDialog(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                TextButton(
-                    onClick  = { haptic.click(); onDismiss() },
-                    modifier = Modifier.align(Alignment.End),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    @Suppress("DEPRECATION")
-                    Text("CANCEL", fontWeight = FontWeight.Black)
+                    if (browseLabel != null && onBrowse != null) {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { haptic.click(); onBrowse() },
+                        ) {
+                            Icon(
+                                Icons.Rounded.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(browseLabel, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    TextButton(
+                        onClick = { haptic.click(); onDismiss() },
+                    ) {
+                        @Suppress("DEPRECATION")
+                        Text("CANCEL", fontWeight = FontWeight.Black)
+                    }
                 }
             }
         }
@@ -2699,7 +2729,16 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
             LaunchedEffect(uri, constraints.maxWidth, constraints.maxHeight) {
                 bitmap = withContext(Dispatchers.IO) {
                     try {
-                        val pfd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") ?: return@withContext null
+                        val parsed = Uri.parse(uri)
+                        val pfd = if (parsed.scheme == "file") {
+                            val f = java.io.File(parsed.path ?: return@withContext null)
+                            if (!f.isFile || !f.canRead()) return@withContext null
+                            android.os.ParcelFileDescriptor.open(
+                                f, android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                            )
+                        } else {
+                            context.contentResolver.openFileDescriptor(parsed, "r")
+                        } ?: return@withContext null
                         pfd.use {
                             val renderer = PdfRenderer(it)
                             if (renderer.pageCount <= 0) { renderer.close(); return@withContext null }
@@ -3602,6 +3641,57 @@ private fun FullExpressiveEditor(
     var showAttachmentMenu by remember { mutableStateOf(false) }
     var showAudioPicker by remember { mutableStateOf(false) }
     var showPdfPicker by remember { mutableStateOf(false) }
+    var isBrowsingPdf by remember { mutableStateOf(false) }
+    val editorScope = rememberCoroutineScope()
+
+    // SAF fallback: pick any PDF from the system picker (works without
+    // All-files access). Persisted + copied to app-private so the note
+    // keeps opening after reboot.
+    val pdfBrowseLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) {
+            isBrowsingPdf = false
+            return@rememberLauncherForActivityResult
+        }
+        editorScope.launch {
+            try {
+                if (currentNote.id != 0) {
+                    val result = viewModel.attachPdf(currentNote.id, uri)
+                    // Sync the local editor copy so SAVE doesn't wipe the
+                    // dual-written legacy slot with a stale null.
+                    if (result is PdfAttachResult.Attached && result.uri.isNotBlank()) {
+                        currentNote = currentNote.copy(
+                            attachedPdfUri = currentNote.attachedPdfUri ?: result.uri
+                        )
+                    }
+                    val msg = when (result) {
+                        is PdfAttachResult.Attached -> "PDF attached"
+                        PdfAttachResult.Capped -> "Note already has 10 PDFs"
+                        PdfAttachResult.Unreadable -> "Couldn't open that PDF on this device"
+                        is PdfAttachResult.Failed -> "Couldn't attach — try again"
+                    }
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    viewModel.refreshPdfs()
+                } else {
+                    val durable = viewModel.resolvePdfForDraft(uri)
+                    if (durable != null) {
+                        currentNote = currentNote.copy(attachedPdfUri = durable)
+                        viewModel.refreshPdfs()
+                    } else {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Couldn't open that PDF on this device",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            } finally {
+                isBrowsingPdf = false
+                showPdfPicker = false
+            }
+        }
+    }
 
     LaunchedEffect(aiStyle) {
         if (aiStyle != null) showAiStyleBanner = true
@@ -3960,16 +4050,20 @@ private fun FullExpressiveEditor(
                             )
                         }
                     }
-                    // V2: saved-note multi-attachments (legacy slots above stay for drafts).
-                    if (currentNote.id != 0) {
-                        NotePdfAttachmentStrip(
-                            viewModel = viewModel,
-                            note = currentNote,
-                            onOpenPdf = onViewPdf,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
                 }
+            }
+            // V2: saved-note multi-attachments. Deliberately OUTSIDE the
+            // legacy-if above: V2-only attaches (no legacy slots set) must
+            // still render, otherwise a successful attach looks like nothing
+            // happened. The strip self-hides for drafts (id == 0) and when
+            // the note has no PDF rows.
+            if (currentNote.id != 0) {
+                NotePdfAttachmentStrip(
+                    viewModel = viewModel,
+                    note = currentNote,
+                    onOpenPdf = onViewPdf,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                )
             }
             Spacer(Modifier.height(100.dp))
         }
@@ -4006,19 +4100,40 @@ private fun FullExpressiveEditor(
         )
     }
 
+    LaunchedEffect(showPdfPicker) {
+        if (showPdfPicker) viewModel.refreshPdfs()
+    }
+
     if (showPdfPicker) {
         AttachmentPickerDialog(
             title = "ATTACH PDF",
             items = availablePdfs.map { it.name to it.uri.toString() },
             onDismiss = { showPdfPicker = false },
             emptyText = "No PDFs found — import one from the PDF tool first",
+            browseLabel = if (isBrowsingPdf) "Opening…" else "Browse files…",
+            onBrowse = {
+                if (!isBrowsingPdf) {
+                    isBrowsingPdf = true
+                    try {
+                        pdfBrowseLauncher.launch(arrayOf("application/pdf"))
+                    } catch (_: Exception) {
+                        isBrowsingPdf = false
+                    }
+                }
+            },
             onSelect = { name, uri ->
                 showPdfPicker = false
                 if (currentNote.id != 0) {
                     // Saved note: persist into multi-attach table (grant verified).
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                        val msg = when (viewModel.attachPdf(currentNote.id, Uri.parse(uri))) {
-                            PdfAttachResult.Attached -> "PDF attached"
+                        val result = viewModel.attachPdf(currentNote.id, Uri.parse(uri))
+                        if (result is PdfAttachResult.Attached && result.uri.isNotBlank()) {
+                            currentNote = currentNote.copy(
+                                attachedPdfUri = currentNote.attachedPdfUri ?: result.uri
+                            )
+                        }
+                        val msg = when (result) {
+                            is PdfAttachResult.Attached -> "PDF attached"
                             PdfAttachResult.Capped -> "Note already has 10 PDFs"
                             PdfAttachResult.Unreadable -> "Couldn't open that PDF on this device"
                             is PdfAttachResult.Failed -> "Couldn't attach — try again"
@@ -4026,7 +4141,25 @@ private fun FullExpressiveEditor(
                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
                 } else {
-                    currentNote = currentNote.copy(attachedPdfUri = uri)
+                    // Draft: resolve to a durable copy now so SAVE keeps a
+                    // readable URI even for fragile MediaStore entries.
+                    val picked = Uri.parse(uri)
+                    editorScope.launch {
+                        val durable = try {
+                            viewModel.resolvePdfForDraft(picked)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (durable != null) {
+                            currentNote = currentNote.copy(attachedPdfUri = durable)
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Couldn't open that PDF on this device",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 }
             },
             viewModel = viewModel

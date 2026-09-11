@@ -23,8 +23,8 @@ package com.frerox.toolz.data.notepad
  * swallowing failures into a generic Boolean.
  */
 sealed interface PdfAttachResult {
-    /** Row written; the attachment is readable and will open. */
-    data object Attached : PdfAttachResult
+    /** Row written; the attachment is readable and will open. [uri] is the stored URI. */
+    data class Attached(val uri: String = "") : PdfAttachResult
 
     /** Note already holds 10 PDFs. */
     data object Capped : PdfAttachResult

@@ -66,10 +66,24 @@ class PdfRenderEngine @Inject constructor(
     private fun mutexFor(uri: Uri) =
         openStripes[(uri.toString().hashCode() and Int.MAX_VALUE) % openStripes.size]
 
+    /** Open an FD for [uri], handling app-private file:// directly so
+     *  attachments/imports never depend on ContentResolver file support. */
+    private fun openFd(uri: Uri): ParcelFileDescriptor? = try {
+        if (uri.scheme == "file") {
+            val f = java.io.File(uri.path ?: return null)
+            if (!f.isFile || !f.canRead()) null
+            else ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+        } else {
+            context.contentResolver.openFileDescriptor(uri, "r")
+        }
+    } catch (_: Exception) {
+        null
+    }
+
     suspend fun getPageCount(uri: Uri): Int = withContext(Dispatchers.IO) {
         mutexFor(uri).withLock {
             try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                openFd(uri)?.use { pfd ->
                     PdfRenderer(pfd).use { it.pageCount }
                 } ?: 0
             } catch (_: SecurityException) {
@@ -83,7 +97,7 @@ class PdfRenderEngine @Inject constructor(
     suspend fun getPageSize(uri: Uri, pageIndex: Int): PageSize? = withContext(Dispatchers.IO) {
         mutexFor(uri).withLock {
             try {
-                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                openFd(uri)?.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
                         if (pageIndex >= renderer.pageCount) return@withContext null
                         renderer.openPage(pageIndex).use { PageSize(it.width, it.height) }
@@ -117,7 +131,7 @@ class PdfRenderEngine @Inject constructor(
         return withContext(Dispatchers.IO) {
             mutexFor(uri).withLock {
                 try {
-                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    openFd(uri)?.use { pfd ->
                         PdfRenderer(pfd).use { renderer ->
                             if (pageIndex >= renderer.pageCount) return@withContext null
                             renderer.openPage(pageIndex).use { page ->
@@ -185,7 +199,7 @@ class PdfRenderEngine @Inject constructor(
     }
 
     fun openSession(uri: Uri): Session? = try {
-        val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+        val pfd = openFd(uri) ?: return null
         Session(pfd)
     } catch (_: Exception) {
         null

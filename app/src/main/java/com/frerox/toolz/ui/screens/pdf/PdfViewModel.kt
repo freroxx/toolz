@@ -657,7 +657,8 @@ class PdfViewModel @Inject constructor(
     /**
      * Attach [file] to [noteId], guaranteeing the stored URI stays readable:
      * persistable grant where supported, verified read, app-private copy as
-     * fallback. Never inserts a dead row.
+     * fallback. Never inserts a dead row. Fragile sources are copied into
+     * app-private storage so the note opens after reboot / grant loss.
      */
     suspend fun attachPdfToNote(noteId: Int, file: PdfFile, page: Int = 0): PdfAttachResult =
         withContext(Dispatchers.IO) {
@@ -666,7 +667,7 @@ class PdfViewModel @Inject constructor(
                     return@withContext PdfAttachResult.Capped
                 }
                 repository.ensurePersistableGrant(file.uri)
-                var usable = file.uri.toString()
+                val usable: Uri
                 if (!repository.isReadable(file.uri)) {
                     val imported = try {
                         repository.importPdf(file.uri)
@@ -678,21 +679,39 @@ class PdfViewModel @Inject constructor(
                         Log.w(TAG, "attachPdfToNote: source unreadable and no copy possible: ${file.uri}")
                         return@withContext PdfAttachResult.Unreadable
                     }
-                    usable = imported.toString()
+                    usable = imported
+                } else {
+                    val durable = try {
+                        repository.resolveDurableUri(file.uri)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "attachPdfToNote: durable resolve failed", e)
+                        file.uri
+                    } ?: file.uri
+                    usable = if (repository.isReadable(durable)) durable else file.uri
+                    if (!repository.isReadable(usable)) {
+                        return@withContext PdfAttachResult.Unreadable
+                    }
                 }
                 // Re-read display fields from the stored URI so the row is self-consistent.
-                val stored = Uri.parse(usable)
+                val usableStr = usable.toString()
                 attachmentDao.insert(
                     NoteAttachment(
                         noteId = noteId,
                         kind = NoteAttachment.KIND_PDF,
-                        uri = usable,
-                        displayName = try { repository.queryDisplayName(stored) } catch (_: Exception) { file.displayTitle },
-                        sizeBytes = try { repository.querySize(stored).takeIf { it > 0 } ?: file.size } catch (_: Exception) { file.size },
+                        uri = usableStr,
+                        displayName = try { repository.queryDisplayName(usable) } catch (_: Exception) { file.displayTitle },
+                        sizeBytes = try { repository.querySize(usable).takeIf { it > 0 } ?: file.size } catch (_: Exception) { file.size },
                         pageHint = page
                     )
                 )
-                PdfAttachResult.Attached
+                // Dual-write the legacy slot (see NotepadViewModel.attachPdf).
+                try {
+                    val current = noteDao.getNoteById(noteId)
+                    if (current != null && current.attachedPdfUri.isNullOrBlank()) {
+                        noteDao.updateAttachedPdfUri(noteId, usableStr)
+                    }
+                } catch (_: Exception) { }
+                PdfAttachResult.Attached(usableStr)
             } catch (e: Exception) {
                 Log.e(TAG, "attachPdfToNote failed for note $noteId", e)
                 PdfAttachResult.Failed(e.message ?: e.javaClass.simpleName)
@@ -856,9 +875,21 @@ class PdfViewModel @Inject constructor(
 
     fun sharePdf(context: android.content.Context, uri: Uri, title: String) {
         try {
+            // file:// URIs throw FileUriExposedException on N+ — serve via FileProvider.
+            val shareUri = try {
+                if (uri.scheme == "file") {
+                    val f = java.io.File(uri.path ?: return)
+                    if (!f.isFile) return
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context, "${context.packageName}.fileprovider", f
+                    )
+                } else uri
+            } catch (_: Exception) {
+                uri
+            }
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "application/pdf"
-                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                putExtra(android.content.Intent.EXTRA_STREAM, shareUri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             context.startActivity(android.content.Intent.createChooser(intent, "Share $title"))
@@ -869,7 +900,19 @@ class PdfViewModel @Inject constructor(
         try {
             val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as android.print.PrintManager
             val jobName = "Toolz - $title"
-            val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return
+            val pfd = try {
+                if (uri.scheme == "file") {
+                    val f = java.io.File(uri.path ?: return)
+                    if (!f.isFile || !f.canRead()) return
+                    android.os.ParcelFileDescriptor.open(
+                        f, android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                    )
+                } else {
+                    context.contentResolver.openFileDescriptor(uri, "r")
+                }
+            } catch (_: Exception) {
+                null
+            } ?: return
             printManager.print(jobName, object : android.print.PrintDocumentAdapter() {
                 override fun onWrite(
                     pages: Array<out android.print.PageRange>?,

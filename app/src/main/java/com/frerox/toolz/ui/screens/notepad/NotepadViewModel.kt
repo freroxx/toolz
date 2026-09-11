@@ -145,10 +145,76 @@ class NotepadViewModel @Inject constructor(
     init {
         loadPdfs()
         loadAvailableModels()
+        healAllLegacyColumns()
+    }
+
+    /**
+     * One-shot repair for notes attached before legacy dual-write existed:
+     * any note with V2 PDF rows but a blank legacy attachedPdfUri gets the
+     * legacy slot backfilled from its first V2 row, so card badges, the PDFs
+     * filter/counts and card tap-to-open work again.
+     */
+    private fun healAllLegacyColumns() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val all = try {
+                    noteDao.getAllNotesSync()
+                } catch (_: Exception) {
+                    return@launch
+                }
+                for (n in all) {
+                    if (!n.attachedPdfUri.isNullOrBlank()) continue
+                    try {
+                        val first = attachmentDao.listForNote(n.id)
+                            .firstOrNull { it.kind == NoteAttachment.KIND_PDF }
+                            ?: continue
+                        noteDao.updateAttachedPdfUri(n.id, first.uri)
+                    } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     fun refreshPdfs() {
         loadPdfs()
+    }
+
+    /**
+     * Resolve a SAF-picked PDF into a durable URI string for an unsaved draft
+     * (id == 0, no attachment row yet). Takes the persistable grant, verifies
+     * readability and prefers an app-private copy. Null = unreadable.
+     */
+    suspend fun resolvePdfForDraft(source: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            try {
+                appContext.contentResolver.takePersistableUriPermission(
+                    source, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {
+                pdfRepository.ensurePersistableGrant(source)
+            }
+            val durable = try {
+                pdfRepository.resolveDurableUri(source)
+            } catch (e: Exception) {
+                Log.e(TAG, "resolvePdfForDraft failed", e)
+                null
+            } ?: return@withContext null
+            if (!pdfRepository.isReadable(durable)) return@withContext null
+            // New private copies must appear in the vault list.
+            try {
+                if (durable.toString() != source.toString()) loadPdfsSync()
+            } catch (_: Exception) { }
+            durable.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "resolvePdfForDraft failed", e)
+            null
+        }
+    }
+
+    private suspend fun loadPdfsSync() = withContext(Dispatchers.IO) {
+        try {
+            _availablePdfs.value = pdfRepository.getPdfFiles()
+        } catch (_: Exception) { }
     }
 
     fun refreshTracks() {
@@ -305,27 +371,48 @@ class NotepadViewModel @Inject constructor(
      * One-time legacy merge: copies the old single-slot attached* columns into
      * the multi-attach table so old notes render in the new UI. Idempotent —
      * skips when rows already exist or when the note is unsaved (id == 0).
+     *
+     * Also heals the reverse direction: notes whose V2 rows exist but whose
+     * legacy attachedPdfUri is blank (e.g. attached from the PDF reader
+     * before dual-write) get the legacy column backfilled from the first V2
+     * PDF row, so card badges, PDFs filter/counts and card tap-to-open keep
+     * working on the legacy columns.
      */
     suspend fun ensureLegacyAttachments(note: Note) = withContext(Dispatchers.IO) {
         try {
             if (note.id == 0) return@withContext
-            if (attachmentDao.listForNote(note.id).isNotEmpty()) return@withContext
-            val rows = ArrayList<NoteAttachment>()
-            note.attachedPdfUri?.takeIf { it.isNotBlank() }?.let {
-                rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_PDF, uri = it))
+            val existing = try {
+                attachmentDao.listForNote(note.id)
+            } catch (_: Exception) {
+                return@withContext
             }
-            note.attachedImageUri?.takeIf { it.isNotBlank() }?.let {
-                rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_IMAGE, uri = it))
-            }
-            note.attachedAudioUri?.takeIf { it.isNotBlank() }?.let {
-                rows.add(
-                    NoteAttachment(
-                        noteId = note.id, kind = NoteAttachment.KIND_AUDIO, uri = it,
-                        displayName = note.attachedAudioName
+            if (existing.isEmpty()) {
+                val rows = ArrayList<NoteAttachment>()
+                note.attachedPdfUri?.takeIf { it.isNotBlank() }?.let {
+                    rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_PDF, uri = it))
+                }
+                note.attachedImageUri?.takeIf { it.isNotBlank() }?.let {
+                    rows.add(NoteAttachment(noteId = note.id, kind = NoteAttachment.KIND_IMAGE, uri = it))
+                }
+                note.attachedAudioUri?.takeIf { it.isNotBlank() }?.let {
+                    rows.add(
+                        NoteAttachment(
+                            noteId = note.id, kind = NoteAttachment.KIND_AUDIO, uri = it,
+                            displayName = note.attachedAudioName
+                        )
                     )
-                )
+                }
+                if (rows.isNotEmpty()) attachmentDao.insertAll(rows)
+                return@withContext
             }
-            if (rows.isNotEmpty()) attachmentDao.insertAll(rows)
+            // Reverse heal: V2 rows exist but legacy PDF slot is blank.
+            if (note.attachedPdfUri.isNullOrBlank()) {
+                existing.firstOrNull { it.kind == NoteAttachment.KIND_PDF }?.let { first ->
+                    try {
+                        noteDao.updateAttachedPdfUri(note.id, first.uri)
+                    } catch (_: Exception) { }
+                }
+            }
         } catch (_: Exception) { }
     }
 
@@ -333,6 +420,11 @@ class NotepadViewModel @Inject constructor(
      * Attach a PDF, guaranteeing the stored URI stays readable: persistable
      * grant where supported, verified read, app-private copy as fallback.
      * Never inserts a dead row — an unreadable source reports [PdfAttachResult.Unreadable].
+     *
+     * Durability: fragile sources (MediaStore, downloads, …) are copied into
+     * app-private files/pdfs so the attachment opens even after reboot or
+     * All-files access revocation. The copy is preferred; the original is
+     * kept only when the copy fails but the original reads.
      */
     suspend fun attachPdf(noteId: Int, source: Uri, pageHint: Int = 0): PdfAttachResult =
         withContext(Dispatchers.IO) {
@@ -343,8 +435,11 @@ class NotepadViewModel @Inject constructor(
                 // Best effort: keep the grant across reboots where supported.
                 // (MediaStore / app-private URIs throw here — expected, not fatal.)
                 pdfRepository.ensurePersistableGrant(source)
-                var usable = source.toString()
-                if (!pdfRepository.isReadable(source)) {
+                val readable = pdfRepository.isReadable(source)
+                var usable: Uri? = null
+                if (!readable) {
+                    // Unreadable now — last chance is an app-private copy
+                    // (works when the FD path allows it, e.g. SAF grant race).
                     val imported = try {
                         pdfRepository.importPdf(source)
                     } catch (e: Exception) {
@@ -355,18 +450,43 @@ class NotepadViewModel @Inject constructor(
                         Log.w(TAG, "attachPdf: source unreadable and no copy possible: $source")
                         return@withContext PdfAttachResult.Unreadable
                     }
-                    usable = imported.toString()
+                    usable = imported
+                } else {
+                    // Readable — prefer a durable private copy for fragile URIs.
+                    usable = try {
+                        pdfRepository.resolveDurableUri(source)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "attachPdf: durable resolve failed, using source", e)
+                        source
+                    } ?: source
+                    if (!pdfRepository.isReadable(usable)) {
+                        // Resolve returned something dead — fall back to source.
+                        if (!pdfRepository.isReadable(source)) {
+                            return@withContext PdfAttachResult.Unreadable
+                        }
+                        usable = source
+                    }
                 }
-                val usableUri = Uri.parse(usable)
-                val name = try { pdfRepository.queryDisplayName(usableUri) } catch (_: Exception) { null }
-                val size = try { pdfRepository.querySize(usableUri) } catch (_: Exception) { 0L }
+                val usableStr = usable.toString()
+                val name = try { pdfRepository.queryDisplayName(usable) } catch (_: Exception) { null }
+                val size = try { pdfRepository.querySize(usable) } catch (_: Exception) { 0L }
                 attachmentDao.insert(
                     NoteAttachment(
-                        noteId = noteId, kind = NoteAttachment.KIND_PDF, uri = usable,
+                        noteId = noteId, kind = NoteAttachment.KIND_PDF, uri = usableStr,
                         displayName = name, sizeBytes = size, pageHint = pageHint
                     )
                 )
-                PdfAttachResult.Attached
+                // Dual-write: keep the legacy single-slot column in sync so
+                // card badges, PDFs filter/counts and card tap-to-open (which
+                // read the legacy columns) light up for V2 attaches. Only
+                // fills when blank — never overwrites a user's existing slot.
+                try {
+                    val current = noteDao.getNoteById(noteId)
+                    if (current != null && current.attachedPdfUri.isNullOrBlank()) {
+                        noteDao.updateAttachedPdfUri(noteId, usableStr)
+                    }
+                } catch (_: Exception) { }
+                PdfAttachResult.Attached(usableStr)
             } catch (e: Exception) {
                 Log.e(TAG, "attachPdf failed for note $noteId", e)
                 PdfAttachResult.Failed(e.message ?: e.javaClass.simpleName)
@@ -402,7 +522,27 @@ class NotepadViewModel @Inject constructor(
         }
 
     suspend fun removeAttachment(id: Long) {
-        try { attachmentDao.deleteById(id) } catch (_: Exception) { }
+        try {
+            val row = try { attachmentDao.getById(id) } catch (_: Exception) { null }
+            try { attachmentDao.deleteById(id) } catch (_: Exception) { return }
+            if (row == null || row.kind != NoteAttachment.KIND_PDF) return
+            // Keep the legacy slot consistent: if it pointed at the deleted
+            // row, repoint to the first remaining PDF or clear it.
+            try {
+                val note = noteDao.getNoteById(row.noteId) ?: return
+                if (note.attachedPdfUri != row.uri) return
+                val remaining = try {
+                    attachmentDao.listForNote(row.noteId)
+                        .filter { it.kind == NoteAttachment.KIND_PDF }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                noteDao.updateAttachedPdfUri(
+                    row.noteId,
+                    remaining.firstOrNull()?.uri
+                )
+            } catch (_: Exception) { }
+        } catch (_: Exception) { }
     }
 
     // ── AI: Summarize ──────────────────────────────────────────────────────

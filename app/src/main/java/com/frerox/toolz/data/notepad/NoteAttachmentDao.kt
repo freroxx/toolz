@@ -32,6 +32,9 @@ interface NoteAttachmentDao {
     @Query("SELECT * FROM note_attachments WHERE noteId = :noteId ORDER BY createdAt ASC")
     suspend fun listForNote(noteId: Int): List<NoteAttachment>
 
+    @Query("SELECT * FROM note_attachments WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): NoteAttachment?
+
     @Query("SELECT * FROM note_attachments WHERE uri = :uri LIMIT 20")
     suspend fun findNotesWithUri(uri: String): List<NoteAttachment>
 

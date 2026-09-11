@@ -138,9 +138,20 @@ fun ToolzPdfScreen(
                 onConvert = onNavigateToConverter,
                 onAttachToNote = {
                     viewModel.activeUri.value?.let { uri ->
-                        viewModel.pdfFiles.value.find { it.uri == uri }?.let {
-                            attachingFile = it
-                        }
+                        // Library hit is preferred (pinned/title/size), but docs
+                        // opened via SAF / intent / note attachment are NOT in
+                        // the vault list — build a lightweight PdfFile so the
+                        // attach sheet still opens instead of doing nothing.
+                        val known = viewModel.pdfFiles.value.find { it.uri == uri }
+                        attachingFile = known ?: PdfFile(
+                            uri = uri,
+                            name = viewModel.activeTitle.value
+                                .takeIf { it.isNotBlank() } ?: "Document.pdf",
+                            size = 0L,
+                            lastModified = 0L,
+                            pageCount = viewModel.docState.value.totalPages
+                                .coerceAtLeast(0),
+                        )
                     }
                 },
                 onOpenNote = onNavigateToNote
@@ -516,7 +527,7 @@ private fun AttachToNoteSheet(
                                         busy = false
                                         haptic.click()
                                         when (result) {
-                                            PdfAttachResult.Attached -> {
+                                            is PdfAttachResult.Attached -> {
                                                 onDone("Attached to note")
                                                 onOpenNote(note.id)
                                             }
