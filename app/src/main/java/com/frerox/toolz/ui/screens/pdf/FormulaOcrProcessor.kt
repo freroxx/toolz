@@ -325,8 +325,7 @@ class FormulaOcrProcessor @Inject constructor(
         }
     }
 
-    suspend fun summarizePdf(text: String): String? {
-        if (settingsRepository.offlineModeEnabled.first()) return null
+    suspend fun summarizePdf(text: String): String? {        if (settingsRepository.offlineModeEnabled.first()) return null
         val key = aiSettingsManager.getApiKey("Groq")
         if (key.isBlank()) return null
         val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text
@@ -358,6 +357,47 @@ class FormulaOcrProcessor @Inject constructor(
             }
         } catch (e: Exception) {
             Log.w(TAG, "PDF summarisation failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Smart extraction: rewrites raw embedded text as clean, readable
+     * Markdown — fixes hyphenation and line-break artefacts, detects
+     * headings and lists, keeps every fact. Returns null when AI is
+     * unavailable (offline mode or no API key).
+     */
+    suspend fun enhanceForReading(text: String): String? {
+        if (settingsRepository.offlineModeEnabled.first()) return null
+        val key = aiSettingsManager.getApiKey("Groq")
+        if (key.isBlank()) return null
+        val truncated = if (text.length > 12_000) text.take(12_000) + "\n…[truncated]" else text
+        return try {
+            withContext(Dispatchers.IO) {
+                runGroqRequest(key) { requestKey ->
+                    openAiService.getChatCompletion(
+                        url        = GROQ_URL,
+                        authHeader = "Bearer $requestKey",
+                        request    = OpenAiRequest(
+                        model     = GROQ_MODEL,
+                        messages  = listOf(
+                            OpenAiMessage("system", MessageContent.Text(
+                                "Rewrite the extracted document text as clean, readable Markdown.\n" +
+                                "1. Join words broken across lines and remove hyphenation artefacts.\n" +
+                                "2. Detect structure: # title, ## sections, **bold** for key terms.\n" +
+                                "3. Format enumerations as - bullets or 1. numbered lists.\n" +
+                                "4. Keep every fact and number exactly; do not summarise or invent.\n" +
+                                "Return the REWRITTEN MARKDOWN text only."
+                            )),
+                            OpenAiMessage("user", MessageContent.Text(truncated)),
+                        ),
+                        maxTokens = 4_096,
+                        ),
+                    ).choices.firstOrNull()?.message?.content?.trim()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Smart extraction failed: ${e.message}")
             null
         }
     }

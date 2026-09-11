@@ -127,7 +127,7 @@ fun PdfCover(
 }
 
 internal fun formatPdfSize(bytes: Long): String {
-    if (bytes <= 0) return "—"
+    if (bytes <= 0) return ""
     val mb = bytes / 1_048_576.0
     return if (mb >= 1.0) "%.1f MB".format(mb) else "%.0f KB".format(bytes / 1024.0)
 }
@@ -136,8 +136,8 @@ internal fun formatPdfDate(epochSeconds: Long): String {
     if (epochSeconds <= 0) return ""
     return try {
         val ms = if (epochSeconds < 1_000_000_000_000L) epochSeconds * 1000 else epochSeconds
-        java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
-            .format(java.util.Date(ms)).uppercase()
+        java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+            .format(java.util.Date(ms))
     } catch (_: Exception) {
         ""
     }

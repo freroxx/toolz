@@ -25,10 +25,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,30 +35,37 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -70,30 +76,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.MediumExpressiveShape
-import com.frerox.toolz.ui.components.SquircleShape
-import com.frerox.toolz.ui.components.ToolzExpressiveButton
-import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
-import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.toolzBackground
 import kotlinx.coroutines.launch
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PDF Vault entry — remake V2 shell.
-// Library <-> Reader switch with shared rename/delete/attach dialogs.
-// Signature preserved for MainActivity + dashboard intents.
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * PDF entry: library <-> reader switch plus rename / delete / attach dialogs.
+ * Signature preserved for MainActivity + dashboard intents.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ToolzPdfScreen(
@@ -103,7 +101,6 @@ fun ToolzPdfScreen(
     onNavigateToConverter: ((String, String) -> Unit)? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val docState by viewModel.docState.collectAsStateWithLifecycle()
     val performanceMode = LocalPerformanceMode.current
     val haptic = rememberToolzHapticFeedback()
     val scope = rememberCoroutineScope()
@@ -138,13 +135,20 @@ fun ToolzPdfScreen(
                 viewModel = viewModel,
                 onBack = { viewModel.closeViewer() },
                 onConvert = onNavigateToConverter,
-                onAttachToNote = { viewModel.activeUri.value?.let { uri ->
-                    viewModel.pdfFiles.value.find { it.uri == uri }?.let { attachingFile = it }
-                } },
+                onAttachToNote = {
+                    viewModel.activeUri.value?.let { uri ->
+                        viewModel.pdfFiles.value.find { it.uri == uri }?.let {
+                            attachingFile = it
+                        }
+                    }
+                },
                 onOpenNote = onNavigateToNote
             )
         }
     } else {
+        val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
+        var showSortMenu by remember { mutableStateOf(false) }
+
         Scaffold(
             topBar = {
                 Column(
@@ -153,61 +157,105 @@ fun ToolzPdfScreen(
                         .padding(top = 0.dp)
                 ) {
                     Box(Modifier.statusBarsPadding()) {
-                    ExpressiveTopAppBar(
-                        title = {
-                            Text(
-                                "PDF VAULT",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 1.5.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shadowElevation = 3.dp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            ExpressiveTopAppBar(
+                            title = { Text("PDFs") },
+                            subtitle = {
+                                val n = viewModel.pdfFiles.collectAsStateWithLifecycle().value.size
+                                Text(
+                                    when (n) {
+                                        0 -> "No documents"
+                                        1 -> "1 document"
+                                        else -> "$n documents"
+                                    }
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(
+                                    onClick = { haptic.click(); onNavigateBack() },
+                                    modifier = Modifier.padding(start = 4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.ArrowBack,
+                                        contentDescription = "Back"
+                                    )
+                                }
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = {
+                                        haptic.click()
+                                        importer.launch(arrayOf("application/pdf"))
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.Add, contentDescription = "Import PDF")
+                                }
+                                Box {
+                                    IconButton(onClick = { showSortMenu = true }) {
+                                        Icon(
+                                            Icons.Rounded.MoreVert,
+                                            contentDescription = "Sort and refresh"
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = showSortMenu,
+                                        onDismissRequest = { showSortMenu = false }
+                                    ) {
+                                        Text(
+                                            "Sort by",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(
+                                                horizontal = 16.dp,
+                                                vertical = 8.dp
+                                            )
+                                        )
+                                        SortOption(
+                                            label = "Recent",
+                                            selected = sortOrder == PdfSortOrder.RECENT,
+                                            onClick = {
+                                                showSortMenu = false
+                                                viewModel.setSortOrder(PdfSortOrder.RECENT)
+                                            }
+                                        )
+                                        SortOption(
+                                            label = "Name",
+                                            selected = sortOrder == PdfSortOrder.NAME,
+                                            onClick = {
+                                                showSortMenu = false
+                                                viewModel.setSortOrder(PdfSortOrder.NAME)
+                                            }
+                                        )
+                                        SortOption(
+                                            label = "Size",
+                                            selected = sortOrder == PdfSortOrder.SIZE,
+                                            onClick = {
+                                                showSortMenu = false
+                                                viewModel.setSortOrder(PdfSortOrder.SIZE)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Refresh") },
+                                            leadingIcon = {
+                                                Icon(Icons.Rounded.Refresh, null)
+                                            },
+                                            onClick = {
+                                                showSortMenu = false
+                                                haptic.tick()
+                                                viewModel.refresh()
+                                            }
+                                        )
+                                    }
+                                }
+                            },
+                            titleHorizontalAlignment = Alignment.CenterHorizontally
                             )
-                        },
-                        subtitle = {
-                            val n = viewModel.pdfFiles.collectAsStateWithLifecycle().value.size
-                            Text(
-                                if (n == 0) "Your documents" else "$n document${if (n == 1) "" else "s"}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        navigationIcon = {
-                            ToolzExpressiveIconButton(
-                                onClick = { haptic.click(); onNavigateBack() },
-                                modifier = Modifier.padding(start = 8.dp).size(40.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ),
-                                shape = MediumExpressiveShape
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(20.dp))
-                            }
-                        },
-                        actions = {
-                            ToolzExpressiveIconButton(
-                                onClick = { haptic.tick(); viewModel.refresh() },
-                                modifier = Modifier.size(40.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ),
-                                shape = MediumExpressiveShape
-                            ) {
-                                Icon(Icons.Rounded.Refresh, "Refresh", Modifier.size(20.dp))
-                            }
-                            ToolzExpressiveIconButton(
-                                onClick = { haptic.click(); importer.launch(arrayOf("application/pdf")) },
-                                modifier = Modifier.padding(end = 8.dp).size(40.dp),
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                ),
-                                shape = MediumExpressiveShape
-                            ) {
-                                Icon(Icons.Rounded.Add, "Import", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onPrimary)
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
-                        titleHorizontalAlignment = Alignment.CenterHorizontally
-                    )
+                        }
                     }
                 }
             },
@@ -221,12 +269,20 @@ fun ToolzPdfScreen(
                     targetState = uiState,
                     transitionSpec = {
                         if (performanceMode) fadeIn() togetherWith fadeOut()
-                        else (fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.97f)) togetherWith fadeOut()
+                        else fadeIn() togetherWith fadeOut()
                     },
                     label = "pdfShell"
                 ) { state ->
                     when (state) {
-                        is PdfUiState.Loading, is PdfUiState.Idle -> VaultLoading()
+                        is PdfUiState.Loading, is PdfUiState.Idle -> {
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
+
                         is PdfUiState.Error -> VaultError(
                             message = (state as PdfUiState.Error).message,
                             onRetry = { viewModel.refresh() },
@@ -242,7 +298,8 @@ fun ToolzPdfScreen(
                                 newFileName = it.displayTitle
                                 showRename = true
                             },
-                            onAttachToNote = { attachingFile = it }
+                            onAttachToNote = { attachingFile = it },
+                            onImport = { importer.launch(arrayOf("application/pdf")) }
                         )
                     }
                 }
@@ -250,85 +307,70 @@ fun ToolzPdfScreen(
         }
     }
 
-    // ── Rename ──
     if (showRename && renamingFile != null) {
         AlertDialog(
             onDismissRequest = { showRename = false },
-            shape = SquircleShape,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = {
-                Text("RENAME PDF", fontWeight = FontWeight.Black, letterSpacing = 1.sp, style = MaterialTheme.typography.headlineSmall)
-            },
+            title = { Text("Rename") },
             text = {
                 OutlinedTextField(
                     value = newFileName,
                     onValueChange = { newFileName = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = MediumExpressiveShape,
                     label = { Text("File name") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                    )
+                    shape = RoundedCornerShape(16.dp)
                 )
             },
             confirmButton = {
-                ToolzExpressiveButton(
+                TextButton(
                     onClick = {
                         renamingFile?.let { viewModel.renameFile(it, newFileName.trim()) }
                         showRename = false
                         haptic.click()
-                        scope.launch { snackbar.showSnackbar("Renamed") }
                     },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = MediumExpressiveShape,
                     enabled = newFileName.trim().isNotEmpty()
                 ) {
-                    Text("RENAME", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text("Rename")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRename = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text("CANCEL", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f))
+                TextButton(onClick = { showRename = false }) {
+                    Text("Cancel")
                 }
             }
         )
     }
 
-    // ── Delete confirm ──
     deletingFile?.let { file ->
         AlertDialog(
             onDismissRequest = { deletingFile = null },
-            shape = SquircleShape,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("DELETE PDF?", fontWeight = FontWeight.Black, letterSpacing = 1.sp) },
-            text = { Text("\"${file.displayTitle}\" will be permanently deleted.", style = MaterialTheme.typography.bodyMedium) },
+            title = { Text("Delete this PDF?") },
+            text = {
+                Text("\"${file.displayTitle}\" will be permanently deleted.")
+            },
             confirmButton = {
-                ToolzExpressiveButton(
+                TextButton(
                     onClick = {
                         viewModel.deleteFile(file)
                         deletingFile = null
                         haptic.click()
                         scope.launch { snackbar.showSnackbar("Deleted") }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = MediumExpressiveShape
+                    }
                 ) {
-                    Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("DELETE", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                    Text(
+                        "Delete",
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deletingFile = null }, modifier = Modifier.fillMaxWidth()) {
-                    Text("CANCEL", fontWeight = FontWeight.Bold)
+                TextButton(onClick = { deletingFile = null }) {
+                    Text("Cancel")
                 }
             }
         )
     }
 
-    // ── Attach to note ──
     attachingFile?.let { file ->
         AttachToNoteSheet(
             viewModel = viewModel,
@@ -344,39 +386,46 @@ fun ToolzPdfScreen(
 }
 
 @Composable
-private fun VaultLoading() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            ToolzWavyCircularProgressIndicator(Modifier.size(64.dp))
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "SCANNING VAULT", style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black, letterSpacing = 4.sp,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
+private fun SortOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        leadingIcon = {
+            if (selected) Icon(Icons.Rounded.Check, contentDescription = null)
+        },
+        onClick = onClick
+    )
 }
 
 @Composable
 private fun VaultError(message: String, onRetry: () -> Unit, onImport: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(40.dp)) {
-            Text("SOMETHING WENT WRONG", fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                Icons.Outlined.Description,
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Spacer(Modifier.height(16.dp))
+            Text("Something went wrong", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             Text(
-                message, style = MaterialTheme.typography.bodyMedium,
+                message,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(20.dp))
             Row {
-                ToolzExpressiveButton(onClick = onRetry, shape = MediumExpressiveShape) {
-                    Text("RETRY", fontWeight = FontWeight.Black)
+                FilledTonalButton(onClick = onRetry) {
+                    Text("Retry")
                 }
                 Spacer(Modifier.width(12.dp))
-                ToolzExpressiveButton(onClick = onImport, shape = MediumExpressiveShape) {
-                    Text("IMPORT", fontWeight = FontWeight.Black)
+                Button(onClick = onImport) {
+                    Text("Import")
                 }
             }
         }
@@ -404,47 +453,45 @@ private fun AttachToNoteSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
-            Text("ATTACH TO NOTE", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        Column(Modifier.padding(horizontal = 24.dp)) {
+            Text("Attach to note", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(4.dp))
             Text(
-                "\"${file.displayTitle}\"" + if (viewModel.uiState.collectAsStateWithLifecycle().value is PdfUiState.Viewer) " · page ${currentPage + 1}" else "",
+                file.displayTitle +
+                    if (viewModel.uiState.collectAsStateWithLifecycle().value is PdfUiState.Viewer) {
+                        " · page ${currentPage + 1}"
+                    } else "",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(16.dp))
             if (notes.isEmpty()) {
                 Text(
-                    "No notes yet — create one in Notepad first, then attach.",
+                    "No notes yet. Create one in Notes first, then attach.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyColumn(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(notes, key = { it.id }) { note ->
-                        androidx.compose.material3.Surface(
-                            shape = MediumExpressiveShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            modifier = Modifier.fillMaxWidth()
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        note.title.ifBlank { "Untitled" },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Black,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    note.title.ifBlank { "Untitled" },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (note.content.isNotBlank()) {
                                     Text(
                                         note.content.take(80),
                                         style = MaterialTheme.typography.bodySmall,
@@ -453,35 +500,37 @@ private fun AttachToNoteSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Spacer(Modifier.width(12.dp))
-                                ToolzExpressiveButton(
-                                    onClick = {
-                                        if (busy) return@ToolzExpressiveButton
-                                        busy = true
-                                        scope.launch {
-                                            val page = if (viewModel.uiState.value is PdfUiState.Viewer) currentPage else 0
-                                            val ok = viewModel.attachPdfToNote(note.id, file, page)
-                                            busy = false
-                                            haptic.click()
-                                            if (ok) {
-                                                onDone("Attached — opens at p.${page + 1}")
-                                                onOpenNote(note.id)
-                                            } else {
-                                                onDone("Note already has 10 PDFs")
-                                            }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            TextButton(
+                                onClick = {
+                                    if (busy) return@TextButton
+                                    busy = true
+                                    scope.launch {
+                                        val page =
+                                            if (viewModel.uiState.value is PdfUiState.Viewer) {
+                                                currentPage
+                                            } else 0
+                                        val ok = viewModel.attachPdfToNote(note.id, file, page)
+                                        busy = false
+                                        haptic.click()
+                                        if (ok) {
+                                            onDone("Attached to note")
+                                            onOpenNote(note.id)
+                                        } else {
+                                            onDone("Note already has 10 PDFs")
                                         }
-                                    },
-                                    shape = MediumExpressiveShape,
-                                    enabled = !busy
-                                ) {
-                                    Text("ATTACH", fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-                                }
+                                    }
+                                },
+                                enabled = !busy
+                            ) {
+                                Text("Attach")
                             }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

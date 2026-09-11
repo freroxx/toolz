@@ -166,6 +166,8 @@ class PdfViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val pdfAiEnabled = settingsRepository.pdfAiToolsEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     private val bitmapCache = object : LruCache<String, Bitmap>(
         (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()
@@ -354,6 +356,40 @@ class PdfViewModel @Inject constructor(
 
     fun clearSummary() { _pdfSummary.value = null }
 
+    // ── AI sheet: document summary + smart extraction ────────────────────────
+
+    private val _enhancedText = MutableStateFlow<String?>(null)
+    val enhancedText: StateFlow<String?> = _enhancedText.asStateFlow()
+
+    private val _isEnhancing = MutableStateFlow(false)
+    val isEnhancing: StateFlow<Boolean> = _isEnhancing.asStateFlow()
+
+    private fun fullDocumentText(): String =
+        _pageTexts.value.filter { it.isNotBlank() }.joinToString("\n\n")
+
+    /** Summarise the whole document (embedded text). Null result = AI unavailable. */
+    fun summarizeDocument() {
+        val text = fullDocumentText()
+        if (text.isBlank()) return
+        summarizePdf(text)
+    }
+
+    /** Rewrite the whole document text as clean Markdown for reading. */
+    fun enhanceDocument() {
+        val text = fullDocumentText()
+        if (text.isBlank() || _isEnhancing.value) return
+        viewModelScope.launch {
+            _isEnhancing.value = true
+            _enhancedText.value = ocrProcessor.enhanceForReading(text)
+            _isEnhancing.value = false
+        }
+    }
+
+    fun clearAiResults() {
+        _pdfSummary.value = null
+        _enhancedText.value = null
+    }
+
     // ── File management ─────────────────────────────────────────────────────
 
     fun setPdfFiles(files: List<PdfFile>) {
@@ -374,6 +410,8 @@ class PdfViewModel @Inject constructor(
             _pageTexts.value = emptyList()
             _textReady.value = false
             _toc.value = emptyList()
+            _pdfSummary.value = null
+            _enhancedText.value = null
 
             val existing = _openTabs.value.find { it.uri == uri }
             val keyPrefix = uri.toString().hashCode()

@@ -17,11 +17,12 @@
 
 package com.frerox.toolz.ui.screens.pdf.components
 
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,102 +30,124 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.IntSize
-
-data class ZoomState(
-    val scale: Float,
-    val offset: Offset,
-    val onReset: () -> Unit
-)
 
 /**
- * Per-page pinch zoom. Unlike the old whole-list graphicsLayer hack, each page
- * owns its transform so scroll never breaks and zoom stays sharp (the page
- * re-renders at higher width past 1.5x via [onZoomChanged]).
+ * Document-wide zoom state. The whole page list scales as one canvas, so
+ * zoomed pages can never overlap each other.
+ *
+ * Remembered per document: [rememberDocZoomState] takes the doc key so
+ * opening another file always starts unzoomed.
  */
-@Composable
-fun rememberZoomableState(
-    minScale: Float = 1f,
-    maxScale: Float = 5f,
-    onZoomChanged: (Float) -> Unit = {}
-): ZoomStateHolder {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    return remember {
-        ZoomStateHolder(
-            getScale = { scale },
-            getOffset = { offset },
-            setTransform = { s, o ->
-                scale = s.coerceIn(minScale, maxScale)
-                offset = if (scale <= 1.02f) Offset.Zero else o
-                onZoomChanged(scale)
-            },
-            reset = {
-                scale = 1f
-                offset = Offset.Zero
-                onZoomChanged(1f)
-            },
-            getViewSize = { viewSize },
-            setViewSize = { viewSize = it }
-        )
+class DocZoomState internal constructor() {
+    var scale by mutableFloatStateOf(1f)
+        private set
+    var offset by mutableStateOf(Offset.Zero)
+        private set
+    var viewWidth by mutableIntStateOf(0)
+        internal set
+    var viewHeight by mutableIntStateOf(0)
+        internal set
+
+    val zoomed: Boolean get() = scale > 1.02f
+
+    internal fun applyZoom(zoomChange: Float, panChange: Offset, centroid: Offset, maxScale: Float) {
+        if (zoomChange.isNaN() || panChange.x.isNaN()) return
+        val cur = scale
+        val ns = (cur * zoomChange).coerceIn(1f, maxScale)
+        if (ns <= 1.02f) {
+            scale = 1f
+            offset = Offset.Zero
+            return
+        }
+        val w = viewWidth.toFloat().takeIf { it > 0 } ?: return
+        val h = viewHeight.toFloat().takeIf { it > 0 } ?: return
+        val sc = ns / cur.coerceAtLeast(0.01f)
+        val focal = centroid - Offset(w / 2f, h / 2f)
+        val raw = (offset + panChange) * sc + focal * (1f - sc)
+        // The canvas is taller than the viewport, so allow generous vertical
+        // travel instead of clamping to the visible window.
+        val mx = (w * (ns - 1f)) / 2f
+        val my = (h * (ns - 1f)) / 2f + h / 2f
+        scale = ns
+        offset = Offset(raw.x.coerceIn(-mx, mx), raw.y.coerceIn(-my, my))
+    }
+
+    internal fun applyPan(drag: Offset) {
+        if (!zoomed || drag == Offset.Zero) return
+        val w = viewWidth.toFloat().takeIf { it > 0 } ?: return
+        val h = viewHeight.toFloat().takeIf { it > 0 } ?: return
+        val mx = (w * (scale - 1f)) / 2f
+        val my = (h * (scale - 1f)) / 2f + h / 2f
+        val raw = offset + drag
+        offset = Offset(raw.x.coerceIn(-mx, mx), raw.y.coerceIn(-my, my))
     }
 }
 
-class ZoomStateHolder(
-    val getScale: () -> Float,
-    val getOffset: () -> Offset,
-    val setTransform: (Float, Offset) -> Unit,
-    val reset: () -> Unit,
-    val getViewSize: () -> IntSize,
-    val setViewSize: (IntSize) -> Unit
-)
+@Composable
+fun rememberDocZoomState(docKey: Any?): DocZoomState {
+    return remember(docKey) { DocZoomState() }
+}
 
-fun Modifier.zoomablePage(
-    holder: ZoomStateHolder,
-    maxScale: Float = 5f,
-    enabled: Boolean = true
+/**
+ * Pinch-to-zoom for the whole document canvas. Attach once, around the
+ * page list — never per page.
+ *
+ * - One finger at 1x: events pass through untouched, the list scrolls.
+ * - Two fingers: pinch zoom around the focal point (events consumed).
+ * - One finger while zoomed: pans the canvas (events consumed), so the
+ *   list stays put until the user pinches back out.
+ */
+fun Modifier.docZoomable(
+    state: DocZoomState,
+    maxScale: Float = 5f
 ): Modifier = this
-    .onSizeChanged { holder.setViewSize(it) }
-    .pointerInput(enabled, maxScale) {
-        if (!enabled) return@pointerInput
-        detectTransformGestures { centroid, pan, zoom, _ ->
-            val size = holder.getViewSize()
-            val cur = holder.getScale()
-            val ns = (cur * zoom).coerceIn(1f, maxScale)
-            val sc = if (cur == 0f) 1f else ns / cur
-            val focal = centroid - Offset(size.width / 2f, size.height / 2f)
-            val raw = (holder.getOffset() + pan) * sc + focal * (1f - sc)
-            val clamped = if (ns <= 1.02f) {
-                Offset.Zero
-            } else {
-                val mx = (size.width * (ns - 1f)) / 2f
-                val my = (size.height * (ns - 1f)) / 2f
-                Offset(raw.x.coerceIn(-mx, mx), raw.y.coerceIn(-my, my))
-            }
-            holder.setTransform(ns, clamped)
+    .onSizeChanged {
+        state.viewWidth = it.width
+        state.viewHeight = it.height
+    }
+    .pointerInput(state) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            var lastCentroid: Offset? = null
+            var lastDistance = 0f
+            do {
+                val event = awaitPointerEvent()
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.size >= 2) {
+                    val a = pressed[0].position
+                    val b = pressed[1].position
+                    val centroid = (a + b) / 2f
+                    val distance = (a - b).getDistance()
+                    val prevCentroid = lastCentroid
+                    if (prevCentroid != null && lastDistance > 0f && distance > 0f) {
+                        val zoomChange = distance / lastDistance
+                        val panChange = centroid - prevCentroid
+                        if (zoomChange.isFinite() && zoomChange > 0f) {
+                            state.applyZoom(zoomChange, panChange, centroid, maxScale)
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                    lastCentroid = centroid
+                    lastDistance = distance
+                } else {
+                    lastCentroid = null
+                    lastDistance = 0f
+                    if (pressed.size == 1 && state.zoomed) {
+                        val drag = pressed[0].positionChange()
+                        if (drag != Offset.Zero) {
+                            state.applyPan(drag)
+                            event.changes.forEach { it.consume() }
+                        }
+                    }
+                }
+            } while (pressed.isNotEmpty())
         }
     }
-    .pointerInput(enabled) {
-        if (!enabled) return@pointerInput
-        detectTapGestures(onDoubleTap = { pos ->
-            val size = holder.getViewSize()
-            if (holder.getScale() > 1.1f) {
-                holder.reset()
-            } else {
-                val target = 2.5f
-                val focal = pos - Offset(size.width / 2f, size.height / 2f)
-                val raw = -focal * (target - 1f)
-                val mx = (size.width * (target - 1f)) / 2f
-                val my = (size.height * (target - 1f)) / 2f
-                holder.setTransform(target, Offset(raw.x.coerceIn(-mx, mx), raw.y.coerceIn(-my, my)))
-            }
-        })
-    }
     .graphicsLayer {
-        scaleX = holder.getScale()
-        scaleY = holder.getScale()
-        translationX = holder.getOffset().x
-        translationY = holder.getOffset().y
+        scaleX = state.scale
+        scaleY = state.scale
+        translationX = state.offset.x
+        translationY = state.offset.y
     }

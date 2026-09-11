@@ -468,7 +468,7 @@ class SettingsRepository @Inject constructor(
     private val CONVERTER_CUSTOM_OUTPUT_PATH = stringPreferencesKey("converter_custom_output_path")
 
     // PDF Settings
-    private val PDF_AI_OCR_ENHANCE = booleanPreferencesKey("pdf_ai_ocr_enhance")
+    private val PDF_AI_TOOLS = booleanPreferencesKey("pdf_ai_tools")
 
     // AI Search
     private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
@@ -847,8 +847,8 @@ class SettingsRepository @Inject constructor(
 
     val converterCustomOutputPath: Flow<String?> = dataStore.data.map { it[CONVERTER_CUSTOM_OUTPUT_PATH] }
 
-    val pdfAiOcrEnhance: Flow<Boolean> = combine(
-        dataStore.data.map { it[PDF_AI_OCR_ENHANCE] ?: false },
+    val pdfAiToolsEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[PDF_AI_TOOLS] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
@@ -1235,8 +1235,8 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun setPdfAiOcrEnhance(enabled: Boolean) {
-        dataStore.edit { it[PDF_AI_OCR_ENHANCE] = enabled }
+    suspend fun setPdfAiToolsEnabled(enabled: Boolean) {
+        dataStore.edit { it[PDF_AI_TOOLS] = enabled }
     }
 
     suspend fun setAiSearchEnabled(enabled: Boolean) {
