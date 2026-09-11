@@ -250,4 +250,4 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 Want to test bleeding-edge features? Check out our [Early Access Hub]([https://github.com/freroxx/toolz](https://github.com/freroxx/toolz/discussions/7))!
 
 
-**Made with ❤️ by frerox**
+**Made with ❤️ by freroxx**
