@@ -74,8 +74,12 @@ fun PdfCover(
         if (renderEngine != null) {
             bitmap = try {
                 withContext(Dispatchers.IO) { renderEngine.renderThumbnail(uri, widthPx) }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("PdfCover", "thumbnail failed for $uri: ${e.message}")
                 null
+            }
+            if (bitmap == null) {
+                android.util.Log.w("PdfCover", "thumbnail unavailable for $uri")
             }
         } else {
             // Fallback for previews without DI (notes legacy path): direct render.

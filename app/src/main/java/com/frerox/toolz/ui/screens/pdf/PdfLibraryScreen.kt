@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PictureAsPdf
@@ -135,6 +137,8 @@ fun PdfLibraryScreen(
             }
 
             else -> {
+                val pinned = remember(files) { files.filter { it.isPinned } }
+                val rest = remember(files) { files.filterNot { it.isPinned } }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -142,21 +146,75 @@ fun PdfLibraryScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(files, key = { it.uri.toString() }) { file ->
-                        PdfRow(
-                            file = file,
-                            viewModel = viewModel,
-                            onOpen = { onOpen(file) },
-                            onPin = { viewModel.togglePin(file.uri.toString()) },
-                            onRename = { onRename(file) },
-                            onDelete = { onDelete(file) },
-                            onAttach = onAttachToNote?.let { { it(file) } }
-                        )
-                        LaunchedEffect(file.uri) { viewModel.prefetchInfo(file) }
+                    if (pinned.isNotEmpty()) {
+                        item(key = "pinned-header") {
+                            SectionHeader(
+                                label = "Pinned",
+                                icon = Icons.Rounded.PushPin
+                            )
+                        }
+                        items(pinned, key = { "pinned-" + it.uri.toString() }) { file ->
+                            PdfRow(
+                                file = file,
+                                viewModel = viewModel,
+                                onOpen = { onOpen(file) },
+                                onPin = { viewModel.togglePin(file.uri.toString()) },
+                                onRename = { onRename(file) },
+                                onDelete = { onDelete(file) },
+                                onAttach = onAttachToNote?.let { { it(file) } }
+                            )
+                            LaunchedEffect(file.uri) { viewModel.prefetchInfo(file) }
+                        }
+                    }
+                    if (rest.isNotEmpty()) {
+                        if (pinned.isNotEmpty()) {
+                            item(key = "all-header") {
+                                SectionHeader(
+                                    label = "All documents",
+                                    icon = Icons.Rounded.Description
+                                )
+                            }
+                        }
+                        items(rest, key = { it.uri.toString() }) { file ->
+                            PdfRow(
+                                file = file,
+                                viewModel = viewModel,
+                                onOpen = { onOpen(file) },
+                                onPin = { viewModel.togglePin(file.uri.toString()) },
+                                onRename = { onRename(file) },
+                                onDelete = { onDelete(file) },
+                                onAttach = onAttachToNote?.let { { it(file) } }
+                            )
+                            LaunchedEffect(file.uri) { viewModel.prefetchInfo(file) }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -220,7 +278,7 @@ private fun PdfRow(
                             DropdownMenuItem(
                                 text = { Text(if (file.isPinned) "Unpin" else "Pin") },
                                 leadingIcon = { Icon(Icons.Rounded.PushPin, null) },
-                                onClick = { menu = false; onPin() }
+                                onClick = { menu = false; haptic.tick(); onPin() }
                             )
                             DropdownMenuItem(
                                 text = { Text("Rename") },

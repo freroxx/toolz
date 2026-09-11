@@ -58,11 +58,16 @@ class PdfRenderEngine @Inject constructor(
         override fun sizeOf(key: String, v: Bitmap) = v.byteCount / 1024
     }
 
-    /** Serialises PdfRenderer opens — the framework FD path is not thread-safe per uri. */
-    private val openMutex = Mutex()
+    /** Striped per-URI locks: same-file opens stay serialized (the framework
+     *  FD path isn't thread-safe per uri) while different files render in
+     *  parallel — a single global mutex turned thumbnail warmup into a
+     *  10s+ convoy on large libraries. Bounded; no leak. */
+    private val openStripes = Array(16) { Mutex() }
+    private fun mutexFor(uri: Uri) =
+        openStripes[(uri.toString().hashCode() and Int.MAX_VALUE) % openStripes.size]
 
     suspend fun getPageCount(uri: Uri): Int = withContext(Dispatchers.IO) {
-        openMutex.withLock {
+        mutexFor(uri).withLock {
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                     PdfRenderer(pfd).use { it.pageCount }
@@ -76,7 +81,7 @@ class PdfRenderEngine @Inject constructor(
     }
 
     suspend fun getPageSize(uri: Uri, pageIndex: Int): PageSize? = withContext(Dispatchers.IO) {
-        openMutex.withLock {
+        mutexFor(uri).withLock {
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
@@ -110,7 +115,7 @@ class PdfRenderEngine @Inject constructor(
         if (bucket == "thumb") synchronized(thumbCache) { thumbCache.get(key)?.let { return it } }
 
         return withContext(Dispatchers.IO) {
-            openMutex.withLock {
+            mutexFor(uri).withLock {
                 try {
                     context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         PdfRenderer(pfd).use { renderer ->

@@ -469,6 +469,7 @@ class SettingsRepository @Inject constructor(
 
     // PDF Settings
     private val PDF_AI_TOOLS = booleanPreferencesKey("pdf_ai_tools")
+    private val PDF_FULLSCREEN_TIP_SEEN = booleanPreferencesKey("pdf_fullscreen_tip_seen")
 
     // AI Search
     private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
@@ -851,6 +852,10 @@ class SettingsRepository @Inject constructor(
         dataStore.data.map { it[PDF_AI_TOOLS] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
+
+    /** True once the user dismissed the fullscreen tip (either button). */
+    val pdfFullscreenTipSeen: Flow<Boolean> =
+        dataStore.data.map { it[PDF_FULLSCREEN_TIP_SEEN] ?: false }
 
     val aiSearchEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false },
@@ -1237,6 +1242,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setPdfAiToolsEnabled(enabled: Boolean) {
         dataStore.edit { it[PDF_AI_TOOLS] = enabled }
+    }
+
+    suspend fun setPdfFullscreenTipSeen() {
+        dataStore.edit { it[PDF_FULLSCREEN_TIP_SEEN] = true }
     }
 
     suspend fun setAiSearchEnabled(enabled: Boolean) {

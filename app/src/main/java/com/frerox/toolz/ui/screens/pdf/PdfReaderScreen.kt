@@ -18,6 +18,7 @@
 package com.frerox.toolz.ui.screens.pdf
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Palette
@@ -69,11 +71,13 @@ import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Transform
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -82,7 +86,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -183,6 +186,27 @@ fun PdfReaderScreen(
     var showAiSheet by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
     var keepScreenOn by remember { mutableStateOf(false) }
+    var showFullscreenTip by remember { mutableStateOf(false) }
+    val tipSeen by viewModel.fullscreenTipSeen.collectAsStateWithLifecycle(initialValue = false)
+
+    // System back: close search first, otherwise leave the viewer for
+    // the library — never jump straight to the dashboard.
+    BackHandler {
+        haptic.tick()
+        if (showSearch) {
+            showSearch = false
+            searchQuery = ""
+            viewModel.clearDocSearch()
+        } else {
+            onBack()
+        }
+    }
+
+    fun enterFullscreen() {
+        haptic.tick()
+        showChrome = false
+        if (!tipSeen) showFullscreenTip = true
+    }
 
     val view = LocalView.current
     DisposableEffect(keepScreenOn) {
@@ -203,6 +227,16 @@ fun PdfReaderScreen(
     )
     val bottomFade by animateDpAsState(
         if (showChrome) 104.dp else 0.dp, tween(300, easing = FastOutSlowInEasing), label = "bottomFade"
+    )
+    // The floating bars overlay the list, so reserve matching space at the
+    // edges — otherwise the top bar covers the first page. Animated with
+    // the chrome so entering fullscreen glides instead of jumping.
+    val topPad by animateDpAsState(
+        if (showChrome) 108.dp else 12.dp, tween(300, easing = FastOutSlowInEasing), label = "topPad"
+    )
+    val bottomPad by animateDpAsState(
+        if (showChrome && doc.isReady && doc.totalPages > 1) 92.dp else 12.dp,
+        tween(300, easing = FastOutSlowInEasing), label = "bottomPad"
     )
 
     Box(Modifier.fillMaxSize()) {
@@ -237,8 +271,16 @@ fun PdfReaderScreen(
                         paperMode = paperMode,
                         topFade = topFade,
                         bottomFade = bottomFade,
+                        topPad = topPad,
+                        bottomPad = bottomPad,
                         onPage = { viewModel.updatePage(it) },
-                        onFullscreen = { showChrome = !showChrome },
+                        onFullscreen = {
+                            if (showChrome) enterFullscreen()
+                            else {
+                                haptic.tick()
+                                showChrome = true
+                            }
+                        },
                         onShowText = { page ->
                             textSheetPage = page
                             showTextSheet = true
@@ -333,6 +375,11 @@ fun PdfReaderScreen(
                                         leadingIcon = { Icon(Icons.Rounded.Palette, null) },
                                         onClick = { showMenu = false; showAppearance = true }
                                     )
+                                    DropdownMenuItem(
+                                        text = { Text("Fullscreen") },
+                                        leadingIcon = { Icon(Icons.Rounded.Fullscreen, null) },
+                                        onClick = { showMenu = false; enterFullscreen() }
+                                    )
                                     HorizontalDivider()
                                     DropdownMenuItem(
                                         text = { Text("Share") },
@@ -387,6 +434,28 @@ fun PdfReaderScreen(
                 }
             }
 
+            // Floating exit button: slides down and fades in with fullscreen.
+            AnimatedVisibility(
+                visible = !showChrome,
+                enter = slideInVertically(tween(320, easing = FastOutSlowInEasing)) { -it } +
+                    fadeIn(tween(250)),
+                exit = slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { -it } +
+                    fadeOut(tween(220)),
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                FilledTonalIconButton(
+                    onClick = {
+                        haptic.tick()
+                        showChrome = true
+                    },
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(top = 8.dp, end = 12.dp)
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Exit fullscreen")
+                }
+            }
+
             AnimatedVisibility(
                 visible = showChrome && showSearch,
                 enter = fadeIn(tween(250)),
@@ -422,9 +491,22 @@ fun PdfReaderScreen(
                 PageBar(
                     total = doc.totalPages,
                     current = doc.currentPageIndex,
-                    onScrub = {
-                        viewModel.updatePage(it)
-                        requestJump(it)
+                    onShare = {
+                        haptic.click()
+                        viewModel.activeUri.value?.let { viewModel.sharePdf(context, it, title) }
+                    },
+                    onPrint = {
+                        haptic.click()
+                        viewModel.activeUri.value?.let { viewModel.printPdf(context, it, title) }
+                    },
+                    onAppearance = {
+                        haptic.tick()
+                        showAppearance = true
+                    },
+                    onText = {
+                        haptic.tick()
+                        textSheetPage = null
+                        showTextSheet = true
                     }
                 )
             }
@@ -492,6 +574,30 @@ fun PdfReaderScreen(
             onOpenNote = onOpenNote
         )
     }
+
+    if (showFullscreenTip) {
+        AlertDialog(
+            onDismissRequest = { showFullscreenTip = false },
+            icon = { Icon(Icons.Rounded.Fullscreen, contentDescription = null) },
+            title = { Text("Did you know?") },
+            text = { Text("Double-tap to enter or exit fullscreen mode.") },
+            confirmButton = {
+                TextButton(onClick = { showFullscreenTip = false }) {
+                    Text("Continue")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissFullscreenTip()
+                        showFullscreenTip = false
+                    }
+                ) {
+                    Text("Never show again")
+                }
+            }
+        )
+    }
 }
 
 /** Jump bus: slider, search, outline and text sheet all drive the page list. */
@@ -509,6 +615,8 @@ private fun ContinuousBody(
     paperMode: PdfPaperMode,
     topFade: androidx.compose.ui.unit.Dp,
     bottomFade: androidx.compose.ui.unit.Dp,
+    topPad: androidx.compose.ui.unit.Dp,
+    bottomPad: androidx.compose.ui.unit.Dp,
     onPage: (Int) -> Unit,
     onFullscreen: () -> Unit,
     onShowText: (Int) -> Unit
@@ -548,7 +656,7 @@ private fun ContinuousBody(
             .background(MaterialTheme.colorScheme.surfaceContainerLowest)
             .docZoomable(zoom)
             .fadingEdges(top = topFade, bottom = bottomFade),
-        contentPadding = PaddingValues(vertical = 12.dp, horizontal = 12.dp),
+        contentPadding = PaddingValues(top = topPad, bottom = bottomPad, start = 12.dp, end = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -648,11 +756,11 @@ private fun PdfPage(
 private fun PageBar(
     total: Int,
     current: Int,
-    onScrub: (Int) -> Unit
+    onShare: () -> Unit,
+    onPrint: () -> Unit,
+    onAppearance: () -> Unit,
+    onText: () -> Unit
 ) {
-    var slider by remember(current) { mutableFloatStateOf(current.toFloat()) }
-    val haptic = rememberToolzHapticFeedback()
-
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shadowElevation = 3.dp,
@@ -664,25 +772,27 @@ private fun PageBar(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
                 "${current + 1} / $total",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(72.dp)
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
-            Slider(
-                value = slider,
-                onValueChange = {
-                    slider = it
-                    haptic.tick()
-                },
-                onValueChangeFinished = {
-                    onScrub(slider.toInt().coerceIn(0, total - 1))
-                },
-                valueRange = 0f..(total - 1).toFloat()
-            )
+            FilledTonalIconButton(onClick = onShare) {
+                Icon(Icons.Rounded.Share, contentDescription = "Share")
+            }
+            FilledTonalIconButton(onClick = onPrint) {
+                Icon(Icons.Rounded.Print, contentDescription = "Print")
+            }
+            FilledTonalIconButton(onClick = onAppearance) {
+                Icon(Icons.Rounded.Palette, contentDescription = "Appearance")
+            }
+            FilledTonalIconButton(onClick = onText) {
+                Icon(Icons.Rounded.TextFields, contentDescription = "Document text")
+            }
         }
     }
 }

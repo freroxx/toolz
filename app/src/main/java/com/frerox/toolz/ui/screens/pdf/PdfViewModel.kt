@@ -45,6 +45,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -129,15 +131,18 @@ class PdfViewModel @Inject constructor(
     val pdfRenderEngine: PdfRenderEngine get() = renderEngine
 
     /** Decode the first covers ahead of the rows so library
-     *  thumbnails are already cached when they scroll into view. */
+     *  thumbnails are already cached when they scroll into view.
+     *  Concurrent — per-URI lock stripes keep files independent. */
     fun warmThumbnails(files: List<PdfFile>, count: Int = 12) {
         viewModelScope.launch(Dispatchers.IO) {
-            files.take(count).forEach {
-                try {
-                    renderEngine.renderThumbnail(it.uri)
-                } catch (_: Exception) {
+            files.take(count).map { f ->
+                async {
+                    try {
+                        renderEngine.renderThumbnail(f.uri)
+                    } catch (_: Exception) {
+                    }
                 }
-            }
+            }.awaitAll()
         }
     }
 
@@ -181,6 +186,12 @@ class PdfViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val pdfAiEnabled = settingsRepository.pdfAiToolsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val fullscreenTipSeen = settingsRepository.pdfFullscreenTipSeen
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun dismissFullscreenTip() {
+        viewModelScope.launch { settingsRepository.setPdfFullscreenTipSeen() }
+    }
 
     private val bitmapCache = object : LruCache<String, Bitmap>(
         (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()
