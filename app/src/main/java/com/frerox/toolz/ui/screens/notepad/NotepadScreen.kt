@@ -2707,7 +2707,8 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
                             val reqWidth     = (constraints.maxWidth.coerceAtLeast(320) * 2).coerceAtMost(2200)
                             val aspectRatio  = if (page.width == 0) 1f else page.height.toFloat() / page.width.toFloat()
                             val reqHeight    = ((reqWidth * aspectRatio).toInt()).coerceAtLeast(constraints.maxHeight.coerceAtLeast(240)).coerceAtMost(3200)
-                            val bmp          = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.RGB_565)
+                            // NB: PdfRenderer only supports ARGB_8888 (RGB_565 throws).
+                            val bmp          = Bitmap.createBitmap(reqWidth, reqHeight, Bitmap.Config.ARGB_8888)
                             bmp.eraseColor(android.graphics.Color.WHITE)
                             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                             page.close(); renderer.close(); bmp

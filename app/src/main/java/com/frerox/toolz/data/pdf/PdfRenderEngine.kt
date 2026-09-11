@@ -37,8 +37,8 @@ import javax.inject.Singleton
  * V2 rules (remake):
  * - One short-lived [PdfRenderer] per call — never held across composition.
  *   Fast scroll therefore can't leak FDs; the FD is closed in `use {}`.
- * - Thumbnails use RGB_565 + small target width; full pages ARGB_8888.
- * - Hard cap on decoded pixels (max texture / OOM guard for huge scans).
+ * - Small target widths for thumbs + OOM pixel cap; everything ARGB_8888
+ *   (PdfRenderer rejects all other configs).
  * - In-memory LRU keyed "$uri#$page#$bucket" so pager neighbours hit cache.
  */
 @Singleton
@@ -133,11 +133,11 @@ class PdfRenderEngine @Inject constructor(
                                     w = (w * f).toInt().coerceAtLeast(120)
                                     h = (h * f).toInt().coerceAtLeast(120)
                                 }
-                                val bmp = Bitmap.createBitmap(
-                                    w, h,
-                                    if (bucket == "thumb") Bitmap.Config.RGB_565
-                                    else Bitmap.Config.ARGB_8888
-                                )
+                                // NB: PdfRenderer.Page.render only supports ARGB_8888 —
+                                // RGB_565 throws IllegalArgumentException ("Unsupported
+                                // pixel format"), so thumbs use it too and stay small
+                                // instead (see width cap + thumbCache budget).
+                                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                                 bmp.eraseColor(android.graphics.Color.WHITE)
                                 page.render(
                                     bmp, null, null,
@@ -151,9 +151,11 @@ class PdfRenderEngine @Inject constructor(
                             }
                         }
                     }
-                } catch (_: SecurityException) {
+                } catch (e: SecurityException) {
+                    android.util.Log.w("PdfRender", "denied: $uri ${e.message}")
                     null
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    android.util.Log.w("PdfRender", "render failed: $uri p$pageIndex ${e.javaClass.simpleName} ${e.message}")
                     null
                 }
             }

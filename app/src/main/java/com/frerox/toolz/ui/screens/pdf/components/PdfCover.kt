@@ -93,7 +93,7 @@ fun PdfCover(
                             renderer.openPage(0).use { page ->
                                 val w = 320
                                 val h = (w * page.height.toFloat() / page.width.toFloat()).toInt()
-                                val bmp = Bitmap.createBitmap(w, h.coerceAtLeast(1), Bitmap.Config.RGB_565)
+                                val bmp = Bitmap.createBitmap(w, h.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
                                 bmp.eraseColor(android.graphics.Color.WHITE)
                                 page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                                 bmp
