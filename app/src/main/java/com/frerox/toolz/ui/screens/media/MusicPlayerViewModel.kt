@@ -630,11 +630,12 @@ class MusicPlayerViewModel @Inject constructor(
         if (playerServiceStarted) return
         try {
             val intent = Intent(context, MusicPlayerService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                androidx.core.content.ContextCompat.startForegroundService(context, intent)
-            } else {
-                context.startService(intent)
-            }
+            // Warm-up only: the ViewModel lives while the UI is foreground, so
+            // plain startService() is allowed and avoids the FGS timeout ANR
+            // ("did not then call startForeground") that a foreground start
+            // with an empty/non-playing queue would trigger. Playback paths
+            // promote via MediaController/Media3 when play() is actually called.
+            context.startService(intent)
             playerServiceStarted = true
         } catch (e: Exception) {
             // Don't latch the flag: a background-start throw must be retryable

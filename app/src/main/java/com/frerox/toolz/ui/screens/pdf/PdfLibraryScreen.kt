@@ -17,6 +17,12 @@
 
 package com.frerox.toolz.ui.screens.pdf
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,10 +44,12 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -56,8 +64,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,8 +75,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.data.pdf.PdfFile
 import com.frerox.toolz.ui.components.fadingEdges
@@ -90,6 +104,32 @@ fun PdfLibraryScreen(
 ) {
     val files by viewModel.pdfFiles.collectAsStateWithLifecycle()
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val haptic = rememberToolzHapticFeedback()
+
+    // File access gate: without All-files access the OS blocks opening
+    // other apps' PDFs, so covers (and the reader) can't load them.
+    var hasAccess by remember { mutableStateOf(viewModel.hasAllFilesAccess()) }
+    // Bumped when access is granted so failed covers re-render.
+    var coverReload by remember { mutableIntStateOf(0) }
+    val settingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { /* ON_RESUME observer below picks up the new grant */ }
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) {
+                val now = viewModel.hasAllFilesAccess()
+                if (now && !hasAccess) {
+                    viewModel.refresh()
+                    coverReload++
+                }
+                hasAccess = now
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
 
     // Decode the first covers ahead of the rows so thumbnails are
     // already cached when they scroll into view.
@@ -98,6 +138,18 @@ fun PdfLibraryScreen(
     }
 
     Column(modifier.fillMaxSize()) {
+        if (!hasAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            AccessBanner(
+                onAllow = {
+                    haptic.click()
+                    settingsLauncher.launch(
+                        Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                    )
+                }
+            )
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
@@ -161,7 +213,8 @@ fun PdfLibraryScreen(
                                 onPin = { viewModel.togglePin(file.uri.toString()) },
                                 onRename = { onRename(file) },
                                 onDelete = { onDelete(file) },
-                                onAttach = onAttachToNote?.let { { it(file) } }
+                                onAttach = onAttachToNote?.let { { it(file) } },
+                                coverReload = coverReload
                             )
                             LaunchedEffect(file.uri) { viewModel.prefetchInfo(file) }
                         }
@@ -183,12 +236,52 @@ fun PdfLibraryScreen(
                                 onPin = { viewModel.togglePin(file.uri.toString()) },
                                 onRename = { onRename(file) },
                                 onDelete = { onDelete(file) },
-                                onAttach = onAttachToNote?.let { { it(file) } }
+                                onAttach = onAttachToNote?.let { { it(file) } },
+                                coverReload = coverReload
                             )
                             LaunchedEffect(file.uri) { viewModel.prefetchInfo(file) }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessBanner(onAllow: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Icon(
+                Icons.Rounded.FolderOpen,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Spacer(Modifier.size(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Allow file access",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    "Needed for thumbnails and opening your PDFs.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            Button(onClick = onAllow) {
+                Text("Allow")
             }
         }
     }
@@ -226,7 +319,8 @@ private fun PdfRow(
     onPin: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
-    onAttach: (() -> Unit)?
+    onAttach: (() -> Unit)?,
+    coverReload: Any? = null
 ) {
     var menu by remember { mutableStateOf(false) }
     val haptic = rememberToolzHapticFeedback()
@@ -258,7 +352,8 @@ private fun PdfRow(
                         uri = file.uri,
                         renderEngine = viewModel.pdfRenderEngine,
                         modifier = Modifier.size(width = 56.dp, height = 72.dp),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        reloadKey = coverReload
                     )
                 },
                 trailingContent = {

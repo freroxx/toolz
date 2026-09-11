@@ -65,12 +65,14 @@ fun PdfCover(
     widthPx: Int = 320,
     shape: Shape = MediumExpressiveShape,
     contentScale: ContentScale = ContentScale.Crop,
-    placeholderTint: Color = MaterialTheme.colorScheme.primary
+    placeholderTint: Color = MaterialTheme.colorScheme.primary,
+    /** Bump to force a re-render (e.g. after a file-access grant). */
+    reloadKey: Any? = null
 ) {
     val context = LocalContext.current
-    var bitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
+    var bitmap by remember(uri, reloadKey) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(uri, widthPx) {
+    LaunchedEffect(uri, widthPx, reloadKey) {
         if (renderEngine != null) {
             bitmap = try {
                 withContext(Dispatchers.IO) { renderEngine.renderThumbnail(uri, widthPx) }

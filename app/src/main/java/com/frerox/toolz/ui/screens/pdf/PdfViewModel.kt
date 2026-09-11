@@ -134,6 +134,15 @@ class PdfViewModel @Inject constructor(
     /** Exposed for covers — same singleton the repository uses (shared cache). */
     val pdfRenderEngine: PdfRenderEngine get() = renderEngine
 
+    /**
+     * Full-disk reads (MediaStore PDFs owned by other apps) need All-files
+     * access on API 30+. Without it thumbnails, page counts and opens fail
+     * with SecurityException — the library shows icon-only rows.
+     */
+    fun hasAllFilesAccess(): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+            android.os.Environment.isExternalStorageManager()
+
     /** Decode the first covers ahead of the rows so library
      *  thumbnails are already cached when they scroll into view.
      *  Concurrent — per-URI lock stripes keep files independent. */

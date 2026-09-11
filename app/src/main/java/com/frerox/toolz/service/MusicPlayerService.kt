@@ -19,6 +19,8 @@ package com.frerox.toolz.service
 
 import android.util.Log
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -26,6 +28,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.graphics.*
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -38,6 +41,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.annotation.OptIn
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -110,6 +114,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // Pauses/seeks/task-removed/destroy also checkpoint immediately, so the
         // last song resumes at the exact second even with the phone in a pocket.
         private const val POSITION_PERSIST_INTERVAL_MS = 5_000L
+
+        // FGS safeguard: every startForegroundService() call MUST be followed by
+        // startForeground() within the system timeout, or the system raises
+        // "Context.startForegroundService() did not then call
+        // Service.startForeground()" ANR. Media3's MediaSessionService only goes
+        // foreground when playback is active (playlist non-empty + playing), so
+        // non-playback commands (favorite/shuffle/repeat/warm-up, or an async
+        // restore that hasn't finished yet) never promoted -> ANR. We promote
+        // synchronously on every onStartCommand with a lightweight placeholder
+        // and demote right after if still idle; Media3 re-promotes with the real
+        // media notification as soon as playback starts.
+        private const val FGS_NOTIFICATION_ID = 1101
+        private const val FGS_CHANNEL_ID = "music_playback"
     }
 
     private var mediaSession: MediaSession? = null
@@ -769,7 +786,90 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    /**
+     * Synchronously satisfy the startForegroundService() contract. Must do
+     * zero suspend/blocking work — just channel + placeholder notification.
+     */
+    private fun ensureForegroundForStartCommand() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val nm = getSystemService(NotificationManager::class.java)
+                nm?.createNotificationChannel(
+                    NotificationChannel(
+                        FGS_CHANNEL_ID,
+                        "Music playback",
+                        NotificationManager.IMPORTANCE_LOW
+                    ).apply {
+                        description = "Keeps music playing in the background"
+                        setShowBadge(false)
+                        enableLights(false)
+                        enableVibration(false)
+                    }
+                )
+            }
+            val contentIntent = PendingIntent.getActivity(
+                this, 2001,
+                Intent(this, MainActivity::class.java).apply {
+                    putExtra("navigate_to", "music_player")
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notification = NotificationCompat.Builder(this, FGS_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_music_note)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText("Preparing music…")
+                .setContentIntent(contentIntent)
+                .setOngoing(true)
+                .setSilent(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    FGS_NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(FGS_NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.w("MusicPlayerService", "ensureForeground failed", e)
+        }
+    }
+
+    /**
+     * Drop the placeholder as soon as we know playback isn't active. Uses
+     * DETACH (keep other notifications) + targeted cancel so Media3's own
+     * media notification — different ID — is never dismissed.
+     */
+    private fun demoteForegroundIfIdle() {
+        try {
+            val playing = runCatching { player.isPlaying }.getOrDefault(false)
+            if (!playing) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(false)
+                }
+                runCatching {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.cancel(FGS_NOTIFICATION_ID)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("MusicPlayerService", "demoteForeground failed", e)
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // ANR fix: promote synchronously BEFORE any async restore/widget work.
+        ensureForegroundForStartCommand()
         try {
             when (intent?.action) {
                 ACTION_TOGGLE_PLAY -> {
@@ -831,6 +931,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
         updateWidget()
         super.onStartCommand(intent, flags, startId)
+        // Contract already satisfied above; don't hold FGS + placeholder when idle.
+        // If playback started (or starts async via restore), Media3 re-promotes
+        // with the real media notification on its own.
+        demoteForegroundIfIdle()
         return START_STICKY
     }
 

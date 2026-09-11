@@ -249,7 +249,7 @@ fun PdfReaderScreen(
 
             doc.error == "NO_ACCESS" -> ReaderMessage(
                 title = "Can't open this file",
-                body = "Toolz lost permission for it. Re-import the file to restore access.",
+                body = "Toolz can't open this file. Grant All-files access in the library, or re-import the file.",
                 actionLabel = "Retry",
                 onAction = { viewModel.retryOpen() }
             )
