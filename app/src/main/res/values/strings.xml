@@ -39,7 +39,7 @@
     <string name="st_DashboardScreen_y5z6">REMAINING</string>
     <string name="st_DashboardScreen_e1f2">RECENTLY USED</string>
     <string name="st_DashboardScreen_g3h4">QUICK ACCESS</string>
-    <string name="st_DashboardScreen_k7l8">SMART NOTES</string>
+    <string name="st_DashboardScreen_k7l8">YOUR NOTES</string>
     <string name="st_DashboardScreen_i5j6">VIEW ALL</string>
     <string name="st_Dashboard_Utilities_Count">%d utilities</string>
     <string name="st_DashboardScreen_m9n0">VIEW PDF</string>
@@ -649,6 +649,8 @@
     <string name="st_SettingsScreen_w5x7">Smart classification and summaries</string>
     <string name="st_SettingsScreen_y7z9">PDF AI tools</string>
     <string name="st_SettingsScreen_a9b1">Summarize PDFs and smart-extract text with AI</string>
+    <string name="st_SettingsScreen_n2p4">Notepad AI tools</string>
+    <string name="st_SettingsScreen_p4q6">Summaries, styles and note generation with AI</string>
     <string name="st_SettingsScreen_c1d3">Now Playing AI</string>
     <string name="st_SettingsScreen_e3f5">Smart lyrics meanings and recommendations</string>
     <string name="st_SettingsScreen_g5h7">INTERACTION &amp; HUD</string>

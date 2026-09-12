@@ -1549,19 +1549,67 @@ fun NotesSection(
     musicViewModel: MusicPlayerViewModel,
     pdfViewModel: PdfViewModel
 ) {
+    val vibrationManager = LocalVibrationManager.current
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
-        SectionHeader(stringResource(R.string.st_DashboardScreen_k7l8))
+        // Header: YOUR NOTES + count + See all (replaces the old section title).
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(stringResource(R.string.st_DashboardScreen_k7l8),
+                style         = MaterialTheme.typography.labelLarge,
+                fontWeight    = FontWeight.Black,
+                letterSpacing = 2.sp,
+                color         = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                shape = CircleShape,
+            ) {
+                Text(
+                    "${notes.size}",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Surface(
+                modifier = Modifier.bouncyClick {
+                    vibrationManager?.vibrateClick()
+                    onNavigate(Screen.Notepad.route)
+                },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("SEE ALL",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp,
+                        color = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp))
+                }
+            }
+        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding        = PaddingValues(horizontal = 2.dp),
         ) {
-            items(notes.take(6)) { note ->
+            items(notes.take(6), key = { it.id }) { note ->
                 QuickNoteCard(note, onNavigate, musicViewModel, pdfViewModel)
             }
             item {
                 Surface(
                     modifier = Modifier
-                        .size(width = 104.dp, height = 176.dp)
+                        .size(width = 104.dp, height = 208.dp)
                         .bouncyClick { onNavigate(Screen.Notepad.route) },
                     shape    = SquircleShape,
                     color    = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.36f),
@@ -1610,112 +1658,143 @@ private fun QuickNoteCard(
     
     val dateFormatter = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
 
+    val hasImage = note.attachedImageUri != null
+    val hasAudio = note.attachedAudioUri != null
+    val hasPdf = note.attachedPdfUri != null
+
     val cardW = when {
-        note.attachedAudioUri != null -> 280.dp
-        note.attachedImageUri != null -> 248.dp
+        hasAudio -> 280.dp
+        hasImage -> 248.dp
         else -> 220.dp
     }
-    val cardH = if (note.attachedImageUri != null) 196.dp else 176.dp
+    // Fixed heights sized so title + text + pills + footer always fit.
+    val cardH = if (hasImage) 252.dp else 208.dp
     val shape = when {
-        note.attachedAudioUri != null -> RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
-        note.attachedImageUri != null -> RoundedCornerShape(28.dp, 14.dp, 28.dp, 14.dp)
+        hasAudio -> RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
+        hasImage -> RoundedCornerShape(28.dp, 14.dp, 28.dp, 14.dp)
         else -> SquircleShape
     }
 
-    ExpressiveCard(
-        onClick    = { vibrationManager?.vibrateClick(); onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}") },
+    fun openNote() {
+        vibrationManager?.vibrateClick()
+        onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}")
+    }
+
+    // Plain container: tap zones are explicit siblings below, so attachment
+    // pills can never trigger navigation.
+    Surface(
         modifier   = Modifier.size(width = cardW, height = cardH),
         shape      = shape,
-        containerColor = noteColor.copy(alpha = cardAlpha),
-        border     = null, // Removed border
-        elevation  = 0.dp,
+        color = noteColor.copy(alpha = cardAlpha),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, noteColor.copy(alpha = 0.18f)),
     ) {
         Column(
-            modifier            = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier            = Modifier.fillMaxSize().padding(14.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier              = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.Top,
-                ) {
-                    Text(
-                        note.title.ifBlank { "UNTITLED" },
-                        style         = MaterialTheme.typography.titleMedium,
-                        fontWeight    = FontWeight.Black,
-                        maxLines      = 1,
-                        overflow      = TextOverflow.Ellipsis,
-                        modifier      = Modifier.weight(1f),
-                        letterSpacing = (-0.5).sp,
-                    )
-                    if (note.isPinned) {
-                        Icon(Icons.Rounded.PushPin, null,
-                            modifier = Modifier.size(13.dp), tint = noteColor)
-                    }
-                }
-                note.attachedImageUri?.let { uri ->
-                    AsyncImage(
-                        model        = uri,
-                        contentDescription = null,
-                        modifier     = Modifier.fillMaxWidth().height(78.dp).clip(RoundedCornerShape(14.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-                Text(
-                    note.content,
-                    style      = MaterialTheme.typography.bodySmall,
-                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    maxLines   = if (note.attachedImageUri != null) 2 else 4,
-                    overflow   = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.Medium,
-                    lineHeight = 17.sp,
-                )
-            }
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically,
+            // Main zone: opens the note.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .bouncyClick(onClick = ::openNote)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    if (note.attachedAudioUri != null) Icon(Icons.Rounded.Mic, null,
-                        modifier = Modifier.size(12.dp), tint = noteColor)
-                    if (note.attachedImageUri != null) Icon(Icons.Rounded.Image, null,
-                        modifier = Modifier.size(12.dp), tint = noteColor)
-                }
-                Text(
-                    dateFormatter.format(Date(note.timestamp)).uppercase(),
-                    style         = MaterialTheme.typography.labelSmall,
-                    color         = noteColor.copy(alpha = 0.6f),
-                    fontWeight    = FontWeight.Black,
-                    letterSpacing = 0.7.sp,
-                )
-            }
-
-            // Audio & PDF Attachments (Dashboard)
-            if (note.attachedAudioUri != null || note.attachedPdfUri != null) {
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    note.attachedAudioUri?.let { uri ->
-                        AudioAttachmentPill(
-                            name = note.attachedAudioName ?: "Audio Note",
-                            uri = uri,
-                            color = noteColor,
-                            musicViewModel = musicViewModel
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment     = Alignment.Top,
+                    ) {
+                        Text(
+                            note.title.ifBlank { "UNTITLED" },
+                            style         = MaterialTheme.typography.titleMedium,
+                            fontWeight    = FontWeight.Black,
+                            maxLines      = 1,
+                            overflow      = TextOverflow.Ellipsis,
+                            modifier      = Modifier.weight(1f),
+                            letterSpacing = (-0.5).sp,
+                        )
+                        if (note.isPinned) {
+                            Icon(Icons.Rounded.PushPin, "Pinned",
+                                modifier = Modifier.size(13.dp), tint = noteColor)
+                        }
+                    }
+                    if (hasImage) {
+                        AsyncImage(
+                            model        = note.attachedImageUri,
+                            contentDescription = "Note image",
+                            modifier     = Modifier.fillMaxWidth().height(84.dp).clip(RoundedCornerShape(14.dp)),
+                            contentScale = ContentScale.Crop,
                         )
                     }
-                    note.attachedPdfUri?.let { uri ->
+                    Text(
+                        note.content.ifBlank { "No text" },
+                        style      = MaterialTheme.typography.bodySmall,
+                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines   = if (hasImage) 3 else 5,
+                        overflow   = TextOverflow.Ellipsis,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 17.sp,
+                        modifier   = Modifier.weight(1f, fill = false),
+                    )
+                }
+            }
+
+            // Attachment pills: independent tap targets, never navigate.
+            if (hasAudio || hasPdf) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (hasAudio) {
+                        AudioAttachmentPill(
+                            name = note.attachedAudioName ?: "Audio Note",
+                            uri = note.attachedAudioUri!!,
+                            color = noteColor,
+                            musicViewModel = musicViewModel,
+                            modifier = if (hasPdf) Modifier.weight(1f) else Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (hasPdf) {
                         PdfAttachmentPill(
-                            uri = uri,
+                            uri = note.attachedPdfUri!!,
                             title = note.title.ifBlank { "Document" },
                             color = noteColor,
                             onNavigate = onNavigate,
-                            pdfViewModel = pdfViewModel
+                            pdfViewModel = pdfViewModel,
                         )
                     }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Footer zone: opens the note.
+            Box(
+                Modifier.bouncyClick(onClick = ::openNote)
+            ) {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically,
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        if (hasAudio) Icon(Icons.Rounded.Mic, "Has audio",
+                            modifier = Modifier.size(12.dp), tint = noteColor)
+                        if (hasPdf) Icon(Icons.Rounded.PictureAsPdf, "Has PDF",
+                            modifier = Modifier.size(12.dp), tint = noteColor)
+                        if (hasImage) Icon(Icons.Rounded.Image, "Has image",
+                            modifier = Modifier.size(12.dp), tint = noteColor)
+                    }
+                    Text(
+                        dateFormatter.format(Date(note.timestamp)).uppercase(),
+                        style         = MaterialTheme.typography.labelSmall,
+                        color         = noteColor.copy(alpha = 0.6f),
+                        fontWeight    = FontWeight.Black,
+                        letterSpacing = 0.7.sp,
+                    )
                 }
             }
         }
@@ -1727,33 +1806,62 @@ private fun AudioAttachmentPill(
     name: String,
     uri: String,
     color: Color,
-    musicViewModel: MusicPlayerViewModel
+    musicViewModel: MusicPlayerViewModel,
+    modifier: Modifier = Modifier,
 ) {
     val vibrationManager = LocalVibrationManager.current
-    Surface(
-        onClick = {
-            vibrationManager?.vibrateClick()
-            musicViewModel.playUri(uri.toUri())
-        },
-        shape = CircleShape,
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
-        modifier = Modifier.height(44.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+    val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
+    val isCurrent = musicState.currentTrack?.uri == uri
+    val isPlaying = isCurrent && musicState.isPlaying
+    val progress = if (isCurrent && musicState.duration > 0L) {
+        (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+    Column(modifier = modifier) {
+        Surface(
+            onClick = {
+                vibrationManager?.vibrateClick()
+                if (isCurrent) {
+                    musicViewModel.togglePlayPause()
+                } else {
+                    val track = musicState.tracks.find { it.uri == uri }
+                    if (track != null) musicViewModel.playTrack(track)
+                    else musicViewModel.playUri(uri.toUri())
+                    // Dashboard previews loop the single track too.
+                    musicViewModel.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE)
+                }
+            },
+            shape = CircleShape,
+            color = color.copy(alpha = 0.12f),
+            border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
+            modifier = Modifier.height(40.dp).fillMaxWidth()
         ) {
-            Icon(Icons.Rounded.PlayArrow, null, tint = color, modifier = Modifier.size(20.dp))
-            Text(
-                text = name,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Black,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 140.dp)
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    if (isPlaying) "Pause" else "Play",
+                    tint = color, modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = color,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+            }
+        }
+        if (isCurrent && progress > 0.005f) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(3.dp).clip(CircleShape),
+                color = color.copy(alpha = 0.8f),
+                trackColor = color.copy(alpha = 0.18f),
             )
         }
     }

@@ -834,6 +834,9 @@ class MusicPlayerViewModel @Inject constructor(
 
     fun toggleRepeat() = playbackTransport.toggleRepeat()
 
+    /** Loop the current item (used by note attachments so one song repeats). */
+    fun setRepeatMode(mode: Int) = playbackTransport.setRepeatMode(mode)
+
     fun setSortOrder(order: SortOrder) = playbackTransport.setSortOrder(order)
     fun toggleDownloadedOnlyFilter() {
         viewModelScope.launch { settingsRepository.setMusicDownloadedOnlyFilter(!_uiState.value.downloadedOnlyFilter); hapticClick() }

@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.Flow
 data class CaffeinateApp(
     @PrimaryKey val packageName: String,
     val appName: String,
-    val category: String,
+    val category: String = "",
     val isAutoEnabled: Boolean = false
 )
 

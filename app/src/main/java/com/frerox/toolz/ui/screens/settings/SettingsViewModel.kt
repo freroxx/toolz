@@ -104,9 +104,14 @@ class SettingsViewModel @Inject constructor(
     val pillFlashlightEnabled = repository.pillFlashlightEnabled
     val pillCatalogDownloadEnabled = repository.pillCatalogDownloadEnabled
     val caffeinateAutoSummaryNotification = repository.caffeinateAutoSummaryNotification
+    val caffeinateNotificationsEnabled = repository.caffeinateNotificationsEnabled
 
     fun setCaffeinateAutoSummaryNotification(enabled: Boolean) {
         viewModelScope.launch { repository.setCaffeinateAutoSummaryNotification(enabled) }
+    }
+
+    fun setCaffeinateNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setCaffeinateNotificationsEnabled(enabled) }
     }
     val backupFrequency = repository.backupFrequency
     val appLanguage = repository.appLanguage
@@ -136,6 +141,7 @@ class SettingsViewModel @Inject constructor(
 
     val converterCustomOutputPath = repository.converterCustomOutputPath
     val pdfAiToolsEnabled = repository.pdfAiToolsEnabled
+    val notepadAiToolsEnabled = repository.notepadAiToolsEnabled
 
     fun setStepGoal(goal: Int) = viewModelScope.launch { repository.setStepGoal(goal) }
     fun setThemeMode(mode: String) = viewModelScope.launch { repository.setThemeMode(mode) }
@@ -219,6 +225,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setPdfAiToolsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiToolsEnabled(enabled) }
+    fun setNotepadAiToolsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotepadAiToolsEnabled(enabled) }
     fun setAiClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiClipboardMonitoringEnabled(enabled) }
 
     fun scheduleBackup(frequency: String) {

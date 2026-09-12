@@ -17,14 +17,27 @@
 
 package com.frerox.toolz.service
 
+import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class CaffeinateTileService : TileService() {
+
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onStartListening() {
         super.onStartListening()
@@ -38,32 +51,46 @@ class CaffeinateTileService : TileService() {
                 action = CaffeinateService.ACTION_STOP
             }
             startService(intent)
-            updateTile()
         } else {
-            val intent = Intent(this, CaffeinatePopupActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            val intent = Intent(this, CaffeinateService::class.java).apply {
+                action = CaffeinateService.ACTION_START_INFINITE
             }
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                val pendingIntent = android.app.PendingIntent.getActivity(
-                    this, 7001, intent,
-                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-                )
-                startActivityAndCollapse(pendingIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
             } else {
-                @Suppress("DEPRECATION")
-                startActivityAndCollapse(intent)
+                startService(intent)
+            }
+        }
+
+        // Give service a moment to register before updating tile
+        serviceScope.launch {
+            kotlinx.coroutines.delay(200)
+            updateTile()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                requestListeningState(this@CaffeinateTileService, ComponentName(this@CaffeinateTileService, CaffeinateTileService::class.java))
             }
         }
     }
 
     private fun updateTile() {
         val tile = qsTile ?: return
-        val isRunning = CaffeinateService.isRunning
-        tile.state = if (isRunning) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = if (isRunning) "Active" else "Inactive"
+        serviceScope.launch {
+            val isActive = if (CaffeinateService.isRunning) {
+                true
+            } else {
+                try {
+                    val mode = settingsRepository.caffeinateMode.first()
+                    mode != "OFF"
+                } catch (_: Exception) {
+                    false
+                }
+            }
+
+            tile.state = if (isActive) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tile.subtitle = if (isActive) "On" else "Off"
+            }
+            tile.updateTile()
         }
-        tile.updateTile()
     }
 }

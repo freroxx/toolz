@@ -37,7 +37,7 @@
     <string name="st_DashboardScreen_y5z6">RESTANTE</string>
     <string name="st_DashboardScreen_e1f2">USADOS RECENTEMENTE</string>
     <string name="st_DashboardScreen_g3h4">ACESSO RÁPIDO</string>
-    <string name="st_DashboardScreen_k7l8">NOTAS INTELIGENTES</string>
+    <string name="st_DashboardScreen_k7l8">SUAS NOTAS</string>
     <string name="st_DashboardScreen_i5j6">VER TUDO</string>
     <string name="st_Dashboard_Utilities_Count">%d utilitários</string>
     <string name="st_DashboardScreen_m9n0">VER PDF</string>
@@ -627,6 +627,8 @@
     <string name="st_SettingsScreen_w5x7">Classificação inteligente e resumos</string>
     <string name="st_SettingsScreen_y7z9">Ferramentas de IA para PDF</string>
     <string name="st_SettingsScreen_a9b1">Resumir PDFs e extrair texto com IA</string>
+    <string name="st_SettingsScreen_n2p4">Ferramentas de IA do Bloco de Notas</string>
+    <string name="st_SettingsScreen_p4q6">Resumos, estilos e geração de notas com IA</string>
     <string name="st_SettingsScreen_c1d3">IA Tocando Agora</string>
     <string name="st_SettingsScreen_e3f5">Significados inteligentes de letras e recomendações</string>
     <string name="st_SettingsScreen_g5h7">INTERAÇÃO E HUD</string>

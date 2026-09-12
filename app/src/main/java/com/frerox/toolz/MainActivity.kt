@@ -1304,9 +1304,24 @@ fun ToolzNavHost(
                 viewModel = hiltViewModel(),
                 onBack = { toolOnBack() },
                 onPlayAudio = { uri ->
-                    val track = musicViewModel.uiState.value.tracks.find { it.uri == uri }
-                    track?.let { musicViewModel.playTrack(it) }
-                    navController.navigate(Screen.MusicPlayer.route)
+                    // Inline playback: toggle from here, never navigate away from Notes.
+                    // Note attachments loop the single track (repeat-one), not the queue.
+                    val state = musicViewModel.uiState.value
+                    val current = state.currentTrack
+                    if (current?.uri == uri) {
+                        musicViewModel.togglePlayPause()
+                    } else {
+                        val track = state.tracks.find { it.uri == uri }
+                        if (track != null) {
+                            musicViewModel.playTrack(track)
+                        } else {
+                            // Fallback for generic audio / voice memo URIs not in the library.
+                            try {
+                                musicViewModel.playUri(Uri.parse(uri))
+                            } catch (_: Exception) { }
+                        }
+                        musicViewModel.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE)
+                    }
                 },
                 onViewPdf = { uri, page ->
                     pdfViewModel.openPdfAtPage(Uri.parse(uri), "Document", page)

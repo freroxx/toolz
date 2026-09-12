@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2026 Toolz Contributors
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,11 +19,16 @@ package com.frerox.toolz.service
 
 import android.accessibilityservice.AccessibilityService
 import android.app.ActivityManager
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.media.AudioManager
 import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -31,6 +36,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.TextView
 import com.frerox.toolz.MainActivity
@@ -44,6 +50,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 /**
@@ -90,16 +97,111 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var appLimits = emptyMap<String, Long>()
     private var aiCategoryMappings = emptyMap<String, String>()
 
+    // Caffeinate Cache
+    private var caffeinateEverything = false
+    private var caffeinateAutoPkgs = emptySet<String>()
+    private var caffeinateDebounceJob: Job? = null
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    Log.d(TAG, "Screen off detected -> stopping auto caffeinate immediately")
+                    caffeinateDebounceJob?.cancel()
+                    stopAutoCaffeinate()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    Log.d(TAG, "Screen on detected -> verifying lock screen")
+                    if (isLockScreen()) {
+                        stopAutoCaffeinate()
+                    }
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    Log.d(TAG, "User unlocked screen -> rechecking caffeinate")
+                    evaluateForegroundAppForCaffeinate()
+                }
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "FocusFlowService"
         private const val DISMISS_GRACE_PERIOD_MS = 3000L
         private val SYSTEM_UI_PACKAGES = setOf(
-            "com.android.systemui", 
-            "android", 
+            "com.android.systemui",
+            "android",
             "com.google.android.inputmethod.latin",
             "com.samsung.android.honeyboard",
             "com.google.android.gms",
-            "com.android.settings"
+            "com.android.settings",
+            "com.google.android.permissioncontroller",
+            "com.android.permissioncontroller",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            // Samsung OneUI lock screen & AOD packages
+            "com.samsung.android.app.aodservice",
+            "com.samsung.android.dynamiclock",
+            "com.samsung.android.homemode",
+            "com.samsung.android.lockscreen",
+            "com.samsung.systemui.lockscreen",
+            "com.samsung.android.app.cocktailbarservice", // Edge panel
+            "com.samsung.android.biometrics.app.setting",
+            "com.samsung.android.brightnesscontroller",
+            "com.samsung.android.app.smartcapture",
+            "com.samsung.android.Bixby",
+            "com.samsung.android.bixby.agent",
+            "com.samsung.android.bixby.wakeup",
+            "com.samsung.android.app.routines",
+            // Other OEM system packages
+            "com.miui.aod",
+            "com.oplus.aod",
+            "com.coloros.lockscreen",
+            "com.oppo.lockscreen"
+        )
+        private val KNOWN_LAUNCHERS = setOf(
+            "com.android.launcher3",
+            "com.android.launcher",
+            "com.google.android.apps.nexuslauncher",
+            "com.google.android.launcher",
+            // Samsung OneUI launchers
+            "com.sec.android.app.launcher",
+            "com.samsung.android.app.launcher",
+            "com.samsung.android.app.homescreen",   // OneUI 6+
+            // MIUI
+            "com.miui.home",
+            // Huawei / Honor
+            "com.huawei.android.launcher",
+            "com.hihonor.android.launcher",
+            // Oppo / Realme / OnePlus
+            "com.oppo.launcher",
+            "com.coloros.home",
+            "com.realme.launcher",
+            "com.oneplus.launcher",
+            "net.oneplus.launcher",
+            "net.oneplus.h2launcher",
+            // Vivo / BBK / Transsion
+            "com.vivo.launcher",
+            "com.bbk.launcher2",
+            "com.transsion.hilauncher",
+            "com.transsion.XOSLauncher",
+            // Motorola / LG / Asus / Sony
+            "com.motorola.launcher3",
+            "com.asus.launcher",
+            "com.sonyericsson.home",
+            "com.lge.launcher2",
+            "com.lge.launcher3",
+            // Third-party launchers
+            "com.teslacoilsw.launcher",
+            "ch.deletescape.lawnchair.plah",
+            "app.lawnchair",
+            "app.lawnchair.playstore",
+            "com.actionlauncher.playstore",
+            "com.microsoft.launcher",
+            "com.nothing.launcher",
+            "com.smartlauncher.smartlauncher5",
+            "ginlemon.flowerfree",
+            "com.niagara.launcher",
+            "bitpit.launcher"
         )
     }
 
@@ -112,6 +214,17 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         refreshHomePackage()
         startPeriodicValidation()
         observeSettings()
+
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            registerReceiver(screenReceiver, filter)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register screenReceiver", e)
+        }
     }
 
     private fun observeSettings() {
@@ -160,45 +273,67 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 delay(30000) // Every 30s is enough for cache
             }
         }
+        serviceScope.launch {
+            settingsRepository.caffeinateEverything.collect { everything ->
+                caffeinateEverything = everything
+                currentPackage?.let { checkCaffeinate(it) }
+            }
+        }
+        serviceScope.launch {
+            settingsRepository.caffeinateAutoPkgs.collect { pkgs ->
+                caffeinateAutoPkgs = pkgs
+                currentPackage?.let { checkCaffeinate(it) }
+            }
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        
-        val packageName = event.packageName?.toString() ?: return
-        val className = event.className?.toString() ?: ""
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                val packageName = event.packageName?.toString() ?: return
+                val className = event.className?.toString() ?: ""
 
-        Log.d(TAG, "onAccessibilityEvent: $packageName / $className")
+                Log.d(TAG, "onAccessibilityEvent TYPE_WINDOW_STATE_CHANGED: $packageName / $className")
 
-        // Handle package change for precise tracking
-        if (packageName != currentPackage) {
-            Log.d(TAG, "Package changed: $currentPackage -> $packageName")
-            currentPackage = packageName
-            currentPackageResumedTime = System.currentTimeMillis()
-        }
+                // CRITICAL: Always check Caffeinate first on EVERY window state change!
+                checkCaffeinate(packageName, className)
 
-        // Ignore events from the overlay itself or Toolz UI
-        if (packageName == toolzPackage && !className.contains("Activity") && !className.contains("MainActivity")) {
-            return
-        }
+                // Handle package change for precise tracking
+                if (packageName != currentPackage) {
+                    Log.d(TAG, "Package changed: $currentPackage -> $packageName")
+                    currentPackage = packageName
+                    currentPackageResumedTime = System.currentTimeMillis()
+                }
 
-        // Handle "Safe" contexts
-        if (isHomePackage(packageName) || (packageName == toolzPackage && (className.contains("Activity") || className.contains("MainActivity")))) {
-            if (isHomePackage(packageName) && shouldKeepOverlayVisibleOnHome()) {
-                Log.d(TAG, "Keeping overlay visible on Home")
-                return
+                // Ignore events from the overlay itself or Toolz UI
+                if (packageName == toolzPackage && !className.contains("Activity") && !className.contains("MainActivity")) {
+                    return
+                }
+
+                // Handle "Safe" contexts
+                if (isHomePackage(packageName) || (packageName == toolzPackage && (className.contains("Activity") || className.contains("MainActivity")))) {
+                    if (isHomePackage(packageName) && shouldKeepOverlayVisibleOnHome()) {
+                        Log.d(TAG, "Keeping overlay visible on Home")
+                        return
+                    }
+                    Log.d(TAG, "Hiding overlay because of safe context: $packageName")
+                    hideOverlay()
+                    return
+                }
+
+                if (SYSTEM_UI_PACKAGES.contains(packageName)) {
+                    return
+                }
+
+                validateAndLock(packageName)
             }
-            Log.d(TAG, "Hiding overlay because of safe context: $packageName")
-            hideOverlay()
-            return
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                // Window layer changes (e.g. gesture navigation to home, recents, notification shade)
+                if (CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value) {
+                    evaluateForegroundAppForCaffeinate()
+                }
+            }
         }
-
-        if (SYSTEM_UI_PACKAGES.contains(packageName)) {
-            return
-        }
-
-        validateAndLock(packageName)
-        checkCaffeinate(packageName)
         
         // Only trigger clipboard check if WE are the ones becoming focused
         if (packageName == toolzPackage) {
@@ -227,11 +362,22 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var homePackages = setOf<String>()
 
     private fun refreshHomePackage() {
-        val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
-        val resolveInfos = packageManager.queryIntentActivities(intent, 0)
-        homePackages = resolveInfos.map { it.activityInfo.packageName }.toSet()
-        Log.d(TAG, "Refreshed home packages: $homePackages")
-        cachedHomePackage = resolveInfos.firstOrNull()?.activityInfo?.packageName
+        try {
+            val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PackageManager.MATCH_ALL else 0
+            val resolveInfos = packageManager.queryIntentActivities(intent, flags)
+            val pkgs = resolveInfos.mapNotNull { it.activityInfo?.packageName }.toMutableSet()
+            packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName?.let {
+                pkgs.add(it)
+            }
+            pkgs.addAll(KNOWN_LAUNCHERS)
+            homePackages = pkgs
+            Log.d(TAG, "Refreshed home packages: $homePackages")
+            cachedHomePackage = resolveInfos.firstOrNull()?.activityInfo?.packageName
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to refresh home packages", e)
+            homePackages = KNOWN_LAUNCHERS
+        }
     }
 
     private fun isHomePackage(packageName: String): Boolean {
@@ -243,10 +389,26 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         validationJob?.cancel()
         validationJob = serviceScope.launch {
             while (isActive) {
-                delay(500) // Fast check
-                val pkg = currentPackage
+                delay(1000)
+                val pkg = getActiveForegroundPackage() ?: currentPackage
+
                 if (pkg != null && !isHomePackage(pkg) && pkg != toolzPackage && !SYSTEM_UI_PACKAGES.contains(pkg)) {
                     validateAndLock(pkg)
+                }
+
+                // Auto-Caffeinate watchdog:
+                // If auto-caffeinate is currently active, ensure the active window is STILL a valid target app
+                if (CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value) {
+                    if (pkg == null || isOutsideApp(pkg, "")) {
+                        Log.d(TAG, "Watchdog: outside app ($pkg) while AUTO caffeinate running -> stopping")
+                        stopAutoCaffeinate()
+                    } else {
+                        val isTarget = caffeinateEverything || caffeinateAutoPkgs.contains(pkg)
+                        if (!isTarget) {
+                            Log.d(TAG, "Watchdog: app $pkg is no longer a target -> stopping")
+                            stopAutoCaffeinate()
+                        }
+                    }
                 }
             }
         }
@@ -308,35 +470,203 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         return keywords.any { lower.contains(it) }
     }
 
-    private fun checkCaffeinate(packageName: String) {
-        serviceScope.launch {
-            val autoAllApps = settingsRepository.caffeinateAutoAllApps.first()
-            val autoEnabledPackages = withContext(Dispatchers.IO) {
-                caffeinateRepository.getAutoEnabledPackages()
+    private val launchableCache = ConcurrentHashMap<String, Boolean>()
+
+    private fun isLaunchableApp(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        return launchableCache.computeIfAbsent(packageName) { pkg ->
+            try {
+                packageManager.getLaunchIntentForPackage(pkg) != null
+            } catch (e: Exception) {
+                false
             }
-            
-            val isTargetApp = autoAllApps || autoEnabledPackages.contains(packageName)
-            
-            if (isTargetApp) {
-                // Should be running
-                if (!CaffeinateService.isRunning) {
-                    val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
-                        action = CaffeinateService.ACTION_AUTO_START
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
+        }
+    }
+
+    private fun isScreenInteractive(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return powerManager?.isInteractive ?: true
+    }
+
+    private fun isLockScreen(): Boolean {
+        if (!isScreenInteractive()) return true
+        // Primary check: KeyguardManager (works on AOSP, unreliable on OneUI)
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguardManager?.isKeyguardLocked == true ||
+            keyguardManager?.isDeviceLocked == true ||
+            keyguardManager?.inKeyguardRestrictedInputMode() == true) return true
+        // Secondary check: scan active accessibility windows for lock screen packages.
+        // On Samsung OneUI, the lock screen appears as a TYPE_SYSTEM window whose root
+        // package is com.samsung.android.dynamiclock, com.android.systemui, etc.
+        return isOneUiLockScreenVisible()
+    }
+
+    /**
+     * Scans all active accessibility windows for known Samsung/OEM lock-screen packages.
+     * This catches cases where [KeyguardManager.isKeyguardLocked] incorrectly returns false
+     * on OneUI (Galaxy devices), MIUI, ColorOS, etc.
+     */
+    private fun isOneUiLockScreenVisible(): Boolean {
+        try {
+            val activeWindows = windows ?: return false
+            for (window in activeWindows) {
+                val pkg = window.root?.packageName?.toString() ?: continue
+                // Anything from the known lock-screen packages is a dead giveaway
+                if (pkg == "com.samsung.android.dynamiclock" ||
+                    pkg == "com.samsung.android.app.aodservice" ||
+                    pkg == "com.samsung.android.lockscreen" ||
+                    pkg == "com.samsung.systemui.lockscreen" ||
+                    pkg == "com.android.systemui" ||
+                    pkg == "com.miui.aod" ||
+                    pkg == "com.coloros.lockscreen" ||
+                    pkg == "com.oppo.lockscreen") {
+                    // Extra: make sure it's not just a quick-settings overlay on top of an app
+                    // by checking if this system window has focus or covers the screen
+                    if (window.isFocused || window.type == AccessibilityWindowInfo.TYPE_SYSTEM) {
+                        return true
                     }
                 }
-            } else {
-                // Should not be running (if it was started automatically)
-                if (CaffeinateService.isRunning) {
-                    val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
-                        action = CaffeinateService.ACTION_AUTO_STOP
-                    }
+                // Also catch any window whose class/title contains lock-screen keywords
+                val title = window.title?.toString()?.lowercase() ?: ""
+                if (title.contains("keyguard") || title.contains("lockscreen") ||
+                    title.contains("bouncer")) return true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "isOneUiLockScreenVisible error", e)
+        }
+        return false
+    }
+
+    private fun isKeyguardOrDream(className: String): Boolean {
+        if (className.isBlank()) return false
+        val lower = className.lowercase()
+        return lower.contains("keyguard") ||
+                lower.contains("lockscreen") ||
+                lower.contains("bouncer") ||
+                lower.contains("dream") ||
+                lower.contains("screensaver") ||
+                lower.contains("aod") ||
+                lower.contains("ambient")
+    }
+
+    private fun isLauncherHeuristic(packageName: String, className: String): Boolean {
+        val lowerPkg = packageName.lowercase()
+        val lowerCls = className.lowercase()
+        return lowerPkg.contains("launcher") ||
+                lowerPkg.contains("homescreen") ||
+                lowerPkg.endsWith(".home") ||
+                lowerPkg.contains(".quickstep") ||
+                lowerCls.contains("launcher") ||
+                lowerCls.contains("homescreen") ||
+                lowerCls.contains("quickstep") ||
+                lowerCls.contains("recentsactivity") ||
+                lowerCls.contains("fallbackhome")
+    }
+
+    private fun isSystemUi(packageName: String): Boolean {
+        return SYSTEM_UI_PACKAGES.contains(packageName) ||
+                packageName == "android" ||
+                packageName.startsWith("com.android.systemui") ||
+                packageName.startsWith("com.google.android.permissioncontroller") ||
+                packageName.startsWith("com.android.permissioncontroller") ||
+                packageName.startsWith("com.samsung.android.app.aodservice") ||
+                packageName.startsWith("com.samsung.android.dynamiclock") ||
+                packageName.startsWith("com.miui.aod") ||
+                packageName.startsWith("com.oplus.aod")
+    }
+
+    private fun isOutsideApp(packageName: String, className: String = ""): Boolean {
+        if (isLockScreen()) return true
+        if (isKeyguardOrDream(className)) return true
+        if (isHomePackage(packageName) || isLauncherHeuristic(packageName, className)) return true
+        if (isSystemUi(packageName)) return true
+        if (packageName == toolzPackage) return true
+        if (!isLaunchableApp(packageName)) return true
+        return false
+    }
+
+    private fun getActiveForegroundPackage(): String? {
+        try {
+            val activeRoot = rootInActiveWindow
+            if (activeRoot != null) {
+                val pkg = activeRoot.packageName?.toString()
+                if (!pkg.isNullOrBlank()) return pkg
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val appWindow = windows?.firstOrNull { it.isActive && it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                val pkg = appWindow?.root?.packageName?.toString()
+                if (!pkg.isNullOrBlank()) return pkg
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get active foreground package", e)
+        }
+        return currentPackage
+    }
+
+    private fun evaluateForegroundAppForCaffeinate() {
+        val pkg = getActiveForegroundPackage()
+        if (pkg != null) {
+            checkCaffeinate(pkg, "")
+        } else {
+            stopAutoCaffeinate()
+        }
+    }
+
+    private fun stopAutoCaffeinate() {
+        if (CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value) {
+            Log.d(TAG, "Stopping auto caffeinate")
+            val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
+                action = CaffeinateService.ACTION_AUTO_STOP
+            }
+            startService(intent)
+        }
+    }
+
+    private fun checkCaffeinate(packageName: String, className: String = "") {
+        caffeinateDebounceJob?.cancel()
+
+        if (isOutsideApp(packageName, className)) {
+            // User is outside apps: home screen, lockscreen, system UI, or Toolz:
+            // Stop immediately if running in auto mode!
+            stopAutoCaffeinate()
+            return
+        }
+
+        // Inside a regular application!
+        caffeinateDebounceJob = serviceScope.launch {
+            delay(200)
+
+            if (isOutsideApp(packageName, className)) {
+                stopAutoCaffeinate()
+                return@launch
+            }
+
+            val isTargetApp = caffeinateEverything || caffeinateAutoPkgs.contains(packageName)
+            Log.d(TAG, "Inside app: $packageName, isTarget=$isTargetApp (everything=$caffeinateEverything, autoPkgs=${caffeinateAutoPkgs.size})")
+
+            if (isTargetApp) {
+                // If service is running manually in INFINITE mode, do not downgrade or override
+                if (CaffeinateService.isRunning && !CaffeinateService.isAutoRunningFlow.value) {
+                    return@launch
+                }
+
+                val appLabel = try {
+                    val ai = packageManager.getApplicationInfo(packageName, 0)
+                    packageManager.getApplicationLabel(ai).toString()
+                } catch (e: Exception) {
+                    packageName
+                }
+                val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
+                    action = CaffeinateService.ACTION_AUTO_START
+                    putExtra(CaffeinateService.EXTRA_TARGET_APP, appLabel)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
                     startService(intent)
                 }
+            } else {
+                stopAutoCaffeinate()
             }
         }
     }
@@ -531,7 +861,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         hideOverlay()
         validationJob?.cancel()
         backgroundStopJob?.cancel()
+        caffeinateDebounceJob?.cancel()
         serviceScope.cancel()
+        try {
+            unregisterReceiver(screenReceiver)
+        } catch (_: Exception) {}
     }
 
     override fun onInterrupt() {

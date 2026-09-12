@@ -42,9 +42,18 @@ class SettingsRepository @Inject constructor(
     private val WORLD_CLOCK_ZONES = stringSetPreferencesKey("world_clock_zones")
     
     // Caffeinate
-    private val CAFFEINATE_AUTO_ALL_APPS = booleanPreferencesKey("caffeinate_auto_all_apps")
-    private val CAFFEINATE_AUTO_SUMMARY_NOTIFICATION = booleanPreferencesKey("caffeinate_auto_summary_notification")
+    private val CAFFEINATE_AUTO_ALL_APPS = booleanPreferencesKey("caffeinate_auto_all_apps") // legacy: read-only
+    private val CAFFEINATE_AUTO_SUMMARY_NOTIFICATION = booleanPreferencesKey("caffeinate_auto_summary_notification") // legacy: read-only for migration
     private val ACCESSIBILITY_BRIDGE_WAS_ACTIVE = booleanPreferencesKey("accessibility_bridge_was_active")
+    private val CAFFEINATE_NOTIFICATIONS_ENABLED = booleanPreferencesKey("caffeinate_notifications_enabled")
+    private val CAFFEINATE_REMINDER_ENABLED = booleanPreferencesKey("caffeinate_reminder_enabled")
+    private val CAFFEINATE_REMINDER_MINS = intPreferencesKey("caffeinate_reminder_mins")
+    private val CAFFEINATE_AUTOSTOP_ENABLED = booleanPreferencesKey("caffeinate_autostop_enabled")
+    private val CAFFEINATE_AUTOSTOP_MINS = intPreferencesKey("caffeinate_autostop_mins")
+    private val CAFFEINATE_EVERYTHING = booleanPreferencesKey("caffeinate_everything")
+    private val CAFFEINATE_AUTO_PKGS = stringSetPreferencesKey("caffeinate_auto_pkgs")
+    private val CAFFEINATE_START_TIME = longPreferencesKey("caffeinate_start_time")
+    private val CAFFEINATE_MODE = stringPreferencesKey("caffeinate_mode") // OFF | INFINITE | AUTO
 
     // PurgeShot — screenshot auto-deletion
     private val PURGESHOT_ENABLED = booleanPreferencesKey("purgeshot_enabled")
@@ -400,6 +409,20 @@ class SettingsRepository @Inject constructor(
     val caffeinateAutoSummaryNotification: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTO_SUMMARY_NOTIFICATION] ?: true }
     val accessibilityBridgeWasActive: Flow<Boolean> = dataStore.data.map { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] ?: false }
 
+    val caffeinateNotificationsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[CAFFEINATE_NOTIFICATIONS_ENABLED] ?: (prefs[CAFFEINATE_AUTO_SUMMARY_NOTIFICATION] ?: true)
+    }
+    val caffeinateReminderEnabled: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_REMINDER_ENABLED] ?: false }
+    val caffeinateReminderMins: Flow<Int> = dataStore.data.map { it[CAFFEINATE_REMINDER_MINS] ?: 30 }
+    val caffeinateAutoStopEnabled: Flow<Boolean> = dataStore.data.map { it[CAFFEINATE_AUTOSTOP_ENABLED] ?: false }
+    val caffeinateAutoStopMins: Flow<Int> = dataStore.data.map { it[CAFFEINATE_AUTOSTOP_MINS] ?: 60 }
+    val caffeinateEverything: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[CAFFEINATE_EVERYTHING] ?: (prefs[CAFFEINATE_AUTO_ALL_APPS] ?: false)
+    }
+    val caffeinateAutoPkgs: Flow<Set<String>> = dataStore.data.map { it[CAFFEINATE_AUTO_PKGS] ?: emptySet() }
+    val caffeinateStartTime: Flow<Long> = dataStore.data.map { it[CAFFEINATE_START_TIME] ?: 0L }
+    val caffeinateMode: Flow<String> = dataStore.data.map { it[CAFFEINATE_MODE] ?: "OFF" }
+
     // PurgeShot flows
     val purgeShotEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_ENABLED] ?: false }
     val purgeShotSmartAuto: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_SMART_AUTO] ?: false }
@@ -439,6 +462,45 @@ class SettingsRepository @Inject constructor(
         dataStore.edit { it[ACCESSIBILITY_BRIDGE_WAS_ACTIVE] = active }
     }
 
+    suspend fun setCaffeinateNotificationsEnabled(enabled: Boolean) {
+        dataStore.edit { it[CAFFEINATE_NOTIFICATIONS_ENABLED] = enabled }
+    }
+
+    suspend fun setCaffeinateReminderEnabled(enabled: Boolean) {
+        dataStore.edit { it[CAFFEINATE_REMINDER_ENABLED] = enabled }
+    }
+
+    suspend fun setCaffeinateReminderMins(mins: Int) {
+        dataStore.edit { it[CAFFEINATE_REMINDER_MINS] = mins }
+    }
+
+    suspend fun setCaffeinateAutoStopEnabled(enabled: Boolean) {
+        dataStore.edit { it[CAFFEINATE_AUTOSTOP_ENABLED] = enabled }
+    }
+
+    suspend fun setCaffeinateAutoStopMins(mins: Int) {
+        dataStore.edit { it[CAFFEINATE_AUTOSTOP_MINS] = mins }
+    }
+
+    suspend fun setCaffeinateEverything(enabled: Boolean) {
+        dataStore.edit {
+            it[CAFFEINATE_EVERYTHING] = enabled
+            it[CAFFEINATE_AUTO_ALL_APPS] = enabled
+        }
+    }
+
+    suspend fun setCaffeinateAutoPkgs(pkgs: Set<String>) {
+        dataStore.edit { it[CAFFEINATE_AUTO_PKGS] = pkgs }
+    }
+
+    suspend fun setCaffeinateStartTime(time: Long) {
+        dataStore.edit { it[CAFFEINATE_START_TIME] = time }
+    }
+
+    suspend fun setCaffeinateMode(mode: String) {
+        dataStore.edit { it[CAFFEINATE_MODE] = mode }
+    }
+
     // Download Settings
     private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format") // "M4A", "OPUS", "MP3"
     private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality") // "HIGH", "MEDIUM", "LOW"
@@ -470,6 +532,9 @@ class SettingsRepository @Inject constructor(
     // PDF Settings
     private val PDF_AI_TOOLS = booleanPreferencesKey("pdf_ai_tools")
     private val PDF_FULLSCREEN_TIP_SEEN = booleanPreferencesKey("pdf_fullscreen_tip_seen")
+
+    // Notepad Settings
+    private val NOTEPAD_AI_TOOLS = booleanPreferencesKey("notepad_ai_tools")
 
     // AI Search
     private val AI_SEARCH_ENABLED = booleanPreferencesKey("ai_search_enabled")
@@ -850,6 +915,11 @@ class SettingsRepository @Inject constructor(
 
     val pdfAiToolsEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[PDF_AI_TOOLS] ?: true },
+        offlineModeEnabled
+    ) { enabled, offline -> if (offline) false else enabled }
+
+    val notepadAiToolsEnabled: Flow<Boolean> = combine(
+        dataStore.data.map { it[NOTEPAD_AI_TOOLS] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
@@ -1242,6 +1312,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setPdfAiToolsEnabled(enabled: Boolean) {
         dataStore.edit { it[PDF_AI_TOOLS] = enabled }
+    }
+
+    suspend fun setNotepadAiToolsEnabled(enabled: Boolean) {
+        dataStore.edit { it[NOTEPAD_AI_TOOLS] = enabled }
     }
 
     suspend fun setPdfFullscreenTipSeen() {

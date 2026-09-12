@@ -569,6 +569,17 @@ class PlaybackTransport(
         if (new != Player.REPEAT_MODE_OFF) hapticSuccess() else hapticClick()
     }
 
+    /**
+     * Direct repeat-mode set without haptics (for programmatic use, e.g. note
+     * attachments that must loop the single track instead of the queue).
+     */
+    fun setRepeatMode(mode: Int) {
+        val p: Player = playerOrController()
+        if (p.repeatMode == mode) return
+        p.repeatMode = mode
+        uiState.update { it.copy(repeatMode = mode) }
+    }
+
     fun setSortOrder(order: com.frerox.toolz.ui.screens.media.SortOrder) {
         uiState.update { it.copy(sortOrder = order) }
         hapticClick()

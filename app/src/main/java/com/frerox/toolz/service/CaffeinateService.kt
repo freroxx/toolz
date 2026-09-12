@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2026 Toolz Contributors
  *
  * This program is free software: you can redistribute it and/or modify
@@ -18,31 +18,33 @@
 package com.frerox.toolz.service
 
 import android.app.*
+import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
-import android.os.*
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
+import android.service.quicksettings.TileService
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.ui.navigation.Screen
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import java.util.Locale
-import java.util.concurrent.TimeUnit
-import android.service.quicksettings.TileService
-import android.content.ComponentName
-import android.accessibilityservice.AccessibilityServiceInfo
-import android.view.accessibility.AccessibilityManager
-import com.frerox.toolz.data.focus.CaffeinateRepository
-import com.frerox.toolz.data.settings.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -50,41 +52,41 @@ class CaffeinateService : Service() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
-    
-    @Inject
-    lateinit var caffeinateRepository: CaffeinateRepository
 
     private var screenWakeLock: PowerManager.WakeLock? = null
     private var cpuWakeLock: PowerManager.WakeLock? = null
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
-    
+    private var savedScreenTimeout: Int = -1  // stores original timeout to restore on stop
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var reminderJob: Job? = null
     private var notificationJob: Job? = null
-    
+    private var reminderJob: Job? = null
+
     private var startTimeMillis: Long = 0
-    private var reminderIntervalMinutes: Int = 30
-    private var isInfinite: Boolean = false
-    private var isAutoMode: Boolean = false
-    private var themeColor: Int = android.graphics.Color.BLUE
-    
-    private var autoAppsCount: Int = 0
-    private var summaryEnabled: Boolean = true
+    private var currentMode: String = "OFF" // "OFF" | "INFINITE" | "AUTO"
+    private var targetAppName: String? = null
+    private var notificationsEnabled: Boolean = true
 
     companion object {
         private const val TAG = "CaffeinateService"
-        private const val CHANNEL_ID = "caffeinate_channel"
-        private const val NOTIFICATION_ID = 1001
-        
+        const val CHANNEL_STATUS_ID = "caffeinate_status"
+        const val CHANNEL_ALERTS_ID = "caffeinate_alerts"
+        private const val NOTIFICATION_STATUS_ID = 1001
+        private const val NOTIFICATION_REMINDER_ID = 1002
+        private const val NOTIFICATION_AUTOSTOP_ID = 1003
+
         const val ACTION_START = "ACTION_START"
+        const val ACTION_START_INFINITE = "ACTION_START_INFINITE"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_AUTO_START = "ACTION_AUTO_START"
         const val ACTION_AUTO_STOP = "ACTION_AUTO_STOP"
+        const val ACTION_TIMED_STOP = "ACTION_TIMED_STOP"
         const val ACTION_KEEP_GOING = "ACTION_KEEP_GOING"
-        
-        const val EXTRA_INTERVAL = "EXTRA_INTERVAL"
+
+        const val EXTRA_TARGET_APP = "EXTRA_TARGET_APP"
         const val EXTRA_INFINITE = "EXTRA_INFINITE"
+        const val EXTRA_INTERVAL = "EXTRA_INTERVAL"
         const val EXTRA_COLOR = "EXTRA_COLOR"
 
         private val _elapsedTimeFlow = MutableStateFlow(0L)
@@ -97,152 +99,267 @@ class CaffeinateService : Service() {
             private set
     }
 
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                if (currentMode == "AUTO" || _isAutoRunningFlow.value) {
+                    Log.d(TAG, "Screen turned off in AUTO mode -> auto stopping Caffeinate")
+                    stopSession()
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createNotificationChannels()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        try {
+            registerReceiver(screenReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register screenReceiver", e)
+        }
+    }
+
+    private fun ensureForeground(notificationText: String = "Starting Caffeinate…") {
+        val initialNotification = createStatusNotification(notificationText)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_STATUS_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_STATUS_ID, initialNotification)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        serviceScope.launch {
-            summaryEnabled = settingsRepository.caffeinateAutoSummaryNotification.first()
-            autoAppsCount = caffeinateRepository.getAutoEnabledPackages().size
-            if (settingsRepository.caffeinateAutoAllApps.first()) {
-                autoAppsCount = -1 // Indicates "All"
-            }
-            
-            // Bridge Alert Check
-            checkAccessibilityBridgeAlert()
-        }
+        val action = intent?.action
 
-        // Guaranteed startForeground call at the entry point
-        val initialNotification = createNotification(currentNotificationText())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, initialNotification)
-        }
-
-        when (intent?.action) {
-            ACTION_START -> {
-                isRunning = true
-                isAutoMode = false
+        when (action) {
+            ACTION_START, ACTION_START_INFINITE -> {
+                ensureForeground()
+                currentMode = "INFINITE"
                 _isAutoRunningFlow.value = false
-                reminderIntervalMinutes = intent.getIntExtra(EXTRA_INTERVAL, 30)
-                isInfinite = intent.getBooleanExtra(EXTRA_INFINITE, false)
-                themeColor = intent.getIntExtra(EXTRA_COLOR, android.graphics.Color.BLUE)
-                startCaffeinate()
+                targetAppName = null
+                startSession(isAuto = false)
             }
             ACTION_AUTO_START -> {
-                if (!isRunning) {
-                    isRunning = true
-                    isAutoMode = true
-                    _isAutoRunningFlow.value = true
-                    reminderIntervalMinutes = 0
-                    isInfinite = true
-                    themeColor = intent.getIntExtra(EXTRA_COLOR, android.graphics.Color.BLUE)
-                    startCaffeinate()
+                // If user manually started INFINITE, don't downgrade or override mode
+                if (isRunning && currentMode == "INFINITE") {
+                    // Already running manually in infinite mode, ignore auto start
+                } else {
+                    targetAppName = intent.getStringExtra(EXTRA_TARGET_APP)
+                    if (!isRunning) {
+                        ensureForeground()
+                        currentMode = "AUTO"
+                        _isAutoRunningFlow.value = true
+                        startSession(isAuto = true)
+                    } else {
+                        currentMode = "AUTO"
+                        _isAutoRunningFlow.value = true
+                        updateStatusNotification()
+                    }
                 }
             }
             ACTION_STOP -> {
-                stopCaffeinate()
+                stopSession()
             }
             ACTION_AUTO_STOP -> {
-                if (isAutoMode) {
-                    stopCaffeinate()
+                if (currentMode == "AUTO" || _isAutoRunningFlow.value || !isRunning) {
+                    stopSession()
+                }
+            }
+            ACTION_TIMED_STOP -> {
+                serviceScope.launch {
+                    val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (e: Exception) { 60 }
+                    stopSession()
+                    if (notificationsEnabled) {
+                        postAlertNotification(
+                            NOTIFICATION_AUTOSTOP_ID,
+                            "Caffeinate Stopped",
+                            "Screen awake ended after $autostopMins min."
+                        )
+                    }
                 }
             }
             ACTION_KEEP_GOING -> {
-                // Do nothing for now, since we removed reminders
+                // Dismiss reminder notification
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(NOTIFICATION_REMINDER_ID)
             }
             else -> {
                 if (intent == null && isRunning) {
-                     startCaffeinate()
+                    // Resurrected by START_STICKY
+                    serviceScope.launch {
+                        val savedMode = settingsRepository.caffeinateMode.first()
+                        val savedStart = settingsRepository.caffeinateStartTime.first()
+                        if (savedMode != "OFF") {
+                            currentMode = savedMode
+                            startTimeMillis = if (savedStart > 0) savedStart else System.currentTimeMillis()
+                            _isAutoRunningFlow.value = (savedMode == "AUTO")
+                            acquireWakeLocks()
+                            showKeepScreenOnOverlay()
+                            startLoops()
+                        } else {
+                            stopSession()
+                        }
+                    }
                 }
             }
         }
         return START_STICKY
     }
 
-    private suspend fun checkAccessibilityBridgeAlert() {
-        val wasActive = settingsRepository.accessibilityBridgeWasActive.first()
-        val isCurrentlyActive = isAccessibilityServiceEnabled()
-        
-        if (wasActive && !isCurrentlyActive && summaryEnabled) {
-            showBridgeDisconnectedNotification()
-        }
-    }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        return try {
-            val manager = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
-            manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_GENERIC)?.any {
-                it.resolveInfo.serviceInfo.packageName == packageName
-            } == true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun showBridgeDisconnectedNotification() {
-        val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 3, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Accessibility Bridge Disconnected")
-            .setContentText("Auto-triggering is disabled. Tap to re-enable.")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setColor(android.graphics.Color.RED)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID + 2, notification)
-    }
-
-    private fun startCaffeinate() {
+    private fun startSession(isAuto: Boolean) {
+        isRunning = true
         acquireWakeLocks()
         showKeepScreenOnOverlay()
-        
+        overrideScreenTimeout()  // prevent dimming
+
         if (startTimeMillis == 0L) {
             startTimeMillis = System.currentTimeMillis()
         }
 
-        val notification = createNotification(currentNotificationText())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        serviceScope.launch {
+            notificationsEnabled = try { settingsRepository.caffeinateNotificationsEnabled.first() } catch (e: Exception) { true }
+            settingsRepository.setCaffeinateMode(currentMode)
+            settingsRepository.setCaffeinateStartTime(startTimeMillis)
+
+            // Setup Auto-stop Alarm if applicable (only in manual infinite mode)
+            if (!isAuto) {
+                val autostopEnabled = try { settingsRepository.caffeinateAutoStopEnabled.first() } catch (e: Exception) { false }
+                if (autostopEnabled) {
+                    val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (e: Exception) { 60 }
+                    scheduleAutoStopAlarm(autostopMins)
+                } else {
+                    cancelAutoStopAlarm()
+                }
+
+                // Setup Reminder loop if applicable
+                val reminderEnabled = try { settingsRepository.caffeinateReminderEnabled.first() } catch (e: Exception) { false }
+                if (reminderEnabled && notificationsEnabled) {
+                    val reminderMins = try { settingsRepository.caffeinateReminderMins.first() } catch (e: Exception) { 30 }
+                    startReminderLoop(reminderMins)
+                } else {
+                    reminderJob?.cancel()
+                }
+            } else {
+                cancelAutoStopAlarm()
+                reminderJob?.cancel()
+            }
+
+            updateStatusNotification()
+            requestTileUpdate()
         }
-        updateNotificationLoop()
-        requestTileUpdate()
+
+        startLoops()
     }
 
-    private fun stopCaffeinate() {
+    private fun stopSession() {
         isRunning = false
-        isAutoMode = false
+        currentMode = "OFF"
         _isAutoRunningFlow.value = false
         startTimeMillis = 0
         _elapsedTimeFlow.value = 0
+
+        cancelAutoStopAlarm()
+        reminderJob?.cancel()
+        reminderJob = null
         notificationJob?.cancel()
         notificationJob = null
+
         releaseWakeLocks()
         removeKeepScreenOnOverlay()
+        restoreScreenTimeout()  // undo our dimming-prevention override
+
+        serviceScope.launch {
+            try {
+                settingsRepository.setCaffeinateMode("OFF")
+                settingsRepository.setCaffeinateStartTime(0L)
+            } catch (_: Exception) {}
+        }
+
         stopForeground(STOP_FOREGROUND_REMOVE)
         requestTileUpdate()
         stopSelf()
     }
 
+    private fun startLoops() {
+        notificationJob?.cancel()
+        notificationJob = serviceScope.launch {
+            var lastText: String? = null
+            while (isActive && isRunning) {
+                val elapsed = System.currentTimeMillis() - startTimeMillis
+                _elapsedTimeFlow.value = elapsed
+
+                val text = currentStatusText()
+                if (text != lastText) {
+                    lastText = text
+                    updateStatusNotification()
+                }
+                delay(1000)
+            }
+        }
+    }
+
+    private fun startReminderLoop(intervalMins: Int) {
+        reminderJob?.cancel()
+        reminderJob = serviceScope.launch {
+            val intervalMillis = intervalMins * 60_000L
+            while (isActive && isRunning) {
+                delay(intervalMillis)
+                if (isActive && isRunning && notificationsEnabled) {
+                    val elapsed = System.currentTimeMillis() - startTimeMillis
+                    val elapsedMins = TimeUnit.MILLISECONDS.toMinutes(elapsed)
+                    postReminderNotification(elapsedMins)
+                }
+            }
+        }
+    }
+
+    private fun scheduleAutoStopAlarm(minutes: Int) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val triggerAt = startTimeMillis + (minutes * 60_000L)
+        val intent = Intent(this, CaffeinateService::class.java).apply {
+            action = ACTION_TIMED_STOP
+        }
+        val pendingIntent = PendingIntent.getService(
+            this,
+            9001,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            }
+            Log.d(TAG, "Scheduled auto-stop alarm in $minutes minutes")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to schedule exact auto-stop alarm", e)
+        }
+    }
+
+    private fun cancelAutoStopAlarm() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(this, CaffeinateService::class.java).apply {
+            action = ACTION_TIMED_STOP
+        }
+        val pendingIntent = PendingIntent.getService(
+            this,
+            9001,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+        }
+    }
+
     private fun acquireWakeLocks() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        
+
         if (cpuWakeLock == null) {
             cpuWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Toolz:CaffeinateCpuLock").apply {
                 setReferenceCounted(false)
@@ -255,7 +372,7 @@ class CaffeinateService : Service() {
         if (screenWakeLock == null) {
             @Suppress("DEPRECATION")
             screenWakeLock = powerManager.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
                 "Toolz:CaffeinateScreenLock"
             ).apply {
                 setReferenceCounted(false)
@@ -266,28 +383,79 @@ class CaffeinateService : Service() {
         }
     }
 
+    private fun releaseWakeLocks() {
+        if (screenWakeLock?.isHeld == true) {
+            try { screenWakeLock?.release() } catch (_: Exception) {}
+        }
+        if (cpuWakeLock?.isHeld == true) {
+            try { cpuWakeLock?.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Prevents screen dimming by overriding SCREEN_OFF_TIMEOUT to Int.MAX_VALUE.
+     * Requires WRITE_SETTINGS permission (user grants via Settings > Apps > Special access).
+     * Falls back silently if not granted — wakelock still keeps screen on, just may dim.
+     */
+    private fun overrideScreenTimeout() {
+        try {
+            if (Settings.System.canWrite(this)) {
+                val current = Settings.System.getInt(
+                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000
+                )
+                if (current != Int.MAX_VALUE) {
+                    savedScreenTimeout = current
+                    Settings.System.putInt(
+                        contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, Int.MAX_VALUE
+                    )
+                    Log.d(TAG, "Screen timeout overridden ($current ms → MAX) to prevent dimming")
+                }
+            } else {
+                Log.d(TAG, "WRITE_SETTINGS not granted — screen may still dim (wakelock is backup)")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to override screen timeout", e)
+        }
+    }
+
+    /**
+     * Restores the screen timeout that was saved before [overrideScreenTimeout] was called.
+     */
+    private fun restoreScreenTimeout() {
+        try {
+            if (savedScreenTimeout > 0 && Settings.System.canWrite(this)) {
+                Settings.System.putInt(
+                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, savedScreenTimeout
+                )
+                Log.d(TAG, "Screen timeout restored to $savedScreenTimeout ms")
+                savedScreenTimeout = -1
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to restore screen timeout", e)
+        }
+    }
+
     private fun showKeepScreenOnOverlay() {
         if (overlayView != null) return
-        
         try {
             val params = WindowManager.LayoutParams(
                 1, 1,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
-                else 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
                     @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             )
-            
-            overlayView = View(this)
-            windowManager?.addView(overlayView, params)
-            Log.d(TAG, "KeepScreenOn Overlay added")
+            val view = View(this)
+            windowManager?.addView(view, params)
+            overlayView = view
+            Log.d(TAG, "KeepScreenOn overlay added")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to add KeepScreenOn overlay", e)
+            Log.w(TAG, "KeepScreenOn overlay failed (system alert window not granted, falling back to wakelock)", e)
         }
     }
 
@@ -302,67 +470,114 @@ class CaffeinateService : Service() {
         }
     }
 
-    private fun releaseWakeLocks() {
-        if (screenWakeLock?.isHeld == true) {
-            screenWakeLock?.release()
+    private fun currentStatusText(): String {
+        if (!notificationsEnabled) {
+            return if (currentMode == "AUTO") "Auto-Caffeinate active" else "Caffeinate active"
         }
-        if (cpuWakeLock?.isHeld == true) {
-            cpuWakeLock?.release()
+
+        val elapsed = System.currentTimeMillis() - startTimeMillis
+        val hours = TimeUnit.MILLISECONDS.toHours(elapsed)
+        val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsed) % 60
+
+        val timeStr = if (hours > 0) {
+            String.format(Locale.getDefault(), "%02d:%02d h", hours, minutes)
+        } else {
+            String.format(Locale.getDefault(), "%02d min", minutes)
+        }
+
+        return if (currentMode == "AUTO") {
+            if (!targetAppName.isNullOrBlank()) {
+                "Active for $timeStr • $targetAppName"
+            } else {
+                "Active for $timeStr"
+            }
+        } else {
+            "Active for $timeStr"
         }
     }
 
-    private fun createNotification(contentText: String = "Screen will stay awake"): Notification {
-        val title = if (isAutoMode) "Auto-Caffeinate Active" else "Caffeinate is Active"
-        return NotificationCompat.Builder(this, "caffeinate_channel")
+    private fun createStatusNotification(text: String): Notification {
+        val title = if (currentMode == "AUTO") "Auto-Caffeinate Active" else "Caffeinate is Active"
+        return NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
             .setContentTitle(title)
-            .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notif_caffeinate)
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
-            .setColor(themeColor)
-            .setColorized(true)
             .setContentIntent(createOpenCaffeinatePendingIntent())
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", createStopPendingIntent())
-            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
-    
-    private fun updateNotificationLoop() {
-        notificationJob?.cancel()
-        notificationJob = serviceScope.launch {
-            // The in-app UI gets exact seconds via elapsedTimeFlow (still ticked
-            // every second below). The STATUS-BAR notification only reposts when
-            // its minute-granularity text actually changes — reposting every
-            // second spams logcat, fires listener callbacks, and burns battery
-            // for zero user-visible benefit.
-            var lastText: String? = null
-            while (isActive && isRunning) {
-                val elapsed = System.currentTimeMillis() - startTimeMillis
-                _elapsedTimeFlow.value = elapsed
 
-                val text = currentNotificationText()
-                if (text != lastText) {
-                    lastText = text
-                    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    notificationManager.notify(NOTIFICATION_ID, createNotification(text))
-                }
-                delay(1000)
-            }
-        }
+    private fun updateStatusNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_STATUS_ID, createStatusNotification(currentStatusText()))
     }
-    
-    private fun createNotificationChannel() {
+
+    private fun postReminderNotification(minutesElapsed: Long) {
+        val keepGoingIntent = Intent(this, CaffeinateService::class.java).apply {
+            action = ACTION_KEEP_GOING
+        }
+        val keepGoingPendingIntent = PendingIntent.getService(
+            this, 10, keepGoingIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS_ID)
+            .setContentTitle("Caffeinate Reminder")
+            .setContentText("Hey, you've been using Caffeinate for $minutesElapsed min already.")
+            .setSmallIcon(R.drawable.ic_notif_caffeinate)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(createOpenCaffeinatePendingIntent())
+            .addAction(0, "Keep going", keepGoingPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", createStopPendingIntent())
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NOTIFICATION_REMINDER_ID, notification)
+    }
+
+    private fun postAlertNotification(id: Int, title: String, message: String) {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS_ID)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(R.drawable.ic_notif_caffeinate)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(createOpenCaffeinatePendingIntent())
+            .build()
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(id, notification)
+    }
+
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "Caffeinate Service Channel",
-                NotificationManager.IMPORTANCE_LOW
-            )
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(serviceChannel)
+
+            val statusChannel = NotificationChannel(
+                CHANNEL_STATUS_ID,
+                "Caffeinate Status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows ongoing status while Caffeinate is active"
+                setShowBadge(false)
+            }
+
+            val alertsChannel = NotificationChannel(
+                CHANNEL_ALERTS_ID,
+                "Caffeinate Alerts",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Reminders and auto-stop notifications"
+            }
+
+            manager.createNotificationChannel(statusChannel)
+            manager.createNotificationChannel(alertsChannel)
         }
     }
 
@@ -397,47 +612,6 @@ class CaffeinateService : Service() {
         )
     }
 
-    // Minute granularity on purpose: the loop above only reposts when this text
-    // changes, turning ~1 notify/sec into ~1 notify/min. Exact seconds stay
-    // available in-app via elapsedTimeFlow.
-    private fun currentNotificationText(): String {
-        val elapsed = System.currentTimeMillis() - startTimeMillis
-        val hours = TimeUnit.MILLISECONDS.toHours(elapsed)
-        val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsed) % 60
-
-        val timeStr = if (hours > 0) {
-            String.format(Locale.getDefault(), "%02d:%02d h", hours, minutes)
-        } else {
-            String.format(Locale.getDefault(), "%02d min", minutes)
-        }
-        
-        if (isAutoMode) {
-            val summaryText = if (summaryEnabled) {
-                val countText = if (autoAppsCount == -1) "all apps" else "$autoAppsCount ${if (autoAppsCount == 1) "app" else "apps"}"
-                "\nAuto-Caffeinate is enabled for $countText"
-            } else ""
-            return "Managing sleep for current app • $timeStr$summaryText"
-        }
-        
-        return if (isInfinite) {
-            "Active for: $timeStr (Infinite)"
-        } else {
-            val remaining = TimeUnit.MINUTES.toMillis(reminderIntervalMinutes.toLong()) - elapsed
-            if (remaining > 0) {
-                val rMin = TimeUnit.MILLISECONDS.toMinutes(remaining)
-                "Active for: $timeStr • Ends in ${rMin}m"
-            } else {
-                "Active for: $timeStr • Pending action"
-            }
-        }
-    }
-
-    private fun cancelNotifications() {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(NOTIFICATION_ID)
-        notificationManager.cancel(NOTIFICATION_ID + 1)
-    }
-    
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -448,6 +622,8 @@ class CaffeinateService : Service() {
         serviceScope.cancel()
         releaseWakeLocks()
         removeKeepScreenOnOverlay()
-        cancelNotifications()
+        try {
+            unregisterReceiver(screenReceiver)
+        } catch (_: Exception) {}
     }
 }

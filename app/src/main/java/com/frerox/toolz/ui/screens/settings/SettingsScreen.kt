@@ -90,6 +90,7 @@ fun SettingsScreen(
     val customSecondaryInt by viewModel.customSecondaryColor.collectAsState(initial = null)
     val backgroundGradientEnabled by viewModel.backgroundGradientEnabled.collectAsState(initial = true)
     val pdfAiToolsEnabled by viewModel.pdfAiToolsEnabled.collectAsState(initial = true)
+    val notepadAiToolsEnabled by viewModel.notepadAiToolsEnabled.collectAsState(initial = true)
 
     val dashboardView by viewModel.dashboardView.collectAsState(initial = "DEFAULT")
 
@@ -104,7 +105,7 @@ fun SettingsScreen(
     val eventReminderNotifications by viewModel.eventReminderNotifications.collectAsState(initial = true)
     val pomodoroNotifications by viewModel.pomodoroNotifications.collectAsState(initial = true)
     val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
-    val caffeinateSummaryNotification by viewModel.caffeinateAutoSummaryNotification.collectAsState(initial = true)
+    val caffeinateNotificationsEnabled by viewModel.caffeinateNotificationsEnabled.collectAsState(initial = true)
     val purgeShotNotifications by viewModel.purgeShotNotifications.collectAsState(initial = true)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
@@ -608,6 +609,16 @@ fun SettingsScreen(
                                         enabled = !offlineModeEnabled
                                     )
                                 }
+                                if (matches(searchQuery, "notepad", "notes", "ai", "tools", "summarize", "smart", "style")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_n2p4),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_p4q6),
+                                        icon = Icons.Rounded.EditNote,
+                                        checked = notepadAiToolsEnabled,
+                                        onCheckedChange = { viewModel.setNotepadAiToolsEnabled(it) },
+                                        enabled = !offlineModeEnabled
+                                    )
+                                }
                                 if (matches(searchQuery, "now playing", "lyrics", "meaning", "smart", "ai")) {
                                     SettingsToggleItem(
                                         title = stringResource(R.string.st_SettingsScreen_c1d3),
@@ -1042,13 +1053,13 @@ fun SettingsScreen(
                                         )
                                     }
 
-                                    if (matches(searchQuery, "caffeinate", "auto", "summary", "awake")) {
+                                    if (matches(searchQuery, "caffeinate", "notifications", "reminder", "awake")) {
                                         SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_a9b2),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_c1d4),
+                                            title = "Caffeinate Notifications",
+                                            subtitle = "Reminders and stop alerts. Ongoing status always shows while active.",
                                             icon = Icons.Rounded.Coffee,
-                                            checked = caffeinateSummaryNotification,
-                                            onCheckedChange = { viewModel.setCaffeinateAutoSummaryNotification(it) }
+                                            checked = caffeinateNotificationsEnabled,
+                                            onCheckedChange = { viewModel.setCaffeinateNotificationsEnabled(it) }
                                         )
                                     }
 

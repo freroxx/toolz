@@ -106,6 +106,9 @@ class NotepadViewModel @Inject constructor(
     val offlineModeEnabled = settingsRepository.offlineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val notepadAiEnabled = settingsRepository.notepadAiToolsEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val availableTracks = musicRepository.allTracks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

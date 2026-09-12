@@ -234,10 +234,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var lastShape: String? = null
     private var lastAccentColor: String? = null
 
-    // Multi-tap detection for earphone center button
-    private var lastMediaButtonClickTime: Long = 0
-    private var mediaButtonClickCount = 0
-    private var mediaButtonCheckJob: Job? = null
+    // Multi-tap detection for earphone center button (Spotify/YT Music style timing)
+    private val mediaButtonMultiTapHandler by lazy {
+        MediaButtonMultiTapHandler(
+            coroutineScope = serviceScope,
+            multiTapTimeoutMs = 380L,
+            doubleTapSettleMs = 350L,
+            tripleTapCooldownMs = 350L,
+            onSingleTap = { handleMediaButtonPlayPause() },
+            onDoubleTap = { handleMediaButtonNext() },
+            onTripleTap = { handleMediaButtonPrevious() }
+        )
+    }
 
     @Inject
     lateinit var player: ExoPlayer
@@ -524,42 +532,42 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else {
                 @Suppress("DEPRECATION")
                 intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
-            }
-            if (keyEvent?.action == android.view.KeyEvent.ACTION_DOWN) {
-                when (keyEvent.keyCode) {
-                    android.view.KeyEvent.KEYCODE_HEADSETHOOK,
-                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                        handleMediaButtonClick()
-                        return true
-                    }
-                    // Pocket / lockscreen / BT-remote resume without opening Toolz:
-                    // single PLAY/PAUSE keys must also wake + restore the last song.
-                    android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                        resumeLastIfEmptyOrPlay()
-                        return true
-                    }
-                    android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                        savePlaybackState()
-                        if (player.isPlaying) player.pause()
-                        return true
-                    }
-                    android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                        runCatching {
-                            if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                            else if (player.hasNextMediaItem()) player.seekToNext()
-                            else if (player.repeatMode == Player.REPEAT_MODE_ALL) player.seekTo(0, 0L)
+            } ?: return super.onMediaButtonEvent(session, controllerInfo, intent)
+
+            val keyCode = keyEvent.keyCode
+            val isHandledKey = keyCode == android.view.KeyEvent.KEYCODE_HEADSETHOOK ||
+                keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY ||
+                keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PAUSE ||
+                keyCode == android.view.KeyEvent.KEYCODE_MEDIA_NEXT ||
+                keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+
+            if (isHandledKey) {
+                // Ignore long-press auto-repeats (repeatCount > 0)
+                if (keyEvent.action == android.view.KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) {
+                    when (keyCode) {
+                        android.view.KeyEvent.KEYCODE_HEADSETHOOK,
+                        android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                            mediaButtonMultiTapHandler.onMediaButtonClick()
                         }
-                        return true
-                    }
-                    android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                        runCatching {
-                            if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                            else if (player.currentPosition > 3_000) player.seekTo(0L)
-                            else if (player.hasPreviousMediaItem()) player.seekToPrevious()
+                        // Pocket / lockscreen / BT-remote resume without opening Toolz:
+                        // single PLAY/PAUSE keys must also wake + restore the last song.
+                        android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                            resumeLastIfEmptyOrPlay()
                         }
-                        return true
+                        android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                            savePlaybackState()
+                            if (player.isPlaying) player.pause()
+                        }
+                        android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                            handleMediaButtonNext()
+                        }
+                        android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                            handleMediaButtonPrevious()
+                        }
                     }
                 }
+                return true
             }
             return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
@@ -655,44 +663,43 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         }
     }
 
-    private fun handleMediaButtonClick() {
-        val now = System.currentTimeMillis()
-        // User-first timing: 400ms grouping + 250ms settle keeps single-press
-        // snappy (~250ms) while double/triple (next/prev) still register.
-        // The old 500ms + 350ms made every earphone press feel dead.
-        if (now - lastMediaButtonClickTime > 400) {
-            mediaButtonClickCount = 1
-        } else {
-            mediaButtonClickCount++
-        }
-        lastMediaButtonClickTime = now
-
-        mediaButtonCheckJob?.cancel()
-        mediaButtonCheckJob = serviceScope.launch {
-            delay(250)
-            runCatching {
-                when (mediaButtonClickCount) {
-                    1 -> {
-                        if (player.mediaItemCount == 0) {
-                            restorePlaybackState(autoPlay = true)
-                        } else {
-                            if (player.isPlaying) player.pause() else player.play()
-                        }
-                    }
-                    2 -> {
-                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                        else if (player.hasNextMediaItem()) player.seekToNext()
-                        else player.play()
-                    }
-                    3 -> {
-                        if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                        else if (player.hasPreviousMediaItem()) player.seekToPrevious()
-                        else player.play()
-                    }
-                    else -> Unit
-                }
+    private fun handleMediaButtonPlayPause() {
+        runCatching {
+            if (player.mediaItemCount == 0) {
+                restorePlaybackState(autoPlay = true)
+            } else {
+                if (player.isPlaying) player.pause() else player.play()
             }
-            mediaButtonClickCount = 0
+        }
+    }
+
+    private fun handleMediaButtonNext() {
+        runCatching {
+            if (player.mediaItemCount == 0) {
+                restorePlaybackState(autoPlay = true)
+            } else if (player.hasNextMediaItem()) {
+                player.seekToNext()
+            } else if (player.repeatMode == Player.REPEAT_MODE_ALL) {
+                player.seekTo(0, 0L)
+            } else {
+                player.play()
+            }
+        }
+    }
+
+    private fun handleMediaButtonPrevious() {
+        runCatching {
+            if (player.mediaItemCount == 0) {
+                restorePlaybackState(autoPlay = true)
+            } else if (player.currentPosition > 3_000) {
+                player.seekTo(0L)
+            } else if (player.hasPreviousMediaItem()) {
+                player.seekToPrevious()
+            } else if (player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
+                player.seekTo(player.mediaItemCount - 1, 0L)
+            } else {
+                player.play()
+            }
         }
     }
 
@@ -1433,6 +1440,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         try { player.volume = 1.0f } catch (_: Exception) {}
         placeholderDemoteJob?.cancel()
         isPlaceholderActive = false
+        mediaButtonMultiTapHandler.cancelPending()
         runCatching {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.cancel(FGS_NOTIFICATION_ID)
