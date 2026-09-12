@@ -52,6 +52,7 @@ Toolz includes **48+ precision instruments** organized across 9 categories:
 
 ### 💾 Media & PDF
 - **Music Player** — Local audio hub with lyrics, playlist management, and Media3 background playback
+- **Media Downloader** — Save YouTube, TikTok, and Instagram Reels with quality picker, audio-only mode, and background downloads
 - **Voice Recorder** — Studio-quality audio capture with pause/resume and searchable library
 - **File Converter** — FFmpeg-powered media transformation for video, audio, and image formats
 - **PDF Reader** — Native document viewer with text extraction and document summary support
