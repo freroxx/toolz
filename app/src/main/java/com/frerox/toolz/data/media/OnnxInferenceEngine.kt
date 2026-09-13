@@ -83,21 +83,23 @@ class OnnxInferenceEngine : AutoCloseable {
     }
 
     /**
-     * Builds session options with model-appropriate thread counts.
+     * Builds session options with model-appropriate thread counts and memory allocation policies.
      *
-     * Thread strategy:
-     * - Ultra (Swin): intra=4, inter=2. Swin's attention heads benefit from a modest
-     *   inter-op count, but exceeding 4 intra causes thermal throttle on mid-range SoCs.
-     * - All others: intra=min(cpuCount, 4), inter=1. Single-path graphs don't benefit
-     *   from inter parallelism and the extra thread just wastes context-switch budget.
-     * - In all cases we leave at least 1 core free for the UI and coroutine dispatchers.
+     * Thread & Memory strategy:
+     * - Ultra (Swin-Tiny 224 MB):
+     *   * intra=2: keeps CPU cool on big.LITTLE architectures (Snapdragon 6 Gen 3 etc.)
+     *     and prevents thermal runaway / device reboots.
+     *   * inter=1: sequential operator execution to prevent concurrent layer memory spikes.
+     *   * setCPUArenaAllocator(false): disables the multi-gigabyte static memory arena.
+     *     Tensors are allocated and freed per operator by the OS instead of lingering in RAM.
+     *   * setMemoryPatternOptimization(false): prevents peak memory reservation upfront.
+     * - All others (CNNs / MobileNet): intra=min(cpuCount - 1, 4), inter=1, arena enabled.
      */
     private fun buildSessionOptions(modelId: String, useBasicOpt: Boolean): OrtSession.SessionOptions {
         val isUltra = modelId == "ultra_birefnet"
         val cpuCount = Runtime.getRuntime().availableProcessors()
-        // Leave at least 1 core free for the UI thread, coerced into [2, 4].
-        val intraThreads = (cpuCount - 1).coerceIn(2, 4)
-        val interThreads = if (isUltra) 2 else 1
+        val intraThreads = if (isUltra) 2 else (cpuCount - 1).coerceIn(2, 4)
+        val interThreads = 1
 
         return OrtSession.SessionOptions().apply {
             setIntraOpNumThreads(intraThreads)
@@ -106,15 +108,23 @@ class OnnxInferenceEngine : AutoCloseable {
                 if (useBasicOpt) OrtSession.SessionOptions.OptLevel.BASIC_OPT
                 else OrtSession.SessionOptions.OptLevel.ALL_OPT,
             )
+            if (isUltra) {
+                setCPUArenaAllocator(false)
+                setMemoryPatternOptimization(false)
+            }
         }
     }
 
     // ── Inference ──────────────────────────────────────────────────────────────
 
     /**
-     * Single-input / single-output segmentation (U²-Net, ISNet, MODNet-style).
+     * Single-input / single-output segmentation (U²-Net, ISNet, BiRefNet).
      * First graph input, first graph output; output[0] is the foreground mask
-     * with shape [1,1,H,W] (sigmoid already applied by these graphs).
+     * with shape [1,1,H,W].
+     *
+     * Uses direct [java.nio.FloatBuffer] zero-copy transfer instead of boxed
+     * Object arrays (`result.get(0).value`), avoiding allocating 1,000,000+ Float
+     * heap objects per inference pass.
      *
      * @return [InferenceResult] with mask in 0..1 and computed [MaskConfidence].
      */
@@ -125,10 +135,6 @@ class OnnxInferenceEngine : AutoCloseable {
         height: Int,
         width: Int,
     ): InferenceResult {
-        // NOTE: intentionally NOT using session.inputInfo here. ORT's native
-        // getInputInfo calls back into the NodeInfo Java constructor, which R8
-        // can strip (ORT 1.29 consumer rules don't keep it) causing a fatal
-        // abort in release builds. getInputNames is a pure-Java path and safe.
         val inputName = session.inputNames.firstOrNull()
             ?: throw OrtException("ONNX graph has no inputs")
         OnnxTensor.createTensor(
@@ -136,8 +142,18 @@ class OnnxInferenceEngine : AutoCloseable {
             longArrayOf(1, channels.toLong(), height.toLong(), width.toLong()),
         ).use { input ->
             session.run(mapOf(inputName to input)).use { result ->
-                val raw = result.get(0).value
-                val singleMask = extractFirstChannel(raw, "single")
+                val outputValue = result.get(0)
+                val maskData = FloatArray(height * width)
+                if (outputValue is OnnxTensor) {
+                    val floatBuf = outputValue.floatBuffer
+                    val count = minOf(floatBuf.remaining(), height * width)
+                    floatBuf.get(maskData, 0, count)
+                } else {
+                    val raw = outputValue.value
+                    val extracted = extractFirstChannel(raw, "single")
+                    System.arraycopy(extracted.data, 0, maskData, 0, minOf(extracted.data.size, maskData.size))
+                }
+                val singleMask = SingleMask(maskData, width, height)
                 val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
                 return InferenceResult(singleMask, confidence)
             }
@@ -190,9 +206,18 @@ class OnnxInferenceEngine : AutoCloseable {
 
             session.run(inputs).use { result ->
                 // 'pha' output if named, else index 1 (fgr=0, pha=1 per upstream spec).
-                val phaValue: Any? = result.get("pha").map { it.value }.orElse(null)
-                    ?: result.get(1).value
-                val singleMask = extractFirstChannel(phaValue, "rvm")
+                val phaValue = result.get("pha").orElse(null) ?: result.get(1)
+                val maskData = FloatArray(height * width)
+                if (phaValue is OnnxTensor) {
+                    val floatBuf = phaValue.floatBuffer
+                    val count = minOf(floatBuf.remaining(), height * width)
+                    floatBuf.get(maskData, 0, count)
+                } else {
+                    val raw = phaValue.value
+                    val extracted = extractFirstChannel(raw, "rvm")
+                    System.arraycopy(extracted.data, 0, maskData, 0, minOf(extracted.data.size, maskData.size))
+                }
+                val singleMask = SingleMask(maskData, width, height)
                 val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
                 return InferenceResult(singleMask, confidence)
             }
