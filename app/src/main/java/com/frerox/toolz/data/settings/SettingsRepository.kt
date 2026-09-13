@@ -641,7 +641,7 @@ class SettingsRepository @Inject constructor(
     val showRecentTools: Flow<Boolean> = dataStore.data.map { it[SHOW_RECENT_TOOLS] ?: true }
     val recentToolsRows: Flow<Int> = dataStore.data.map { it[RECENT_TOOLS_ROWS] ?: 1 }
     val showQuickNotes: Flow<Boolean> = dataStore.data.map { it[SHOW_QUICK_NOTES] ?: true }
-    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: false }
+    val showDashboardStats: Flow<Boolean> = dataStore.data.map { it[SHOW_DASHBOARD_STATS] ?: true }
 
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }

@@ -42,6 +42,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1542,6 +1544,38 @@ private fun PinnedItem(
 // NOTES SECTION
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Uniform YOUR NOTES card sizing: every card is the largest variant so audio,
+// image and plain notes all fit identically. The carousel slot drives the
+// actual size; the card itself just fills it.
+private val NoteCardWidth = 280.dp
+private val NoteCardHeight = 252.dp
+private val NoteCardShape = RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NotesCarouselRow(
+    notes: List<Note>,
+    onNavigate: (String) -> Unit,
+    musicViewModel: MusicPlayerViewModel,
+    pdfViewModel: PdfViewModel,
+) {
+    val carouselState = rememberCarouselState { notes.size }
+    HorizontalMultiBrowseCarousel(
+        state              = carouselState,
+        preferredItemWidth = NoteCardWidth,
+        itemSpacing        = 12.dp,
+        contentPadding     = PaddingValues(horizontal = 2.dp),
+        modifier           = Modifier.fillMaxWidth().height(NoteCardHeight),
+    ) { index ->
+        // maskClip is scroll-position-driven: the focused card renders full
+        // while the peeking neighbor squashes — the affordance that more
+        // cards are a swipe away. Same pattern as TrackCarouselRow.
+        Box(Modifier.fillMaxSize().maskClip(NoteCardShape)) {
+            QuickNoteCard(notes[index], onNavigate, musicViewModel, pdfViewModel)
+        }
+    }
+}
+
 @Composable
 fun NotesSection(
     notes: List<Note>, 
@@ -1599,48 +1633,7 @@ fun NotesSection(
                 }
             }
         }
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding        = PaddingValues(horizontal = 2.dp),
-        ) {
-            items(notes.take(6), key = { it.id }) { note ->
-                QuickNoteCard(note, onNavigate, musicViewModel, pdfViewModel)
-            }
-            item {
-                Surface(
-                    modifier = Modifier
-                        .size(width = 104.dp, height = 208.dp)
-                        .bouncyClick { onNavigate(Screen.Notepad.route) },
-                    shape    = SquircleShape,
-                    color    = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.36f),
-                    border   = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f)),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Surface(
-                                modifier = Modifier.size(44.dp),
-                                shape    = CircleShape,
-                                color    = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.AutoMirrored.Rounded.ArrowForward, null,
-                                        tint     = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(22.dp))
-                                }
-                            }
-                            Text(stringResource(R.string.st_DashboardScreen_i5j6),
-                                style         = MaterialTheme.typography.labelMedium,
-                                fontWeight    = FontWeight.Black,
-                                color         = MaterialTheme.colorScheme.primary,
-                                letterSpacing = 1.sp)
-                        }
-                    }
-                }
-            }
-        }
+        NotesCarouselRow(notes.take(12), onNavigate, musicViewModel, pdfViewModel)
     }
 }
 
@@ -1662,19 +1655,6 @@ private fun QuickNoteCard(
     val hasAudio = note.attachedAudioUri != null
     val hasPdf = note.attachedPdfUri != null
 
-    val cardW = when {
-        hasAudio -> 280.dp
-        hasImage -> 248.dp
-        else -> 220.dp
-    }
-    // Fixed heights sized so title + text + pills + footer always fit.
-    val cardH = if (hasImage) 252.dp else 208.dp
-    val shape = when {
-        hasAudio -> RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
-        hasImage -> RoundedCornerShape(28.dp, 14.dp, 28.dp, 14.dp)
-        else -> SquircleShape
-    }
-
     fun openNote() {
         vibrationManager?.vibrateClick()
         onNavigate("${Screen.Notepad.route}?initialNoteId=${note.id}")
@@ -1683,8 +1663,8 @@ private fun QuickNoteCard(
     // Plain container: tap zones are explicit siblings below, so attachment
     // pills can never trigger navigation.
     Surface(
-        modifier   = Modifier.size(width = cardW, height = cardH),
-        shape      = shape,
+        modifier   = Modifier.fillMaxSize(),
+        shape      = NoteCardShape,
         color = noteColor.copy(alpha = cardAlpha),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
@@ -1731,7 +1711,7 @@ private fun QuickNoteCard(
                         note.content.ifBlank { "No text" },
                         style      = MaterialTheme.typography.bodySmall,
                         color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        maxLines   = if (hasImage) 3 else 5,
+                        maxLines   = 3,
                         overflow   = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.Medium,
                         lineHeight = 17.sp,
