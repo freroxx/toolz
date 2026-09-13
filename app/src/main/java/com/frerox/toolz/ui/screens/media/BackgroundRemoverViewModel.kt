@@ -527,6 +527,23 @@ class BackgroundRemoverViewModel @Inject constructor(
                 return
             }
 
+            // ── Ultra memory guard ──────────────────────────────────────────────────────
+            // BiRefNet at 1024×1024 leaves ~4 GB RSS in native ORT activation buffers after
+            // session.run() returns. Arena-disable flags stop pre-allocation but cannot
+            // reclaim post-run intermediate tensors — those only free when the session closes.
+            // Closing here (before matting starts) lets the kernel reclaim those pages while
+            // we do CPU-only work, preventing lmkd from killing the app when the user later
+            // navigates to another screen. Next Ultra run re-warms the session (WARMING_UP
+            // shows again) — acceptable: quality > memory smoothness.
+            if (model.id == "ultra_birefnet") {
+                initMutex.withLock {
+                    Log.d("BgRemoverVM", "Ultra: closing ONNX session post-inference to free ~4 GB RSS")
+                    runCatching { onnxSession?.close() }
+                    onnxSession = null
+                    onnxSessionModelId = null
+                }
+            }
+
             _uiState.update { it.copy(stage = BgStage.MATTING) }
             val resultBitmap = runMatting(
                 bitmap,
@@ -534,6 +551,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 inferenceResult.mask.maskW,
                 inferenceResult.mask.maskH,
                 confidence,
+                model.id,
             )
             val superseded = _uiState.value.resultBitmap
             _uiState.update {
@@ -686,6 +704,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         maskW: Int,
         maskH: Int,
         confidence: MaskConfidence = MaskConfidence.UNKNOWN,
+        modelId: String = "",
     ): Bitmap {
         val budgeted = fitToMemoryBudget(source)
         val downsized = budgeted !== source
@@ -698,13 +717,13 @@ class BackgroundRemoverViewModel @Inject constructor(
         }
         try {
             return try {
-                BackgroundRemoverEngine.removeBackground(budgeted, mask, maskW, maskH, confidence)
+                BackgroundRemoverEngine.removeBackground(budgeted, mask, maskW, maskH, confidence, modelId)
             } catch (oom: OutOfMemoryError) {
                 // Budget was optimistic (heap is shared and moving) — halve once more.
                 Log.w("BgRemoverVM", "OOM at ${budgeted.width}×${budgeted.height} — halving", oom)
                 val half = budgeted.halvedForMemory() ?: throw oom
                 try {
-                    BackgroundRemoverEngine.removeBackground(half, mask, maskW, maskH, confidence)
+                    BackgroundRemoverEngine.removeBackground(half, mask, maskW, maskH, confidence, modelId)
                 } finally {
                     if (half !== budgeted) half.recycle()
                 }

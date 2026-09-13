@@ -35,14 +35,17 @@ import kotlin.math.sqrt
  *     pixels, which are never written — provably equivalent to the copy version).
  *  6. Alpha compositing also runs in-place.
  *
- * Adaptive refinement strategy (driven by MaskConfidence):
- *  - Clean binary mask  (entropy < 0.35, edgeRatio < 0.03):
+ * Adaptive refinement strategy (driven by MaskConfidence + model tier):
+ *  - High-quality models (Ultra/Pro): ALWAYS run double guided filter + gradient refinement
+ *    regardless of MaskConfidence. BiRefNet outputs can look "clean" in entropy space even
+ *    for complex hair (values cluster near 0/1 after sigmoid+min-max), which would wrongly
+ *    skip the gradient pass that recovers fine hair strands. Quality is non-negotiable here.
+ *  - Clean binary mask from fast models (entropy < 0.35, edgeRatio < 0.03):
  *    → Single guided filter pass, no gradient step. Saves ~40 % on easy subjects.
  *  - Standard complex mask (edgeRatio ≥ 0.03):
- *    → Double guided filter + gradient refinement. Current behaviour for hair, fur, etc.
+ *    → Double guided filter + gradient refinement.
  *  - Noisy/uncertain mask (entropy > 0.65):
- *    → 3×3 median pre-pass, then double guided filter + gradient. Cleans Swin/attention
- *      artifacts on complex textures.
+ *    → 3×3 median pre-pass, then double guided filter + gradient.
  *
  * Memory model @12 MP (4000×3000, 256 MB heap):
  *   pixels 48 MB + full alpha 48 MB + result bitmap 48 MB + transient refine arrays <15 MB
@@ -59,10 +62,18 @@ object BackgroundRemoverEngine {
     private const val GF_EPS2     = 1e-5f
     private const val DECONTAM_RADIUS = 6
 
-    // Confidence thresholds that drive adaptive pass selection.
+    // Confidence thresholds that drive adaptive pass selection (fast models only).
     private const val ENTROPY_CLEAN_THRESHOLD  = 0.35f  // below → skip second GF pass
     private const val ENTROPY_NOISY_THRESHOLD  = 0.65f  // above → add median pre-pass
     private const val EDGE_SIMPLE_THRESHOLD    = 0.03f  // below → single GF pass
+
+    /**
+     * Model IDs that must always run the full refinement pipeline regardless of
+     * MaskConfidence. These are high-quality transformer models whose output can
+     * look entropy-clean even on complex hair/fur boundaries — skipping gradient
+     * refinement for them degrades quality on the exact subject where it matters most.
+     */
+    private val HIGH_QUALITY_MODEL_IDS = setOf("ultra_birefnet", "pro_detail")
 
     suspend fun removeBackground(
         source: Bitmap,
@@ -70,6 +81,7 @@ object BackgroundRemoverEngine {
         maskW: Int,
         maskH: Int,
         confidence: MaskConfidence = MaskConfidence.UNKNOWN,
+        modelId: String = "",
     ): Bitmap = withContext(Dispatchers.Default) {
         val w = source.width
         val h = source.height
@@ -87,12 +99,18 @@ object BackgroundRemoverEngine {
         // ── 2. Refine alpha at bounded size ──
         var alphaSmall = bilinearUpsample(maskArray, maskW, maskH, rw, rh)
 
+        // High-quality models (Ultra/Pro) always run the full pipeline.
+        // Their masks may appear entropy-clean even for complex hair — this is a property
+        // of BiRefNet/ISNet's strong bilateral priors, NOT a sign that the boundary is simple.
+        val forceFullPipeline = modelId in HIGH_QUALITY_MODEL_IDS
+
         // Decide refinement depth from the model's confidence profile.
         val edgeRatio       = confidence.edgeRatio
         val entropy         = confidence.maskEntropy
         val hasComplexEdges = edgeRatio > EDGE_SIMPLE_THRESHOLD
         val isNoisy         = entropy > ENTROPY_NOISY_THRESHOLD
-        val isClean         = entropy < ENTROPY_CLEAN_THRESHOLD && !hasComplexEdges
+        // isClean shortcut is ONLY valid for fast models — never for Ultra/Pro.
+        val isClean         = !forceFullPipeline && entropy < ENTROPY_CLEAN_THRESHOLD && !hasComplexEdges
 
         if (!isClean) {
             val resScale = max(rw, rh).toFloat() / 1024f
@@ -107,8 +125,10 @@ object BackgroundRemoverEngine {
             // First guided filter pass — always run when not clean
             alphaSmall = guidedFilterPassIntegral(alphaSmall, smallPixels, rw, rh, r1, GF_EPS)
 
-            // Second pass + gradient refinement — only for complex-edge or noisy masks
-            if (hasComplexEdges || isNoisy) {
+            // Second pass + gradient refinement:
+            // - Always for high-quality models (Ultra/Pro) — non-negotiable for hair/fur.
+            // - Also for complex-edge or noisy masks from fast models.
+            if (forceFullPipeline || hasComplexEdges || isNoisy) {
                 alphaSmall = guidedFilterPassIntegral(alphaSmall, smallPixels, rw, rh, r2, GF_EPS2)
                 alphaSmall = refineEdgeGradients(alphaSmall, smallPixels, rw, rh)
             }
@@ -121,7 +141,7 @@ object BackgroundRemoverEngine {
         val pixels = IntArray(w * h)
         source.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        if (hasComplexEdges || isNoisy) {
+        if (forceFullPipeline || hasComplexEdges || isNoisy) {
             val dr = (DECONTAM_RADIUS * (max(w, h).toFloat() / 1024f)).toInt().coerceIn(3, 8)
             decontaminateInPlace(pixels, alphaFull, w, h, dr)
         }
