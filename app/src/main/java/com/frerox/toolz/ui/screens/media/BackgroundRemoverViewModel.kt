@@ -29,7 +29,9 @@ import com.frerox.toolz.data.media.FastBlur
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_1024
 import com.frerox.toolz.data.media.ISNET_PREPROCESS_1024
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_320
+import com.frerox.toolz.data.media.InferenceResult
 import com.frerox.toolz.data.media.InferenceRuntime
+import com.frerox.toolz.data.media.MaskConfidence
 import com.frerox.toolz.data.media.MaskDecoder
 import com.frerox.toolz.data.media.ModelDownloadManager
 import com.frerox.toolz.data.media.OnnxInferenceEngine
@@ -50,6 +52,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.tensorflow.lite.Interpreter
 import java.io.File
 import java.io.FileInputStream
@@ -279,17 +282,21 @@ class BackgroundRemoverViewModel @Inject constructor(
         }
     }
 
-    private fun ensureOnnxReady(model: BackgroundModel): Boolean {
+    private suspend fun ensureOnnxReady(model: BackgroundModel): Boolean {
         if (onnxSession != null && onnxSessionModelId == model.id) return true
         val modelFile = downloadManager.modelFile(model)
         if (!modelFile.exists()) return false
         return try {
             runCatching { onnxSession?.close() }
-            // Ultra uses a Swin Transformer backbone (224 MB) — NNAPI drivers fail to
-            // build the session graph on most devices, surfacing as a startup crash.
-            // CPU-only is still hardware-threaded and correct; skip NNAPI for this tier.
-            val tryNnapi = model.id != "ultra_birefnet"
-            onnxSession = onnxEngine.createSession(modelFile, tryNnapi = tryNnapi)
+            onnxSession = null
+            onnxSessionModelId = null
+            // Emit WARMING_UP so the user sees feedback during graph compilation.
+            // For Ultra (Swin-Tiny) BASIC_OPT takes ~2 s; Pro (ISNet) ALL_OPT ~1 s.
+            // Without this the screen freezes silently, which is worse than a spinner.
+            _uiState.update { it.copy(stage = BgStage.WARMING_UP) }
+            // createSession blocks on this thread (Dispatchers.Default/IO, never main).
+            // The modelId arg picks BASIC_OPT + tighter thread caps for Ultra.
+            onnxSession = onnxEngine.createSession(modelFile, modelId = model.id)
             onnxSessionModelId = model.id
             Log.d("BgRemoverVM", "ONNX ready for ${model.id}")
             true
@@ -473,6 +480,12 @@ class BackgroundRemoverViewModel @Inject constructor(
 
     // ── Inference ──
 
+    /** Timeout per model tier: Ultra/Pro can be genuinely slow; others are fast. */
+    private fun inferenceTimeoutMs(model: BackgroundModel): Long = when (model.id) {
+        "ultra_birefnet", "pro_detail" -> 120_000L
+        else -> 60_000L
+    }
+
     private suspend fun processImage(bitmap: Bitmap) {
         if (!ensureBackendReady()) {
             if (_uiState.value.stage != BgStage.FAILED) {
@@ -484,20 +497,53 @@ class BackgroundRemoverViewModel @Inject constructor(
 
         try {
             _uiState.update { it.copy(stage = BgStage.SEGMENTING) }
-            val (mask, maskW, maskH) = withContext(Dispatchers.Default) {
-                when (model.runtime) {
-                    InferenceRuntime.LITERT -> runTfliteMask(bitmap, model)
-                    InferenceRuntime.ONNX -> runOnnxMask(bitmap, model)
+
+            val inferenceResult = withContext(Dispatchers.Default) {
+                withTimeout(inferenceTimeoutMs(model)) {
+                    when (model.runtime) {
+                        InferenceRuntime.LITERT -> runTfliteInference(bitmap, model)
+                        InferenceRuntime.ONNX   -> runOnnxInference(bitmap, model)
+                    }
                 }
             }
+
+            val confidence = inferenceResult.confidence
+            Log.d(
+                "BgRemoverVM",
+                "${model.id} confidence: edgeRatio=${confidence.edgeRatio} " +
+                    "entropy=${confidence.maskEntropy} fgCoverage=${confidence.fgCoverage} " +
+                    "likelyEmpty=${confidence.likelyEmpty} likelyFull=${confidence.likelyFull}",
+            )
+
+            // Fail fast on a blank mask — surface a helpful message instead of a
+            // transparent result that looks like a bug. Give the user a path forward.
+            if (confidence.likelyEmpty) {
+                val suggestion = when (model.id) {
+                    "ultra_birefnet" -> context.getString(R.string.st_BackgroundRemover_EmptyMaskUltra)
+                    "instant_selfie" -> context.getString(R.string.st_BackgroundRemover_EmptyMaskInstant)
+                    else             -> context.getString(R.string.st_BackgroundRemover_EmptyMask)
+                }
+                fail(suggestion, RetryAction.SWITCH_MODEL)
+                return
+            }
+
             _uiState.update { it.copy(stage = BgStage.MATTING) }
-            val resultBitmap = runMatting(bitmap, mask, maskW, maskH)
+            val resultBitmap = runMatting(
+                bitmap,
+                inferenceResult.mask.data,
+                inferenceResult.mask.maskW,
+                inferenceResult.mask.maskH,
+                confidence,
+            )
             val superseded = _uiState.value.resultBitmap
             _uiState.update {
                 it.copy(stage = BgStage.DONE, isProcessing = false, resultBitmap = resultBitmap)
             }
             // Free the previous cutout now — a stale 40 MB bitmap must not linger.
             if (superseded !== resultBitmap) recycleBitmap(superseded)
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            Log.e("BgRemoverVM", "processImage timed out for ${model.id}", e)
+            fail(context.getString(R.string.st_BackgroundRemover_Timeout, model.shortName), RetryAction.SWITCH_MODEL)
         } catch (e: OutOfMemoryError) {
             Log.e("BgRemoverVM", "processImage OOM", e)
             fail(context.getString(R.string.st_BackgroundRemover_TooLarge), RetryAction.PICK_IMAGE)
@@ -509,9 +555,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         }
     }
 
-    private data class RawMask(val data: FloatArray, val w: Int, val h: Int)
-
-    private fun runTfliteMask(bitmap: Bitmap, model: BackgroundModel): RawMask {
+    private fun runTfliteInference(bitmap: Bitmap, model: BackgroundModel): InferenceResult {
         val interpreter = tfliteInterpreter
             ?: throw IllegalStateException("AI Engine uninitialized.")
         val inputTensor = interpreter.getInputTensor(0)
@@ -554,7 +598,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         interpreter.run(inputBuffer, outputBuffer)
         outputBuffer.rewind()
 
-        val combinedMask = MaskDecoder.decode(
+        val maskData = MaskDecoder.decode(
             outputBuffer = outputBuffer,
             isFloatOutput = isFloatOutput,
             outputShape = outputShape,
@@ -562,13 +606,16 @@ class BackgroundRemoverViewModel @Inject constructor(
             modelH = modelH,
             modelId = model.id,
         )
-        return RawMask(combinedMask, modelW, modelH)
+        // LiteRT (Instant Selfie) is fast enough that the adaptive refinement
+        // overhead would add more time than it saves — use the UNKNOWN sentinel.
+        return InferenceResult(SingleMask(maskData, modelW, modelH), MaskConfidence.UNKNOWN)
     }
 
-    private fun runOnnxMask(bitmap: Bitmap, model: BackgroundModel): RawMask {
+    private fun runOnnxInference(bitmap: Bitmap, model: BackgroundModel): InferenceResult {
         val session = onnxSession?.takeIf { onnxSessionModelId == model.id }
             ?: throw IllegalStateException("ONNX session not ready.")
-        val single: SingleMask = when (model.id) {
+
+        val rawResult: InferenceResult = when (model.id) {
             "portrait_rvm" -> {
                 // Aspect-preserving fit, long edge capped; internal working band per upstream.
                 val scale = RVM_PREPROCESS.inputSize.toFloat() / max(bitmap.width, bitmap.height).toFloat()
@@ -582,32 +629,46 @@ class BackgroundRemoverViewModel @Inject constructor(
             "pro_detail" -> {
                 // DIS recipe (rembg DisSession + upstream training): (x - 0.5) / 1.0.
                 // ImageNet stats shift every activation and collapse the mask.
-                val chw = ISNET_PREPROCESS_1024.toChw(bitmap)
-                onnxEngine.runSingleMask(session, chw, 3, 1024, 1024)
+                val sz = model.inferenceInputSize
+                val chw = ISNET_PREPROCESS_1024.toChw(bitmap, sz, sz)
+                onnxEngine.runSingleMask(session, chw, 3, sz, sz)
             }
             "ultra_birefnet" -> {
                 // BiRefNet recipe (rembg BiRefNetSessionGeneral): ImageNet norm;
-                // raw logits → sigmoid + min-max handled by the post block below.
-                val chw = IMAGENET_PREPROCESS_1024.toChw(bitmap)
-                onnxEngine.runSingleMask(session, chw, 3, 1024, 1024)
+                // raw logits → sigmoid + min-max handled in the post block below.
+                val sz = model.inferenceInputSize
+                val chw = IMAGENET_PREPROCESS_1024.toChw(bitmap, sz, sz)
+                onnxEngine.runSingleMask(session, chw, 3, sz, sz)
             }
-            else -> { // fast_general (ImageNet 320); post block below handles sigmoid/min-max
-                val chw = IMAGENET_PREPROCESS_320.toChw(bitmap)
-                onnxEngine.runSingleMask(session, chw, 3, 320, 320)
+            else -> {
+                // fast_general — ImageNet 320; post block below handles sigmoid/min-max.
+                val sz = model.inferenceInputSize
+                val chw = IMAGENET_PREPROCESS_320.toChw(bitmap, sz, sz)
+                onnxEngine.runSingleMask(session, chw, 3, sz, sz)
             }
         }
+
         // Post: raw-logit exports (BiRefNet family) need sigmoid first — rembg does
         // the same explicitly. Then rembg-parity min-max stretch so a weak-but-
         // correct response never vanishes below the matting thresholds. RVM
         // returns calibrated alpha and is exempt from both.
-        val cooked = if (model.id == "portrait_rvm") {
-            single
+        return if (model.id == "portrait_rvm") {
+            rawResult
         } else {
-            val activated = if (model.onnxPostSigmoid) MaskDecoder.sigmoidArray(single.data) else single.data
-            single.copy(data = MaskDecoder.minMaxNormalize(activated))
+            val activated = if (model.onnxPostSigmoid) {
+                MaskDecoder.sigmoidArray(rawResult.mask.data)
+            } else {
+                rawResult.mask.data
+            }
+            val normalised = MaskDecoder.minMaxNormalize(activated)
+            // Re-analyse the post-processed mask — the sigmoid + min-max step changes
+            // the confidence profile (e.g. a noisy logit space becomes cleaner after
+            // normalisation). This gives the matting engine the right quality signal.
+            val cookedMask = rawResult.mask.copy(data = normalised)
+            val cookedConfidence = com.frerox.toolz.data.media.MaskQualityAnalyzer.analyze(normalised)
+            Log.d("BgRemoverVM", "ONNX ${model.id} mask=${cookedMask.maskW}x${cookedMask.maskH}")
+            InferenceResult(cookedMask, cookedConfidence)
         }
-        Log.d("BgRemoverVM", "ONNX ${model.id} mask=${cooked.maskW}x${cooked.maskH}")
-        return RawMask(cooked.data, cooked.maskW, cooked.maskH)
     }
 
     /**
@@ -624,6 +685,7 @@ class BackgroundRemoverViewModel @Inject constructor(
         mask: FloatArray,
         maskW: Int,
         maskH: Int,
+        confidence: MaskConfidence = MaskConfidence.UNKNOWN,
     ): Bitmap {
         val budgeted = fitToMemoryBudget(source)
         val downsized = budgeted !== source
@@ -636,13 +698,13 @@ class BackgroundRemoverViewModel @Inject constructor(
         }
         try {
             return try {
-                BackgroundRemoverEngine.removeBackground(budgeted, mask, maskW, maskH)
+                BackgroundRemoverEngine.removeBackground(budgeted, mask, maskW, maskH, confidence)
             } catch (oom: OutOfMemoryError) {
                 // Budget was optimistic (heap is shared and moving) — halve once more.
                 Log.w("BgRemoverVM", "OOM at ${budgeted.width}×${budgeted.height} — halving", oom)
                 val half = budgeted.halvedForMemory() ?: throw oom
                 try {
-                    BackgroundRemoverEngine.removeBackground(half, mask, maskW, maskH)
+                    BackgroundRemoverEngine.removeBackground(half, mask, maskW, maskH, confidence)
                 } finally {
                     if (half !== budgeted) half.recycle()
                 }
@@ -891,7 +953,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                 activeJob?.cancel()
                 activeJob = viewModelScope.launch { processImage(it) }
             }
-            RetryAction.OPEN_HUB, RetryAction.PICK_IMAGE -> {
+            RetryAction.OPEN_HUB, RetryAction.SWITCH_MODEL, RetryAction.PICK_IMAGE -> {
                 // Handled by the screen (opens hub / picker); just clear the inline state.
                 _uiState.update { it.copy(stage = BgStage.IDLE, failure = null, error = null) }
             }
@@ -935,9 +997,9 @@ class BackgroundRemoverViewModel @Inject constructor(
 }
 
 /** Explicit pipeline state — the UI renders this, never infers it. */
-enum class BgStage { IDLE, DOWNLOADING, SEGMENTING, MATTING, DONE, FAILED }
+enum class BgStage { IDLE, DOWNLOADING, WARMING_UP, SEGMENTING, MATTING, DONE, FAILED }
 
-enum class RetryAction { RETRY_DOWNLOAD, RETRY_PROCESS, OPEN_HUB, PICK_IMAGE }
+enum class RetryAction { RETRY_DOWNLOAD, RETRY_PROCESS, OPEN_HUB, SWITCH_MODEL, PICK_IMAGE }
 
 data class BgFailure(val message: String, val retry: RetryAction?)
 

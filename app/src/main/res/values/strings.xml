@@ -613,6 +613,13 @@
     <string name="st_BackgroundRemover_CanvasOriginal">Original photo</string>
     <string name="st_BackgroundRemover_CanvasResult">Isolated subject, pinch to zoom</string>
     <string name="st_BackgroundRemover_DownloadFailed">Download failed. Check your connection and retry.</string>
+    <string name="st_BackgroundRemover_WorkingWarmup">Preparing AI model…</string>
+    <string name="st_BackgroundRemover_WorkingWarmupDesc">First run takes a moment to compile the neural network graph</string>
+    <string name="st_BackgroundRemover_EmptyMask">No clear subject was detected in this photo. Try choosing a different AI model or another image.</string>
+    <string name="st_BackgroundRemover_EmptyMaskUltra">Ultra didn\'t detect a clear subject. Try switching to the Pro model.</string>
+    <string name="st_BackgroundRemover_EmptyMaskInstant">Instant Selfie works best on human portraits. For objects or pets, try the Fast or Pro model.</string>
+    <string name="st_BackgroundRemover_Timeout">Processing timed out with %1$s. This model might be too demanding for this device — try the Pro or Fast model.</string>
+    <string name="st_BackgroundRemover_SwitchModel">Switch model</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Perfect Gray Suggestion</string>

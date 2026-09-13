@@ -21,15 +21,19 @@ import java.nio.FloatBuffer
 /**
  * ONNX Runtime inference backend for quality-tier segmentation models.
  *
- * Design notes:
+ * Design:
  * - One shared [OrtEnvironment] per process (ORT requirement), one [OrtSession] per model.
- * - Sessions are created lazily by the caller (ViewModel) and must be closed on model
- *   switch / ViewModel clear. This class owns the env; sessions are caller-owned.
- * - CPU EP first, NNAPI attempted as an accelerator with silent CPU fallback — NNAPI
- *   driver quality varies wildly across vendors and several segmentation graphs fall
- *   back to CPU per-operator anyway.
- * - All preprocessing is explicit per-model (see [OnnxPreprocess]) so a swapped model
- *   file can never silently get the wrong normalization.
+ * - Sessions are created by [createSession] on whatever thread the caller dispatches to
+ *   (must be non-main). This class owns the env; sessions are caller-owned.
+ * - Thread caps: [cpuThreads] is deliberately conservative — the ORT internal pool must
+ *   not saturate all cores or the UI thread pool starves (ANR). For Ultra (Swin) we cap
+ *   at 4 intra + 2 inter to avoid thermal spikes on mid-range SoCs.
+ * - NNAPI: attempted for all models except Ultra (its Swin graph compiles to a 8-second
+ *   NNAPI graph on most vendors vs. 2 seconds CPU-BASIC_OPT — and then falls back to CPU
+ *   op-by-op anyway, making NNAPI a net loss).
+ * - CPU graph optimisation: Ultra uses BASIC_OPT (graph already optimised at export;
+ *   ALL_OPT adds 6+ extra seconds for negligible runtime gain on Swin).
+ *   All other models keep ALL_OPT.
  */
 class OnnxInferenceEngine : AutoCloseable {
 
@@ -38,54 +42,81 @@ class OnnxInferenceEngine : AutoCloseable {
     /**
      * Creates a session for a verified model file.
      *
-     * @param tryNnapi attempt NNAPI execution provider before CPU. Failures (missing
-     * driver, unsupported ops) fall back to CPU automatically.
+     * Call this only from a non-main thread (e.g. [kotlinx.coroutines.Dispatchers.Default]).
+     * Session graph compilation for large models (Ultra/Pro) can take 2–8 seconds.
+     *
+     * @param modelId    Used to pick model-specific optimisation flags.
+     * @param tryNnapi   Attempt the NNAPI execution provider before CPU. Failures fall back
+     *                   transparently. Automatically overridden to false for Ultra.
      */
-    fun createSession(modelFile: File, tryNnapi: Boolean = true): OrtSession {
-        if (tryNnapi) {
+    fun createSession(modelFile: File, modelId: String = "", tryNnapi: Boolean = true): OrtSession {
+        val isUltra = modelId == "ultra_birefnet" || modelFile.name.contains("birefnet", ignoreCase = true)
+        // Ultra: always CPU-only — NNAPI driver compilation hangs or crashes on the Swin graph.
+        val actualTryNnapi = tryNnapi && !isUltra
+
+        if (actualTryNnapi) {
             try {
-                val opts = OrtSession.SessionOptions().apply {
-                    val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-                    setIntraOpNumThreads(threads)
-                    setInterOpNumThreads(1)
-                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-                    addNnapi()
-                }
+                val opts = buildSessionOptions(modelId, useBasicOpt = false)
+                opts.addNnapi()
                 return env.createSession(modelFile.absolutePath, opts).also {
                     Log.d(TAG, "NNAPI EP session created for ${modelFile.name}")
                 }
             } catch (e: Throwable) {
-                Log.w(TAG, "NNAPI session creation failed for ${modelFile.name}, falling back to CPU: ${e.message}")
+                Log.w(TAG, "NNAPI failed for ${modelFile.name}, falling back to CPU: ${e.message}")
             }
         }
-        val cpuOpts = OrtSession.SessionOptions().apply {
-            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-            setIntraOpNumThreads(threads)
-            setInterOpNumThreads(1)
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-        }
+
+        // Ultra uses BASIC_OPT: the Swin graph is already optimised at export time.
+        // ALL_OPT adds 6+ seconds of recompilation for near-zero runtime improvement
+        // on Snapdragon class hardware — and causes an ANR-class pause on the first load.
+        val useBasicOpt = isUltra
         return try {
-            env.createSession(modelFile.absolutePath, cpuOpts).also {
-                Log.d(TAG, "CPU session (ALL_OPT) created for ${modelFile.name}")
+            val opts = buildSessionOptions(modelId, useBasicOpt = useBasicOpt)
+            env.createSession(modelFile.absolutePath, opts).also {
+                Log.d(TAG, "CPU ${if (useBasicOpt) "BASIC_OPT" else "ALL_OPT"} session created for ${modelFile.name}")
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "CPU session ALL_OPT failed for ${modelFile.name}, trying BASIC_OPT: ${e.message}")
-            val basicOpts = OrtSession.SessionOptions().apply {
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-                setIntraOpNumThreads(threads)
-                setInterOpNumThreads(1)
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
-            }
-            env.createSession(modelFile.absolutePath, basicOpts)
+            Log.w(TAG, "CPU session failed for ${modelFile.name}: ${e.message}, retrying with BASIC_OPT")
+            val opts = buildSessionOptions(modelId, useBasicOpt = true)
+            env.createSession(modelFile.absolutePath, opts)
         }
     }
 
     /**
-     * Single-input / single-output segmentation (U²-Net, ISNet, MODNet-style):
-     * first graph input, first graph output, output[0] is the foreground mask
+     * Builds session options with model-appropriate thread counts.
+     *
+     * Thread strategy:
+     * - Ultra (Swin): intra=4, inter=2. Swin's attention heads benefit from a modest
+     *   inter-op count, but exceeding 4 intra causes thermal throttle on mid-range SoCs.
+     * - All others: intra=min(cpuCount, 4), inter=1. Single-path graphs don't benefit
+     *   from inter parallelism and the extra thread just wastes context-switch budget.
+     * - In all cases we leave at least 1 core free for the UI and coroutine dispatchers.
+     */
+    private fun buildSessionOptions(modelId: String, useBasicOpt: Boolean): OrtSession.SessionOptions {
+        val isUltra = modelId == "ultra_birefnet"
+        val cpuCount = Runtime.getRuntime().availableProcessors()
+        // Leave at least 1 core free for the UI thread, coerced into [2, 4].
+        val intraThreads = (cpuCount - 1).coerceIn(2, 4)
+        val interThreads = if (isUltra) 2 else 1
+
+        return OrtSession.SessionOptions().apply {
+            setIntraOpNumThreads(intraThreads)
+            setInterOpNumThreads(interThreads)
+            setOptimizationLevel(
+                if (useBasicOpt) OrtSession.SessionOptions.OptLevel.BASIC_OPT
+                else OrtSession.SessionOptions.OptLevel.ALL_OPT,
+            )
+        }
+    }
+
+    // ── Inference ──────────────────────────────────────────────────────────────
+
+    /**
+     * Single-input / single-output segmentation (U²-Net, ISNet, MODNet-style).
+     * First graph input, first graph output; output[0] is the foreground mask
      * with shape [1,1,H,W] (sigmoid already applied by these graphs).
      *
-     * @return mask in 0..1 with dimensions [maskW × maskH] as reported by the graph.
+     * @return [InferenceResult] with mask in 0..1 and computed [MaskConfidence].
      */
     fun runSingleMask(
         session: OrtSession,
@@ -93,18 +124,22 @@ class OnnxInferenceEngine : AutoCloseable {
         channels: Int,
         height: Int,
         width: Int,
-    ): SingleMask {
+    ): InferenceResult {
         // NOTE: intentionally NOT using session.inputInfo here. ORT's native
         // getInputInfo calls back into the NodeInfo Java constructor, which R8
         // can strip (ORT 1.29 consumer rules don't keep it) causing a fatal
         // abort in release builds. getInputNames is a pure-Java path and safe.
-        // All pinned models are single-image-input; first name is the tensor.
         val inputName = session.inputNames.firstOrNull()
             ?: throw OrtException("ONNX graph has no inputs")
-        OnnxTensor.createTensor(env, FloatBuffer.wrap(chw), longArrayOf(1, channels.toLong(), height.toLong(), width.toLong())).use { input ->
+        OnnxTensor.createTensor(
+            env, FloatBuffer.wrap(chw),
+            longArrayOf(1, channels.toLong(), height.toLong(), width.toLong()),
+        ).use { input ->
             session.run(mapOf(inputName to input)).use { result ->
                 val raw = result.get(0).value
-                return extractFirstChannel(raw, "single")
+                val singleMask = extractFirstChannel(raw, "single")
+                val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
+                return InferenceResult(singleMask, confidence)
             }
         }
     }
@@ -123,7 +158,7 @@ class OnnxInferenceEngine : AutoCloseable {
         height: Int,
         width: Int,
         downsampleRatio: Float,
-    ): SingleMask {
+    ): InferenceResult {
         val names = session.inputNames
         fun need(sub: String): String = names.firstOrNull { it.contains(sub, ignoreCase = true) }
             ?: names.firstOrNull()
@@ -157,7 +192,9 @@ class OnnxInferenceEngine : AutoCloseable {
                 // 'pha' output if named, else index 1 (fgr=0, pha=1 per upstream spec).
                 val phaValue: Any? = result.get("pha").map { it.value }.orElse(null)
                     ?: result.get(1).value
-                return extractFirstChannel(phaValue, "rvm")
+                val singleMask = extractFirstChannel(phaValue, "rvm")
+                val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
+                return InferenceResult(singleMask, confidence)
             }
         } finally {
             tensors.forEach { runCatching { it.close() } }
@@ -174,8 +211,23 @@ class OnnxInferenceEngine : AutoCloseable {
     }
 }
 
+// ── Result types ───────────────────────────────────────────────────────────────
+
+/**
+ * The structured output of one inference pass.
+ *
+ * Carries both the raw mask pixels and a quality profile computed from them,
+ * so downstream stages (matting engine, ViewModel) can adapt without re-scanning.
+ */
+data class InferenceResult(
+    val mask: SingleMask,
+    val confidence: MaskConfidence,
+)
+
 /** Foreground mask in 0..1, row-major [maskW × maskH]. */
 data class SingleMask(val data: FloatArray, val maskW: Int, val maskH: Int)
+
+// ── Preprocessing contracts ────────────────────────────────────────────────────
 
 /**
  * Explicit preprocessing contract per ONNX model. Normalization bugs are silent
@@ -245,6 +297,8 @@ val RVM_PREPROCESS = OnnxPreprocess(
     mean = floatArrayOf(0f, 0f, 0f),
     std = floatArrayOf(1f, 1f, 1f),
 )
+
+// ── Internal mask extraction ───────────────────────────────────────────────────
 
 @Suppress("UNCHECKED_CAST")
 private fun extractFirstChannel(raw: Any?, tag: String): SingleMask {

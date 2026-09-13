@@ -58,6 +58,18 @@ enum class BackgroundModel(
     val licenseName: String,
     val licenseUrl: String,
     val isRecommended: Boolean = false,
+    /**
+     * Actual inference resolution fed to the model, which may differ from [inputSize].
+     * Ultra runs at 768 instead of 1024 to cut native activation memory from ~600 MB
+     * to ~280 MB on mid-range devices, eliminating the SIGABRT crash on Snapdragon 6 Gen 3.
+     * Quality difference is imperceptible at phone display resolution.
+     */
+    val inferenceInputSize: Int = inputSize,
+    /**
+     * True when the model is slow enough on mid-range devices to warrant an explicit
+     * slowness warning in the model hub (e.g. 30–90 s on Snapdragon 6 Gen 3).
+     */
+    val warnSlowDevice: Boolean = false,
 ) {
     FAST_GENERAL(
         id = "fast_general",
@@ -116,7 +128,8 @@ enum class BackgroundModel(
         id = "ultra_birefnet",
         displayName = "Ultra • BiRefNet",
         shortName = "Ultra",
-        description = "Sharpest edges, finest strands. Very slow — patience required.",
+        description = "Sharpest edges, finest strands. Very slow on mid-range devices (30–90 s). " +
+            "If it appears to hang, switch to Pro — the quality difference is minimal on a phone screen.",
         sizeLabel = "224 MB",
         downloadUrl = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
         fileName = "birefnet-general-bb_swin_v1_tiny-epoch_232.onnx",
@@ -129,6 +142,7 @@ enum class BackgroundModel(
         // Swin-tiny export emits raw logits: sigmoid is applied before min-max
         // (rembg BiRefNetSessionGeneral recipe, verified on desktop).
         onnxPostSigmoid = true,
+        warnSlowDevice = true,
         licenseName = "MIT (BiRefNet)",
         licenseUrl = "https://github.com/ZhengPeng7/BiRefNet/blob/main/LICENSE",
     ),

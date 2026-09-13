@@ -257,7 +257,7 @@ fun BackgroundRemoverScreen(
                     onCancelWork = { viewModel.cancelActive() },
                     onRetry = { failure ->
                         when (failure.retry) {
-                            RetryAction.OPEN_HUB -> {
+                            RetryAction.OPEN_HUB, RetryAction.SWITCH_MODEL -> {
                                 viewModel.dismissError()
                                 isHubOpen = true
                             }
@@ -465,7 +465,7 @@ private fun EditorPane(
 ) {
     val haptic = rememberToolzHapticFeedback()
     val hasResult = uiState.resultBitmap != null
-    val working = uiState.stage == BgStage.SEGMENTING || uiState.stage == BgStage.MATTING
+    val working = uiState.stage == BgStage.WARMING_UP || uiState.stage == BgStage.SEGMENTING || uiState.stage == BgStage.MATTING
     val failed = uiState.stage == BgStage.FAILED && uiState.failure != null
 
     Column(modifier.padding(horizontal = 16.dp)) {
@@ -531,19 +531,33 @@ private fun EditorPane(
                         ToolzWavyCircularProgressIndicator(modifier = Modifier.size(56.dp))
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            if (uiState.stage == BgStage.MATTING) stringResource(R.string.st_BackgroundRemover_WorkingEdge)
-                            else stringResource(R.string.st_BackgroundRemover_WorkingBg),
+                            when (uiState.stage) {
+                                BgStage.WARMING_UP -> stringResource(R.string.st_BackgroundRemover_WorkingWarmup)
+                                BgStage.MATTING -> stringResource(R.string.st_BackgroundRemover_WorkingEdge)
+                                else -> stringResource(R.string.st_BackgroundRemover_WorkingBg)
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        uiState.selectedModel?.let {
+                        if (uiState.stage == BgStage.WARMING_UP) {
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                it.displayName,
-                                style = MaterialTheme.typography.labelMedium,
+                                stringResource(R.string.st_BackgroundRemover_WorkingWarmupDesc),
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(horizontal = 32.dp),
                             )
+                        } else {
+                            uiState.selectedModel?.let {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    it.displayName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                )
+                            }
                         }
                         Spacer(Modifier.height(16.dp))
                         TextButton(onClick = onCancelWork) {
@@ -596,6 +610,7 @@ private fun EditorPane(
                                 Text(
                                     when (uiState.failure?.retry) {
                                         RetryAction.OPEN_HUB -> stringResource(R.string.st_BackgroundRemover_OpenModels)
+                                        RetryAction.SWITCH_MODEL -> stringResource(R.string.st_BackgroundRemover_SwitchModel)
                                         RetryAction.PICK_IMAGE -> stringResource(R.string.st_BackgroundRemover_ChooseAnother)
                                         else -> stringResource(R.string.st_BackgroundRemover_Retry)
                                     },
