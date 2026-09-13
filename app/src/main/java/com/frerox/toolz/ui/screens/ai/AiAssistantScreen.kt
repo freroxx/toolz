@@ -170,6 +170,7 @@ fun AiAssistantScreen(
     var showQuotaDialog            by remember { mutableStateOf(false) }
     var selectedMessageForActions  by remember { mutableStateOf<AiMessage?>(null) }
     var selectedMessageForSources  by remember { mutableStateOf<AiMessage?>(null) }
+    var selectedMessageForTextSelection by remember { mutableStateOf<AiMessage?>(null) }
 
     val openSettings = {
         if (onNavigateToSettings != null) {
@@ -229,6 +230,15 @@ fun AiAssistantScreen(
         return
     }
 
+    // ── Full-screen Select Text View ─────────────────────────────────────────
+    if (selectedMessageForTextSelection != null) {
+        AiSelectTextScreen(
+            message = selectedMessageForTextSelection!!,
+            onBack = { selectedMessageForTextSelection = null }
+        )
+        return
+    }
+
     if (showQuotaDialog) ModernAiDialog(
         title = stringResource(R.string.st_AiAssistantScreen_8f1a), icon = Icons.Rounded.LockClock,
         iconColor = MaterialTheme.colorScheme.error,
@@ -250,6 +260,7 @@ fun AiAssistantScreen(
         onDismiss = { selectedMessageForActions = null },
         onRegenerate = { viewModel.regenerateMessage(it); selectedMessageForActions = null },
         onShowSources = { selectedMessageForSources = it; selectedMessageForActions = null },
+        onSelectText = { selectedMessageForTextSelection = it; selectedMessageForActions = null },
     )
 
     if (selectedMessageForSources != null) MessageSourcesSheet(
@@ -393,7 +404,16 @@ fun AiAssistantScreen(
                                     isLoading       = uiState.isLoading,
                                     error           = uiState.error,
                                     listState       = listState,
-                                    currentConfig   = uiState.savedConfigs.find { it.provider == uiState.activeProvider && it.model == uiState.activeModel },
+                                    currentConfig   = uiState.savedConfigs.find { it.name == uiState.activeConfigName }
+                                        ?: uiState.savedConfigs.find { it.provider == uiState.activeProvider && it.model == uiState.activeModel }
+                                        ?: AiConfig(
+                                            name = uiState.activeConfigName ?: uiState.activeProvider,
+                                            provider = uiState.activeProvider,
+                                            model = uiState.activeModel,
+                                            apiKey = "",
+                                            iconRes = settingsUiState.selectedIcon,
+                                            customIconUri = settingsUiState.customIconUri
+                                        ),
                                     performanceMode = performanceMode,
                                     onRegenerate    = { viewModel.regenerateMessage(it) },
                                     onLinkClick     = onNavigateToBrowser,
@@ -1246,7 +1266,13 @@ fun ChatSummarySheet(summary: String?, isSummarizing: Boolean, onDismiss: () -> 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate: (Int) -> Unit, onShowSources: ((AiMessage) -> Unit)? = null) {
+fun MessageActionsSheet(
+    message: AiMessage,
+    onDismiss: () -> Unit,
+    onRegenerate: (Int) -> Unit,
+    onShowSources: ((AiMessage) -> Unit)? = null,
+    onSelectText: ((AiMessage) -> Unit)? = null,
+) {
     val clipboard = LocalClipboardManager.current
     val context   = LocalContext.current
     // Second entry point to the sources sheet (long-press menu), so sources
@@ -1304,6 +1330,9 @@ fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate:
 
             ActionRow(Icons.Rounded.ContentCopy, stringResource(R.string.st_AiAssistantScreen_6a1b), MaterialTheme.colorScheme.onSurface) {
                 clipboard.setText(AnnotatedString(message.text)); onDismiss()
+            }
+            ActionRow(Icons.Rounded.SelectAll, stringResource(R.string.st_AiSelectText_action), MaterialTheme.colorScheme.onSurface) {
+                onSelectText?.invoke(message); onDismiss()
             }
             if (!message.isUser) ActionRow(Icons.Rounded.Refresh, stringResource(R.string.st_AiAssistantScreen_1b2c), MaterialTheme.colorScheme.primary) {
                 onRegenerate(message.id); onDismiss()

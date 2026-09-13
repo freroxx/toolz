@@ -41,7 +41,7 @@ fun Modifier.bouncyClick(
     scaleDown: Float = 0.95f, // Tuned to the M3 Expressive sweet spot
     haptic: Boolean = true,
     onLongClick: (() -> Unit)? = null,
-    onClick: () -> Unit
+    onClick: (() -> Unit)? = null
 ) = composed {
     val performanceMode = LocalPerformanceMode.current
     val hapticFeedback = rememberToolzHapticFeedback()
@@ -70,10 +70,12 @@ fun Modifier.bouncyClick(
             interactionSource = interactionSource,
             indication = null,
             onClick = {
-                if (haptic) {
-                    hapticFeedback.click()
+                if (onClick != null) {
+                    if (haptic) {
+                        hapticFeedback.click()
+                    }
+                    onClick()
                 }
-                onClick()
             },
             onLongClick = onLongClick?.let { longClickAction ->
                 {

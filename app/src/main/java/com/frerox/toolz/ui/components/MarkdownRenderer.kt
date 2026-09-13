@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,9 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -289,12 +293,56 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
 }
 
 @Composable
+private fun MarkdownAnnotatedText(
+    text: AnnotatedString,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    onLinkClick: (String) -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
+) {
+    val hasLinks = remember(text) {
+        text.getStringAnnotations("URL", 0, text.length).isNotEmpty()
+    }
+    if (!hasLinks) {
+        Text(
+            text = text,
+            style = style,
+            modifier = modifier,
+        )
+    } else {
+        var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+        Text(
+            text = text,
+            style = style,
+            modifier = modifier.pointerInput(text, onLinkClick, onLongClick) {
+                detectTapGestures(
+                    onLongPress = {
+                        onLongClick?.invoke()
+                    },
+                    onTap = { pos ->
+                        layoutResult?.let { layout ->
+                            val offset = layout.getOffsetForPosition(pos)
+                            text.getStringAnnotations("URL", offset, offset)
+                                .firstOrNull()?.let { annotation ->
+                                    onLinkClick(annotation.item)
+                                }
+                        }
+                    }
+                )
+            },
+            onTextLayout = { layoutResult = it }
+        )
+    }
+}
+
+@Composable
 fun MarkdownSegment(
     seg: MdSegment,
     modifier: Modifier = Modifier,
     baseFontSize: TextUnit = 16.sp,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
-    onLinkClick: (String) -> Unit = {}
+    onLinkClick: (String) -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
 ) {
     val bodyStyle = MaterialTheme.typography.bodyMedium.copy(
         fontSize = baseFontSize,
@@ -312,16 +360,12 @@ fun MarkdownSegment(
             Text(seg.text, fontSize = fontSize, fontWeight = weight, lineHeight = (fontSize.value + 4).sp, color = textColor, modifier = modifier.padding(top = 12.dp, bottom = 4.dp))
         }
         is MdSegment.Paragraph -> {
-            ClickableText(
+            MarkdownAnnotatedText(
                 text = seg.content,
                 style = bodyStyle,
                 modifier = modifier,
-                onClick = { offset ->
-                    seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                        .firstOrNull()?.let { annotation ->
-                            onLinkClick(annotation.item)
-                        }
-                }
+                onLinkClick = onLinkClick,
+                onLongClick = onLongClick,
             )
         }
         is MdSegment.BulletItem -> {
@@ -336,32 +380,24 @@ fun MarkdownSegment(
                 } else {
                     Box(Modifier.size((baseFontSize.value / 3).dp).offset(y = (baseFontSize.value / 2).dp).background(textColor.copy(alpha = 0.8f), CircleShape))
                 }
-                ClickableText(
+                MarkdownAnnotatedText(
                     text = seg.content,
                     style = bodyStyle,
                     modifier = Modifier.weight(1f),
-                    onClick = { offset ->
-                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                            .firstOrNull()?.let { annotation ->
-                                onLinkClick(annotation.item)
-                            }
-                    }
+                    onLinkClick = onLinkClick,
+                    onLongClick = onLongClick,
                 )
             }
         }
         is MdSegment.NumberedItem -> {
             Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${seg.index}.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, style = bodyStyle, modifier = Modifier.widthIn(min = (baseFontSize.value * 1.2f).dp))
-                ClickableText(
+                MarkdownAnnotatedText(
                     text = seg.content,
                     style = bodyStyle,
                     modifier = Modifier.weight(1f),
-                    onClick = { offset ->
-                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                            .firstOrNull()?.let { annotation ->
-                                onLinkClick(annotation.item)
-                            }
-                    }
+                    onLinkClick = onLinkClick,
+                    onLongClick = onLongClick,
                 )
             }
         }
@@ -386,15 +422,11 @@ fun MarkdownSegment(
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
                 )
                 Spacer(Modifier.width(16.dp))
-                ClickableText(
+                MarkdownAnnotatedText(
                     text = seg.content,
                     style = bodyStyle.copy(fontStyle = FontStyle.Italic, color = textColor.copy(alpha = 0.8f)),
-                    onClick = { offset ->
-                        seg.content.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                            .firstOrNull()?.let { annotation ->
-                                onLinkClick(annotation.item)
-                            }
-                    }
+                    onLinkClick = onLinkClick,
+                    onLongClick = onLongClick,
                 )
             }
         }
@@ -409,7 +441,8 @@ fun MarkdownContent(
     baseFontSize: TextUnit = 16.sp,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(8.dp),
-    onLinkClick: (String) -> Unit = {}
+    onLinkClick: (String) -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
 ) {
     val segments = remember(markdown) { parseMarkdownToSegments(markdown) }
     Column(
@@ -421,10 +454,54 @@ fun MarkdownContent(
                 seg = seg,
                 baseFontSize = baseFontSize,
                 textColor = textColor,
-                onLinkClick = onLinkClick
+                onLinkClick = onLinkClick,
+                onLongClick = onLongClick,
             )
         }
     }
+}
+
+/**
+ * Strips markdown syntax elements, returning a clean, readable plain text representation.
+ */
+fun stripMarkdown(markdown: String): String {
+    var text = markdown
+    // 1. Fenced code blocks ```lang\n...``` -> ...
+    text = text.replace(Regex("```[a-zA-Z0-9_-]*\\n?([\\s\\S]*?)```"), "$1")
+    // 2. Inline code `code` -> code
+    text = text.replace(Regex("`([^`]+)`"), "$1")
+    // 3. Images ![alt](url) -> alt
+    text = text.replace(Regex("!\\[(.*?)\\]\\(.*?\\)"), "$1")
+    // 4. Links [text](url) -> text
+    text = text.replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1")
+    // 5. Headers: # Header -> Header
+    text = text.replace(Regex("(?m)^#{1,6}\\s+(.+)$"), "$1")
+    // 6. Blockquotes: > quote -> quote
+    text = text.replace(Regex("(?m)^>\\s?"), "")
+    // 7. Bold & Italic
+    text = text.replace(Regex("\\*\\*\\*([^*]+)\\*\\*\\*"), "$1")
+    text = text.replace(Regex("___([^_]+)___"), "$1")
+    text = text.replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
+    text = text.replace(Regex("__([^_]+)__"), "$1")
+    text = text.replace(Regex("(?<!\\*)\\*([^*\n]+)\\*(?!\\*)"), "$1")
+    text = text.replace(Regex("(?<!_)_([^_\n]+)_(?!_)"), "$1")
+    // 8. Strikethrough: ~~text~~ -> text
+    text = text.replace(Regex("~~([^~]+)~~"), "$1")
+    // 9. Horizontal rules: --- or *** or ___ -> empty line
+    text = text.replace(Regex("(?m)^[-*_]{3,}\\s*$"), "")
+    // 10. Table formatting: remove table delimiter rows |---|---|
+    text = text.replace(Regex("(?m)^\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?$"), "")
+    // Table rows: | cell | cell | -> cell | cell
+    text = text.lines().joinToString("\n") { line ->
+        if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+            line.trim().removeSurrounding("|", "|").split("|").joinToString("  |  ") { it.trim() }
+        } else {
+            line
+        }
+    }
+    // 11. Normalize excess blank lines
+    text = text.replace(Regex("\\n{3,}"), "\n\n")
+    return text.trim()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -51,6 +51,9 @@ class AiSettingsManager @Inject constructor(
         private const val KEY_CATALOG_TIMESTAMP = "ai_catalog_timestamp"
         private const val KEY_IDENTITY_ID = "selected_identity_id"
         private const val KEY_CUSTOM_IDENTITIES = "custom_identities"
+        private const val KEY_ACTIVE_CONFIG_NAME = "active_config_name"
+        private const val KEY_ACTIVE_ICON = "active_icon"
+        private const val KEY_ACTIVE_CUSTOM_ICON_URI = "active_custom_icon_uri"
         private fun userKey(p: String) = "api_key_user_$p"
     }
 
@@ -194,11 +197,28 @@ class AiSettingsManager @Inject constructor(
     fun saveAllConfigs(configs: List<AiConfig>) = persistConfigs(configs)
     
     fun deleteConfig(name: String) = persistConfigs(getSavedConfigs().filter { it.name != name })
+
+    fun getActiveConfigName(): String? = prefs.getString(KEY_ACTIVE_CONFIG_NAME, null)
+    fun setActiveConfigName(name: String?) = prefs.edit().apply {
+        if (name == null) remove(KEY_ACTIVE_CONFIG_NAME) else putString(KEY_ACTIVE_CONFIG_NAME, name)
+    }.apply()
+
+    fun getActiveIcon(): String = prefs.getString(KEY_ACTIVE_ICON, "AUTO") ?: "AUTO"
+    fun setActiveIcon(icon: String) = prefs.edit().putString(KEY_ACTIVE_ICON, icon).apply()
+
+    fun getActiveCustomIconUri(): String? = prefs.getString(KEY_ACTIVE_CUSTOM_ICON_URI, null)
+    fun setActiveCustomIconUri(uri: String?) = prefs.edit().apply {
+        if (uri.isNullOrBlank()) remove(KEY_ACTIVE_CUSTOM_ICON_URI)
+        else putString(KEY_ACTIVE_CUSTOM_ICON_URI, uri)
+    }.apply()
     
     fun applyConfig(config: AiConfig) {
         setAiProvider(config.provider)
         setApiKey(config.apiKey, config.provider)
         setSelectedModel(config.model, config.provider)
+        setActiveIcon(config.iconRes)
+        setActiveCustomIconUri(config.customIconUri)
+        setActiveConfigName(config.name)
     }
 
     private fun persistConfigs(configs: List<AiConfig>) {

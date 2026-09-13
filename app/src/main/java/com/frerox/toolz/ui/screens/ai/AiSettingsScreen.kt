@@ -90,8 +90,14 @@ fun AiSettingsScreen(
     AiSettingsContent(
         state = settingsState,
         savedConfigs = uiState.savedConfigs,
+        activeConfigName = uiState.activeConfigName,
         pendingConfig = uiState.pendingConfig,
         onBack = handleBack,
+        onSelectPreset = { config ->
+            vibration?.vibrateClick()
+            viewModel.selectPreset(config)
+            onBack()
+        },
         onProviderChange = viewModel::updateProvider,
         onApiKeyChange = viewModel::updateApiKey,
         onModelChange = viewModel::updateModel,
@@ -143,8 +149,10 @@ fun AiSettingsScreen(
 fun AiSettingsContent(
     state: AiSettingsUiState,
     savedConfigs: List<AiConfig>,
+    activeConfigName: String?,
     pendingConfig: AiConfig?,
     onBack: () -> Unit,
+    onSelectPreset: (AiConfig) -> Unit,
     onProviderChange: (String) -> Unit,
     onApiKeyChange: (String) -> Unit,
     onModelChange: (String) -> Unit,
@@ -351,6 +359,10 @@ fun AiSettingsContent(
                 } else {
                     SettingsPresetsList(
                         savedConfigs = savedConfigs,
+                        activeConfigName = activeConfigName,
+                        currentProvider = state.provider,
+                        currentModel = state.selectedModel,
+                        onSelectConfig = onSelectPreset,
                         onEditConfig = onEditConfig,
                         onDeleteConfig = onDeleteConfig,
                         onActiveTabChange = { activeTab = it }
@@ -1121,6 +1133,10 @@ private fun SettingsPresetEditSection(
 @Composable
 private fun SettingsPresetsList(
     savedConfigs: List<AiConfig>,
+    activeConfigName: String?,
+    currentProvider: String,
+    currentModel: String,
+    onSelectConfig: (AiConfig) -> Unit,
     onEditConfig: (AiConfig) -> Unit,
     onDeleteConfig: (AiConfig) -> Unit,
     onActiveTabChange: (Int) -> Unit
@@ -1141,11 +1157,39 @@ private fun SettingsPresetsList(
             }
         }
         items(savedConfigs, key = { it.name }) { config ->
-            Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            val isActive = (activeConfigName != null && config.name == activeConfigName) ||
+                    (activeConfigName == null && config.provider == currentProvider && config.model == currentModel)
+            Surface(
+                onClick = { onSelectConfig(config) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MediumExpressiveShape,
+                color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) else AiDesign.glassColor(),
+                border = BorderStroke(
+                    width = if (isActive) 1.5.dp else 1.dp,
+                    color = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else AiDesign.glassBorder()
+                )
+            ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     AiAvatar(config, 42.dp, performanceMode = true)
                     Column(Modifier.weight(1f)) {
-                        Text(config.name, fontWeight = FontWeight.Black, color = AiDesign.textColor())
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(config.name, fontWeight = FontWeight.Black, color = AiDesign.textColor())
+                            if (isActive) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        "ACTIVE",
+                                        Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Black,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontSize = 9.sp
+                                    )
+                                }
+                            }
+                        }
                         Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
                     }
                     ToolzExpressiveIconButton(

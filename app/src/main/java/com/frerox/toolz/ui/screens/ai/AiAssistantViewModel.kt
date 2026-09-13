@@ -72,6 +72,7 @@ data class AiAssistantUiState(
     // un-saved draft, so closing Settings without Apply can't desync the tag.
     val activeProvider    : String           = "Groq",
     val activeModel       : String           = "openai/gpt-oss-20b",
+    val activeConfigName  : String?          = null,
 )
 
 data class AiSettingsUiState(
@@ -191,11 +192,16 @@ class AiAssistantViewModel @Inject constructor(
     private fun loadSettings() {
         val provider = settingsManager.getAiProvider()
         val model = settingsManager.getSelectedModel(provider)
+        val icon = settingsManager.getActiveIcon()
+        val customIcon = settingsManager.getActiveCustomIconUri()
+        val activeName = settingsManager.getActiveConfigName()
         _settingsUiState.update {
             it.copy(
                 provider             = provider,
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = model,
+                selectedIcon         = icon,
+                customIconUri        = customIcon,
                 dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
                 promptFormat         = settingsManager.getPromptFormat(),
                 selectedIdentityId   = settingsManager.getSelectedIdentityId(),
@@ -203,7 +209,15 @@ class AiAssistantViewModel @Inject constructor(
             )
         }
         val hasKey = settingsManager.resolveApiKey(provider).source != com.frerox.toolz.data.ai.ApiKeySource.NONE
-        _uiState.update { it.copy(isConfigured = settingsManager.isConfigured(), hasApiKey = hasKey, activeProvider = provider, activeModel = model) }
+        _uiState.update {
+            it.copy(
+                isConfigured = settingsManager.isConfigured(),
+                hasApiKey = hasKey,
+                activeProvider = provider,
+                activeModel = model,
+                activeConfigName = activeName
+            )
+        }
         checkModelAvailability()
     }
 
@@ -633,9 +647,45 @@ class AiAssistantViewModel @Inject constructor(
         else _uiState.update { it.copy(pendingConfig = config) }
     }
 
+    fun selectPreset(config: AiConfig) {
+        settingsManager.applyConfig(config)
+        _settingsUiState.update {
+            it.copy(
+                provider = config.provider,
+                selectedModel = config.model,
+                apiKey = config.apiKey,
+                selectedIcon = config.iconRes,
+                customIconUri = config.customIconUri
+            )
+        }
+        _uiState.update {
+            it.copy(
+                activeProvider = config.provider,
+                activeModel = config.model,
+                activeConfigName = config.name,
+                hasApiKey = config.apiKey.isNotBlank() || settingsManager.resolveApiKey(config.provider).source != ApiKeySource.NONE,
+                isConfigured = settingsManager.isConfigured(),
+                pendingConfig = null
+            )
+        }
+        loadSettings()
+    }
+
     fun confirmConfigSwitch() { val c = _uiState.value.pendingConfig ?: return; applyConfig(c); createNewChat(); _uiState.update { it.copy(pendingConfig = null) } }
     fun cancelConfigSwitch()  { _uiState.update { it.copy(pendingConfig = null) } }
-    private fun applyConfig(config: AiConfig) { settingsManager.applyConfig(config); loadSettings() }
+    private fun applyConfig(config: AiConfig) {
+        settingsManager.applyConfig(config)
+        _settingsUiState.update {
+            it.copy(
+                provider = config.provider,
+                selectedModel = config.model,
+                apiKey = config.apiKey,
+                selectedIcon = config.iconRes,
+                customIconUri = config.customIconUri
+            )
+        }
+        loadSettings()
+    }
 
     // ── Test connection ────────────────────────────────────────────────────
 

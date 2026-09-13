@@ -108,8 +108,6 @@ fun SharedChatBubble(
         }.getOrElse { emptyList() }
     }
 
-    var showReactions by remember { mutableStateOf(false) }
-
     val visible = remember { MutableTransitionState(false).apply { targetState = true } }
     AnimatedVisibility(
         visibleState = visible,
@@ -160,7 +158,6 @@ fun SharedChatBubble(
                     modifier = Modifier
                         .widthIn(max = 320.dp)
                         .bouncyClick(
-                            onClick = { showReactions = !showReactions },
                             onLongClick = { onLongPress(message) },
                         ),
                 ) {
@@ -172,6 +169,7 @@ fun SharedChatBubble(
                                 modifier      = Modifier.padding(vertical = 3.dp),
                                 textColor     = if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor(),
                                 onLinkClick   = onLinkClick,
+                                onLongClick   = { onLongPress(message) },
                             )
                         }
 
@@ -198,37 +196,6 @@ fun SharedChatBubble(
                             color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.45f),
                             modifier = Modifier.padding(top = 6.dp).align(Alignment.End),
                         )
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                visible = showReactions && !isUser,
-                enter   = expandVertically(spring(Spring.DampingRatioLowBouncy)) + fadeIn(),
-                exit    = shrinkVertically(tween(180)) + fadeOut(),
-                modifier = Modifier.padding(start = 58.dp, top = 4.dp),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Only actions that do something: regenerate + copy/menu.
-                    // (Thumbs up/down collected nothing — removed, no dead UI.)
-                    listOf("🔁", "📋").forEachIndexed { i, emoji ->
-                        Surface(
-                            onClick = {
-                                when (i) {
-                                    0 -> onRegenerate?.invoke(message.id)
-                                    1 -> onLongPress(message)
-                                }
-                                showReactions = false
-                            },
-                            shape = MediumExpressiveShape,
-                            color = AiDesign.glassColor(),
-                            border = BorderStroke(1.dp, AiDesign.glassBorder()),
-                            modifier = Modifier.size(36.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(emoji, fontSize = 16.sp)
-                            }
-                        }
                     }
                 }
             }
