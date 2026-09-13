@@ -28,3 +28,11 @@ data class AiConfig(
     val iconRes: String = "AUTO", // "AUTO", "GEMINI", "CHATGPT", "GROQ", "CLAUDE", "BOT", "SPARKLE", "BRAIN"
     val customIconUri: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class AiIdentity(
+    val id: String,
+    val name: String,
+    val prompt: String,
+    val isBuiltIn: Boolean = true
+)

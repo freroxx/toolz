@@ -105,6 +105,8 @@ import com.frerox.toolz.ui.screens.focus.FocusFlowScreen
 import com.frerox.toolz.ui.screens.focus.CaffeinateScreen
 import com.frerox.toolz.ui.screens.clipboard.ClipboardScreen
 import com.frerox.toolz.ui.screens.ai.AiAssistantScreen
+import com.frerox.toolz.ui.screens.ai.AiAssistantViewModel
+import com.frerox.toolz.ui.screens.ai.AiSettingsScreen
 import com.frerox.toolz.ui.screens.calendar.CalendarScreen
 import com.frerox.toolz.ui.screens.cleaner.CleanerScreen
 import com.frerox.toolz.ui.screens.browser.TabManagementScreen
@@ -1006,7 +1008,24 @@ fun ToolzNavHost(
         ) {
             AiAssistantScreen(
                 onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
+                onNavigateToSettings = { navController.navigate(Screen.AiSettings.route) },
                 onBack = { toolOnBack() }
+            )
+        }
+
+        composable(Screen.AiSettings.route) { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                runCatching { navController.getBackStackEntry(Screen.AiAssistant.route) }.getOrNull()
+            }
+            val aiViewModel: AiAssistantViewModel = if (parentEntry != null) {
+                hiltViewModel(parentEntry)
+            } else {
+                hiltViewModel()
+            }
+            AiSettingsScreen(
+                viewModel = aiViewModel,
+                onNavigateToBrowser = { url -> navController.navigate(Screen.Browser.createRoute(url)) },
+                onBack = { navController.popBackStack() }
             )
         }
 

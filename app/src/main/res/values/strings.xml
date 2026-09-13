@@ -892,6 +892,21 @@
     <string name="st_AiAssistantScreen_a3b4">No summary available.</string>
     <string name="st_AiAssistantScreen_m3n4_v2">MESSAGE ACTIONS</string>
 
+    <!-- AiSettingsScreen -->
+    <string name="st_AiSettings_title">AI Settings</string>
+    <string name="st_AiSettings_save">Save</string>
+    <string name="st_AiSettings_identity_title">IDENTITY</string>
+    <string name="st_AiSettings_identity_subtitle">Set a system prompt that defines how the AI behaves</string>
+    <string name="st_AiSettings_none">None</string>
+    <string name="st_AiSettings_add_identity">Add custom identity</string>
+    <string name="st_AiSettings_identity_name">Identity name</string>
+    <string name="st_AiSettings_identity_prompt">System prompt</string>
+    <string name="st_AiSettings_save_identity">Save identity</string>
+    <string name="st_AiSettings_edit_identity">Edit identity</string>
+    <string name="st_AiSettings_presets_title">PRESETS</string>
+    <string name="st_AiSettings_show_key">Show API key</string>
+    <string name="st_AiSettings_hide_key">Hide API key</string>
+
     <!-- TabManagementScreen -->
     <string name="st_TabManagementScreen_8f1a">selected</string>
     <string name="st_TabManagementScreen_3d5b">Tabs</string>

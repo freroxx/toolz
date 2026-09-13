@@ -94,6 +94,11 @@ data class AiSettingsUiState(
     val catalogUpdatedAt     : String?   = null,
     val isRefreshingCatalog  : Boolean   = false,
     val catalogRefreshResult : String?   = null,
+    // Identity
+    val selectedIdentityId   : String         = "none",
+    val customIdentities     : List<AiIdentity> = emptyList(),
+    val showCustomIdentityEditor: Boolean     = false,
+    val editingIdentity      : AiIdentity?   = null,
 )
 
 enum class ModelAvailability { AVAILABLE, UNAVAILABLE, CHECKING, UNKNOWN }
@@ -192,7 +197,9 @@ class AiAssistantViewModel @Inject constructor(
                 apiKey               = settingsManager.getRawApiKey(provider),
                 selectedModel        = model,
                 dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
-                promptFormat         = settingsManager.getPromptFormat()
+                promptFormat         = settingsManager.getPromptFormat(),
+                selectedIdentityId   = settingsManager.getSelectedIdentityId(),
+                customIdentities     = settingsManager.getCustomIdentities(),
             )
         }
         val hasKey = settingsManager.resolveApiKey(provider).source != com.frerox.toolz.data.ai.ApiKeySource.NONE
@@ -207,6 +214,48 @@ class AiAssistantViewModel @Inject constructor(
      */
     fun discardSettingsDraft() {
         loadSettings()
+    }
+
+    // ── Identity management ────────────────────────────────────────────────
+
+    fun selectIdentity(id: String) {
+        settingsManager.setSelectedIdentityId(id)
+        _settingsUiState.update { it.copy(selectedIdentityId = id) }
+    }
+
+    fun showCustomIdentityEditor(editing: AiIdentity? = null) {
+        _settingsUiState.update { it.copy(showCustomIdentityEditor = true, editingIdentity = editing) }
+    }
+
+    fun dismissCustomIdentityEditor() {
+        _settingsUiState.update { it.copy(showCustomIdentityEditor = false, editingIdentity = null) }
+    }
+
+    fun saveCustomIdentity(name: String, prompt: String) {
+        val existing = _settingsUiState.value.editingIdentity
+        val id = existing?.id ?: "custom_${System.currentTimeMillis()}"
+        val identity = AiIdentity(id = id, name = name.trim(), prompt = prompt.trim(), isBuiltIn = false)
+        settingsManager.saveCustomIdentity(identity)
+        // Auto-select the newly saved identity
+        settingsManager.setSelectedIdentityId(id)
+        _settingsUiState.update {
+            it.copy(
+                customIdentities = settingsManager.getCustomIdentities(),
+                selectedIdentityId = id,
+                showCustomIdentityEditor = false,
+                editingIdentity = null,
+            )
+        }
+    }
+
+    fun deleteCustomIdentity(id: String) {
+        settingsManager.deleteCustomIdentity(id)
+        _settingsUiState.update {
+            it.copy(
+                customIdentities = settingsManager.getCustomIdentities(),
+                selectedIdentityId = settingsManager.getSelectedIdentityId(),
+            )
+        }
     }
 
     fun toggleDynamicPrompts(enabled: Boolean) {
@@ -722,7 +771,13 @@ class AiAssistantViewModel @Inject constructor(
                 2. Use **bold** for emphasis and bullet points for lists.
                 3. Be punchy, professional, and actionable.
                 4. Ground your advice in real fitness data."""
-            } else null
+            } else {
+                // Use selected identity prompt (null → use default repo system prompt)
+                val identityId = _settingsUiState.value.selectedIdentityId
+                val allIdentities = AiSettingsHelper.builtInIdentities + _settingsUiState.value.customIdentities
+                val identityPrompt = allIdentities.firstOrNull { it.id == identityId }?.prompt
+                identityPrompt?.takeIf { it.isNotBlank() }
+            }
 
             chatRepository.getChatResponse(
                 prompt = text,

@@ -32,6 +32,7 @@ sealed class Screen(val route: String) {
         fun createRoute(chatId: Int = -1, isCoachMode: Boolean = false) =
             "ai_assistant?chatId=$chatId&isCoachMode=$isCoachMode"
     }
+    object AiSettings : Screen("ai_settings")
     object SmartSearch : Screen("smart_search")
     
     // Time & Productivity

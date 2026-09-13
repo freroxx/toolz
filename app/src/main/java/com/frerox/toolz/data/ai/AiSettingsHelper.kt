@@ -506,8 +506,8 @@ object AiSettingsHelper {
         "Claude" -> "sk-ant-..."
         "DeepSeek" -> "sk-..."
         "OpenRouter" -> "sk-or-..."
-        "OpenCode Zen" -> "Paste key from opencode.ai/auth"
-        "OpenCode Go" -> "Paste key from opencode.ai/auth"
+        "OpenCode Zen" -> "oc_..."
+        "OpenCode Go" -> "oc_..."
         else -> ""
     }
 
@@ -631,15 +631,15 @@ object AiSettingsHelper {
         ),
         "OpenCode Zen" to listOf(
             "Open opencode.ai/auth and sign in",
-            "Add billing details / buy credits (pay-as-you-go; the FREE models cost $0)",
-            "Copy your API key from the dashboard and paste it here",
+            "Add billing details / buy credits (pay-as-you-go; the FREE models cost \$0)",
+            "Go to the dashboard, copy your API key, and paste it in the field above",
             "Pick a FREE model to start: muse-spark-1.3-contributor-free, mimo-v2.5-free or big-pickle",
             "Track usage in the same dashboard; enable balance fallback to keep going past Go limits"
         ),
         "OpenCode Go" to listOf(
             "Open opencode.ai/auth and sign in",
-            "Subscribe to OpenCode Go ($10/month) — one subscription per workspace",
-            "Copy your Go API key from the dashboard and paste it here",
+            "Subscribe to OpenCode Go (\$10/month) — one subscription per workspace",
+            "Go to the dashboard, copy your Go API key, and paste it in the field above",
             "Pick a Go model (e.g. glm-5.3-flash) and chat",
             "Watch the 5-hour / weekly / monthly usage meters in the console so caps never surprise you"
         )
@@ -663,6 +663,35 @@ object AiSettingsHelper {
         "OpenRouter" to "A universal API hub that gives you a single place to access almost any model. Models ending in :free cost $0.",
         "OpenCode Zen" to "Curated gateway by the OpenCode team (opencode.ai/zen). Pay-as-you-go + several FREE models (Big Pickle, MiMo-V2.5 Free, Muse Spark Contributor Free). OpenAI-compatible: https://opencode.ai/zen/v1/chat/completions",
         "OpenCode Go" to "Low-cost \$10/mo subscription for reliable open coding models (GLM, Kimi, DeepSeek V4, Qwen, Muse Spark). OpenAI-compatible: https://opencode.ai/zen/go/v1/chat/completions"
+    )
+
+    // ── Built-in identities (preset system prompts) ──────────────────────
+
+    val builtInIdentities: List<AiIdentity> = listOf(
+        AiIdentity(
+            id = "none",
+            name = "None",
+            prompt = "",
+            isBuiltIn = true
+        ),
+        AiIdentity(
+            id = "short_direct",
+            name = "Short and Direct",
+            prompt = "Be brief and direct. Give short, clear answers without unnecessary elaboration.",
+            isBuiltIn = true
+        ),
+        AiIdentity(
+            id = "tutor",
+            name = "Tutor",
+            prompt = "You are a patient and encouraging tutor. Explain concepts clearly, use examples, and guide rather than just giving answers.",
+            isBuiltIn = true
+        ),
+        AiIdentity(
+            id = "creative_writer",
+            name = "Creative Writer",
+            prompt = "You are a creative writing assistant. Help with storytelling, characters, world-building, and prose in an imaginative, engaging style.",
+            isBuiltIn = true
+        ),
     )
 
     val disclaimerText: String

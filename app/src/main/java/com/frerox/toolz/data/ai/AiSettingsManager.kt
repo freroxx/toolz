@@ -49,6 +49,8 @@ class AiSettingsManager @Inject constructor(
         private const val KEY_CATALOG_JSON = "ai_catalog_json"
         private const val KEY_CATALOG_VERSION = "ai_catalog_version"
         private const val KEY_CATALOG_TIMESTAMP = "ai_catalog_timestamp"
+        private const val KEY_IDENTITY_ID = "selected_identity_id"
+        private const val KEY_CUSTOM_IDENTITIES = "custom_identities"
         private fun userKey(p: String) = "api_key_user_$p"
     }
 
@@ -61,6 +63,9 @@ class AiSettingsManager @Inject constructor(
     }
     private val mapAdapter by lazy {
         moshi.adapter<Map<String, String>>(Types.newParameterizedType(Map::class.java, String::class.java, String::class.java))
+    }
+    private val identityListAdapter by lazy {
+        moshi.adapter<List<AiIdentity>>(Types.newParameterizedType(List::class.java, AiIdentity::class.java))
     }
 
     // ── Settings ───────────────────────────────────────────────────────────
@@ -100,6 +105,32 @@ class AiSettingsManager @Inject constructor(
             .remove(KEY_NEVER_SHOW_PROMPTS)
             .remove(KEY_EDITED_PROMPTS)
             .apply()
+    }
+
+    // ── Identity ────────────────────────────────────────────────────────────
+
+    fun getSelectedIdentityId(): String = prefs.getString(KEY_IDENTITY_ID, "none") ?: "none"
+    fun setSelectedIdentityId(id: String) = prefs.edit().putString(KEY_IDENTITY_ID, id).apply()
+
+    fun getCustomIdentities(): List<AiIdentity> {
+        val json = prefs.getString(KEY_CUSTOM_IDENTITIES, null) ?: return emptyList()
+        return try { identityListAdapter.fromJson(json) ?: emptyList() } catch (e: Exception) { emptyList() }
+    }
+
+    fun saveCustomIdentity(identity: AiIdentity) {
+        val list = getCustomIdentities().toMutableList()
+        val idx = list.indexOfFirst { it.id == identity.id }
+        if (idx != -1) list[idx] = identity else list.add(identity)
+        try { prefs.edit().putString(KEY_CUSTOM_IDENTITIES, identityListAdapter.toJson(list)).apply() }
+        catch (e: Exception) { Log.e(TAG, "Identity serialize: ${e.message}") }
+    }
+
+    fun deleteCustomIdentity(id: String) {
+        val list = getCustomIdentities().filter { it.id != id }
+        try { prefs.edit().putString(KEY_CUSTOM_IDENTITIES, identityListAdapter.toJson(list)).apply() }
+        catch (e: Exception) { Log.e(TAG, "Identity delete serialize: ${e.message}") }
+        // If deleted identity was selected, fall back to "none"
+        if (getSelectedIdentityId() == id) setSelectedIdentityId("none")
     }
 
     private fun buildPrefs(): SharedPreferences = try {

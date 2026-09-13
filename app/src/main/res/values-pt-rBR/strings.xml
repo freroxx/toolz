@@ -868,6 +868,21 @@
     <string name="st_AiAssistantScreen_a3b4">Nenhum resumo disponível.</string>
     <string name="st_AiAssistantScreen_m3n4_v2">AÇÕES DE MENSAGEM</string>
 
+    <!-- AiSettingsScreen -->
+    <string name="st_AiSettings_title">Configurações de IA</string>
+    <string name="st_AiSettings_save">Salvar</string>
+    <string name="st_AiSettings_identity_title">IDENTIDADE</string>
+    <string name="st_AiSettings_identity_subtitle">Defina um prompt de sistema que determina o comportamento da IA</string>
+    <string name="st_AiSettings_none">Nenhum</string>
+    <string name="st_AiSettings_add_identity">Adicionar identidade personalizada</string>
+    <string name="st_AiSettings_identity_name">Nome da identidade</string>
+    <string name="st_AiSettings_identity_prompt">Prompt de sistema</string>
+    <string name="st_AiSettings_save_identity">Salvar identidade</string>
+    <string name="st_AiSettings_edit_identity">Editar identidade</string>
+    <string name="st_AiSettings_presets_title">PRESETS</string>
+    <string name="st_AiSettings_show_key">Mostrar chave</string>
+    <string name="st_AiSettings_hide_key">Ocultar chave</string>
+
     <!-- TabManagementScreen -->
     <string name="st_TabManagementScreen_8f1a">selecionado</string>
     <string name="st_TabManagementScreen_3d5b">Abas</string>

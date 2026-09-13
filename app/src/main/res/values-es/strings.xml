@@ -782,6 +782,21 @@
     <string name="st_AiAssistantScreen_a3b4">No hay resumen disponible.</string>
     <string name="st_AiAssistantScreen_m3n4_v2">ACCIONES DE MENSAJE</string>
 
+    <!-- AiSettingsScreen -->
+    <string name="st_AiSettings_title">Ajustes de IA</string>
+    <string name="st_AiSettings_save">Guardar</string>
+    <string name="st_AiSettings_identity_title">IDENTIDAD</string>
+    <string name="st_AiSettings_identity_subtitle">Define un prompt de sistema que determina cómo se comporta la IA</string>
+    <string name="st_AiSettings_none">Ninguno</string>
+    <string name="st_AiSettings_add_identity">Añadir identidad personalizada</string>
+    <string name="st_AiSettings_identity_name">Nombre de identidad</string>
+    <string name="st_AiSettings_identity_prompt">Prompt de sistema</string>
+    <string name="st_AiSettings_save_identity">Guardar identidad</string>
+    <string name="st_AiSettings_edit_identity">Editar identidad</string>
+    <string name="st_AiSettings_presets_title">PREAJUSTES</string>
+    <string name="st_AiSettings_show_key">Mostrar clave</string>
+    <string name="st_AiSettings_hide_key">Ocultar clave</string>
+
     <!-- TabManagementScreen -->
     <string name="st_TabManagementScreen_8f1a">seleccionado</string>
     <string name="st_TabManagementScreen_3d5b">Pestañas</string>
