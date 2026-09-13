@@ -16,6 +16,7 @@ import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import com.frerox.toolz.data.catalog.CatalogRepository
 import com.frerox.toolz.util.NotificationHelper
+import com.frerox.toolz.util.VideoQualityPolicy
 import com.frerox.toolz.util.YtVideoMerge
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
@@ -84,44 +85,73 @@ class VideoDownloadWorker @AssistedInject constructor(
             }
 
             var downloaded: File? = null
-            val wantsHd = !isMp3 && maxHeight > 720
+            var actualHeight: Int? = null
+            // Muxed/progressive streams cap at 360p on most videos (itag 22 gone),
+            // so any request >= 480p must try the DASH video+audio merge FIRST.
+            // Previously only >720p did, letting 720p silently save a 360p file.
+            val wantsHdMerge = !isMp3 && maxHeight >= 480
 
-            // HD path first for 1080p+ requests: muxed streams cap at 720p, so a direct
-            // resolve would silently return the wrong (lower) quality. Resolve the DASH
-            // video+audio pair and mux on-device for true HD with audio.
-            if (wantsHd) {
-                publishProgress(notificationId, "Preparing HD $safeTitle ($quality)...", 0.06f)
-                try {
-                    val pair = catalogRepository.resolveHdVideoPair(sourceUrl, maxHeight)
-                    if (pair != null) {
-                        val hdOut = File(applicationContext.cacheDir, "toolz_hd_${System.currentTimeMillis()}.mp4")
-                        publishProgress(notificationId, "Downloading HD $safeTitle (${pair.height}p)...", 0.08f)
-                        val muxed = YtVideoMerge.downloadAndMux(
-                            applicationContext, okHttpClient,
-                            pair.videoUrl, pair.audioUrl,
-                            File(applicationContext.cacheDir, "hd_merge"), hdOut,
-                        ) { progress ->
-                            val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
-                            val progressInt = (normalized * 100).toInt()
-                            notificationManager.notify(notificationId, createNotification(notificationId, "Downloading HD $safeTitle...", progressInt))
-                            progressChannel.trySend(normalized)
-                        }
-                        if (muxed && hdOut.exists() && hdOut.length() > 1024) {
-                            downloaded = hdOut
-                            android.util.Log.i("VideoDownloadWorker", "HD merge succeeded (${pair.height}p): ${hdOut.length()} bytes")
-                        } else {
-                            try { hdOut.delete() } catch (_: Exception) {}
-                        }
+            suspend fun downloadHdPair(ceiling: Int, label: String): Boolean {
+                publishProgress(notificationId, "Preparing HD $safeTitle ($label)...", 0.06f)
+                return try {
+                    val pair = catalogRepository.resolveHdVideoPair(sourceUrl, ceiling)
+                    if (pair == null) {
+                        android.util.Log.w("VideoDownloadWorker", "No DASH pair <= ${ceiling}p for $sourceUrl")
+                        return false
+                    }
+                    // Reject pairs far below the request — a 144p DASH for a 1080p
+                    // request is not "HD"; let yt-dlp try instead of mislabeling.
+                    // Accept if >= ~50% of requested height or >= 480p for HD asks.
+                    val acceptable = VideoQualityPolicy.isHdPairAcceptable(pair.height, ceiling)
+                    if (!acceptable) {
+                        android.util.Log.w("VideoDownloadWorker", "DASH pair ${pair.height}p too low for $label request — trying yt-dlp instead")
+                        return false
+                    }
+                    val hdOut = File(applicationContext.cacheDir, "toolz_hd_${System.currentTimeMillis()}.mp4")
+                    publishProgress(notificationId, "Downloading HD $safeTitle (${pair.height}p)...", 0.08f)
+                    val muxed = YtVideoMerge.downloadAndMux(
+                        applicationContext, okHttpClient,
+                        pair.videoUrl, pair.audioUrl,
+                        File(applicationContext.cacheDir, "hd_merge"), hdOut,
+                    ) { progress ->
+                        val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
+                        val progressInt = (normalized * 100).toInt()
+                        notificationManager.notify(notificationId, createNotification(notificationId, "Downloading HD $safeTitle (${pair.height}p)...", progressInt))
+                        progressChannel.trySend(normalized)
+                    }
+                    if (muxed && hdOut.exists() && hdOut.length() > 1024) {
+                        // Drop any previous low-res file before promoting HD.
+                        try { downloaded?.delete() } catch (_: Exception) {}
+                        downloaded = hdOut
+                        actualHeight = pair.height
+                        android.util.Log.i("VideoDownloadWorker", "HD merge succeeded (${pair.height}p for $label): ${hdOut.length()} bytes")
+                        true
+                    } else {
+                        try { hdOut.delete() } catch (_: Exception) {}
+                        false
                     }
                 } catch (e: Exception) {
                     android.util.Log.w("VideoDownloadWorker", "HD merge path failed, falling back", e)
+                    false
                 }
             }
 
-            // Primary: High-speed direct stream resolution via CatalogRepository
-            val directStreamUrl = try {
+            // HD path first for 480p+ requests: muxed streams cap at 360p, so a direct
+            // resolve would silently return the wrong (lower) quality. Resolve the DASH
+            // video+audio pair and mux on-device for true HD with audio.
+            if (wantsHdMerge) {
+                downloadHdPair(maxHeight, quality)
+            }
+
+            // Primary: High-speed direct stream resolution via CatalogRepository.
+            // For HD requests this is only a fallback when DASH merge failed, and a
+            // low muxed result is HELD (not saved) until yt-dlp has had its chance —
+            // otherwise a 360p muxed would shadow a real 720p/1080p yt-dlp result.
+            var heldLowRes: File? = null
+            var heldLowHeight: Int? = null
+            val directStream = try {
                 if (isMp3) {
-                    catalogRepository.resolveAudioStream(sourceUrl, "HIGH")
+                    catalogRepository.resolveAudioStream(sourceUrl, "HIGH")?.let { CatalogRepository.VideoStream(it, 0) }
                 } else {
                     catalogRepository.resolveVideoStream(sourceUrl, maxHeight)
                 }
@@ -130,57 +160,57 @@ class VideoDownloadWorker @AssistedInject constructor(
                 null
             }
 
-            if (!directStreamUrl.isNullOrBlank()) {
-                val ext = if (isMp3) "mp3" else "mp4"
-                val tempFile = File(applicationContext.cacheDir, "toolz_dl_${System.currentTimeMillis()}.$ext")
-                publishProgress(notificationId, "Downloading $safeTitle ($quality)...", 0.08f)
-                val ok = catalogRepository.downloadAudioStream(directStreamUrl, tempFile) { progress ->
-                    val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
-                    val progressInt = (normalized * 100).toInt()
-                    notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
-                    progressChannel.trySend(normalized)
-                }
-                if (ok && tempFile.exists() && tempFile.length() > 1024) {
-                    downloaded = tempFile
-                    android.util.Log.i("VideoDownloadWorker", "Direct stream download succeeded: ${tempFile.length()} bytes")
-                } else {
-                    try { tempFile.delete() } catch (_: Exception) {}
+            if (!directStream?.url.isNullOrBlank()) {
+                val directHeight = directStream!!.height
+                val isAcceptable = VideoQualityPolicy.isDirectAcceptable(directHeight, maxHeight, isMp3) ||
+                    downloaded != null // HD already won; direct is just a backup
+                if (isAcceptable && downloaded == null) {
+                    val ext = if (isMp3) "mp3" else "mp4"
+                    val tempFile = File(applicationContext.cacheDir, "toolz_dl_${System.currentTimeMillis()}.$ext")
+                    publishProgress(notificationId, "Downloading $safeTitle ($quality)...", 0.08f)
+                    val ok = catalogRepository.downloadAudioStream(directStream.url, tempFile) { progress ->
+                        val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
+                        val progressInt = (normalized * 100).toInt()
+                        notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
+                        progressChannel.trySend(normalized)
+                    }
+                    if (ok && tempFile.exists() && tempFile.length() > 1024) {
+                        downloaded = tempFile
+                        if (!isMp3) actualHeight = directHeight
+                        android.util.Log.i("VideoDownloadWorker", "Direct stream download succeeded (${directHeight}p for $quality): ${tempFile.length()} bytes")
+                    } else {
+                        try { tempFile.delete() } catch (_: Exception) {}
+                    }
+                } else if (!isMp3 && downloaded == null) {
+                    // Hold the low-res muxed (e.g. 360p for a 1080p ask) as LAST resort:
+                    // download it now so we have something, but keep trying yt-dlp first.
+                    android.util.Log.w("VideoDownloadWorker", "Direct muxed ${directHeight}p too low for $quality — holding as last resort, trying yt-dlp first")
+                    val tempFile = File(applicationContext.cacheDir, "toolz_low_${System.currentTimeMillis()}.mp4")
+                    val ok = try {
+                        catalogRepository.downloadAudioStream(directStream.url, tempFile) { _ -> }
+                    } catch (_: Exception) { false }
+                    if (ok && tempFile.exists() && tempFile.length() > 1024) {
+                        heldLowRes = tempFile
+                        heldLowHeight = directHeight
+                    } else {
+                        try { tempFile.delete() } catch (_: Exception) {}
+                    }
                 }
             }
 
             // HD merge fallback for SD requests too: if the direct muxed resolve failed,
             // a DASH pair at the same ceiling often still works (then muxed with audio).
-            if ((downloaded == null || downloaded.length() < 1024) && !isMp3 && !wantsHd) {
-                try {
-                    val pair = catalogRepository.resolveHdVideoPair(sourceUrl, maxHeight)
-                    if (pair != null) {
-                        val hdOut = File(applicationContext.cacheDir, "toolz_hd_${System.currentTimeMillis()}.mp4")
-                        publishProgress(notificationId, "Downloading $safeTitle (${pair.height}p)...", 0.08f)
-                        val muxed = YtVideoMerge.downloadAndMux(
-                            applicationContext, okHttpClient,
-                            pair.videoUrl, pair.audioUrl,
-                            File(applicationContext.cacheDir, "hd_merge"), hdOut,
-                        ) { progress ->
-                            val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
-                            val progressInt = (normalized * 100).toInt()
-                            notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
-                            progressChannel.trySend(normalized)
-                        }
-                        if (muxed && hdOut.exists() && hdOut.length() > 1024) {
-                            downloaded = hdOut
-                            android.util.Log.i("VideoDownloadWorker", "HD merge fallback succeeded (${pair.height}p)")
-                        } else {
-                            try { hdOut.delete() } catch (_: Exception) {}
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.w("VideoDownloadWorker", "HD merge fallback failed", e)
+            if ((downloaded?.length() ?: 0) < 1024 && !isMp3 && !wantsHdMerge) {
+                if (downloadHdPair(maxHeight, quality)) {
+                    // downloaded + actualHeight set inside helper
                 }
             }
 
             // Secondary fallback: yt-dlp reflection if direct resolution was not available
-            if (downloaded == null || downloaded.length() < 1024) {
-                android.util.Log.w("VideoDownloadWorker", "Attempting secondary fallback for $sourceUrl")
+            // (or was held back as too-low-res). yt-dlp handles DASH merge itself for
+            // true HD with audio when on-device merge failed.
+            if ((downloaded?.length() ?: 0) < 1024) {
+                android.util.Log.w("VideoDownloadWorker", "Attempting yt-dlp fallback for $sourceUrl ($quality)")
                 val outputDir = if (isMp3) File(applicationContext.cacheDir, "yt_dlp_mp3") else File(applicationContext.cacheDir, "yt_dlp_video")
                 outputDir.mkdirs()
                 val outputTemplate = File(outputDir, "toolz_dl_${System.currentTimeMillis()}_.%(ext)s").absolutePath
@@ -223,36 +253,65 @@ class VideoDownloadWorker @AssistedInject constructor(
                 }
 
                 if (ytdlpResult.isSuccess && ytdlpResult.getOrNull() != null) {
+                    try { downloaded?.delete() } catch (_: Exception) {}
                     downloaded = ytdlpResult.getOrNull()
+                    // yt-dlp format string caps at maxHeight; trust it, but we don't know
+                    // the exact height without probing — leave actualHeight null (= "≈ request").
+                    android.util.Log.i("VideoDownloadWorker", "yt-dlp fallback succeeded for $quality: ${downloaded?.length()} bytes")
                 } else {
                     // Try direct stream fetch from OkHttp fallback
-                    downloaded = tryFallbackDirectDownload(sourceUrl, isMp3, maxHeight, notificationId, safeTitle)
+                    val fb = tryFallbackDirectDownload(sourceUrl, isMp3, maxHeight, notificationId, safeTitle)
+                    if (fb != null && fb.length() > 1024) {
+                        try { downloaded?.delete() } catch (_: Exception) {}
+                        downloaded = fb
+                    } else {
+                        fb?.delete()
+                    }
                 }
+            }
+
+            // Last resort: the held low-res muxed (e.g. 360p for a 1080p ask). Only now,
+            // after DASH + yt-dlp both failed, do we accept a downgrade — and we label it.
+            if ((downloaded?.length() ?: 0) < 1024 && heldLowRes != null && (heldLowRes?.length() ?: 0) > 1024) {
+                android.util.Log.w("VideoDownloadWorker", "All HD paths failed for $quality — using held ${heldLowHeight}p file as last resort")
+                try { downloaded?.delete() } catch (_: Exception) {}
+                downloaded = heldLowRes
+                actualHeight = heldLowHeight
+                heldLowRes = null
+            } else {
+                try { heldLowRes?.delete() } catch (_: Exception) {}
+                heldLowRes = null
             }
 
             progressChannel.close()
             progressJob.cancel()
 
-            if (downloaded == null || downloaded.length() < 1024) {
+            val finalFile = downloaded
+            if (finalFile == null || finalFile.length() < 1024) {
                 showErrorNotification(notificationId, safeTitle, "Could not resolve or download stream")
-                downloaded?.delete()
+                finalFile?.delete()
                 return@withContext Result.failure()
+            }
+
+            val downgraded = !isMp3 && VideoQualityPolicy.isDowngrade(actualHeight, maxHeight)
+            if (downgraded) {
+                android.util.Log.w("VideoDownloadWorker", "Quality downgrade: requested $quality but saved ${actualHeight}p for $sourceUrl")
             }
 
             publishProgress(notificationId, "Saving file...", 0.92f)
             val displayName = if (isMp3) "$safeTitle.mp3" else "$safeTitle.mp4"
             val mime = if (isMp3) "audio/mpeg" else "video/mp4"
             val savedUri = if (isMp3) {
-                saveToMusic(downloaded, displayName, safeTitle)
+                saveToMusic(finalFile, displayName, safeTitle)
             } else {
-                saveToMovies(downloaded, displayName)
+                saveToMovies(finalFile, displayName)
             }
 
-            try { downloaded.delete() } catch (_: Exception) {}
+            try { finalFile.delete() } catch (_: Exception) {}
 
             if (savedUri != null) {
                 publishProgress(notificationId, "Download complete", 1.0f)
-                showCompletedNotification(notificationId, safeTitle, isMp3)
+                showCompletedNotification(notificationId, safeTitle, isMp3, requestedQuality = if (isMp3) null else quality, actualHeight = actualHeight)
                 Result.success(
                     workDataOf(
                         KEY_FILE_URI to savedUri,
@@ -432,8 +491,18 @@ class VideoDownloadWorker @AssistedInject constructor(
         return builder.build()
     }
 
-    private fun showCompletedNotification(id: Int, title: String, isMp3: Boolean = false) {
-        val text = if (isMp3) "$title • MP3 • Toolz" else "$title • Toolz"
+    private fun showCompletedNotification(id: Int, title: String, isMp3: Boolean = false, requestedQuality: String? = null, actualHeight: Int? = null) {
+        val qualitySuffix = when {
+            isMp3 -> " • MP3 • Toolz"
+            actualHeight != null && requestedQuality != null -> {
+                val reqH = requestedQuality.replace("p", "", ignoreCase = true).toIntOrNull()
+                if (reqH != null && actualHeight < reqH - 60) " • ${actualHeight}p (asked $requestedQuality) • Toolz"
+                else " • ${actualHeight}p • Toolz"
+            }
+            requestedQuality != null -> " • $requestedQuality • Toolz"
+            else -> " • Toolz"
+        }
+        val text = "$title$qualitySuffix"
         val titleText = if (isMp3) "✓ MP3 Download complete" else "✓ Download complete"
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle(titleText)

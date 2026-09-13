@@ -345,21 +345,36 @@ class MediaDownloaderViewModel @Inject constructor(
     }
 
     private fun buildLocalOptions(heights: List<Int>): List<QualityOption> {
-        val has1080 = 1080 in heights || heights.any { it > 720 }
-        val has1440 = heights.any { it >= 1440 }
-        val has2160 = heights.any { it >= 2160 }
+        // heights is now HONEST (only real playable heights, empty = probe failed).
+        // Empty → unknown: offer the full ladder with "if available" notes (old UX),
+        // default selection stays 720p. Non-empty → cap the ladder at the real max so
+        // we never promise 1080p on a 360p-only video (the old 640x360 bug).
+        if (heights.isEmpty()) {
+            return buildList {
+                add(QualityOption("1080p", "1080p", "Full HD • merged if available", isHd = true))
+                add(QualityOption("720p", "720p", "HD if available"))
+                add(QualityOption("480p", "480p", "SD if available"))
+                add(QualityOption("360p", "360p", "Low"))
+                add(QualityOption("240p", "240p", "Data saver"))
+                add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
+            }
+        }
+        val maxH = heights.maxOrNull() ?: 0
         return buildList {
-            if (has2160) add(QualityOption("2160p", "2160p", "Ultra HD • merged", isHd = true))
-            if (has1440) add(QualityOption("1440p", "1440p", "Quad HD • merged", isHd = true))
-            // 1080p always offered — worker merges DASH pair, falls back to 720p muxed.
-            add(QualityOption("1080p", "1080p", if (has1080) "Full HD • merged" else "Full HD • merged if available", isHd = true))
-            add(QualityOption("720p", "720p", "HD"))
-            add(QualityOption("480p", "480p", "SD"))
-            add(QualityOption("360p", "360p", "Low"))
+            if (maxH >= 2160 || heights.any { it >= 2160 }) add(QualityOption("2160p", "2160p", "Ultra HD • merged", isHd = true))
+            if (maxH >= 1440 || heights.any { it >= 1440 }) add(QualityOption("1440p", "1440p", "Quad HD • merged", isHd = true))
+            if (maxH >= 1080 || heights.any { it in 721..1200 }) add(QualityOption("1080p", "1080p", "Full HD • merged", isHd = true))
+            if (maxH >= 720) add(QualityOption("720p", "720p", "HD"))
+            if (maxH >= 480) add(QualityOption("480p", "480p", "SD"))
+            // Always keep a playable low fallback + audio.
+            add(QualityOption("360p", "360p", if (maxH < 480) "Best for this video" else "Low"))
             add(QualityOption("240p", "240p", "Data saver"))
             add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
         }
     }
+
+    /** Pure helper for unit tests: max playable height, 0 when unknown. */
+    internal fun maxAvailableHeight(heights: List<Int>): Int = heights.maxOrNull() ?: 0
 
     fun downloadSelected(context: Context) {
         val s = _ui.value

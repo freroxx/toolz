@@ -289,14 +289,34 @@ class CatalogRepository @Inject constructor(
             try {
                 val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
                 val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
-                val videoOnly = streamInfo.videoOnlyStreams?.filter {
-                    (it.resolution?.replace("p", "")?.toIntOrNull() ?: 0) <= maxHeight
-                }?.maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
+                fun npHeight(res: String?): Int {
+                    if (res == null) return 0
+                    val wxh = Regex("(\\d+)x(\\d+)").find(res)
+                    if (wxh != null) return wxh.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
+                    return Regex("(\\d{3,4})").find(res)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+                }
+                val candidates = streamInfo.videoOnlyStreams
+                    ?.filter { npHeight(it.resolution) in 1..maxHeight }
+                    ?.sortedWith(
+                        compareByDescending<org.schabi.newpipe.extractor.stream.VideoStream> {
+                            // Prefer mp4/avc for clean FFmpeg mux, then height, then bitrate.
+                            val fmt = it.format?.name?.lowercase() ?: ""
+                            when {
+                                fmt.contains("m4v") || fmt.contains("mp4") || fmt.contains("avc") -> 2
+                                fmt.contains("webm") || fmt.contains("vp9") || fmt.contains("av01") -> 1
+                                else -> 0
+                            }
+                        }.thenByDescending { npHeight(it.resolution) }
+                         .thenByDescending { it.bitrate }
+                    )
+                val videoOnly = candidates?.firstOrNull()
                 val audio = streamInfo.audioStreams?.sortedByDescending { it.averageBitrate }?.firstOrNull()
                 if (videoOnly?.content != null && audio?.content != null) {
-                    val h = videoOnly.resolution?.replace("p", "")?.toIntOrNull() ?: 0
-                    android.util.Log.i("CatalogRepo", "HD pair via NewPipe ${h}p for $videoId")
+                    val h = npHeight(videoOnly.resolution)
+                    android.util.Log.i("CatalogRepo", "HD pair via NewPipe ${h}p (${videoOnly.resolution} ${videoOnly.format?.name}) for $videoId (candidates=${candidates?.size})")
                     return@withContext HdVideoPair(videoOnly.content, audio.content, h)
+                } else {
+                    android.util.Log.w("CatalogRepo", "NewPipe HD pair empty for $videoId (videoOnly=${streamInfo.videoOnlyStreams?.size} audio=${streamInfo.audioStreams?.size})")
                 }
             } catch (e: Exception) {
                 android.util.Log.w("CatalogRepo", "NewPipe HD pair failed: ${e.message}")
@@ -305,8 +325,12 @@ class CatalogRepository @Inject constructor(
         }
 
     /**
-     * Available video heights for quality sheets (muxed + adaptive, distinct sorted).
-     * Used to show/hide 1080p/1440p/2160p rows without over-promising.
+     * Available video heights for quality sheets — ONLY real, currently playable
+     * heights (muxed + adaptive with direct urls). Returns empty when the probe
+     * fails (offline / InnerTube disabled / page scrape failed) so callers can
+     * show an "unknown, offer full ladder if-available" state instead of lying.
+     * Previously this injected a fake classic ladder, which made has1080 always
+     * true and let 1080p/720p presets silently save 360p files.
      */
     suspend fun availableVideoHeights(sourceUrl: String): List<Int> = withContext(Dispatchers.IO) {
         val videoId = sourceUrl.substringAfter("v=", "")
@@ -320,62 +344,85 @@ class CatalogRepository @Inject constructor(
             try {
                 val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
                 val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
-                streamInfo.videoStreams?.mapNotNullTo(heights) { it.resolution?.replace("p", "")?.toIntOrNull() }
-                streamInfo.videoOnlyStreams?.mapNotNullTo(heights) { it.resolution?.replace("p", "")?.toIntOrNull() }
+                streamInfo.videoStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
+                streamInfo.videoOnlyStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
             } catch (_: Exception) {}
         }
-        // Always offer the classic ladder; HD rows get gated by callers via_hdAvailable_.
-        val classic = listOf(240, 360, 480, 720, 1080)
-        (heights + classic).distinct().sorted()
+        heights.distinct().sorted()
+    }
+
+    companion object {
+        /** Parses "720p", "720p60", "1280x720" → 720. Returns null when unparseable. */
+        fun parseStreamHeight(resolution: String?): Int? {
+            if (resolution == null) return null
+            val wxh = Regex("(\\d+)x(\\d+)").find(resolution)
+            if (wxh != null) return wxh.groupValues.getOrNull(2)?.toIntOrNull()?.takeIf { it > 0 }
+            return Regex("(\\d{3,4})").find(resolution)?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 }
+        }
     }
 
     /**
      * Resolves a direct playable and downloadable video stream URL (MP4) for a YouTube video.
      * Uses InnerTube first, then falls back to NewPipeExtractor muxed/video streams.
+     *
+     * Returns the url WITH its real height so callers can reject a silent
+     * downgrade (e.g. 1080p requested but only 360p muxed exists).
      */
-    suspend fun resolveVideoStream(sourceUrl: String, maxHeight: Int = 720): String? = withContext(Dispatchers.IO) {
+    data class VideoStream(val url: String, val height: Int)
+
+    suspend fun resolveVideoStream(sourceUrl: String, maxHeight: Int = 720): VideoStream? = withContext(Dispatchers.IO) {
         val videoId = sourceUrl.substringAfter("v=", "")
             .substringBefore("&")
             .ifBlank { sourceUrl.substringAfterLast("/", "") }
 
         try {
             // Step 1: Try InnerTube resolution first (fastest)
-            val innerTubeUrl = innerTubeClient.resolveVideoStream(videoId, maxHeight)
-            if (innerTubeUrl != null) {
-                android.util.Log.i("CatalogRepo", "Resolved video stream via InnerTube for $videoId")
-                return@withContext innerTubeUrl
+            val innerTubeMuxed = innerTubeClient.resolveVideoStream(videoId, maxHeight)
+            if (innerTubeMuxed != null) {
+                android.util.Log.i("CatalogRepo", "Resolved video stream via InnerTube ${innerTubeMuxed.height}p (ceiling ${maxHeight}p) for $videoId")
+                return@withContext VideoStream(innerTubeMuxed.url, innerTubeMuxed.height)
             }
 
             // Step 2: Fallback to NewPipeExtractor
             val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
             val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
 
-            // Prefer muxed streams (video + audio in one stream, e.g. 720p or 360p MP4)
+            // Prefer muxed streams (video + audio in one stream, e.g. 720p or 360p MP4).
+            // NOTE: YouTube progressive rarely exceeds 360p now — callers must check
+            // .height against the request and prefer DASH merge / yt-dlp for HD.
             val muxed = streamInfo.videoStreams
             if (!muxed.isNullOrEmpty()) {
                 val matched = muxed
                     .filter { stream ->
-                        val res = stream.resolution?.replace("p", "")?.toIntOrNull() ?: 0
-                        res <= maxHeight
+                        val res = parseStreamHeight(stream.resolution) ?: 0
+                        res in 1..maxHeight
                     }
-                    .maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
-                    ?: muxed.minByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: Int.MAX_VALUE }
+                    .maxByOrNull { parseStreamHeight(it.resolution) ?: 0 }
+                    // Do NOT fall back to a *higher* stream than requested (would waste
+                    // bandwidth and mislabel); only fall back to the smallest playable
+                    // when everything exceeds the ceiling for very low requests.
+                    ?: muxed.minByOrNull { parseStreamHeight(it.resolution) ?: Int.MAX_VALUE }
+                        ?.takeIf { (parseStreamHeight(it.resolution) ?: Int.MAX_VALUE) > maxHeight && maxHeight < 360 }
 
                 if (matched?.content != null) {
+                    val h = parseStreamHeight(matched.resolution) ?: 0
                     android.util.Log.i("CatalogRepo", "Resolved muxed video stream via NewPipe (${matched.resolution}) for $videoId")
-                    return@withContext matched.content
+                    return@withContext VideoStream(matched.content, h)
                 }
             }
 
-            // Fallback to videoOnlyStreams
+            // Fallback to videoOnlyStreams (silent — no audio; worker should merge,
+            // only used for inline playback where ExoPlayer handles DASH separately).
             val videoOnly = streamInfo.videoOnlyStreams
             if (!videoOnly.isNullOrEmpty()) {
                 val matched = videoOnly
-                    .filter { (it.resolution?.replace("p", "")?.toIntOrNull() ?: 0) <= maxHeight }
-                    .maxByOrNull { it.resolution?.replace("p", "")?.toIntOrNull() ?: 0 }
+                    .filter { (parseStreamHeight(it.resolution) ?: 0) in 1..maxHeight }
+                    .maxByOrNull { parseStreamHeight(it.resolution) ?: 0 }
                     ?: videoOnly.firstOrNull()
                 if (matched?.content != null) {
-                    return@withContext matched.content
+                    val h = parseStreamHeight(matched.resolution) ?: 0
+                    android.util.Log.w("CatalogRepo", "Falling back to SILENT video-only ${h}p for $videoId (no audio)")
+                    return@withContext VideoStream(matched.content, h)
                 }
             }
             null

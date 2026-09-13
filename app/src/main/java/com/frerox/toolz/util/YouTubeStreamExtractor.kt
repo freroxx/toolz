@@ -22,7 +22,21 @@ object YouTubeStreamExtractor {
                 CatalogEntryPoint::class.java
             )
             val repository = entryPoint.catalogRepository()
-            repository.resolveVideoStream("https://www.youtube.com/watch?v=$videoId", maxHeight)
+            repository.resolveVideoStream("https://www.youtube.com/watch?v=$videoId", maxHeight)?.url
+        } catch (e: Exception) {
+            android.util.Log.e("YouTubeExtractor", "extract failed for $videoId", e)
+            null
+        }
+    }
+
+    /** Same as above but also returns the real height for honest UI labels. */
+    suspend fun extractYouTubeStream(videoId: String, maxHeight: Int = 720, context: Context): com.frerox.toolz.data.catalog.CatalogRepository.VideoStream? = withContext(Dispatchers.IO) {
+        try {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                CatalogEntryPoint::class.java
+            )
+            entryPoint.catalogRepository().resolveVideoStream("https://www.youtube.com/watch?v=$videoId", maxHeight)
         } catch (e: Exception) {
             android.util.Log.e("YouTubeExtractor", "extract failed for $videoId", e)
             null
