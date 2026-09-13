@@ -74,6 +74,37 @@ class CaffeinateBootReceiver : BroadcastReceiver() {
 
                 Log.d(TAG, "Persisted mode on boot: $mode")
 
+                // Repair: a crash/kill while caffeinate was active can leave
+                // SCREEN_OFF_TIMEOUT at MAX with no session to restore it.
+                // If we're not restoring a session, put the user's timeout back.
+                if (mode == "OFF") {
+                    try {
+                        val savedTimeout = try { settingsRepository.caffeinateSavedTimeout.first() } catch (_: Exception) { -1 }
+                        if (savedTimeout > 0 && savedTimeout != Int.MAX_VALUE) {
+                            try {
+                                if (android.provider.Settings.System.canWrite(context)) {
+                                    val current = try {
+                                        android.provider.Settings.System.getInt(
+                                            context.contentResolver,
+                                            android.provider.Settings.System.SCREEN_OFF_TIMEOUT, -1
+                                        )
+                                    } catch (_: Exception) { -1 }
+                                    if (current == Int.MAX_VALUE) {
+                                        android.provider.Settings.System.putInt(
+                                            context.contentResolver,
+                                            android.provider.Settings.System.SCREEN_OFF_TIMEOUT, savedTimeout
+                                        )
+                                        Log.d(TAG, "Restored stale MAX timeout to $savedTimeout ms")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Stale timeout repair failed", e)
+                            }
+                            try { settingsRepository.clearCaffeinateSavedTimeout() } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 if (mode == "INFINITE") {
                     val serviceIntent = Intent(context, CaffeinateService::class.java).apply {
                         this.action = CaffeinateService.ACTION_START_INFINITE

@@ -69,6 +69,7 @@ class CaffeinateService : Service() {
     private var reminderJob: Job? = null
     private var watchdogJob: Job? = null
     private var configJob: Job? = null
+    private var pendingAutoStopJob: Job? = null
 
     private var startTimeMillis: Long = 0
     private var currentMode: String = "OFF" // "OFF" | "INFINITE" | "AUTO"
@@ -77,6 +78,7 @@ class CaffeinateService : Service() {
 
     companion object {
         private const val TAG = "CaffeinateService"
+        private const val AUTO_EXIT_GRACE_MS = 2500L
         const val CHANNEL_STATUS_ID = "caffeinate_status"
         const val CHANNEL_ALERTS_ID = "caffeinate_alerts"
         private const val NOTIFICATION_STATUS_ID = 1001
@@ -183,6 +185,8 @@ class CaffeinateService : Service() {
                     requestTileUpdate()
                     return START_STICKY
                 }
+                pendingAutoStopJob?.cancel()
+                pendingAutoStopJob = null
                 // If auto was running, promote to manual infinite (keep original start time).
                 try {
                     ensureForeground()
@@ -192,6 +196,9 @@ class CaffeinateService : Service() {
                 startSession(isAuto = false)
             }
             ACTION_AUTO_START -> {
+                // Any real foreground report cancels a pending grace-stop.
+                pendingAutoStopJob?.cancel()
+                pendingAutoStopJob = null
                 // If user manually started INFINITE, don't downgrade or override mode
                 if (isRunning && currentMode == "INFINITE") {
                     // Already running manually in infinite mode, ignore auto start
@@ -211,11 +218,25 @@ class CaffeinateService : Service() {
                 }
             }
             ACTION_STOP -> {
+                pendingAutoStopJob?.cancel()
+                pendingAutoStopJob = null
                 stopSession()
             }
             ACTION_AUTO_STOP -> {
                 if (currentMode == "AUTO" || _isAutoRunningFlow.value || !isRunning) {
-                    stopSession()
+                    // Grace: transient exits (shade, recents, keyboard) cancel via
+                    // a follow-up AUTO_START. Screen-off already stops immediately
+                    // on the accessibility side + here via screenReceiver; this
+                    // grace only smooths app-to-app transitions.
+                    if (pendingAutoStopJob?.isActive == true) return START_STICKY
+                    Log.d(TAG, "AUTO_STOP received -> grace $AUTO_EXIT_GRACE_MS ms before stopping")
+                    pendingAutoStopJob = serviceScope.launch {
+                        delay(AUTO_EXIT_GRACE_MS)
+                        if (!isActive) return@launch
+                        if (currentMode != "AUTO" && !_isAutoRunningFlow.value) return@launch
+                        Log.d(TAG, "AUTO grace expired -> stopping")
+                        stopSession()
+                    }
                 }
             }
             ACTION_TIMED_STOP -> {
@@ -430,6 +451,8 @@ class CaffeinateService : Service() {
         }
 
         try { cancelAutoStopAlarm() } catch (_: Exception) {}
+        pendingAutoStopJob?.cancel()
+        pendingAutoStopJob = null
         configJob?.cancel()
         configJob = null
         watchdogJob?.cancel()
@@ -487,7 +510,8 @@ class CaffeinateService : Service() {
 
     /**
      * Watchdog: some OEMs (Xiaomi/MIUI, OnePlus, Samsung) aggressively release
-     * wakelocks or kill overlays. Re-acquire every 30s if still supposed to run.
+     * wakelocks, kill overlays, or revert the screen-timeout override.
+     * Re-acquire every 30s if still supposed to run.
      */
     private fun startWatchdog() {
         watchdogJob?.cancel()
@@ -503,6 +527,21 @@ class CaffeinateService : Service() {
                     if (overlayView == null) {
                         showKeepScreenOnOverlay()
                     }
+                    // OEMs / users can revert SCREEN_OFF_TIMEOUT behind our back.
+                    // Re-assert MAX while the session is active so dimming can't creep in.
+                    try {
+                        if (Settings.System.canWrite(this@CaffeinateService)) {
+                            val current = Settings.System.getInt(
+                                contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, -1
+                            )
+                            if (current != -1 && current != Int.MAX_VALUE) {
+                                Log.w(TAG, "Watchdog: timeout reverted to $current ms -> re-overriding to MAX")
+                                Settings.System.putInt(
+                                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, Int.MAX_VALUE
+                                )
+                            }
+                        }
+                    } catch (_: Exception) {}
                 } catch (e: Exception) {
                     Log.w(TAG, "Watchdog re-acquire failed", e)
                 }
@@ -660,23 +699,41 @@ class CaffeinateService : Service() {
     /**
      * Prevents screen dimming by overriding SCREEN_OFF_TIMEOUT to Int.MAX_VALUE.
      * Requires WRITE_SETTINGS permission (user grants via Settings > Apps > Special access).
-     * Falls back silently if not granted — wakelock still keeps screen on, just may dim.
+     * The original value is persisted in DataStore (not just RAM) so a process
+     * death can never leave the device stuck at MAX, and a stale MAX from a
+     * previous crash is detected and repaired on next start.
      */
     private fun overrideScreenTimeout() {
         try {
-            if (Settings.System.canWrite(this)) {
-                val current = Settings.System.getInt(
-                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000
-                )
-                if (current != Int.MAX_VALUE) {
-                    savedScreenTimeout = current
-                    Settings.System.putInt(
-                        contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, Int.MAX_VALUE
-                    )
-                    Log.d(TAG, "Screen timeout overridden ($current ms → MAX) to prevent dimming")
-                }
-            } else {
+            if (!Settings.System.canWrite(this)) {
                 Log.d(TAG, "WRITE_SETTINGS not granted — screen may still dim (wakelock is backup)")
+                return
+            }
+            val current = Settings.System.getInt(
+                contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000
+            )
+            if (current == Int.MAX_VALUE) {
+                // Stale MAX left by a previous crash/kill: try to restore the
+                // persisted original, otherwise fall back to a safe 30s.
+                serviceScope.launch {
+                    try {
+                        val persisted = try { settingsRepository.caffeinateSavedTimeout.first() } catch (_: Exception) { -1 }
+                        val fallback = if (persisted > 0 && persisted != Int.MAX_VALUE) persisted else 30_000
+                        savedScreenTimeout = fallback
+                        Log.w(TAG, "Stale MAX timeout detected -> will restore to $fallback ms on stop")
+                    } catch (_: Exception) {}
+                }
+                return
+            }
+            savedScreenTimeout = current
+            Settings.System.putInt(
+                contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, Int.MAX_VALUE
+            )
+            Log.d(TAG, "Screen timeout overridden ($current ms → MAX) to prevent dimming")
+            prefsScope.launch {
+                try { settingsRepository.setCaffeinateSavedTimeout(current) } catch (e: Exception) {
+                    Log.w(TAG, "Failed to persist saved timeout", e)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to override screen timeout", e)
@@ -684,16 +741,30 @@ class CaffeinateService : Service() {
     }
 
     /**
-     * Restores the screen timeout that was saved before [overrideScreenTimeout] was called.
+     * Restores the screen timeout saved by [overrideScreenTimeout].
+     * Falls back to the DataStore-persisted value if the in-memory copy was lost.
      */
     private fun restoreScreenTimeout() {
         try {
-            if (savedScreenTimeout > 0 && Settings.System.canWrite(this)) {
+            var toRestore = savedScreenTimeout
+            if (toRestore <= 0) {
+                try {
+                    toRestore = kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(1500L) {
+                            settingsRepository.caffeinateSavedTimeout.first()
+                        } ?: -1
+                    }
+                } catch (_: Exception) { toRestore = -1 }
+            }
+            if (toRestore > 0 && toRestore != Int.MAX_VALUE && Settings.System.canWrite(this)) {
                 Settings.System.putInt(
-                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, savedScreenTimeout
+                    contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, toRestore
                 )
-                Log.d(TAG, "Screen timeout restored to $savedScreenTimeout ms")
-                savedScreenTimeout = -1
+                Log.d(TAG, "Screen timeout restored to $toRestore ms")
+            }
+            savedScreenTimeout = -1
+            prefsScope.launch {
+                try { settingsRepository.clearCaffeinateSavedTimeout() } catch (_: Exception) {}
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to restore screen timeout", e)
@@ -917,6 +988,8 @@ class CaffeinateService : Service() {
         watchdogJob?.cancel()
         reminderJob?.cancel()
         notificationJob?.cancel()
+        pendingAutoStopJob?.cancel()
+        pendingAutoStopJob = null
         serviceScope.cancel()
         // NOTE: prefsScope is intentionally NOT cancelled here — a pending
         // stop-persist must be allowed to land.

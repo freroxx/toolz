@@ -54,6 +54,7 @@ class SettingsRepository @Inject constructor(
     private val CAFFEINATE_AUTO_PKGS = stringSetPreferencesKey("caffeinate_auto_pkgs")
     private val CAFFEINATE_START_TIME = longPreferencesKey("caffeinate_start_time")
     private val CAFFEINATE_MODE = stringPreferencesKey("caffeinate_mode") // OFF | INFINITE | AUTO
+    private val CAFFEINATE_SAVED_TIMEOUT = intPreferencesKey("caffeinate_saved_timeout")
 
     // PurgeShot — screenshot auto-deletion
     private val PURGESHOT_ENABLED = booleanPreferencesKey("purgeshot_enabled")
@@ -425,6 +426,7 @@ class SettingsRepository @Inject constructor(
     val caffeinateAutoPkgs: Flow<Set<String>> = dataStore.data.map { it[CAFFEINATE_AUTO_PKGS] ?: emptySet() }
     val caffeinateStartTime: Flow<Long> = dataStore.data.map { it[CAFFEINATE_START_TIME] ?: 0L }
     val caffeinateMode: Flow<String> = dataStore.data.map { it[CAFFEINATE_MODE] ?: "OFF" }
+    val caffeinateSavedTimeout: Flow<Int> = dataStore.data.map { it[CAFFEINATE_SAVED_TIMEOUT] ?: -1 }
 
     // PurgeShot flows
     val purgeShotEnabled: Flow<Boolean> = dataStore.data.map { it[PURGESHOT_ENABLED] ?: false }
@@ -502,6 +504,14 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setCaffeinateMode(mode: String) {
         dataStore.edit { it[CAFFEINATE_MODE] = mode }
+    }
+
+    suspend fun setCaffeinateSavedTimeout(timeoutMs: Int) {
+        dataStore.edit { it[CAFFEINATE_SAVED_TIMEOUT] = timeoutMs }
+    }
+
+    suspend fun clearCaffeinateSavedTimeout() {
+        dataStore.edit { it.remove(CAFFEINATE_SAVED_TIMEOUT) }
     }
 
     // Download Settings

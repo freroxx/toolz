@@ -547,7 +547,9 @@ private fun TableCellText(
     // Parse **bold** / *italic* / `code` / links so cells never show raw markers.
     val annotated = remember(raw) { inlineMarkdownNoCompose(raw) }
     Row(
-        modifier = Modifier.width(width),
+        modifier = Modifier
+            .width(width)
+            .height(IntrinsicSize.Max),
         verticalAlignment = Alignment.Top,
     ) {
         Box(
@@ -573,7 +575,6 @@ private fun TableCellText(
             Box(
                 modifier = Modifier
                     .width(1.dp)
-                    .height(IntrinsicSize.Max)
                     .fillMaxHeight()
                     .background(dividerColor.copy(alpha = 0.6f))
             )

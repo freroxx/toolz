@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monochrome notification icon for Caffeinate service.
+  Must be white-on-transparent only — Android tints it in the status bar.
+  24×24 dp coffee cup silhouette, clean and readable at small sizes.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Cup body -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6,7 L6,17 C6,18.1 6.9,19 8,19 L16,19 C17.1,19 18,18.1 18,17 L18,7 Z" />
+    <!-- Handle -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,9 L19.5,9 C20.33,9 21,9.67 21,10.5 L21,13.5 C21,14.33 20.33,15 19.5,15 L18,15 Z
+                          M18,9 L18,15 L19.5,15 C20.33,15 21,14.33 21,13.5 L21,10.5 C21,9.67 20.33,9 19.5,9 Z"
+        android:fillType="evenOdd" />
+    <!-- Saucer / base -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,20 L20,20 L20,21 L4,21 Z" />
+    <!-- Steam wisps -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M9,5 Q9.5,4 9,3 Q8.5,4 9,5 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,5 Q12.5,4 12,3 Q11.5,4 12,5 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15,5 Q15.5,4 15,3 Q14.5,4 15,5 Z" />
+</vector>

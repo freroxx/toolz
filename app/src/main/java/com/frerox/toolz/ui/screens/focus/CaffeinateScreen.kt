@@ -95,6 +95,16 @@ fun CaffeinateScreen(
     val performanceMode = LocalPerformanceMode.current
 
     var showAppsSheet by remember { mutableStateOf(false) }
+    var canWriteSettings by remember { mutableStateOf(true) }
+    var canDrawOverlays by remember { mutableStateOf(true) }
+
+    fun refreshSpecialPermissions() {
+        canWriteSettings = try { Settings.System.canWrite(context) } catch (_: Exception) { false }
+        canDrawOverlays = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(context) else true
+        } catch (_: Exception) { false }
+    }
+    LaunchedEffect(Unit) { refreshSpecialPermissions() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -103,6 +113,7 @@ fun CaffeinateScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.checkServiceStatus()
         viewModel.refreshAccessibilityStatus()
+        refreshSpecialPermissions()
     }
 
     // Blocking Accessibility Permission Dialog
@@ -235,6 +246,107 @@ fun CaffeinateScreen(
                                 )
                             }
                             Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+
+                // Dim-prevention permissions (non-blocking): without these the
+                // screen can still dim even while caffeinate holds a wakelock.
+                if (!canWriteSettings) {
+                    ExpressiveCard(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            try {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                )
+                            } catch (_: Exception) {
+                                try { context.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)) } catch (_: Exception) {}
+                            }
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.WbSunny, null, tint = MaterialTheme.colorScheme.tertiary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Prevent dimming",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                                Text(
+                                    "Allow modifying system settings so caffeinate can stop the screen from dimming",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.tertiary)
+                        }
+                    }
+                }
+                if (!canDrawOverlays) {
+                    ExpressiveCard(
+                        onClick = {
+                            vibrationManager?.vibrateClick()
+                            try {
+                                context.startActivity(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    )
+                                )
+                            } catch (_: Exception) {}
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Layers, null, tint = MaterialTheme.colorScheme.secondary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Display over other apps",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(
+                                    "Backup keep-awake layer for OEMs that throttle wakelocks",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.secondary)
                         }
                     }
                 }

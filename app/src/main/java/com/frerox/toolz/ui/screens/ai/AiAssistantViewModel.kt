@@ -991,15 +991,16 @@ Summarize this AI conversation as 3-6 concise bullet points.
                             resp = tryHelper(h, chatText)
                             break
                         } catch (e: Exception) {
-                            lastErr = e as? Exception ?: Exception(e.message)
+                            lastErr = e
                             Log.e(TAG, "Summarize failed (${h.provider} attempt ${attempt + 1}): ${e.message}")
                         }
-                        if (attempt == 0 && resp == null && lastErr != null && isPayloadTooLarge(lastErr!!)) {
+                        if (attempt == 0) {
                             // Payload-too-large → shrink once and retry same helper
                             // instead of burning the retry on the same oversized body.
-                            chatText = buildChatText(maxMessages = 15, perMessage = 200, maxChars = 4000)
-                        }
-                        if (attempt == 0 && resp == null) {
+                            val errCopy = lastErr
+                            if (errCopy != null && isPayloadTooLarge(errCopy)) {
+                                chatText = buildChatText(maxMessages = 15, perMessage = 200, maxChars = 4000)
+                            }
                             try { kotlinx.coroutines.delay(600L) } catch (_: Exception) {}
                         }
                     }

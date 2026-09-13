@@ -101,31 +101,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private var caffeinateEverything = false
     private var caffeinateAutoPkgs = emptySet<String>()
     private var caffeinateDebounceJob: Job? = null
-
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> {
-                    Log.d(TAG, "Screen off detected -> stopping auto caffeinate immediately")
-                    caffeinateDebounceJob?.cancel()
-                    stopAutoCaffeinate()
-                }
-                Intent.ACTION_SCREEN_ON -> {
-                    Log.d(TAG, "Screen on detected -> verifying lock screen")
-                    if (isLockScreen()) {
-                        stopAutoCaffeinate()
-                    }
-                }
-                Intent.ACTION_USER_PRESENT -> {
-                    Log.d(TAG, "User unlocked screen -> rechecking caffeinate")
-                    evaluateForegroundAppForCaffeinate()
-                }
-            }
-        }
-    }
+    private var caffeinatePendingStopJob: Job? = null
 
     companion object {
         private const val TAG = "FocusFlowService"
+        private const val CAFFEINATE_EXIT_GRACE_MS = 2500L
+        private const val CAFFEINATE_START_DEBOUNCE_MS = 300L
         private const val DISMISS_GRACE_PERIOD_MS = 3000L
         private val SYSTEM_UI_PACKAGES = setOf(
             "com.android.systemui",
@@ -203,6 +184,39 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             "com.niagara.launcher",
             "bitpit.launcher"
         )
+    }
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    Log.d(TAG, "Screen off detected -> stopping auto caffeinate immediately")
+                    caffeinateDebounceJob?.cancel()
+                    stopAutoCaffeinate(immediate = true)
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    Log.d(TAG, "Screen on detected -> verifying lock screen")
+                    if (isLockScreen()) {
+                        stopAutoCaffeinate()
+                    }
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    Log.d(TAG, "User unlocked screen -> rechecking caffeinate (with retry)")
+                    serviceScope.launch {
+                        // Right after unlock the foreground window is often still the
+                        // launcher/locker remnant. Retry so AUTO resumes when
+                        // unlocking straight into a target app.
+                        repeat(3) { attempt ->
+                            delay(if (attempt == 0) 600 else 1000)
+                            try {
+                                evaluateForegroundAppForCaffeinate()
+                                if (CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value) return@launch
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private val toolzPackage: String get() = packageName
@@ -502,34 +516,63 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Scans all active accessibility windows for known Samsung/OEM lock-screen packages.
-     * This catches cases where [KeyguardManager.isKeyguardLocked] incorrectly returns false
-     * on OneUI (Galaxy devices), MIUI, ColorOS, etc.
+     * Scans active accessibility windows for genuine lock-screen windows.
+     *
+     * Strict version: a bare `com.android.systemui` TYPE_SYSTEM window (status
+     * bar / nav bar / notification shade) must NEVER count as locked — those
+     * windows exist permanently, even inside normal apps. That was the root
+     * cause of "auto-caffeinate disabled everywhere": the old
+     * `isFocused || type == TYPE_SYSTEM` check matched the status bar and
+     * reported lockscreen while inside the target app.
      */
     private fun isOneUiLockScreenVisible(): Boolean {
+        val activeWindows = try { windows } catch (e: Exception) {
+            Log.w(TAG, "isOneUiLockScreenVisible error", e)
+            return false
+        } ?: return false
+        // Dedicated lock/AOD packages: their mere visible presence is a strong signal.
+        // Generic systemui/android: only counts when the window is FOCUSED and its
+        // title says keyguard/lockscreen/bouncer (i.e. the actual lock UI, not the shade).
+        val dedicatedLockPkgs = setOf(
+            "com.samsung.android.dynamiclock",
+            "com.samsung.android.app.aodservice",
+            "com.samsung.android.lockscreen",
+            "com.samsung.systemui.lockscreen",
+            "com.miui.aod",
+            "com.oplus.aod",
+            "com.coloros.lockscreen",
+            "com.oppo.lockscreen"
+        )
         try {
-            val activeWindows = windows ?: return false
             for (window in activeWindows) {
-                val pkg = window.root?.packageName?.toString() ?: continue
-                // Anything from the known lock-screen packages is a dead giveaway
-                if (pkg == "com.samsung.android.dynamiclock" ||
-                    pkg == "com.samsung.android.app.aodservice" ||
-                    pkg == "com.samsung.android.lockscreen" ||
-                    pkg == "com.samsung.systemui.lockscreen" ||
-                    pkg == "com.android.systemui" ||
-                    pkg == "com.miui.aod" ||
-                    pkg == "com.coloros.lockscreen" ||
-                    pkg == "com.oppo.lockscreen") {
-                    // Extra: make sure it's not just a quick-settings overlay on top of an app
-                    // by checking if this system window has focus or covers the screen
-                    if (window.isFocused || window.type == AccessibilityWindowInfo.TYPE_SYSTEM) {
+                val pkg = try { window.root?.packageName?.toString() } catch (_: Exception) { null } ?: continue
+                val title = try { window.title?.toString()?.lowercase() } catch (_: Exception) { null } ?: ""
+                val isLockTitle = title.contains("keyguard") || title.contains("lockscreen") ||
+                    title.contains("bouncer")
+                if (pkg in dedicatedLockPkgs) {
+                    // Dedicated AOD/lock windows are only alive on the lock screen.
+                    // Require focus for application windows to avoid matching cached entries,
+                    // but accept unfocused TYPE_SYSTEM AOD windows (AOD rarely takes focus).
+                    if (window.isFocused || window.type == AccessibilityWindowInfo.TYPE_SYSTEM || isLockTitle) {
+                        Log.d(TAG, "Lock detected via dedicated pkg=$pkg title='$title' focused=${window.isFocused} type=${window.type}")
                         return true
                     }
+                    continue
                 }
-                // Also catch any window whose class/title contains lock-screen keywords
-                val title = window.title?.toString()?.lowercase() ?: ""
-                if (title.contains("keyguard") || title.contains("lockscreen") ||
-                    title.contains("bouncer")) return true
+                if (pkg == "com.android.systemui" || pkg == "android") {
+                    // Status bar / nav bar / QS shade are systemui TYPE_SYSTEM but NOT lock.
+                    // Only the focused keyguard/bouncer window counts.
+                    if (window.isFocused && isLockTitle) {
+                        Log.d(TAG, "Lock detected via systemui focused lock title='$title'")
+                        return true
+                    }
+                    continue
+                }
+                // Any other window whose focused title names the lock UI.
+                if (window.isFocused && isLockTitle) {
+                    Log.d(TAG, "Lock detected via pkg=$pkg title='$title'")
+                    return true
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "isOneUiLockScreenVisible error", e)
@@ -612,29 +655,76 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun stopAutoCaffeinate() {
+    private fun stopAutoCaffeinate(immediate: Boolean = false) {
         if (CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value) {
-            Log.d(TAG, "Stopping auto caffeinate")
+            if (!immediate) {
+                // Grace period: transient system windows (shade, keyboard, recents,
+                // share sheet, rotation) must not kill AUTO instantly. Schedule the
+                // stop and let a returning target app cancel it.
+                if (caffeinatePendingStopJob?.isActive == true) return
+                Log.d(TAG, "Scheduling auto-caffeinate stop in $CAFFEINATE_EXIT_GRACE_MS ms (grace)")
+                caffeinatePendingStopJob = serviceScope.launch {
+                    delay(CAFFEINATE_EXIT_GRACE_MS)
+                    if (!isActive) return@launch
+                    if (!(CaffeinateService.isRunning && CaffeinateService.isAutoRunningFlow.value)) return@launch
+                    // Re-verify before actually stopping: the user may be back inside.
+                    val pkg = try { getActiveForegroundPackage() } catch (_: Exception) { null }
+                    if (pkg != null && !isOutsideApp(pkg, "")) {
+                        val stillTarget = caffeinateEverything || caffeinateAutoPkgs.contains(pkg)
+                        if (stillTarget) {
+                            Log.d(TAG, "Grace stop cancelled, back inside target=$pkg")
+                            return@launch
+                        }
+                    } else if (pkg != null && !isOutsideApp(pkg, "")) {
+                        return@launch
+                    }
+                    Log.d(TAG, "Grace expired -> stopping auto caffeinate")
+                    sendAutoStop()
+                }
+                return
+            }
+            Log.d(TAG, "Stopping auto caffeinate (immediate)")
+            caffeinatePendingStopJob?.cancel()
+            caffeinatePendingStopJob = null
+            sendAutoStop()
+        } else {
+            if (immediate) {
+                caffeinatePendingStopJob?.cancel()
+                caffeinatePendingStopJob = null
+            }
+        }
+    }
+
+    private fun sendAutoStop() {
+        try {
             val intent = Intent(this@FocusFlowAccessibilityService, CaffeinateService::class.java).apply {
                 action = CaffeinateService.ACTION_AUTO_STOP
             }
             startService(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "sendAutoStop failed", e)
         }
+    }
+
+    private fun cancelPendingAutoStop() {
+        caffeinatePendingStopJob?.cancel()
+        caffeinatePendingStopJob = null
     }
 
     private fun checkCaffeinate(packageName: String, className: String = "") {
         caffeinateDebounceJob?.cancel()
 
         if (isOutsideApp(packageName, className)) {
-            // User is outside apps: home screen, lockscreen, system UI, or Toolz:
-            // Stop immediately if running in auto mode!
+            // User is outside apps: home screen, lockscreen, system UI, or Toolz.
+            // Grace-stop if AUTO is running so transient windows don't kill it.
             stopAutoCaffeinate()
             return
         }
 
-        // Inside a regular application!
+        // Inside a regular application: any pending grace-stop is now stale.
+        cancelPendingAutoStop()
         caffeinateDebounceJob = serviceScope.launch {
-            delay(200)
+            delay(CAFFEINATE_START_DEBOUNCE_MS)
 
             if (isOutsideApp(packageName, className)) {
                 stopAutoCaffeinate()
@@ -862,6 +952,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         validationJob?.cancel()
         backgroundStopJob?.cancel()
         caffeinateDebounceJob?.cancel()
+        caffeinatePendingStopJob?.cancel()
         serviceScope.cancel()
         try {
             unregisterReceiver(screenReceiver)
