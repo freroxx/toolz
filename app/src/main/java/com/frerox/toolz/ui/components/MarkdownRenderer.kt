@@ -55,9 +55,40 @@ sealed class MdSegment {
     data class Code(val language: String, val code: String) : MdSegment()
     data class BulletItem(val content: AnnotatedString, val depth: Int = 0, val isChecked: Boolean? = null) : MdSegment()
     data class NumberedItem(val index: Int, val content: AnnotatedString) : MdSegment()
-    data class Table(val headers: List<String>, val rows: List<List<String>>) : MdSegment()
+    data class Table(
+        val headers: List<String>,
+        val rows: List<List<String>>,
+        val alignments: List<androidx.compose.ui.text.style.TextAlign> = emptyList()
+    ) : MdSegment()
     data class Blockquote(val content: AnnotatedString) : MdSegment()
     object Divider : MdSegment()
+}
+
+private fun splitTableRow(line: String): List<String> {
+    var t = line.trim()
+    if (t.startsWith("|")) t = t.drop(1)
+    if (t.endsWith("|")) t = t.dropLast(1)
+    // Preserve empty cells ("a || c") but trim each cell.
+    return t.split("|").map { it.trim() }
+}
+
+private fun isTableSeparator(line: String): Boolean {
+    val cells = splitTableRow(line)
+    if (cells.isEmpty()) return false
+    // Every cell must look like --- / :--- / ---: / :---: (3+ dashes)
+    return cells.all { it.matches(Regex("^:?-{3,}:?$")) }
+}
+
+private fun parseTableAlignments(separatorLine: String): List<androidx.compose.ui.text.style.TextAlign> {
+    return splitTableRow(separatorLine).map { cell ->
+        val left = cell.startsWith(":")
+        val right = cell.endsWith(":")
+        when {
+            left && right -> androidx.compose.ui.text.style.TextAlign.Center
+            right -> androidx.compose.ui.text.style.TextAlign.End
+            else -> androidx.compose.ui.text.style.TextAlign.Start
+        }
+    }
 }
 
 fun parseMarkdownToSegments(raw: String): List<MdSegment> {
@@ -142,16 +173,31 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
             continue
         }
 
-        // Tables
-        if (line.trim().startsWith("|") && i + 1 < lines.size && lines[i + 1].trim().startsWith("|") && lines[i + 1].contains("---")) {
-            val headers = line.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+        // Tables — support both "| a | b |" and "a | b" styles, with
+        // alignment row (| :--- | :---: | ---: |). Cells keep raw markdown
+        // so **bold** / `code` / links render inside the grid.
+        if (line.contains("|") && i + 1 < lines.size && isTableSeparator(lines[i + 1])) {
+            val rawHeaders = splitTableRow(line)
+            val alignments = parseTableAlignments(lines[i + 1])
             i += 2 // skip header and separator
             val rows = mutableListOf<List<String>>()
-            while (i < lines.size && lines[i].trim().startsWith("|")) {
-                rows.add(lines[i].split("|").map { it.trim() }.filter { it.isNotEmpty() })
+            while (i < lines.size && lines[i].contains("|") && lines[i].isNotBlank()
+                && !isTableSeparator(lines[i])
+            ) {
+                val t = lines[i].trimStart()
+                if (t.startsWith("#") || t.startsWith("```") || t.startsWith(">")) break
+                rows.add(splitTableRow(lines[i]))
                 i++
             }
-            segments += MdSegment.Table(headers, rows)
+            val colCount = (listOf(rawHeaders.size) + rows.map { it.size }).maxOrNull() ?: 0
+            if (colCount > 0) {
+                val headers = List(colCount) { idx -> rawHeaders.getOrNull(idx).orEmpty() }
+                val normRows = rows.map { row -> List(colCount) { idx -> row.getOrNull(idx).orEmpty() } }
+                val normAlign = List(colCount) { idx ->
+                    alignments.getOrNull(idx) ?: androidx.compose.ui.text.style.TextAlign.Start
+                }
+                segments += MdSegment.Table(headers, normRows, normAlign)
+            }
             continue
         }
 
@@ -159,10 +205,12 @@ fun parseMarkdownToSegments(raw: String): List<MdSegment> {
         val paragraphLines = mutableListOf<String>()
         while (i < lines.size) {
             val curr = lines[i]
-            if (curr.isBlank() || 
-                curr.trimStart().startsWith("#") || 
-                curr.trimStart().startsWith("```") || 
-                curr.trim().startsWith("|") ||
+            val startsTable = curr.contains("|") && i + 1 < lines.size &&
+                runCatching { isTableSeparator(lines[i + 1]) }.getOrDefault(false)
+            if (curr.isBlank() ||
+                curr.trimStart().startsWith("#") ||
+                curr.trimStart().startsWith("```") ||
+                startsTable ||
                 curr.matches(Regex("^(\\s*)[\\-\\*\\+] .+")) ||
                 curr.matches(Regex("^(\\d+)[\\.\\)] .+")) ||
                 curr.trim().matches(Regex("^[-*_]{3,}$"))
@@ -193,16 +241,23 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
         }
     }
 
-    scan("""\*\*([\s\S]+?)\*\*""", "bold")
-    scan("""\*([\s\S]+?)\*""", "italic")
+    // Priority: code + link first so ** inside `code` or [text](url) never
+    // steals the span. Bold supports both **x** and __x__; italic uses
+    // single-star/underscore guards so "**bold**" isn't misread as italic.
     scan("""`(.+?)`""", "code")
+    scan("""\[(.+?)\]\((.+?)\)""", "link")
+    scan("""\*\*([\s\S]+?)\*\*""", "bold")
+    scan("""__([\s\S]+?)__""", "bold")
+    scan("""(?<!\*)\*([^*\n]+?)\*(?!\*)""", "italic")
+    scan("""(?<!_)_([^_\n]+?)_(?!_)""", "italic")
     scan("""~~(.+?)~~""", "strike")
 
-    scan("""\[(.+?)\]\((.+?)\)""", "link")
-
+    // Same start → longest (most specific) wins; otherwise earliest wins.
+    // This keeps "**text**" as bold even though the italic regex could also
+    // match its inner stars, and keeps `code`/links ahead of bold.
     val clean = mutableListOf<Token>()
     var cursor = 0
-    for (tok in tokens.sortedBy { it.start }) {
+    for (tok in tokens.sortedWith(compareBy<Token> { it.start }.thenByDescending { it.end })) {
         if (tok.start >= cursor) {
             clean += tok
             cursor = tok.end
@@ -213,14 +268,16 @@ fun inlineMarkdownNoCompose(text: String): AnnotatedString = buildAnnotatedStrin
     for (tok in clean) {
         if (tok.start > cursor) append(text.substring(cursor, tok.start))
         when (tok.type) {
-            "bold"   -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(tok.content) }
-            "italic" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(tok.content) }
+            // Recursively parse inner content so "**bold with *italic* or `code`**"
+            // keeps both styles instead of leaking raw markers.
+            "bold"   -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(inlineMarkdownNoCompose(tok.content)) }
+            "italic" -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(inlineMarkdownNoCompose(tok.content)) }
             "code"   -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color.Black.copy(0.08f), color = Color(0xFF2962FF))) { append(tok.content) }
-            "strike" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(tok.content) }
+            "strike" -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(inlineMarkdownNoCompose(tok.content)) }
             "link"   -> {
                 pushStringAnnotation(tag = "URL", annotation = tok.url ?: "")
                 withStyle(SpanStyle(color = Color(0xFF2962FF), textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Bold)) {
-                    append(tok.content)
+                    append(inlineMarkdownNoCompose(tok.content))
                 }
                 pop()
             }
@@ -310,31 +367,15 @@ fun MarkdownSegment(
         }
         is MdSegment.Code -> MarkdownCodeBlock(language = seg.language, code = seg.code, modifier = modifier)
         is MdSegment.Table -> {
-            Column(modifier = modifier.padding(vertical = 8.dp).horizontalScroll(rememberScrollState())) {
-                Row(modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))) {
-                    seg.headers.forEach { header ->
-                        Text(
-                            text = header,
-                            style = bodyStyle.copy(fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(8.dp).widthIn(min = 100.dp),
-                            color = textColor
-                        )
-                    }
-                }
-                seg.rows.forEach { row ->
-                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(0.3f))
-                    Row {
-                        row.forEach { cell ->
-                            Text(
-                                text = cell,
-                                style = bodyStyle,
-                                modifier = Modifier.padding(8.dp).widthIn(min = 100.dp),
-                                color = textColor
-                            )
-                        }
-                    }
-                }
-            }
+            MarkdownTable(
+                headers = seg.headers,
+                rows = seg.rows,
+                alignments = seg.alignments,
+                baseFontSize = baseFontSize,
+                textColor = textColor,
+                onLinkClick = onLinkClick,
+                modifier = modifier,
+            )
         }
         is MdSegment.Blockquote -> {
             Row(modifier = modifier.padding(vertical = 8.dp).height(IntrinsicSize.Min)) {
@@ -381,6 +422,160 @@ fun MarkdownContent(
                 baseFontSize = baseFontSize,
                 textColor = textColor,
                 onLinkClick = onLinkClick
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aligned table grid — fixed per-column widths (computed from the longest
+// cell) so header + every row line up perfectly, markdown (**bold**, `code`,
+// links) parsed inside each cell, alignment row (:--- / :---: / ---:) honored,
+// zebra striping + card container for structure.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun MarkdownTable(
+    headers: List<String>,
+    rows: List<List<String>>,
+    alignments: List<androidx.compose.ui.text.style.TextAlign> = emptyList(),
+    baseFontSize: TextUnit = 15.sp,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    onLinkClick: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    if (headers.isEmpty()) return
+    val colCount = headers.size
+    val colAlign = List(colCount) { idx ->
+        alignments.getOrNull(idx) ?: androidx.compose.ui.text.style.TextAlign.Start
+    }
+    // Fixed width per column from longest raw cell → perfect vertical alignment.
+    // ~6.5dp per char at 14-15sp + padding, clamped to keep narrow tables compact
+    // and wide tables scrollable instead of squished.
+    val colWidths = remember(headers, rows) {
+        List(colCount) { c ->
+            val maxLen = (listOf(headers[c]) + rows.map { it.getOrNull(c).orEmpty() })
+                .maxOf { it.replace(Regex("""[*_`~\[\]()|]"""), "").trim().length }
+            (((maxLen * 6.5f) + 28f).coerceIn(96f, 220f)).dp
+        }
+    }
+    val headerStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = baseFontSize,
+        lineHeight = (baseFontSize.value * 1.4f).sp,
+        color = textColor,
+        fontWeight = FontWeight.Bold,
+    )
+    val cellStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontSize = baseFontSize,
+        lineHeight = (baseFontSize.value * 1.45f).sp,
+        color = textColor,
+    )
+    val border = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, border),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.background(
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                )
+            ) {
+                headers.forEachIndexed { c, h ->
+                    TableCellText(
+                        raw = h,
+                        style = headerStyle,
+                        textAlign = colAlign[c],
+                        width = colWidths[c],
+                        isHeader = true,
+                        showRightDivider = c < colCount - 1,
+                        dividerColor = border,
+                        onLinkClick = onLinkClick,
+                    )
+                }
+            }
+            HorizontalDivider(thickness = 1.dp, color = border)
+            // Rows
+            rows.forEachIndexed { r, row ->
+                Row(
+                    modifier = Modifier.background(
+                        if (r % 2 == 1) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+                        else Color.Transparent
+                    )
+                ) {
+                    row.forEachIndexed { c, cell ->
+                        TableCellText(
+                            raw = cell,
+                            style = cellStyle,
+                            textAlign = colAlign[c],
+                            width = colWidths[c],
+                            isHeader = false,
+                            showRightDivider = c < colCount - 1,
+                            dividerColor = border,
+                            onLinkClick = onLinkClick,
+                        )
+                    }
+                }
+                if (r < rows.lastIndex) {
+                    HorizontalDivider(thickness = 0.5.dp, color = border.copy(alpha = 0.7f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TableCellText(
+    raw: String,
+    style: androidx.compose.ui.text.TextStyle,
+    textAlign: androidx.compose.ui.text.style.TextAlign,
+    width: androidx.compose.ui.unit.Dp,
+    isHeader: Boolean,
+    showRightDivider: Boolean,
+    dividerColor: Color,
+    onLinkClick: (String) -> Unit,
+) {
+    // Parse **bold** / *italic* / `code` / links so cells never show raw markers.
+    val annotated = remember(raw) { inlineMarkdownNoCompose(raw) }
+    Row(
+        modifier = Modifier.width(width),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            contentAlignment = when (textAlign) {
+                androidx.compose.ui.text.style.TextAlign.Center -> Alignment.TopCenter
+                androidx.compose.ui.text.style.TextAlign.End -> Alignment.TopEnd
+                else -> Alignment.TopStart
+            },
+        ) {
+            androidx.compose.foundation.text.ClickableText(
+                text = annotated,
+                style = style.copy(textAlign = textAlign),
+                onClick = { offset ->
+                    annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()?.let { onLinkClick(it.item) }
+                }
+            )
+        }
+        if (showRightDivider) {
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(IntrinsicSize.Max)
+                    .fillMaxHeight()
+                    .background(dividerColor.copy(alpha = 0.6f))
             )
         }
     }

@@ -85,6 +85,7 @@ import com.frerox.toolz.ui.screens.math.*
 import com.frerox.toolz.ui.screens.media.BackgroundRemoverScreen
 import com.frerox.toolz.ui.screens.media.MusicPlayerScreen
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.media.isCurrentNoteTrack
 import com.frerox.toolz.ui.screens.media.FileConverterScreen
 import com.frerox.toolz.ui.screens.notepad.NotepadScreen
 import com.frerox.toolz.ui.screens.pdf.PdfViewModel
@@ -945,7 +946,12 @@ fun ToolzNavHost(
                 onNavigate = { route ->
                     navController.navigate(route)
                 },
-                settingsRepository = settingsRepository
+                settingsRepository = settingsRepository,
+                // Shared activity-level instance — the PdfReader destination
+                // renders from this same VM, so dashboard attachment opens
+                // must go through it (a back-stack-scoped default would
+                // open the doc on a detached instance and show the library).
+                pdfViewModel = pdfViewModel
             )
         }
 
@@ -1314,7 +1320,7 @@ fun ToolzNavHost(
                     // Note attachments loop the single track (repeat-one), not the queue.
                     val state = musicViewModel.uiState.value
                     val current = state.currentTrack
-                    if (current?.uri == uri) {
+                    if (current != null && isCurrentNoteTrack(current, uri)) {
                         musicViewModel.togglePlayPause()
                     } else {
                         val track = state.tracks.find { it.uri == uri }

@@ -548,6 +548,24 @@ class NotepadViewModel @Inject constructor(
         } catch (_: Exception) { }
     }
 
+    /**
+     * Removes the V2 attachment row(s) matching [uri] (legacy-slot removal
+     * path). The editor's thumbnail-card X button uses this so the hidden
+     * duplicate row can't resurface via reverse-heal on next open.
+     */
+    suspend fun removeAttachmentByUri(noteId: Int, uri: String) = withContext(Dispatchers.IO) {
+        try {
+            val rows = try {
+                attachmentDao.listForNote(noteId).filter { it.uri == uri }
+            } catch (_: Exception) {
+                return@withContext
+            }
+            rows.forEach { row ->
+                try { removeAttachment(row.id) } catch (_: Exception) { }
+            }
+        } catch (_: Exception) { }
+    }
+
     // ── AI: Summarize ──────────────────────────────────────────────────────
 
     /**

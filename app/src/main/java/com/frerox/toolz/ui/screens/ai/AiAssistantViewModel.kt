@@ -66,6 +66,12 @@ data class AiAssistantUiState(
     val loadingPhaseText  : String           = "",
     val isCoachMode       : Boolean          = false,
     val hasApiKey         : Boolean          = true,
+    // Applied (persisted) provider/model — the ones actually used for inference.
+    // The settings dialog edits a *draft* (AiSettingsUiState); the top-bar tag,
+    // avatar and vision-gate must always reflect these applied values, never the
+    // un-saved draft, so closing Settings without Apply can't desync the tag.
+    val activeProvider    : String           = "Groq",
+    val activeModel       : String           = "openai/gpt-oss-20b",
 )
 
 data class AiSettingsUiState(
@@ -179,18 +185,28 @@ class AiAssistantViewModel @Inject constructor(
 
     private fun loadSettings() {
         val provider = settingsManager.getAiProvider()
+        val model = settingsManager.getSelectedModel(provider)
         _settingsUiState.update {
             it.copy(
                 provider             = provider,
                 apiKey               = settingsManager.getRawApiKey(provider),
-                selectedModel        = settingsManager.getSelectedModel(provider),
+                selectedModel        = model,
                 dynamicPromptsEnabled = settingsManager.isDynamicPromptsEnabled(),
                 promptFormat         = settingsManager.getPromptFormat()
             )
         }
         val hasKey = settingsManager.resolveApiKey(provider).source != com.frerox.toolz.data.ai.ApiKeySource.NONE
-        _uiState.update { it.copy(isConfigured = settingsManager.isConfigured(), hasApiKey = hasKey) }
+        _uiState.update { it.copy(isConfigured = settingsManager.isConfigured(), hasApiKey = hasKey, activeProvider = provider, activeModel = model) }
         checkModelAvailability()
+    }
+
+    /**
+     * Discard un-applied edits in the settings dialog (user pressed Close
+     * without Apply). Re-loads the draft from persisted prefs so the top-bar
+     * tag and any other applied-state readers snap back to what's really used.
+     */
+    fun discardSettingsDraft() {
+        loadSettings()
     }
 
     fun toggleDynamicPrompts(enabled: Boolean) {
@@ -882,7 +898,7 @@ class AiAssistantViewModel @Inject constructor(
         _uiState.update { it.copy(isSummarizing = true, chatSummary = null) }
 
         viewModelScope.launch {
-            // Prefer current provider, else Groq, else Zen — 3 attempts max.
+            // Prefer current provider, else Groq (fast 20b), else Zen free — distinct only.
             data class Helper(val provider: String, val url: String, val key: String, val model: String)
             val helpers = buildList {
                 val current = AiSettingsHelper.canonicalProvider(settingsManager.getAiProvider())
@@ -891,18 +907,44 @@ class AiAssistantViewModel @Inject constructor(
                     if (curKey.isNotBlank()) add(Helper(current, url, curKey, settingsManager.getSelectedModel(current)))
                 }
                 val groqKey = settingsManager.getApiKey("Groq")
-                if (groqKey.isNotBlank()) add(Helper("Groq", GROQ_URL, groqKey, GROQ_MODEL_HARD))
+                if (groqKey.isNotBlank()) add(Helper("Groq", GROQ_URL, groqKey, GROQ_MODEL_EASY))
                 val zenKey = settingsManager.getApiKey("OpenCode Zen")
-                if (zenKey.isNotBlank()) add(Helper("OpenCode Zen", "https://opencode.ai/zen/v1/chat/completions", zenKey, "deepseek-v4-flash"))
-            }.take(3)
+                if (zenKey.isNotBlank()) add(Helper("OpenCode Zen", "https://opencode.ai/zen/v1/chat/completions", zenKey, "muse-spark-1.3-contributor-free"))
+            }.distinctBy { AiSettingsHelper.canonicalProvider(it.provider) }.take(3)
             if (helpers.isEmpty()) {
                 _uiState.update { it.copy(isSummarizing = false, chatSummary = "⚠ No API key available. Add a key in Settings.") }
                 return@launch
             }
 
-            val chatText = messages.takeLast(40).joinToString("\n") {
-                if (it.isUser) "User: ${it.text.take(400)}" else "AI: ${it.text.take(400)}"
+            // Budget the payload so long chats fit every provider's context:
+            // head (first 2, for the original topic) + tail (most recent),
+            // each message capped, total capped at ~8k chars (~2k tokens).
+            fun buildChatText(maxMessages: Int, perMessage: Int, maxChars: Int): String {
+                val picked: List<AiMessage> = if (messages.size <= maxMessages) {
+                    messages.takeLast(maxMessages)
+                } else {
+                    // Keep opening context + recent context when truncating long chats.
+                    val head = messages.take(2)
+                    val tail = messages.takeLast(maxMessages - 2)
+                    head + tail
+                }
+                val sb = StringBuilder()
+                // Walk from most-recent backwards so the newest (most relevant)
+                // content always survives the budget cut.
+                val ordered = picked.reversed()
+                var included = 0
+                for (m in ordered) {
+                    val line = (if (m.isUser) "User: " else "AI: ") + m.text.take(perMessage) + "\n"
+                    if (sb.length + line.length > maxChars) break
+                    sb.insert(0, line)
+                    included++
+                }
+                val omitted = messages.size - included
+                val prefix = if (omitted > 0) "(+$omitted earlier messages omitted for length)\n" else ""
+                return prefix + sb.toString()
             }
+
+            var chatText = buildChatText(maxMessages = 30, perMessage = 300, maxChars = 8000)
 
             val systemPrompt = """
 Summarize this AI conversation as 3-6 concise bullet points.
@@ -912,38 +954,58 @@ Summarize this AI conversation as 3-6 concise bullet points.
 - No preamble, just bullet points
             """.trimIndent()
 
+            suspend fun tryHelper(h: Helper, payload: String): com.frerox.toolz.data.ai.OpenAiResponse {
+                return withContext(Dispatchers.IO) {
+                    openAiService.getChatCompletion(
+                        url = h.url,
+                        authHeader = "Bearer ${h.key}",
+                        referer = if (h.provider.startsWith("OpenCode")) "https://github.com/frerox/toolz" else null,
+                        title = if (h.provider.startsWith("OpenCode")) "Toolz AI" else null,
+                        request = OpenAiRequest(
+                            model = h.model,
+                            messages = listOf(
+                                OpenAiMessage("system", MessageContent.Text(systemPrompt)),
+                                OpenAiMessage("user", MessageContent.Text(payload)),
+                            ),
+                            maxTokens = 300,
+                        )
+                    )
+                }
+            }
+
+            fun isPayloadTooLarge(e: Exception): Boolean {
+                val msg = (e.message ?: "").lowercase()
+                return msg.contains("413") || msg.contains("too large") ||
+                    msg.contains("context") && (msg.contains("length") || msg.contains("long") || msg.contains("exceed")) ||
+                    msg.contains("maximum context") || msg.contains("token limit")
+            }
+
             try {
                 var resp: com.frerox.toolz.data.ai.OpenAiResponse? = null
                 var lastErr: Exception? = null
-                for (h in helpers) {
-                    repeat(2) { attempt ->
+                outer@ for (h in helpers) {
+                    // Up to 2 attempts per helper, but NEVER re-call after success.
+                    for (attempt in 0 until 2) {
+                        if (resp != null) break
                         try {
-                            resp = withContext(Dispatchers.IO) {
-                                openAiService.getChatCompletion(
-                                    url = h.url,
-                                    authHeader = "Bearer ${h.key}",
-                                    referer = if (h.provider.startsWith("OpenCode")) "https://github.com/frerox/toolz" else null,
-                                    title = if (h.provider.startsWith("OpenCode")) "Toolz AI" else null,
-                                    request = OpenAiRequest(
-                                        model = h.model,
-                                        messages = listOf(
-                                            OpenAiMessage("system", MessageContent.Text(systemPrompt)),
-                                            OpenAiMessage("user", MessageContent.Text(chatText)),
-                                        ),
-                                        maxTokens = 256,
-                                    )
-                                )
-                            }
-                            return@repeat
+                            resp = tryHelper(h, chatText)
+                            break
                         } catch (e: Exception) {
                             lastErr = e as? Exception ?: Exception(e.message)
-                            Log.e(TAG, "Summarize failed (${h.provider}): ${e.message}")
-                            if (attempt == 0) try { kotlinx.coroutines.delay(500L) } catch (_: Exception) {}
+                            Log.e(TAG, "Summarize failed (${h.provider} attempt ${attempt + 1}): ${e.message}")
+                        }
+                        if (attempt == 0 && resp == null && lastErr != null && isPayloadTooLarge(lastErr!!)) {
+                            // Payload-too-large → shrink once and retry same helper
+                            // instead of burning the retry on the same oversized body.
+                            chatText = buildChatText(maxMessages = 15, perMessage = 200, maxChars = 4000)
+                        }
+                        if (attempt == 0 && resp == null) {
+                            try { kotlinx.coroutines.delay(600L) } catch (_: Exception) {}
                         }
                     }
-                    if (resp != null) break
+                    if (resp != null) break@outer
                 }
-                val summary = resp?.choices?.firstOrNull()?.message?.content?.trim()
+                val summary = resp?.choices?.firstOrNull()?.message?.content?.trim()?.takeIf { it.isNotBlank() }
                     ?: "Summary failed: ${lastErr?.message ?: "no helper responded"}"
                 _uiState.update { it.copy(isSummarizing = false, chatSummary = summary) }
             } catch (e: Exception) {

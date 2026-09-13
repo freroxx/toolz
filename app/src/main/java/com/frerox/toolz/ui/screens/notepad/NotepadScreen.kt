@@ -88,6 +88,7 @@ import com.frerox.toolz.R
 import com.frerox.toolz.data.notepad.Note
 import com.frerox.toolz.data.notepad.PdfAttachResult
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.media.isCurrentNoteTrack
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.toolzBackground
@@ -377,6 +378,10 @@ fun NotepadScreen(
     val deletedNotes     by viewModel.deletedNotes.collectAsStateWithLifecycle()
     val availablePdfs    by viewModel.availablePdfs.collectAsStateWithLifecycle()
     val musicState      by musicViewModel.uiState.collectAsState()
+    // Live ticker position for attachment pills. uiState.playbackPosition only
+    // moves on seek/stop — the 10 Hz transport flow is what the full player
+    // follows, and pills need the same or their slider/progress sits frozen.
+    val liveAudioPosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
     val offlineMode     by viewModel.offlineModeEnabled.collectAsStateWithLifecycle(false)
     val notepadAiEnabled by viewModel.notepadAiEnabled.collectAsStateWithLifecycle(true)
     val performanceMode = LocalPerformanceMode.current
@@ -960,9 +965,9 @@ fun NotepadScreen(
                                     )
                                 },
                             ) { index, note ->
-                                val isCurrentTrack = musicState.currentTrack?.uri == note.attachedAudioUri
+                                val isCurrentTrack = note.attachedAudioUri?.let { isCurrentNoteTrack(musicState.currentTrack, it) } == true
                                 val inlineProgress = if (isCurrentTrack && musicState.duration > 0L) {
-                                    (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
+                                    (liveAudioPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
                                 } else 0f
                                 val cardStyle = resolveNoteCardStyle(
                                     note      = note,
@@ -979,7 +984,7 @@ fun NotepadScreen(
                                         isCurrentTrack        = isCurrentTrack,
                                         currentTrackThumbnail = musicState.currentTrack?.thumbnailUri,
                                         inlineProgress        = inlineProgress,
-                                        audioPositionMs       = musicState.playbackPosition,
+                                        audioPositionMs       = if (isCurrentTrack) liveAudioPosition else 0L,
                                         audioDurationMs       = musicState.duration,
                                         onSeekAudio           = { frac ->
                                             musicViewModel.seekTo((frac * musicState.duration).toLong())
@@ -1183,10 +1188,10 @@ fun NotepadScreen(
                                         }
                                         note.attachedAudioUri?.let { uri ->
                                             val track = musicState.tracks.find { it.uri == uri }
-                                            val isCurrent = musicState.currentTrack?.uri == uri
+                                            val isCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
                                             val playing = musicState.isPlaying && isCurrent
                                             val prog = if (isCurrent && musicState.duration > 0L) {
-                                                (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
+                                                (liveAudioPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
                                             } else 0f
                                             // Inline preview — taps toggle play/pause here, no navigation.
                                             MusicPill(
@@ -1199,7 +1204,7 @@ fun NotepadScreen(
                                                 contentColor = onColor,
                                                 onClick = { onPlayAudio(uri) },
                                                 progress = prog,
-                                                positionMs = musicState.playbackPosition,
+                                                positionMs = if (isCurrent) liveAudioPosition else 0L,
                                                 durationMs = musicState.duration,
                                                 onSeek = { frac ->
                                                     musicViewModel.seekTo((frac * musicState.duration).toLong())
@@ -1216,7 +1221,9 @@ fun NotepadScreen(
                                     viewModel = viewModel,
                                     note = note,
                                     onOpenPdf = onViewPdf,
-                                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                                    // Legacy thumbnail card above already shows this URI.
+                                    excludeUris = setOfNotNull(note.attachedPdfUri)
                                 )
 
                                 androidx.compose.foundation.text.selection.SelectionContainer {
@@ -1978,7 +1985,9 @@ fun NoteViewerSheet(
                             modifier = Modifier.height(160.dp).padding(bottom = 20.dp),
                         )
                     }
-                    NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp))
+                    NotePdfAttachmentStrip(viewModel = viewModel, note = note, onOpenPdf = onViewPdf, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                        // Legacy thumbnail card above already shows this URI.
+                        excludeUris = setOfNotNull(note.attachedPdfUri))
 
                     // ── Note content (markdown) ────────────────────────────
                     val segments = remember(note.content) { parseMarkdownToSegments(note.content) }
@@ -2562,7 +2571,7 @@ fun AttachmentPickerDialog(
                     lazyItems(items) { (name, uri) ->
                         val isMusic  = title.contains("AUDIO", ignoreCase = true)
                         val track    = if (isMusic) musicState.tracks.find { it.uri == uri } else null
-                        val isPlaying = isMusic && musicState.isPlaying && musicState.currentTrack?.uri == uri
+                        val isPlaying = isMusic && musicState.isPlaying && isCurrentNoteTrack(musicState.currentTrack, uri)
 
                         val inf = rememberInfiniteTransition(label = "rot")
                         val rotationRaw by inf.animateFloat(
@@ -3070,19 +3079,24 @@ fun PdfPreview(uri: String, onClick: () -> Unit = {}, modifier: Modifier = Modif
  * Remake V2 — multi-attachment PDF strip for a saved note.
  * Observes note_attachments, merges nothing (legacy single-slot card stays
  * above for compat), opens at the stored page hint, swipe-free remove.
+ *
+ * @param excludeUris V2 rows whose URI is already rendered as a thumbnail
+ * card elsewhere (legacy slot) are skipped so the same PDF never shows
+ * twice on one screen.
  */
 @Composable
 fun NotePdfAttachmentStrip(
     viewModel: NotepadViewModel,
     note: com.frerox.toolz.data.notepad.Note,
     onOpenPdf: (String, Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    excludeUris: Set<String> = emptySet()
 ) {
     val noteId = note.id
     if (noteId == 0) return
     val scope = rememberCoroutineScope()
     val all by viewModel.attachmentsFor(noteId).collectAsStateWithLifecycle(initialValue = emptyList())
-    val items = remember(all) { all.filter { a -> a.kind == "PDF" } }
+    val items = remember(all, excludeUris) { all.filter { a -> a.kind == "PDF" && a.uri !in excludeUris } }
     LaunchedEffect(noteId) {
         try { viewModel.ensureLegacyAttachments(note) } catch (_: Exception) { }
     }
@@ -3896,6 +3910,9 @@ private fun FullExpressiveEditor(
     val offlineMode by viewModel.offlineModeEnabled.collectAsState()
     val notepadAiEnabled by viewModel.notepadAiEnabled.collectAsState()
     val musicState by musicViewModel.uiState.collectAsState()
+    // Same live-ticker rationale as the library screen above: the editor
+    // pill slider must follow transport position, not the seek-only uiState.
+    val liveEditorPosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
     val context = androidx.compose.ui.platform.LocalContext.current
     
     // Editor State
@@ -4293,7 +4310,16 @@ private fun FullExpressiveEditor(
                             Box {
                                 PdfPreview(uri = uri, onClick = { onViewPdf(uri, 0) }, modifier = Modifier.height(150.dp))
                                 ToolzExpressiveIconButton(
-                                    onClick = { currentNote = currentNote.copy(attachedPdfUri = null) },
+                                    onClick = {
+                                        currentNote = currentNote.copy(attachedPdfUri = null)
+                                        // Also drop the hidden V2 row for this URI so
+                                        // it can't resurface via reverse-heal.
+                                        if (currentNote.id != 0) {
+                                            editorScope.launch {
+                                                try { viewModel.removeAttachmentByUri(currentNote.id, uri) } catch (_: Exception) { }
+                                            }
+                                        }
+                                    },
                                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).size(36.dp),
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = Color.Black.copy(0.45f),
@@ -4309,10 +4335,10 @@ private fun FullExpressiveEditor(
                         StaggeredEntrance(index = 4) {
                             val editorTrack = availableTracks.find { it.uri == uri }
                                 ?: musicState.tracks.find { it.uri == uri }
-                            val editorIsCurrent = musicState.currentTrack?.uri == uri
+                            val editorIsCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
                             val editorIsPlaying = musicState.isPlaying && editorIsCurrent
                             val editorProgress = if (editorIsCurrent && musicState.duration > 0L) {
-                                (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
+                                (liveEditorPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
                             } else 0f
                             Box {
                                 MusicPill(
@@ -4342,7 +4368,7 @@ private fun FullExpressiveEditor(
                                         }
                                     },
                                     progress = editorProgress,
-                                    positionMs = musicState.playbackPosition,
+                                    positionMs = if (editorIsCurrent) liveEditorPosition else 0L,
                                     durationMs = musicState.duration,
                                     onSeek = { frac ->
                                         musicViewModel.seekTo((frac * musicState.duration).toLong())
@@ -4374,7 +4400,10 @@ private fun FullExpressiveEditor(
                     viewModel = viewModel,
                     note = currentNote,
                     onOpenPdf = onViewPdf,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    // Legacy thumbnail card above already shows this URI —
+                    // without this the same PDF renders as two cards.
+                    excludeUris = setOfNotNull(currentNote.attachedPdfUri)
                 )
             }
             Spacer(Modifier.height(100.dp))

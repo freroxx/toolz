@@ -86,6 +86,7 @@ import com.frerox.toolz.ui.screens.focus.CaffeinateViewModel
 import com.frerox.toolz.ui.screens.focus.FocusFlowViewModel
 import com.frerox.toolz.ui.screens.pdf.PdfViewModel
 import com.frerox.toolz.ui.screens.media.MusicPlayerViewModel
+import com.frerox.toolz.ui.screens.media.isCurrentNoteTrack
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.ui.screens.media.catalog.CatalogUiState
 import com.frerox.toolz.ui.screens.media.catalog.CatalogViewModel
@@ -1791,10 +1792,13 @@ private fun AudioAttachmentPill(
 ) {
     val vibrationManager = LocalVibrationManager.current
     val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
-    val isCurrent = musicState.currentTrack?.uri == uri
+    // Live transport position — uiState.playbackPosition only moves on
+    // seek/stop, so the progress bar would sit frozen without this.
+    val livePosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
+    val isCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
     val isPlaying = isCurrent && musicState.isPlaying
     val progress = if (isCurrent && musicState.duration > 0L) {
-        (musicState.playbackPosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
+        (livePosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
     Column(modifier = modifier) {
         Surface(

@@ -184,15 +184,38 @@ fun AiAssistantScreen(
     }
 
     LaunchedEffect(uiState.streamingText) {
-        if (uiState.streamingText.isNotEmpty() && uiState.messages.isNotEmpty())
-            listState.scrollToItem(uiState.messages.size - 1)
+        // Follow the stream at the REAL bottom (last item = spacer/error bubble),
+        // not messages.size-1 which lands at the start of the last AI bubble.
+        if (uiState.streamingText.isNotEmpty()) {
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) {
+                try { listState.scrollToItem(total - 1) } catch (_: Exception) {}
+            }
+        }
+    }
+    // New messages (user send / AI finish) also pin to the real bottom.
+    LaunchedEffect(uiState.messages.size, uiState.isLoading) {
+        if (uiState.messages.isNotEmpty()) {
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) {
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                // Auto-follow only when already near the bottom so reading
+                // history mid-chat doesn't yank the list on every new chunk.
+                if (lastVisible >= total - 3 || !listState.canScrollForward) {
+                    try { listState.scrollToItem(total - 1) } catch (_: Exception) {}
+                }
+            }
+        }
     }
     LaunchedEffect(uiState.quotaExceeded) { if (uiState.quotaExceeded) showQuotaDialog = true }
 
     // ── Overlays ──────────────────────────────────────────────────────────────
     if (showSettings) AiSettingsDialog(
         state = settingsUiState, savedConfigs = uiState.savedConfigs,
-        onDismiss = { showSettings = false; viewModel.cancelConfigSwitch() },
+        // Close without Apply must NOT leak the draft into the top-bar tag:
+        // discard un-saved provider/model edits so the tag keeps matching
+        // the actually-used (persisted) provider.
+        onDismiss = { showSettings = false; viewModel.cancelConfigSwitch(); viewModel.discardSettingsDraft() },
         onProviderChange = viewModel::updateProvider, onApiKeyChange = viewModel::updateApiKey,
         onModelChange = viewModel::updateModel, onIconChange = viewModel::updateIcon,
         onCustomIconClick = { configIconPicker.launch("image/*") },
@@ -222,7 +245,7 @@ fun AiAssistantScreen(
     if (showQuotaDialog) ModernAiDialog(
         title = stringResource(R.string.st_AiAssistantScreen_8f1a), icon = Icons.Rounded.LockClock,
         iconColor = MaterialTheme.colorScheme.error,
-        description = "${settingsUiState.provider} has reached its limit.",
+        description = "${uiState.activeProvider} has reached its limit.",
         supportingText = "Switch to ${uiState.suggestedProvider} or use your own API key.",
         primaryButtonText = "SWITCH TO ${uiState.suggestedProvider?.uppercase() ?: "OTHER"}",
         onPrimaryClick = { uiState.suggestedProvider?.let { viewModel.switchProvider(it) }; showQuotaDialog = false },
@@ -327,11 +350,13 @@ fun AiAssistantScreen(
             },
             bottomBar = {
                 // Online-only tool: no input while offline (gate below explains why).
+                // Vision gate uses the *applied* provider/model (what sendMessage
+                // will actually use), never the un-saved settings draft.
                 if (isOnline) AiInputBar(
                     inputText      = inputText,
                     isLoading      = uiState.isLoading,
                     selectedImage  = uiState.selectedImage,
-                    supportsVision = AiSettingsHelper.supportsVision(settingsUiState.provider, settingsUiState.selectedModel),
+                    supportsVision = AiSettingsHelper.supportsVision(uiState.activeProvider, uiState.activeModel),
                     performanceMode = performanceMode,
                     onInputChange  = { inputText = it },
                     onSend = {
@@ -357,7 +382,7 @@ fun AiAssistantScreen(
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     if (!uiState.hasApiKey && settingsUiState.apiKey.isBlank()) {
                         ApiKeyWarningBanner(
-                            provider = settingsUiState.provider,
+                            provider = uiState.activeProvider,
                             onConfigureClick = { showSettings = true }
                         )
                     }
@@ -381,13 +406,26 @@ fun AiAssistantScreen(
                                     isLoading       = uiState.isLoading,
                                     error           = uiState.error,
                                     listState       = listState,
-                                    currentConfig   = uiState.savedConfigs.find { it.provider == settingsUiState.provider && it.model == settingsUiState.selectedModel },
+                                    currentConfig   = uiState.savedConfigs.find { it.provider == uiState.activeProvider && it.model == uiState.activeModel },
                                     performanceMode = performanceMode,
                                     onRegenerate    = { viewModel.regenerateMessage(it) },
                                     onLinkClick     = onNavigateToBrowser,
                                     onLongPress     = { selectedMessageForActions = it },
                                     onShowSources   = { selectedMessageForSources = it },
-                                    onScrollBottom  = { scope.launch { listState.animateScrollToItem((uiState.messages.size - 1).coerceAtLeast(0)) } },
+                                    onScrollBottom  = {
+                                        scope.launch {
+                                            // Real bottom = last LazyColumn item (spacer after
+                                            // error/streaming bubbles), not messages.size-1 which
+                                            // stops at the start of the last AI response.
+                                            val total = listState.layoutInfo.totalItemsCount
+                                            if (total > 0) {
+                                                try { listState.animateScrollToItem(total - 1) }
+                                                catch (_: Exception) {
+                                                    try { listState.scrollToItem(total - 1) } catch (_: Exception) {}
+                                                }
+                                            }
+                                        }
+                                    },
                                     loadingPhaseText = uiState.loadingPhaseText,
                                     onDeepDive      = { viewModel.performDeepDive(it) },
                                     onDismissDeepDive = { viewModel.dismissDeepDive(it) },
@@ -433,7 +471,10 @@ private fun AiTopBar(
     onSummarize: () -> Unit,
     onRefreshTitle: () -> Unit,
 ) {
-    val providerColor = AiDesign.providerColor(settingsUiState.provider)
+    // Tag always reflects the *applied* provider (what inference actually uses),
+    // never the un-saved draft inside the settings dialog.
+    val appliedProvider = uiState.activeProvider
+    val providerColor = AiDesign.providerColor(appliedProvider)
         ?: MaterialTheme.colorScheme.primary
 
     val titleColor by animateColorAsState(providerColor, tween(500), label = "titleColor")
@@ -453,67 +494,93 @@ private fun AiTopBar(
                     interactionSource = remember { MutableInteractionSource() },
                 ),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    // Animated provider chip
-                    if (uiState.isCoachMode) {
-                        Surface(
-                            shape = SmallExpressiveShape,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                // Animated provider chip (applied provider only)
+                if (uiState.isCoachMode) {
+                    Surface(
+                        shape = SmallExpressiveShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
-                                Icon(
-                                    Icons.Rounded.AutoAwesome,
-                                    null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary,
-                                )
-                                Text(
-                                    stringResource(R.string.st_AiAssistantScreen_3d5b),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    letterSpacing = 0.8.sp,
-                                )
-                            }
-                        }
-                    } else {
-                        Surface(
-                            shape = SmallExpressiveShape,
-                            color = titleColor.copy(alpha = 0.14f),
-                            border = BorderStroke(1.dp, titleColor.copy(alpha = 0.22f)),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
-                                Icon(
-                                    getIconForConfig(settingsUiState.selectedIcon, settingsUiState.provider),
-                                    null, Modifier.size(12.dp), tint = titleColor,
-                                )
-                                Text(
-                                    settingsUiState.provider.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Black,
-                                    color = titleColor,
-                                    letterSpacing = 0.8.sp,
-                                )
-                            }
+                            Icon(
+                                Icons.Rounded.AutoAwesome,
+                                null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                stringResource(R.string.st_AiAssistantScreen_3d5b),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 0.8.sp,
+                            )
                         }
                     }
+                } else {
+                    Surface(
+                        shape = SmallExpressiveShape,
+                        color = titleColor.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, titleColor.copy(alpha = 0.22f)),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                getIconForConfig("AUTO", appliedProvider),
+                                null, Modifier.size(12.dp), tint = titleColor,
+                            )
+                            Text(
+                                appliedProvider.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Black,
+                                color = titleColor,
+                                letterSpacing = 0.8.sp,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+                // Chat title — same marquee + fading-edges pattern as the
+                // music player's now-playing title: long titles auto-scroll
+                // horizontally instead of collapsing to "...".
+                val chatTitle = uiState.chats.find { it.id == uiState.currentChatId }?.title
+                    ?: stringResource(R.string.st_AiAssistantScreen_9e2c)
+                if (!performanceMode && chatTitle.length > 18) {
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 170.dp)
+                            .horizontalFadingEdges(left = 12.dp, right = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = chatTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = AiDesign.textColor(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                velocity = 30.dp
+                            )
+                        )
+                    }
+                } else {
                     Text(
-                        text = uiState.chats.find { it.id == uiState.currentChatId }?.title ?: stringResource(R.string.st_AiAssistantScreen_9e2c),
+                        text = chatTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = AiDesign.textColor(),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.widthIn(max = 170.dp),
                     )
                 }
                 AnimatedVisibility(visible = uiState.isGeneratingTitle) {

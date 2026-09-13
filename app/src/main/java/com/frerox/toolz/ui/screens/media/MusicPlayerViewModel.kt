@@ -996,3 +996,17 @@ class MusicPlayerViewModel @Inject constructor(
         synchronized(pendingActions) { pendingActions.clear() }
     }
 }
+
+/**
+ * True when [current] is the player-side incarnation of the attachment [uri].
+ *
+ * Streaming/catalog songs are re-emitted with a resolved direct-stream URL
+ * ([MusicTrack.uri]) while [MusicTrack.sourceUrl] keeps the original that
+ * notes store in `attachedAudioUri` — plain `uri ==` comparison therefore
+ * never matches for attached songs, killing their slider, progress and
+ * play/pause toggle. Match either side.
+ */
+fun isCurrentNoteTrack(current: MusicTrack?, uri: String): Boolean {
+    if (current == null) return false
+    return current.uri == uri || current.sourceUrl == uri
+}
