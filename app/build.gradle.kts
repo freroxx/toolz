@@ -169,8 +169,6 @@ kotlin {
 }
 
 dependencies {
-    implementation(libs.androidx.foundation)
-    implementation(libs.androidx.foundation.layout)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     
     implementation(libs.androidx.core.ktx)
@@ -214,7 +212,6 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(libs.androidx.camera.core)
-    implementation(libs.zxing.android.embedded)
     implementation(libs.androidx.fragment.ktx)
     // PDF text layer — Apache-2.0, embedded-text extraction / TOC / metadata.
     // Rendering stays on android.graphics.pdf.PdfRenderer (zero native bloat);
@@ -244,7 +241,6 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.commonmark)
     implementation(libs.androidsvg)
-    implementation(libs.zxing.core)
     implementation(libs.androidx.webkit)
     
     // WorkManager
@@ -281,12 +277,10 @@ dependencies {
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
 
-    // FFmpeg & Lottie
+    // FFmpeg
     implementation(libs.ffmpeg.kit.standard)
     implementation(libs.youtubedl.android)
     implementation(libs.youtubedl.android.ffmpeg)
-    implementation(libs.smart.exception.java)
-    implementation(libs.lottie.compose)
 
     // Password Vault - SQLCipher & Biometrics
     implementation(libs.sqlcipher)

@@ -53,67 +53,12 @@
 -keep interface com.google.ai.client.generativeai.** { *; }
 -dontwarn com.google.ai.client.generativeai.**
 
-# MediaPipe & TFLite (Maximum Industrial Stability)
+# TFLite / LiteRT Runtime & JNI
 # ------------------------------------------------------------------------------
--keep class com.google.mediapipe.** { *; }
--keep interface com.google.mediapipe.** { *; }
--keepclassmembers class com.google.mediapipe.** { *; }
--dontwarn com.google.mediapipe.**
-
-# Explicitly keep all Task Vision classes and members
--keep class com.google.mediapipe.tasks.vision.** { *; }
--keepclassmembers class com.google.mediapipe.tasks.vision.** { *; }
--keep class com.google.mediapipe.tasks.core.** { *; }
--keepclassmembers class com.google.mediapipe.tasks.core.** { *; }
-
-# Explicitly ignore missing proto classes that MediaPipe references but doesn't always use
--dontwarn com.google.mediapipe.proto.CalculatorProfileProto**
--dontwarn com.google.mediapipe.proto.GraphTemplateProto**
-
-# Preserve all native methods and the annotations that mark them.
--keep @interface com.google.mediapipe.framework.NativeMethod
--keepclassmembers class * {
-    @com.google.mediapipe.framework.NativeMethod *;
-    native <methods>;
-}
-
-# CRITICAL: Prevent R8 from inlining call frames that MediaPipe's native JNI
-# stack-walker requires. The "no caller found on the stack for: gf2" error
-# occurs because R8 full-mode eliminates the Java frame that the native code
-# uses to verify its caller. This rule preserves the call-site descriptors.
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
 
-# Critical for stack walking and internal linkage
--keep class com.google.mediapipe.framework.NativeLibraryLoader { *; }
--keepclassmembers class com.google.mediapipe.framework.NativeLibraryLoader { *; }
-
-# Graph: keep ALL members AND specifically preserve static/native method names
-# so that the JNI stack-walker (which inspects method names) can find them.
--keep class com.google.mediapipe.framework.Graph { *; }
--keepclassmembers class com.google.mediapipe.framework.Graph { *; }
--keepclassmembernames class com.google.mediapipe.framework.Graph {
-    static <methods>;
-    native <methods>;
-    <methods>;
-}
-
--keep class com.google.mediapipe.framework.Packet { *; }
--keep class com.google.mediapipe.framework.AndroidPacketCreator { *; }
--keep class com.google.mediapipe.framework.AndroidAssetUtil { *; }
--keep class com.google.mediapipe.tasks.** { *; }
--keepclassmembers class com.google.mediapipe.tasks.** { *; }
-
-# TaskRunner: the other class involved in the "no caller found" stack check
--keep class com.google.mediapipe.tasks.core.TaskRunner { *; }
--keepclassmembernames class com.google.mediapipe.tasks.core.TaskRunner {
-    native <methods>;
-    static <methods>;
-    <methods>;
-}
-
-# TFLite Runtime
 -keep class org.tensorflow.** { *; }
 -keep interface org.tensorflow.** { *; }
 -dontwarn org.tensorflow.**
@@ -126,11 +71,6 @@
 -keep class com.google.ai.client.generativeai.type.FileDataPart { *; }
 -keep class com.google.ai.client.generativeai.type.FunctionCallPart { *; }
 -keep class com.google.ai.client.generativeai.type.FunctionResponsePart { *; }
-
-# MLKit (Barcode, Text Recognition, Common)
--keep class com.google.mlkit.** { *; }
--keep class com.google.android.gms.internal.mlkit_common.** { *; }
--dontwarn com.google.mlkit.**
 
 # ------------------------------------------------------------------------------
 # 4. DAGGER HILT & VIEWMODELS
@@ -188,7 +128,7 @@
 }
 
 # ------------------------------------------------------------------------------
-# 6. MEDIA3, CAMERA X & LOTTIE
+# 6. MEDIA3 & CAMERA X
 # ------------------------------------------------------------------------------
 
 -keep class androidx.media3.** { *; }
@@ -196,8 +136,6 @@
 
 -keep class androidx.camera.** { *; }
 -dontwarn androidx.camera.**
-
--keep class com.airbnb.lottie.** { *; }
 
 # ------------------------------------------------------------------------------
 # 7. COIL 3 (USES KOTLINX SERIALIZATION)

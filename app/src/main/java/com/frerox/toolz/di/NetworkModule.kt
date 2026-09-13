@@ -66,7 +66,11 @@ object NetworkModule {
         .writeTimeout(60, TimeUnit.SECONDS)
         .addInterceptor(
             HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                level = if (com.frerox.toolz.BuildConfig.DEBUG) {
+                    HttpLoggingInterceptor.Level.BODY
+                } else {
+                    HttpLoggingInterceptor.Level.NONE
+                }
             }
         )
         .build()
