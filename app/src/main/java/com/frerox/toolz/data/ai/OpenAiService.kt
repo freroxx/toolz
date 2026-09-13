@@ -118,11 +118,15 @@ interface OpenAiService {
 
     /**
      * OpenAI-compatible models list endpoint.
+     * Referer/Title are forwarded for OpenRouter + OpenCode gateways that use
+     * them for attribution / routing. Nulls are omitted by Retrofit.
      */
     @retrofit2.http.GET
     suspend fun listModels(
         @Url url: String,
         @Header("Authorization") authHeader: String,
+        @Header("HTTP-Referer") referer: String? = null,
+        @Header("X-Title") title: String? = null,
     ): OpenAiModelsResponse
 
     /**

@@ -93,6 +93,13 @@ class CaffeinateViewModel @Inject constructor(
     init {
         checkServiceStatus()
         refreshAccessibilityStatus()
+        // Reactive sync: tile / auto-stop / accessibility can change the service
+        // behind the UI's back. Collect the service flow so the screen never drifts.
+        viewModelScope.launch {
+            CaffeinateService.isRunningFlow.collect { running ->
+                _isServiceRunning.value = running
+            }
+        }
         // Sync Room apps to DataStore on first launch if DataStore autoPkgs is empty but Room has items
         viewModelScope.launch {
             val currentPkgs = autoPkgs.first()
@@ -180,25 +187,40 @@ class CaffeinateViewModel @Inject constructor(
     fun setReminderEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setCaffeinateReminderEnabled(enabled)
+            notifyServiceConfigChanged()
         }
     }
 
     fun setReminderMins(mins: Int) {
         viewModelScope.launch {
             settingsRepository.setCaffeinateReminderMins(mins)
+            notifyServiceConfigChanged()
         }
     }
 
     fun setAutoStopEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setCaffeinateAutoStopEnabled(enabled)
+            notifyServiceConfigChanged()
         }
     }
 
     fun setAutoStopMins(mins: Int) {
         viewModelScope.launch {
             settingsRepository.setCaffeinateAutoStopMins(mins)
+            notifyServiceConfigChanged()
         }
+    }
+
+    /** Pushes live config to a running session so sliders apply without restart. */
+    private fun notifyServiceConfigChanged() {
+        if (!CaffeinateService.isRunning) return
+        try {
+            val intent = Intent(context, CaffeinateService::class.java).apply {
+                action = CaffeinateService.ACTION_UPDATE_CONFIG
+            }
+            context.startService(intent)
+        } catch (_: Exception) {}
     }
 
     fun toggleEverything() {

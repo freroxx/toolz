@@ -318,7 +318,7 @@
         <service
             android:name=".service.CaffeinateTileService"
             android:label="Toolz: Caffeinate"
-            android:icon="@drawable/ic_coffee"
+            android:icon="@drawable/ic_tile_caffeinate"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
             <intent-filter>

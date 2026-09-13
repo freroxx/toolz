@@ -71,6 +71,7 @@ class FlashlightService : Service() {
 
     @Inject lateinit var dataStore:  DataStore<Preferences>
     @Inject lateinit var repository: FlashlightRepository
+    @Inject lateinit var settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
 
     private val scope          = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var cam:  CameraManager
@@ -103,6 +104,7 @@ class FlashlightService : Service() {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     private var persistentNotif = false
+    private var backgroundNotificationsEnabled = true
 
     private val torchCallback = object : CameraManager.TorchCallback() {
         override fun onTorchModeChanged(id: String, enabled: Boolean) {
@@ -149,6 +151,25 @@ class FlashlightService : Service() {
                         if (!isOn.value) stopSelf()
                     }
                 }
+        }
+        scope.launch {
+            try {
+                settingsRepository.backgroundNotificationsEnabled.collect { enabled ->
+                    backgroundNotificationsEnabled = enabled
+                    // Live-apply: hide or restore flashlight ongoing notification.
+                    if (!enabled) {
+                        try {
+                            getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
+                        } catch (_: Exception) {}
+                        // Keep torch alive but demote so no notification lingers.
+                        if (isOn.value || persistentNotif) {
+                            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+                        }
+                    } else {
+                        if (isOn.value || persistentNotif) runAsForeground()
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -522,6 +543,13 @@ class FlashlightService : Service() {
     }
 
     private fun updateNotification() {
+        // Background master switch hides flashlight ongoing/persistent notification.
+        if (!backgroundNotificationsEnabled) {
+            try {
+                getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
+            } catch (_: Exception) {}
+            return
+        }
         if (!isOn.value && !persistentNotif) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             return
@@ -531,6 +559,29 @@ class FlashlightService : Service() {
     }
 
     private fun runAsForeground() {
+        // Background toggle OFF → satisfy FGS start, then hide immediately (torch stays on).
+        if (!backgroundNotificationsEnabled) {
+            try {
+                val placeholder = buildNotification()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    val type = if (isOn.value) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                    } else {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    }
+                    try {
+                        startForeground(NOTIF_ID, placeholder, type)
+                    } catch (_: Exception) {
+                        startForeground(NOTIF_ID, placeholder)
+                    }
+                } else {
+                    startForeground(NOTIF_ID, placeholder)
+                }
+            } catch (_: Exception) {}
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            try { getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID) } catch (_: Exception) {}
+            return
+        }
         val notif = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ requires a specific type. 

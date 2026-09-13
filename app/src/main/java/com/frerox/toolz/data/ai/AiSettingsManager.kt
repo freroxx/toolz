@@ -31,8 +31,6 @@ import javax.inject.Singleton
 private const val TAG = "AiSettingsManager"
 private const val PREFS_NAME = "ai_settings"
 
-private val PROVIDERS = listOf("Gemini", "ChatGPT", "Groq", "Claude", "DeepSeek", "OpenRouter")
-
 enum class ApiKeySource { USER, NONE }
 data class ResolvedApiKey(val value: String, val source: ApiKeySource)
 
@@ -48,6 +46,9 @@ class AiSettingsManager @Inject constructor(
         private const val KEY_NEVER_SHOW_PROMPTS = "never_show_prompts"
         private const val KEY_EDITED_PROMPTS = "edited_prompts"
         private const val KEY_PROMPT_FORMAT = "prompt_format"
+        private const val KEY_CATALOG_JSON = "ai_catalog_json"
+        private const val KEY_CATALOG_VERSION = "ai_catalog_version"
+        private const val KEY_CATALOG_TIMESTAMP = "ai_catalog_timestamp"
         private fun userKey(p: String) = "api_key_user_$p"
     }
 
@@ -174,7 +175,34 @@ class AiSettingsManager @Inject constructor(
         catch (e: Exception) { Log.e(TAG, "Config serialize: ${e.message}") }
     }
 
-    fun isConfigured(): Boolean = PROVIDERS.any { resolveApiKey(it).source != ApiKeySource.NONE }
+    fun isConfigured(): Boolean =
+        AiSettingsHelper.providers.any { resolveApiKey(it).source != ApiKeySource.NONE }
+
+    // ── Server model catalog cache ───────────────────────────────────────
+    // Raw JSON + version + fetch timestamp for GET /api/models. Version
+    // guard lives in AiCatalogRepository; these are dumb storage.
+
+    fun getCachedCatalogJson(): String? = prefs.getString(KEY_CATALOG_JSON, null)
+
+    fun getCachedCatalogVersion(): Int = prefs.getInt(KEY_CATALOG_VERSION, 0)
+
+    fun getCachedCatalogTimestamp(): Long = prefs.getLong(KEY_CATALOG_TIMESTAMP, 0L)
+
+    fun saveCachedCatalog(json: String, version: Int, timestamp: Long = System.currentTimeMillis()) {
+        prefs.edit()
+            .putString(KEY_CATALOG_JSON, json)
+            .putInt(KEY_CATALOG_VERSION, version)
+            .putLong(KEY_CATALOG_TIMESTAMP, timestamp)
+            .apply()
+    }
+
+    fun clearCachedCatalog() {
+        prefs.edit()
+            .remove(KEY_CATALOG_JSON)
+            .remove(KEY_CATALOG_VERSION)
+            .remove(KEY_CATALOG_TIMESTAMP)
+            .apply()
+    }
 
     fun exportPortableSettings(): Map<String, String> {
         return prefs.all.mapNotNull { (key, value) ->

@@ -65,6 +65,7 @@ class ToolService : Service() {
     private var isGlobalNotificationsEnabled = true
     private var isTimerNotificationsEnabled = true
     private var isPomodoroNotificationsEnabled = true
+    private var isBackgroundNotificationsEnabled = true
 
     // Stopwatch State
     private val _stopwatchTime = MutableStateFlow(0L)
@@ -196,11 +197,15 @@ class ToolService : Service() {
             combine(
                 settingsRepository.notificationsEnabled,
                 settingsRepository.timerNotifications,
-                settingsRepository.pomodoroNotifications
-            ) { global, timer, pomodoro -> Triple(global, timer, pomodoro) }.collect { (global, timer, pomodoro) ->
-                isGlobalNotificationsEnabled = global
-                isTimerNotificationsEnabled = timer
-                isPomodoroNotificationsEnabled = pomodoro
+                settingsRepository.pomodoroNotifications,
+                settingsRepository.backgroundNotificationsEnabled
+            ) { global: Boolean, timer: Boolean, pomodoro: Boolean, background: Boolean ->
+                listOf(global, timer, pomodoro, background)
+            }.collect { flags ->
+                isGlobalNotificationsEnabled = flags[0]
+                isTimerNotificationsEnabled = flags[1]
+                isPomodoroNotificationsEnabled = flags[2]
+                isBackgroundNotificationsEnabled = flags[3]
                 refreshNotifications()
             }
         }
@@ -239,6 +244,18 @@ class ToolService : Service() {
     }
 
     private fun refreshNotifications() {
+        val manager = getSystemService(NotificationManager::class.java)
+        // Background notifications master switch: hides EVERYTHING related to
+        // background activity (ongoing timer/stopwatch/pomodoro/todo + generic).
+        // Alarms (timer finished) still fire — they are alerts, not background status.
+        if (!isBackgroundNotificationsEnabled) {
+            manager.cancel(NotificationHelper.ID_STOPWATCH)
+            manager.cancel(NotificationHelper.ID_TIMER)
+            manager.cancel(NotificationHelper.ID_POMODORO)
+            manager.cancel(NotificationHelper.ID_TODO)
+            hideForeground()
+            return
+        }
         if (_isStopwatchRunning.value) updateStopwatchNotification()
         if (_isTimerRunning.value) updateTimerNotification()
         if (_isPomodoroRunning.value) updatePomodoroNotification()
@@ -246,7 +263,6 @@ class ToolService : Service() {
         
         // Remove notifications if disabled
         if (!isGlobalNotificationsEnabled) {
-            val manager = getSystemService(NotificationManager::class.java)
             manager.cancel(NotificationHelper.ID_STOPWATCH)
             manager.cancel(NotificationHelper.ID_TIMER)
             manager.cancel(NotificationHelper.ID_POMODORO)
@@ -267,6 +283,12 @@ class ToolService : Service() {
     }
 
     private fun ensureForeground() {
+        // Background toggle OFF → satisfy the FGS start requirement, then demote
+        // so no "Toolz is running" / ongoing notification stays visible.
+        if (!isBackgroundNotificationsEnabled) {
+            hideForeground()
+            return
+        }
         val notif = when {
             _isStopwatchRunning.value -> createStopwatchNotification()
             _isTimerRunning.value -> createTimerNotification()
@@ -281,6 +303,31 @@ class ToolService : Service() {
         } else {
             startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif)
         }
+    }
+
+    /**
+     * Hides all background-activity notifications while keeping the service alive.
+     * Calls startForeground first to satisfy the FGS-start timeout, then demotes
+     * to background and cancels every ongoing notification.
+     */
+    private fun hideForeground() {
+        try {
+            val silent = createGenericNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, silent, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, silent)
+            }
+        } catch (_: Exception) {}
+        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+        try {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.cancel(NotificationHelper.ID_FOREGROUND_SERVICE)
+            manager.cancel(NotificationHelper.ID_STOPWATCH)
+            manager.cancel(NotificationHelper.ID_TIMER)
+            manager.cancel(NotificationHelper.ID_POMODORO)
+            manager.cancel(NotificationHelper.ID_TODO)
+        } catch (_: Exception) {}
     }
 
     private fun createGenericNotification(): Notification {
@@ -599,8 +646,7 @@ class ToolService : Service() {
         manager.notify(notificationId, builder.build())
     }
 
-    private fun createStopwatchNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Stopwatch.route) }
+    private fun createStopwatchNotification(): Notification {        val intent = Intent(this, MainActivity::class.java).apply { putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Stopwatch.route) }
         val pendingIntent = PendingIntent.getActivity(this, 3001, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val toggleIntent = Intent(this, ToolService::class.java).apply { action = ACTION_STOPWATCH_TOGGLE }
@@ -630,6 +676,7 @@ class ToolService : Service() {
     }
 
     private fun updateStopwatchNotification() {
+        if (!isBackgroundNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_STOPWATCH, createStopwatchNotification())
     }
@@ -666,6 +713,7 @@ class ToolService : Service() {
     }
 
     private fun updateTimerNotification(text: String? = null) {
+        if (!isBackgroundNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_TIMER, createTimerNotification(text))
     }
@@ -725,6 +773,7 @@ class ToolService : Service() {
     }
 
     private fun updatePomodoroNotification(text: String? = null) {
+        if (!isBackgroundNotificationsEnabled) return
         if (!isGlobalNotificationsEnabled || !isPomodoroNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_POMODORO, createPomodoroNotification(text))
@@ -750,6 +799,7 @@ class ToolService : Service() {
     }
 
     private fun updateTodoNotification() {
+        if (!isBackgroundNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_TODO, createTodoNotification())
     }

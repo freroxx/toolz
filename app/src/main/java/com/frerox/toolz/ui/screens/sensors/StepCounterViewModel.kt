@@ -343,6 +343,17 @@ class StepCounterViewModel @Inject constructor(
             "Calm" to "calm and measured",
             "Energetic" to "high-energy and enthusiastic"
         )
+        // Last-7-days breakdown so "analyze my week" / "how was Tuesday" work.
+        val weekDays = state.weeklyHistory.takeLast(7)
+        val weekLines = weekDays.map { entry ->
+            val dayName = runCatching {
+                java.time.LocalDate.parse(entry.date)
+                    .dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, Locale.US)
+            }.getOrDefault(entry.date)
+            val goalMark = if (entry.steps >= state.goal) " ✓" else ""
+            "$dayName (${entry.date}): ${entry.steps} steps$goalMark"
+        }
+        val weekTotal = weekDays.sumOf { it.steps }
         return """You are an elite AI Fitness Coach. Be ${toneMap[state.aiTone] ?: "professional"} and ${moodMap[state.aiMood] ?: "encouraging"} in tone.
 
 USER'S DATA:
@@ -350,11 +361,18 @@ USER'S DATA:
 - Remaining: $remaining steps
 - Distance: ${String.format(Locale.US, "%.2f", state.distanceDisplay)} ${state.distanceUnit}
 - Calories: ${state.calories} kcal
+- Active minutes: ${state.moveMinutes} min
+- Current streak: ${state.streak} day(s) at/over goal
 - Best Day: ${state.bestDaySteps} steps
 - Daily Average: ${state.averageSteps} steps
+- Active days (≥250 steps): ${state.activeDaysCount}
+- All-time total: ${state.allTimeTotal} steps
+- Last 7 days total: $weekTotal steps
+- Day by day:
+${if (weekLines.isEmpty()) "  (no history yet)" else weekLines.joinToString("\n") { "  - $it" }}
 
 RULES:
-1. Answer the user's SPECIFIC question directly.
+1. Answer the user's SPECIFIC question directly — quote their real numbers.
 2. Keep replies VERY SHORT and PUNCHY (1-4 sentences).
 3. Always use markdown: **bold** for emphasis, - bullet points for lists.
 4. No filler phrases. No "I understand" or "As an AI".
@@ -434,6 +452,7 @@ RULES:
             val model = uiState.value.aiModel
 
             var fullText = ""
+            val requestStartMs = android.os.SystemClock.elapsedRealtime()
             chatRepository.getChatResponse(
                 prompt = text,
                 history = uiState.value.aiChatHistory,
@@ -449,12 +468,14 @@ RULES:
                         fullText = "Connection lost. Try again later."
                     }
                 }
-            
+
             aiDao.insertMessage(AiMessage(
                 chatId = chatId,
                 text = fullText,
                 isUser = false,
-                timestamp = System.currentTimeMillis()
+                timestamp = System.currentTimeMillis(),
+                modelName = model,
+                responseTimeMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
             ))
             _isAiLoading.value = false
         }

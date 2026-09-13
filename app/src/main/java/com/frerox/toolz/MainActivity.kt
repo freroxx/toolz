@@ -242,10 +242,16 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
             var offlineOverlayVisible by remember { mutableStateOf(false) }
             var offlineOverlayReady by remember { mutableStateOf(false) }
             var lastOfflineState by remember { mutableStateOf(offlineState) }
+            val offlinePopupEnabled by settingsRepository.offlinePopupEnabled.collectAsState(initial = true)
 
-            LaunchedEffect(offlineState) {
+            LaunchedEffect(offlineState, offlinePopupEnabled) {
                 if (offlineState != lastOfflineState) {
                     lastOfflineState = offlineState
+                    // Offline/online popup toggle (Settings → Interaction & HUD, on by default).
+                    if (!offlinePopupEnabled) {
+                        offlineOverlayVisible = false
+                        return@LaunchedEffect
+                    }
                     offlineOverlayReady = false
                     offlineOverlayVisible = true
                     delay(1200)

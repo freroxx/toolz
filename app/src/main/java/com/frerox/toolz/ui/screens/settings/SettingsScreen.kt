@@ -96,14 +96,20 @@ fun SettingsScreen(
 
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState(initial = true)
     val notificationVaultEnabled by viewModel.notificationVaultEnabled.collectAsState(initial = true)
+    val backgroundNotificationsEnabled by viewModel.backgroundNotificationsEnabled.collectAsState(initial = true)
+    val whisperNotificationsEnabled by viewModel.whisperNotificationsEnabled.collectAsState(initial = true)
+    val offlinePopupEnabled by viewModel.offlinePopupEnabled.collectAsState(initial = true)
     val stepNotifications by viewModel.stepNotifications.collectAsState(initial = true)
     val timerNotifications by viewModel.timerNotifications.collectAsState(initial = true)
+    val voiceRecordNotifications by viewModel.voiceRecordNotifications.collectAsState(initial = true)
     val musicNotifications by viewModel.musicNotifications.collectAsState(initial = true)
     val fileConversionNotifications by viewModel.fileConversionNotifications.collectAsState(initial = true)
     val appUpdateNotifications by viewModel.appUpdateNotifications.collectAsState(initial = true)
     val taskReminderNotifications by viewModel.taskReminderNotifications.collectAsState(initial = true)
     val eventReminderNotifications by viewModel.eventReminderNotifications.collectAsState(initial = true)
     val pomodoroNotifications by viewModel.pomodoroNotifications.collectAsState(initial = true)
+    val backupNotifications by viewModel.backupNotifications.collectAsState(initial = true)
+    val notificationRetentionDays by viewModel.notificationRetentionDays.collectAsState(initial = 30)
     val flashlightNotificationsEnabled by viewModel.flashlightNotificationsEnabled.collectAsState(initial = false)
     val caffeinateNotificationsEnabled by viewModel.caffeinateNotificationsEnabled.collectAsState(initial = true)
     val purgeShotNotifications by viewModel.purgeShotNotifications.collectAsState(initial = true)
@@ -130,6 +136,8 @@ fun SettingsScreen(
     val pillCatalogDownloadEnabled by viewModel.pillCatalogDownloadEnabled.collectAsState(initial = true)
 
     val showDashboardStats by viewModel.showDashboardStats.collectAsState(initial = true)
+    val showRecentTools by viewModel.showRecentTools.collectAsState(initial = true)
+    val showQuickNotes by viewModel.showQuickNotes.collectAsState(initial = true)
     val recentToolsRows by viewModel.recentToolsRows.collectAsState(initial = 1)
     val appLanguage by viewModel.appLanguage.collectAsState(initial = "en")
 
@@ -525,39 +533,17 @@ fun SettingsScreen(
                                 )
                             }
 
-                            if (matches(searchQuery, "recent", "home", "layout", "view", "dashboard", "style")) {
-                                SettingsItem(
-                                    title = stringResource(R.string.st_SettingsScreen_i1j3),
-                                    subtitle = "Current style: ${dashboardView.lowercase()}",
-                                    icon = Icons.Rounded.Dashboard
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        listOf("DEFAULT", "LIST").forEach { viewStyle ->
-                                            val isSelected = dashboardView == viewStyle
-                                            Surface(
-                                                onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setDashboardView(viewStyle)
-                                                },
-                                                modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
-                                                shape = RoundedCornerShape(16.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    @Suppress("DEPRECATION")
-                                                    Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud", "appearance")) {
+                                SettingsToggleItem(
+                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
+                                    icon = Icons.Rounded.Subtitles,
+                                    checked = showTopAppBarDescriptions,
+                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
+                                )
                             }
 
-                            // Removed Widget Styling section as requested
+                            // Dashboard layout lives under Home & HUD now — see INTERACTION section.
                         }
                     }
 
@@ -633,7 +619,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 4. Section: INTERACTION & HUD
+                    // 4. Section: INTERACTION & HUD — Home layout, pill, feedback & popups
                     StaggeredEntrance(index = 3) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_g5h7),
@@ -641,6 +627,56 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "INTERACTION" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "INTERACTION") null else "INTERACTION" }
                         ) {
+                            // ── Home layout ──
+                            if (matches(searchQuery, "home", "layout", "view", "dashboard", "style", "grid", "list")) {
+                                SettingsItem(
+                                    title = stringResource(R.string.st_SettingsScreen_i1j3),
+                                    subtitle = "Current style: ${dashboardView.lowercase()}",
+                                    icon = Icons.Rounded.Dashboard
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf("DEFAULT", "LIST").forEach { viewStyle ->
+                                            val isSelected = dashboardView == viewStyle
+                                            Surface(
+                                                onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setDashboardView(viewStyle)
+                                                },
+                                                modifier = Modifier.weight(1f).height(48.dp).bouncyClick {},
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    @Suppress("DEPRECATION")
+                                                    Text(viewStyle, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall, color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (matches(searchQuery, "recent", "quick notes", "home", "dashboard", "sections", "visibility")) {
+                                SettingsToggleItem(
+                                    title = "Recent tools",
+                                    subtitle = "Show recently used tools on Home",
+                                    icon = Icons.Rounded.History,
+                                    checked = showRecentTools,
+                                    onCheckedChange = { viewModel.setShowRecentTools(it) }
+                                )
+                                SettingsToggleItem(
+                                    title = "Quick notes",
+                                    subtitle = "Show quick notes on Home",
+                                    icon = Icons.AutoMirrored.Rounded.StickyNote2,
+                                    checked = showQuickNotes,
+                                    onCheckedChange = { viewModel.setShowQuickNotes(it) }
+                                )
+                            }
+
                             if (matches(searchQuery, "pill", "smart", "overlay", "todo", "focus", "fill", "hud")) {
                                 SettingsToggleItem(
                                     title = stringResource(R.string.st_SettingsScreen_i7j9),
@@ -745,13 +781,14 @@ fun SettingsScreen(
                                 }
                             }
 
-                            if (matches(searchQuery, "top bar", "app bar", "description", "subtitle", "expressive", "hud")) {
+                            // ── Popups ──
+                            if (matches(searchQuery, "offline", "online", "popup", "overlay", "transition", "banner", "hud")) {
                                 SettingsToggleItem(
-                                    title = stringResource(R.string.st_SettingsScreen_top_bar_desc_title),
-                                    subtitle = stringResource(R.string.st_SettingsScreen_top_bar_desc_subtitle),
-                                    icon = Icons.Rounded.Subtitles,
-                                    checked = showTopAppBarDescriptions,
-                                    onCheckedChange = { viewModel.setShowTopAppBarDescriptions(it) }
+                                    title = "Offline / Online popup",
+                                    subtitle = "Show the transition popup when connection changes",
+                                    icon = Icons.Rounded.CloudOff,
+                                    checked = offlinePopupEnabled,
+                                    onCheckedChange = { viewModel.setOfflinePopupEnabled(it) }
                                 )
                             }
                         }
@@ -936,7 +973,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 7. Section: NOTIFICATIONS
+                    // 7. Section: NOTIFICATIONS — Master, background & per-tool alerts
                     StaggeredEntrance(index = 6) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_e1f3),
@@ -944,134 +981,203 @@ fun SettingsScreen(
                             isExpanded = expandedSection == "NOTIFICATIONS" || searchQuery.isNotEmpty(),
                             onExpandToggle = { expandedSection = if (expandedSection == "NOTIFICATIONS") null else "NOTIFICATIONS" }
                         ) {
-                            if (matches(searchQuery, "notification", "master", "switch", "alerts")) {
+                            // ── Master ──
+                            if (matches(searchQuery, "notification", "master", "switch", "alerts", "all", "enable")) {
                                 SettingsToggleItem(
-                    title = stringResource(R.string.st_SettingsScreen_g3h5),
-                    subtitle = stringResource(R.string.st_SettingsScreen_i5j7),
-                    icon = Icons.Rounded.NotificationsActive,
-                    checked = notificationsEnabled,
-                    onCheckedChange = { viewModel.setNotificationsEnabled(it) }
-                )
-                
-                SettingsToggleItem(
-                    title = stringResource(R.string.st_SettingsScreen_y5z7),
-                    subtitle = stringResource(R.string.st_SettingsScreen_k7l9),
-                    icon = Icons.Rounded.DirectionsRun,
-                    checked = stepNotifications,
-                    onCheckedChange = { viewModel.setStepNotifications(it) }
-                )
+                                    title = stringResource(R.string.st_SettingsScreen_g3h5),
+                                    subtitle = stringResource(R.string.st_SettingsScreen_i5j7),
+                                    icon = Icons.Rounded.NotificationsActive,
+                                    checked = notificationsEnabled,
+                                    onCheckedChange = { viewModel.setNotificationsEnabled(it) }
+                                )
+                            }
 
-                                if (notificationsEnabled) {
-                                    if (matches(searchQuery, "vault", "history", "save")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_m9n1),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_o1p3),
-                                            icon = Icons.Rounded.History,
-                                            checked = notificationVaultEnabled,
-                                            onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
-                                        )
+                            if (notificationsEnabled) {
+                                // ── General ──
+                                if (matches(searchQuery, "background", "ongoing", "persistent", "running", "purgeshot active", "caffeinate active", "toolz is running")) {
+                                    SettingsToggleItem(
+                                        title = "Background notifications",
+                                        subtitle = "Ongoing status like Toolz running, PurgeShot, Caffeinate",
+                                        icon = Icons.Rounded.NotificationsOff,
+                                        checked = backgroundNotificationsEnabled,
+                                        onCheckedChange = { viewModel.setBackgroundNotificationsEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "whisper", "chat", "message", "friend", "push")) {
+                                    SettingsToggleItem(
+                                        title = "Whisper notifications",
+                                        subtitle = "New messages and friend requests",
+                                        icon = Icons.Rounded.Forum,
+                                        checked = whisperNotificationsEnabled,
+                                        onCheckedChange = { viewModel.setWhisperNotificationsEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "vault", "history", "save")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_m9n1),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_o1p3),
+                                        icon = Icons.Rounded.History,
+                                        checked = notificationVaultEnabled,
+                                        onCheckedChange = { viewModel.setNotificationVaultEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "retention", "history", "days", "keep", "vault", "cleanup")) {
+                                    SettingsItem(
+                                        title = "History retention",
+                                        subtitle = "Keep notification history for $notificationRetentionDays days",
+                                        icon = Icons.Rounded.Schedule
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            listOf(7, 30, 90).forEach { days ->
+                                                val isSelected = notificationRetentionDays == days
+                                                Surface(
+                                                    onClick = {
+                                                        vibrationManager?.vibrateClick()
+                                                        viewModel.setNotificationRetentionDays(days)
+                                                    },
+                                                    modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                    border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = "$days days",
+                                                            fontWeight = FontWeight.Black,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    if (matches(searchQuery, "step", "goal", "alert")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_q3r5),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_s5t7),
-                                            icon = Icons.AutoMirrored.Rounded.DirectionsRun,
-                                            checked = stepNotifications,
-                                            onCheckedChange = { viewModel.setStepNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "timer", "alert", "task")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_u7v9),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_w9x1),
-                                            icon = Icons.Rounded.Timer,
-                                            checked = timerNotifications,
-                                            onCheckedChange = { viewModel.setTimerNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "music", "playback", "media")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_y1z3),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_a3b6),
-                                            icon = Icons.Rounded.MusicNote,
-                                            checked = musicNotifications,
-                                            onCheckedChange = { viewModel.setMusicNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "conversion", "file", "progress")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_c5d8),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_e7f1),
-                                            icon = Icons.Rounded.Transform,
-                                            checked = fileConversionNotifications,
-                                            onCheckedChange = { viewModel.setFileConversionNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "task", "reminder", "deadline")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_g9h2),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_i1j4),
-                                            icon = Icons.Rounded.TaskAlt,
-                                            checked = taskReminderNotifications,
-                                            onCheckedChange = { viewModel.setTaskReminderNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "event", "calendar", "reminder")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_k3l6),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_m5n8),
-                                            icon = Icons.Rounded.Event,
-                                            checked = eventReminderNotifications,
-                                            onCheckedChange = { viewModel.setEventReminderNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "pomodoro", "focus", "timer")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_o7p1),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_q9r2),
-                                            icon = Icons.Rounded.AvTimer,
-                                            checked = pomodoroNotifications,
-                                            onCheckedChange = { viewModel.setPomodoroNotifications(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "flashlight", "light", "notification")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_s1t4),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_u3v6),
-                                            icon = Icons.Rounded.FlashlightOn,
-                                            checked = flashlightNotificationsEnabled,
-                                            onCheckedChange = { viewModel.setFlashlightNotificationsEnabled(it) }
-                                        )
-                                    }
-                                    if (matches(searchQuery, "update", "app", "version")) {
-                                        SettingsToggleItem(
-                                            title = stringResource(R.string.st_SettingsScreen_w5x8),
-                                            subtitle = stringResource(R.string.st_SettingsScreen_y7z1),
-                                            icon = Icons.Rounded.SystemUpdate,
-                                            checked = appUpdateNotifications,
-                                            onCheckedChange = { viewModel.setAppUpdateNotifications(it) }
-                                        )
-                                    }
+                                }
 
-                                    if (matches(searchQuery, "caffeinate", "notifications", "reminder", "awake")) {
-                                        SettingsToggleItem(
-                                            title = "Caffeinate Notifications",
-                                            subtitle = "Reminders and stop alerts. Ongoing status always shows while active.",
-                                            icon = Icons.Rounded.Coffee,
-                                            checked = caffeinateNotificationsEnabled,
-                                            onCheckedChange = { viewModel.setCaffeinateNotificationsEnabled(it) }
-                                        )
-                                    }
+                                // ── Activity & timers ──
+                                if (matches(searchQuery, "step", "goal", "alert", "counter", "activity")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_q3r5),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_s5t7),
+                                        icon = Icons.AutoMirrored.Rounded.DirectionsRun,
+                                        checked = stepNotifications,
+                                        onCheckedChange = { viewModel.setStepNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "timer", "alert", "task", "countdown", "alarm")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_u7v9),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_w9x1),
+                                        icon = Icons.Rounded.Timer,
+                                        checked = timerNotifications,
+                                        onCheckedChange = { viewModel.setTimerNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "pomodoro", "focus", "timer", "session", "break")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_o7p1),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_q9r2),
+                                        icon = Icons.Rounded.AvTimer,
+                                        checked = pomodoroNotifications,
+                                        onCheckedChange = { viewModel.setPomodoroNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "voice", "recorder", "recording", "audio", "mic")) {
+                                    SettingsToggleItem(
+                                        title = "Voice recorder",
+                                        subtitle = "Ongoing recording notification",
+                                        icon = Icons.Rounded.Mic,
+                                        checked = voiceRecordNotifications,
+                                        onCheckedChange = { viewModel.setVoiceRecordNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "music", "playback", "media", "player")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_y1z3),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_a3b6),
+                                        icon = Icons.Rounded.MusicNote,
+                                        checked = musicNotifications,
+                                        onCheckedChange = { viewModel.setMusicNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "conversion", "file", "progress", "converter")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_c5d8),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_e7f1),
+                                        icon = Icons.Rounded.Transform,
+                                        checked = fileConversionNotifications,
+                                        onCheckedChange = { viewModel.setFileConversionNotifications(it) }
+                                    )
+                                }
 
-                                    if (matches(searchQuery, "purgeshot", "screenshot", "delete", "scheduled")) {
-                                        SettingsToggleItem(
-                                            title = "PurgeShot",
-                                            subtitle = "Show notification when screenshot deletion is scheduled",
-                                            icon = Icons.Rounded.ScreenshotMonitor,
-                                            checked = purgeShotNotifications,
-                                            onCheckedChange = { viewModel.setPurgeShotNotifications(it) }
-                                        )
-                                    }
+                                // ── Reminders & system ──
+                                if (matches(searchQuery, "task", "reminder", "deadline", "todo")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_g9h2),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_i1j4),
+                                        icon = Icons.Rounded.TaskAlt,
+                                        checked = taskReminderNotifications,
+                                        onCheckedChange = { viewModel.setTaskReminderNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "event", "calendar", "reminder")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_k3l6),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_m5n8),
+                                        icon = Icons.Rounded.Event,
+                                        checked = eventReminderNotifications,
+                                        onCheckedChange = { viewModel.setEventReminderNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "update", "app", "version", "upgrade")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_w5x8),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_y7z1),
+                                        icon = Icons.Rounded.SystemUpdate,
+                                        checked = appUpdateNotifications,
+                                        onCheckedChange = { viewModel.setAppUpdateNotifications(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "backup", "restore", "save", "export")) {
+                                    SettingsToggleItem(
+                                        title = "Backup alerts",
+                                        subtitle = "Success and failure reports for backups",
+                                        icon = Icons.Rounded.Backup,
+                                        checked = backupNotifications,
+                                        onCheckedChange = { viewModel.setBackupNotifications(it) }
+                                    )
+                                }
+
+                                // ── Tools running in background ──
+                                if (matches(searchQuery, "flashlight", "light", "torch", "notification")) {
+                                    SettingsToggleItem(
+                                        title = stringResource(R.string.st_SettingsScreen_s1t4),
+                                        subtitle = stringResource(R.string.st_SettingsScreen_u3v6),
+                                        icon = Icons.Rounded.FlashlightOn,
+                                        checked = flashlightNotificationsEnabled,
+                                        onCheckedChange = { viewModel.setFlashlightNotificationsEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "caffeinate", "awake", "screen", "reminder", "coffee")) {
+                                    SettingsToggleItem(
+                                        title = "Caffeinate Notifications",
+                                        subtitle = "Reminders and stop alerts (status follows Background toggle)",
+                                        icon = Icons.Rounded.Coffee,
+                                        checked = caffeinateNotificationsEnabled,
+                                        onCheckedChange = { viewModel.setCaffeinateNotificationsEnabled(it) }
+                                    )
+                                }
+                                if (matches(searchQuery, "purgeshot", "screenshot", "delete", "scheduled", "auto")) {
+                                    SettingsToggleItem(
+                                        title = "PurgeShot",
+                                        subtitle = "Show notification when screenshot deletion is scheduled",
+                                        icon = Icons.Rounded.ScreenshotMonitor,
+                                        checked = purgeShotNotifications,
+                                        onCheckedChange = { viewModel.setPurgeShotNotifications(it) }
+                                    )
                                 }
                             }
 

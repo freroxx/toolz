@@ -42,7 +42,11 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class VoiceRecorderService : Service() {
 
+    @Inject lateinit var settingsRepository: com.frerox.toolz.data.settings.SettingsRepository
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var backgroundNotificationsEnabled = true
+    private var voiceNotificationsEnabled = true
     
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording
@@ -78,6 +82,50 @@ class VoiceRecorderService : Service() {
     override fun onCreate() {
         super.onCreate()
         NotificationHelper.createAllChannels(this)
+        serviceScope.launch {
+            try {
+                settingsRepository.backgroundNotificationsEnabled.collect { enabled ->
+                    backgroundNotificationsEnabled = enabled
+                    if (!enabled) {
+                        try {
+                            getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_VOICE_RECORDER)
+                        } catch (_: Exception) {}
+                    } else if (_isRecording.value) {
+                        updateNotification()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        serviceScope.launch {
+            try {
+                kotlinx.coroutines.flow.combine(
+                    settingsRepository.notificationsEnabled,
+                    settingsRepository.voiceRecordNotifications
+                ) { global, voice -> global && voice }.collect { enabled ->
+                    voiceNotificationsEnabled = enabled
+                    if (!enabled) {
+                        try {
+                            getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_VOICE_RECORDER)
+                        } catch (_: Exception) {}
+                    } else if (_isRecording.value && backgroundNotificationsEnabled) {
+                        updateNotification()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun startForegroundHiddenSafe(notification: Notification) {
+        // Background toggle OFF (or voice toggle OFF) → satisfy FGS start, then hide.
+        if (!backgroundNotificationsEnabled || !voiceNotificationsEnabled) {
+            try { startForeground(NotificationHelper.ID_VOICE_RECORDER, notification) } catch (_: Exception) {}
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            try {
+                getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_VOICE_RECORDER)
+            } catch (_: Exception) {}
+            return
+        }
+        startForeground(NotificationHelper.ID_VOICE_RECORDER, notification)
     }
 
     fun startRecording() {
@@ -115,7 +163,7 @@ class VoiceRecorderService : Service() {
             _durationMillis.value = 0L
             startTime = SystemClock.elapsedRealtime()
             startTimer()
-            startForeground(NotificationHelper.ID_VOICE_RECORDER, createNotification())
+            startForegroundHiddenSafe(createNotification())
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -240,6 +288,7 @@ class VoiceRecorderService : Service() {
     }
 
     private fun updateNotification() {
+        if (!backgroundNotificationsEnabled || !voiceNotificationsEnabled) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NotificationHelper.ID_VOICE_RECORDER, createNotification())
     }
@@ -248,7 +297,7 @@ class VoiceRecorderService : Service() {
         // Ensure foreground immediately if an action is provided
         if (intent?.action != null) {
             val notification = createNotification()
-            startForeground(NotificationHelper.ID_VOICE_RECORDER, notification)
+            startForegroundHiddenSafe(notification)
         }
 
         when (intent?.action) {

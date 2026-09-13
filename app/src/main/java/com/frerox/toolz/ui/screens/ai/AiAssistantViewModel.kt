@@ -60,7 +60,8 @@ data class AiAssistantUiState(
     val isGeneratingTitle : Boolean          = false,
     val suggestedPrompts  : List<String>     = emptyList(),
     val isGeneratingPrompts: Boolean         = false,
-    val aiSearchEnabled   : Boolean          = false,
+    // Search is ON by default (privacy-friendly meta engines). Icon always visible by default.
+    val aiSearchEnabled   : Boolean          = true,
     val aiSearchIconVisible: Boolean         = true,
     val loadingPhaseText  : String           = "",
     val isCoachMode       : Boolean          = false,
@@ -70,7 +71,7 @@ data class AiAssistantUiState(
 data class AiSettingsUiState(
     val provider             : String    = "Groq",
     val apiKey               : String    = "",
-    val selectedModel        : String    = "openai/gpt-oss-120b",
+    val selectedModel        : String    = "openai/gpt-oss-20b",
     val isTesting            : Boolean   = false,
     val testResult           : String?   = null,
     val isKeyValid           : Boolean   = true,
@@ -82,6 +83,11 @@ data class AiSettingsUiState(
     val showGroqKeyMissingDialog: Boolean = false,
     val isGroqConfigured     : Boolean   = false,
     val modelAvailability    : ModelAvailability = ModelAvailability.UNKNOWN,
+    val showNoKeyWarningFor  : String?   = null,
+    val catalogVersion       : Int?      = null,
+    val catalogUpdatedAt     : String?   = null,
+    val isRefreshingCatalog  : Boolean   = false,
+    val catalogRefreshResult : String?   = null,
 )
 
 enum class ModelAvailability { AVAILABLE, UNAVAILABLE, CHECKING, UNKNOWN }
@@ -97,6 +103,8 @@ class AiAssistantViewModel @Inject constructor(
     private val settingsManager: AiSettingsManager,
     private val openAiService  : OpenAiService,
     private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
+    private val catalogRepository: AiCatalogRepository,
+    private val offlineManager: com.frerox.toolz.util.OfflineManager,
     private val savedStateHandle: androidx.lifecycle.SavedStateHandle,
 ) : ViewModel() {
 
@@ -129,6 +137,15 @@ class AiAssistantViewModel @Inject constructor(
     private val _settingsUiState = MutableStateFlow(AiSettingsUiState())
     val settingsUiState: StateFlow<AiSettingsUiState> = _settingsUiState.asStateFlow()
 
+    /**
+     * The assistant is online-only (inference + model catalog + web search
+     * are all server-side). False on airplane mode / no route / manual
+     * offline mode. The screen gates on this; send paths double-check it.
+     */
+    val isOnline: StateFlow<Boolean> = offlineManager.offlineState
+        .map { it == com.frerox.toolz.util.OfflineState.ONLINE }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     private var messagesJob        : Job? = null
     private var activeInferenceJob : Job? = null
     private var loadingPhaseJob    : Job? = null
@@ -137,6 +154,12 @@ class AiAssistantViewModel @Inject constructor(
         loadSettings()
         loadConfigs()
         observeSearchSettings()
+        observeCatalog()
+        // Auto-update the server model catalog when stale (TTL-guarded,
+        // silent unless it fails — manual refresh lives in Settings).
+        viewModelScope.launch {
+            runCatching { catalogRepository.refresh() }
+        }
         viewModelScope.launch {
             aiDao.getAllChats().collect { chats -> _uiState.update { it.copy(chats = chats) } }
         }
@@ -289,14 +312,68 @@ class AiAssistantViewModel @Inject constructor(
         }
     }
 
+    // ── Server model catalog ─────────────────────────────────────────────
+
+    private fun observeCatalog() {
+        viewModelScope.launch {
+            catalogRepository.installedVersion.collect { v ->
+                _settingsUiState.update { it.copy(catalogVersion = v) }
+            }
+        }
+        viewModelScope.launch {
+            catalogRepository.catalogUpdatedAt.collect { date ->
+                _settingsUiState.update { it.copy(catalogUpdatedAt = date) }
+            }
+        }
+        viewModelScope.launch {
+            catalogRepository.isRefreshing.collect { refreshing ->
+                _settingsUiState.update { it.copy(isRefreshingCatalog = refreshing) }
+            }
+        }
+    }
+
+    /**
+     * Manual catalog refresh (Settings → Model catalog → Refresh).
+     * Re-reads provider/model tables afterwards so the picker shows the
+     * new lineup without leaving the dialog.
+     */
+    fun refreshCatalog() {
+        viewModelScope.launch {
+            _settingsUiState.update { it.copy(catalogRefreshResult = null) }
+            val ok = catalogRepository.refresh(force = true)
+            if (ok) {
+                // Re-resolve current provider/model against the new tables
+                // (may swap a just-retired model for its replacement).
+                updateProvider(_settingsUiState.value.provider)
+                val v = catalogRepository.installedVersion.value
+                _settingsUiState.update {
+                    it.copy(catalogRefreshResult = if (v != null) "✓ Models updated (v$v)" else "✓ Models updated")
+                }
+            } else {
+                _settingsUiState.update {
+                    it.copy(catalogRefreshResult = "✗ Refresh failed — check your connection and try again.")
+                }
+            }
+        }
+    }
+
+    /**
+     * Offline-gate retry: re-attempt the catalog fetch (result surfaces in
+     * settings + the gate auto-clears the moment connectivity returns).
+     */
+    fun retryConnection() {
+        viewModelScope.launch {
+            catalogRepository.refresh(force = true)
+        }
+    }
+
     fun toggleAiSearch() {
         viewModelScope.launch {
             val nextState = !_uiState.value.aiSearchEnabled
-            if (nextState && !settingsManager.hasUserApiKey("Groq")) {
-                _settingsUiState.update { it.copy(showGroqKeyMissingDialog = true) }
-            } else {
-                settingsRepository.setAiSearchEnabled(nextState)
-            }
+            // Search now works with ANY provider (local heuristic + any helper key).
+            // No Groq gate — just flip the switch. Icon stays visible.
+            settingsRepository.setAiSearchEnabled(nextState)
+            _uiState.update { it.copy(aiSearchEnabled = nextState) }
         }
     }
 
@@ -412,12 +489,36 @@ class AiAssistantViewModel @Inject constructor(
         val currentApiKey = settingsManager.getRawApiKey(currentProvider)
 
         val changed = s.provider != currentProvider || s.selectedModel != currentModel || s.apiKey != currentApiKey
+        if (!changed) return
 
-        if (changed && _uiState.value.messages.isNotEmpty()) {
+        // Warn when switching to (or saving) a provider with no key set —
+        // chats would just fail. User can go back or save anyway.
+        val effectiveKey = s.apiKey.ifBlank { settingsManager.getRawApiKey(s.provider) }
+        if (effectiveKey.isBlank()) {
+            _settingsUiState.update { it.copy(showNoKeyWarningFor = s.provider) }
+            return
+        }
+
+        if (_uiState.value.messages.isNotEmpty()) {
             _uiState.update { it.copy(pendingConfig = AiConfig("Current Settings", s.provider, s.selectedModel, s.apiKey, s.selectedIcon, s.customIconUri)) }
         } else {
             saveSettings()
         }
+    }
+
+    /** User accepted saving a keyless provider — persist + clear warning. */
+    fun confirmSaveWithoutKey() {
+        _settingsUiState.update { it.copy(showNoKeyWarningFor = null) }
+        if (_uiState.value.messages.isNotEmpty()) {
+            val s = _settingsUiState.value
+            _uiState.update { it.copy(pendingConfig = AiConfig("Current Settings", s.provider, s.selectedModel, s.apiKey, s.selectedIcon, s.customIconUri)) }
+        } else {
+            saveSettings()
+        }
+    }
+
+    fun dismissNoKeyWarning() {
+        _settingsUiState.update { it.copy(showNoKeyWarningFor = null) }
     }
 
     fun saveSettings() {
@@ -544,6 +645,10 @@ class AiAssistantViewModel @Inject constructor(
     fun sendMessage(text: String) {
         if (text.isBlank() && _uiState.value.selectedImage == null) return
         if (_uiState.value.isLoading) return
+        if (!isOnline.value) {
+            _uiState.update { it.copy(error = "You're offline. Reconnect to keep chatting.") }
+            return
+        }
 
         activeInferenceJob = viewModelScope.launch {
             var currentId    = _uiState.value.currentChatId
@@ -592,6 +697,7 @@ class AiAssistantViewModel @Inject constructor(
 
             val accumulated = StringBuilder()
             var lastSources: String? = null
+            val requestStartMs = android.os.SystemClock.elapsedRealtime()
 
             val systemPrompt = if (_uiState.value.isCoachMode) {
                 """You are an elite AI Fitness Coach.
@@ -616,21 +722,36 @@ class AiAssistantViewModel @Inject constructor(
                     _uiState.update { it.copy(streamingText = accumulated.toString()) }
                 }.onFailure { e ->
                     val msg     = e.message ?: "Unknown error"
-                    val isQuota = msg.contains("quota", true) || msg.contains("limit", true) || msg.contains("429")
-                    _uiState.update { it.copy(isLoading = false, streamingText = "", error = if (isQuota) "Quota exceeded for $provider." else "Error: $msg", quotaExceeded = isQuota, suggestedProvider = if (isQuota) nextProvider(provider) else null) }
+                    val lower = msg.lowercase()
+                    val isQuota = lower.contains("quota") || lower.contains("rate limit") || lower.contains("429") || lower.contains("503")
+                    val isNotFound = lower.contains("404") || lower.contains("retired") || lower.contains("not found") || lower.contains("decommissioned")
+                    val isAuth = lower.contains("401") || lower.contains("invalid api key") || lower.contains("unauthorized")
+                    val display = when {
+                        isNotFound -> "Model retired (404) — auto-switched to a live model. Tap retry to resend."
+                        isQuota -> "Quota exceeded for $provider."
+                        isAuth -> "Invalid API key for $provider. Open Settings to fix it."
+                        else -> "Error: $msg"
+                    }
+                    _uiState.update { it.copy(isLoading = false, streamingText = "", error = display, quotaExceeded = isQuota, suggestedProvider = if (isQuota) nextProvider(provider) else null) }
                 }
             }
 
             if (accumulated.isNotEmpty()) {
                 val responseText = accumulated.toString()
-                
+                // Re-read: the repo persists a working fallback model on 404
+                // recovery, so this is the model that actually replied.
+                val effectiveModel = settingsManager.getSelectedModel(provider)
+                val elapsedMs = android.os.SystemClock.elapsedRealtime() - requestStartMs
+
                 aiDao.insertMessage(AiMessage(
-                    chatId = currentId, 
-                    text = responseText, 
-                    isUser = false, 
+                    chatId = currentId,
+                    text = responseText,
+                    isUser = false,
                     searchSources = lastSources,
                     canDeepDive = (lastSources != null),
-                    deepDiveState = if (lastSources != null) DeepDiveState.PENDING else DeepDiveState.NONE
+                    deepDiveState = if (lastSources != null) DeepDiveState.PENDING else DeepDiveState.NONE,
+                    modelName = effectiveModel,
+                    responseTimeMs = elapsedMs
                 ))
 
                 if (history.isEmpty() && text.isNotBlank()) {
@@ -664,10 +785,13 @@ class AiAssistantViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.update { it.copy(isGeneratingTitle = true) }
-            val context = messages.take(6).joinToString("\n") {
-                if (it.isUser) "User: ${it.text.take(200)}" else "AI: ${it.text.take(200)}"
+            val userContext = messages.filter { it.isUser }.takeLast(3).joinToString("\n") {
+                "User: ${it.text.take(200)}"
+            }.ifBlank {
+                messages.take(6).joinToString("\n") { "User: ${it.text.take(200)}" }
             }
-            val title = callGroqForTitle(context, "")
+            val lastReply = messages.lastOrNull { !it.isUser }?.text.orEmpty()
+            val title = callGroqForTitle(userContext, lastReply)
             if (title != null && title.isNotBlank()) {
                 aiDao.updateChat(AiChat(id = chatId, title = title))
             }
@@ -676,34 +800,78 @@ class AiAssistantViewModel @Inject constructor(
     }
 
     private suspend fun callGroqForTitle(userMsg: String, aiReply: String): String? {
-        val groqKey = settingsManager.getApiKey("Groq").ifBlank { settingsManager.getApiKey() }
-        if (groqKey.isBlank()) return null
-        return try {
-            val prompt = buildString {
-                append("Generate a concise, descriptive chat title (max 5 words, no quotes, no punctuation at end).\n")
-                append("User: ${userMsg.take(300)}\n")
-                if (aiReply.isNotBlank()) append("AI: ${aiReply.take(300)}")
-            }
-            val resp = withContext(Dispatchers.IO) {
-                openAiService.getChatCompletion(
-                    url        = GROQ_URL,
-                    authHeader = "Bearer $groqKey",
-                    request    = OpenAiRequest(
-                        model    = GROQ_MODEL_EASY,
-                        messages = listOf(
-                            OpenAiMessage("system", MessageContent.Text("You generate short chat titles. Reply with ONLY the title — no explanation, no quotes.")),
-                            OpenAiMessage("user",   MessageContent.Text(prompt)),
-                        ),
-                        maxTokens = 20,
-                    )
-                )
-            }
-            resp.choices.firstOrNull()?.message?.content?.trim()
-                ?.removePrefix("\"")?.removeSuffix("\"")
-                ?.take(60)
-        } catch (e: Exception) {
-            Log.e(TAG, "Title gen failed: ${e.message}"); null
+        // Try Groq fast model first, then any available helper key (Zen free, current provider).
+        // 3 attempts total with cheap models only — titles must never block chat.
+        val prompt = buildString {
+            append("Write a short chat-list title for this conversation.\n")
+            append("RULES: 3-5 words, noun phrase, no verbs like 'chat/help/ask/discuss', ")
+            append("no quotes, no emojis, no trailing punctuation, no generic words like 'conversation' or 'question'.\n")
+            append("User: ${userMsg.take(300)}\n")
+            if (aiReply.isNotBlank()) append("Assistant reply: ${aiReply.take(300)}")
         }
+        val candidates = buildList {
+            val groqKey = settingsManager.getApiKey("Groq")
+            if (groqKey.isNotBlank()) add(Triple("Groq", GROQ_URL, groqKey to GROQ_MODEL_EASY))
+            val zenKey = settingsManager.getApiKey("OpenCode Zen")
+            if (zenKey.isNotBlank()) add(Triple("OpenCode Zen", "https://opencode.ai/zen/v1/chat/completions", zenKey to "muse-spark-1.3-contributor-free"))
+            val current = AiSettingsHelper.canonicalProvider(settingsManager.getAiProvider())
+            val curKey = settingsManager.getApiKey(current)
+            val curUrl = AiSettingsHelper.getChatCompletionUrl(current)
+            if (curKey.isNotBlank() && curUrl != null && current != "Groq" && current != "OpenCode Zen") {
+                add(Triple(current, curUrl, curKey to settingsManager.getSelectedModel(current)))
+            }
+        }.take(3)
+        if (candidates.isEmpty()) return null
+        for ((provider, url, keyModel) in candidates) {
+            repeat(2) { attempt ->
+                try {
+                    val (key, model) = keyModel
+                    val resp = withContext(Dispatchers.IO) {
+                        openAiService.getChatCompletion(
+                            url = url,
+                            authHeader = "Bearer $key",
+                            referer = if (provider.startsWith("OpenCode")) "https://github.com/frerox/toolz" else null,
+                            title = if (provider.startsWith("OpenCode")) "Toolz AI" else null,
+                            request = OpenAiRequest(
+                                model = model,
+                                messages = listOf(
+                                    OpenAiMessage("system", MessageContent.Text("You generate short chat titles. Reply with ONLY the title — no explanation, no quotes.")),
+                                    OpenAiMessage("user", MessageContent.Text(prompt)),
+                                ),
+                                maxTokens = 20,
+                            )
+                        )
+                    }
+                    return resp.choices.firstOrNull()?.message?.content
+                        ?.let { sanitizeChatTitle(it) }
+                        ?.takeIf { it.isNotBlank() }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Title gen failed ($provider attempt ${attempt + 1}): ${e.message}")
+                    if (attempt == 0) {
+                        try { kotlinx.coroutines.delay(500L) } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Normalize a raw model-generated title into a clean chat-list title:
+     * single line, no markdown/quotes/bullets/numbering, capitalized.
+     */
+    private fun sanitizeChatTitle(raw: String): String {
+        var t = raw.lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        t = t.removePrefix("-").removePrefix("*").removePrefix("•").trim()
+        t = t.replace(Regex("^\\d+[.)]\\s*"), "")
+        t = t.removeSurrounding("\"").removeSurrounding("'")
+            .removeSurrounding("**").removeSurrounding("*")
+            .removeSurrounding("_").removeSurrounding("#").trim()
+        t = t.trimEnd('.', '!', '?', ':', ';', ',', '"', '\'').trim()
+        t = t.replace(Regex("\\s+"), " ")
+        if (t.length > 42) t = t.take(42).trimEnd()
+        if (t.isNotEmpty()) t = t.replaceFirstChar { it.uppercase() }
+        return t
     }
 
     // ── Chat Summarization ─────────────────────────────────────────────────
@@ -714,9 +882,21 @@ class AiAssistantViewModel @Inject constructor(
         _uiState.update { it.copy(isSummarizing = true, chatSummary = null) }
 
         viewModelScope.launch {
-            val groqKey = settingsManager.getApiKey("Groq").ifBlank { settingsManager.getApiKey() }
-            if (groqKey.isBlank()) {
-                _uiState.update { it.copy(isSummarizing = false, chatSummary = "⚠ No API key available. Add a Groq key in Settings.") }
+            // Prefer current provider, else Groq, else Zen — 3 attempts max.
+            data class Helper(val provider: String, val url: String, val key: String, val model: String)
+            val helpers = buildList {
+                val current = AiSettingsHelper.canonicalProvider(settingsManager.getAiProvider())
+                val curKey = settingsManager.getApiKey(current)
+                AiSettingsHelper.getChatCompletionUrl(current)?.let { url ->
+                    if (curKey.isNotBlank()) add(Helper(current, url, curKey, settingsManager.getSelectedModel(current)))
+                }
+                val groqKey = settingsManager.getApiKey("Groq")
+                if (groqKey.isNotBlank()) add(Helper("Groq", GROQ_URL, groqKey, GROQ_MODEL_HARD))
+                val zenKey = settingsManager.getApiKey("OpenCode Zen")
+                if (zenKey.isNotBlank()) add(Helper("OpenCode Zen", "https://opencode.ai/zen/v1/chat/completions", zenKey, "deepseek-v4-flash"))
+            }.take(3)
+            if (helpers.isEmpty()) {
+                _uiState.update { it.copy(isSummarizing = false, chatSummary = "⚠ No API key available. Add a key in Settings.") }
                 return@launch
             }
 
@@ -733,21 +913,38 @@ Summarize this AI conversation as 3-6 concise bullet points.
             """.trimIndent()
 
             try {
-                val resp = withContext(Dispatchers.IO) {
-                    openAiService.getChatCompletion(
-                        url        = GROQ_URL,
-                        authHeader = "Bearer $groqKey",
-                        request    = OpenAiRequest(
-                            model    = GROQ_MODEL_HARD,
-                            messages = listOf(
-                                OpenAiMessage("system", MessageContent.Text(systemPrompt)),
-                                OpenAiMessage("user",   MessageContent.Text(chatText)),
-                            ),
-                            maxTokens = 256,
-                        )
-                    )
+                var resp: com.frerox.toolz.data.ai.OpenAiResponse? = null
+                var lastErr: Exception? = null
+                for (h in helpers) {
+                    repeat(2) { attempt ->
+                        try {
+                            resp = withContext(Dispatchers.IO) {
+                                openAiService.getChatCompletion(
+                                    url = h.url,
+                                    authHeader = "Bearer ${h.key}",
+                                    referer = if (h.provider.startsWith("OpenCode")) "https://github.com/frerox/toolz" else null,
+                                    title = if (h.provider.startsWith("OpenCode")) "Toolz AI" else null,
+                                    request = OpenAiRequest(
+                                        model = h.model,
+                                        messages = listOf(
+                                            OpenAiMessage("system", MessageContent.Text(systemPrompt)),
+                                            OpenAiMessage("user", MessageContent.Text(chatText)),
+                                        ),
+                                        maxTokens = 256,
+                                    )
+                                )
+                            }
+                            return@repeat
+                        } catch (e: Exception) {
+                            lastErr = e as? Exception ?: Exception(e.message)
+                            Log.e(TAG, "Summarize failed (${h.provider}): ${e.message}")
+                            if (attempt == 0) try { kotlinx.coroutines.delay(500L) } catch (_: Exception) {}
+                        }
+                    }
+                    if (resp != null) break
                 }
-                val summary = resp.choices.firstOrNull()?.message?.content?.trim() ?: "Could not generate summary."
+                val summary = resp?.choices?.firstOrNull()?.message?.content?.trim()
+                    ?: "Summary failed: ${lastErr?.message ?: "no helper responded"}"
                 _uiState.update { it.copy(isSummarizing = false, chatSummary = summary) }
             } catch (e: Exception) {
                 Log.e(TAG, "Summarize failed: ${e.message}")
@@ -796,9 +993,34 @@ Summarize this AI conversation as 3-6 concise bullet points.
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
-    private fun nextProvider(current: String): String = when (current) {
+    private fun nextProvider(current: String): String = when (AiSettingsHelper.canonicalProvider(current)) {
         "Gemini" -> "Groq"; "Groq" -> "ChatGPT"; "ChatGPT" -> "Claude"
-        "Claude" -> "OpenRouter"; "OpenRouter" -> "DeepSeek"; else -> "Gemini"
+        "Claude" -> "OpenRouter"; "OpenRouter" -> "DeepSeek"; "DeepSeek" -> "OpenCode Zen"
+        "OpenCode Zen" -> "OpenCode Go"; else -> "Gemini"
+    }
+
+    /** Retry the last user message (used by error banner retry button). */
+    fun retryLastMessage() {
+        val lastUser = _uiState.value.messages.lastOrNull { it.isUser } ?: return
+        _uiState.update { it.copy(error = null) }
+        sendMessage(lastUser.text)
+    }
+
+    /** Export current chat as markdown text (for share sheet). */
+    fun exportChatAsMarkdown(): String {
+        val title = _uiState.value.chats.find { it.id == _uiState.value.currentChatId }?.title ?: "Toolz AI chat"
+        val sb = StringBuilder("# $title\n\n")
+        _uiState.value.messages.forEach {
+            sb.append(if (it.isUser) "## You\n" else "## AI\n").append(it.text.trim()).append("\n\n")
+        }
+        return sb.toString()
+    }
+
+    fun clearAllChats() {
+        viewModelScope.launch {
+            _uiState.value.chats.forEach { runCatching { aiDao.deleteChat(it) } }
+            createNewChat()
+        }
     }
 }
 

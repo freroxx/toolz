@@ -81,6 +81,9 @@ class SettingsRepository @Inject constructor(
     // Notifications
     private val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
     private val NOTIFICATION_VAULT_ENABLED = booleanPreferencesKey("notification_vault_enabled")
+    private val BACKGROUND_NOTIFICATIONS_ENABLED = booleanPreferencesKey("background_notifications_enabled")
+    private val WHISPER_NOTIFICATIONS_ENABLED = booleanPreferencesKey("whisper_notifications_enabled")
+    private val OFFLINE_POPUP_ENABLED = booleanPreferencesKey("offline_popup_enabled")
     private val STEP_NOTIFICATIONS = booleanPreferencesKey("step_notifications")
     private val TIMER_NOTIFICATIONS = booleanPreferencesKey("timer_notifications")
     private val VOICE_RECORD_NOTIFICATIONS = booleanPreferencesKey("voice_record_notifications")
@@ -643,6 +646,9 @@ class SettingsRepository @Inject constructor(
     // Notifications Flows
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: true }
     val notificationVaultEnabled: Flow<Boolean> = dataStore.data.map { it[NOTIFICATION_VAULT_ENABLED] ?: true }
+    val backgroundNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[BACKGROUND_NOTIFICATIONS_ENABLED] ?: true }
+    val whisperNotificationsEnabled: Flow<Boolean> = dataStore.data.map { it[WHISPER_NOTIFICATIONS_ENABLED] ?: true }
+    val offlinePopupEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_POPUP_ENABLED] ?: true }
     val stepNotifications: Flow<Boolean> = dataStore.data.map { it[STEP_NOTIFICATIONS] ?: true }
     val timerNotifications: Flow<Boolean> = dataStore.data.map { it[TIMER_NOTIFICATIONS] ?: true }
     val voiceRecordNotifications: Flow<Boolean> = dataStore.data.map { it[VOICE_RECORD_NOTIFICATIONS] ?: true }
@@ -928,16 +934,16 @@ class SettingsRepository @Inject constructor(
         dataStore.data.map { it[PDF_FULLSCREEN_TIP_SEEN] ?: false }
 
     val aiSearchEnabled: Flow<Boolean> = combine(
-        dataStore.data.map { it[AI_SEARCH_ENABLED] ?: false },
+        dataStore.data.map { it[AI_SEARCH_ENABLED] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
     val aiSearchChatEnabled: Flow<Boolean> = combine(
-        dataStore.data.map { it[AI_SEARCH_CHAT_ENABLED] ?: false },
+        dataStore.data.map { it[AI_SEARCH_CHAT_ENABLED] ?: true },
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
-    val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: false }
+    val aiSearchIconVisible: Flow<Boolean> = dataStore.data.map { it[AI_SEARCH_ICON_VISIBLE] ?: true }
 
     val aiClipboardMonitoringEnabled: Flow<Boolean> = combine(
         dataStore.data.map { it[AI_CLIPBOARD_MONITORING] ?: false },
@@ -1023,6 +1029,9 @@ class SettingsRepository @Inject constructor(
     // Notification setters
     suspend fun setNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled } }
     suspend fun setNotificationVaultEnabled(enabled: Boolean) { dataStore.edit { it[NOTIFICATION_VAULT_ENABLED] = enabled } }
+    suspend fun setBackgroundNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[BACKGROUND_NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setWhisperNotificationsEnabled(enabled: Boolean) { dataStore.edit { it[WHISPER_NOTIFICATIONS_ENABLED] = enabled } }
+    suspend fun setOfflinePopupEnabled(enabled: Boolean) { dataStore.edit { it[OFFLINE_POPUP_ENABLED] = enabled } }
     suspend fun setStepNotifications(enabled: Boolean) { dataStore.edit { it[STEP_NOTIFICATIONS] = enabled } }
     suspend fun setTimerNotifications(enabled: Boolean) { dataStore.edit { it[TIMER_NOTIFICATIONS] = enabled } }
     suspend fun setVoiceRecordNotifications(enabled: Boolean) { dataStore.edit { it[VOICE_RECORD_NOTIFICATIONS] = enabled } }

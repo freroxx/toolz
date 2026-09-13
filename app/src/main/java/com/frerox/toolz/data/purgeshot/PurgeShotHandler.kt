@@ -259,6 +259,10 @@ object PurgeShotHandler {
     ) {
         val enabled = try { settingsRepository.purgeShotNotificationsEnabled.first() } catch (_: Exception) { true }
         if (!enabled) return
+        // Background master switch hides every background-activity notification,
+        // including PurgeShot scheduling confirmations.
+        val backgroundEnabled = try { settingsRepository.backgroundNotificationsEnabled.first() } catch (_: Exception) { true }
+        if (!backgroundEnabled) return
 
         try {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return

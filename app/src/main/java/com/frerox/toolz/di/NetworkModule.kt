@@ -31,6 +31,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import com.frerox.toolz.data.ai.AiCatalogApi
 import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.ai.LrcLibService
 import com.frerox.toolz.data.device.DeviceSpecsApi
@@ -113,4 +114,18 @@ object NetworkModule {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(DeviceSpecsApi::class.java)
+
+    /**
+     * AI model catalog API (same website backend, Moshi converter — the
+     * DTOs use @JsonClass codegen like the rest of the AI stack).
+     */
+    @Provides
+    @Singleton
+    fun provideAiCatalogApi(okHttpClient: OkHttpClient, moshi: Moshi): AiCatalogApi =
+        Retrofit.Builder()
+            .baseUrl("https://toolz-app.vercel.app/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(AiCatalogApi::class.java)
 }

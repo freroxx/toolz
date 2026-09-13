@@ -46,7 +46,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -76,6 +75,9 @@ object AiDesign {
         "Claude"   -> Color(0xFFD97757)
         "DeepSeek" -> Color(0xFF007BFF)
         "Groq"     -> Color(0xFFF55036)
+        "OpenRouter" -> Color(0xFF8E55EA)
+        "OpenCode Zen" -> Color(0xFF6366F1)
+        "OpenCode Go" -> Color(0xFF0EA5E9)
         else       -> null
     }
 }
@@ -180,6 +182,22 @@ fun SharedChatBubble(
                             )
                             SourcesPill(sources = sources, isUser = isUser, onClick = { onShowSources(message) })
                         }
+                        // Timestamp footer — subtle, helps scan long chats
+                        Text(
+                            remember(message.timestamp) {
+                                val diff = System.currentTimeMillis() - message.timestamp
+                                when {
+                                    diff < 60_000L -> "just now"
+                                    diff < 3_600_000L -> "${diff / 60_000L}m ago"
+                                    diff < 86_400_000L -> "${diff / 3_600_000L}h ago"
+                                    else -> java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+                                        .format(java.util.Date(message.timestamp))
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = (if (isUser) MaterialTheme.colorScheme.onPrimary else AiDesign.textColor()).copy(alpha = 0.45f),
+                            modifier = Modifier.padding(top = 6.dp).align(Alignment.End),
+                        )
                     }
                 }
             }
@@ -191,12 +209,14 @@ fun SharedChatBubble(
                 modifier = Modifier.padding(start = 58.dp, top = 4.dp),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("👍", "👎", "🔁", "📋").forEachIndexed { i, emoji ->
+                    // Only actions that do something: regenerate + copy/menu.
+                    // (Thumbs up/down collected nothing — removed, no dead UI.)
+                    listOf("🔁", "📋").forEachIndexed { i, emoji ->
                         Surface(
                             onClick = {
                                 when (i) {
-                                    2 -> onRegenerate?.invoke(message.id)
-                                    3 -> onLongPress(message)
+                                    0 -> onRegenerate?.invoke(message.id)
+                                    1 -> onLongPress(message)
                                 }
                                 showReactions = false
                             },
@@ -256,23 +276,23 @@ fun SharedAiInputBar(
     isLoading: Boolean,
     selectedImage: Bitmap? = null,
     supportsVision: Boolean = false,
-    supportsFiles: Boolean = false,
     performanceMode: Boolean = false,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
     onAttach: (() -> Unit)? = null,
     onRemoveImage: (() -> Unit)? = null,
-    aiSearchEnabled: Boolean = false,
-    aiSearchIconVisible: Boolean = false,
+    aiSearchEnabled: Boolean = true,
+    aiSearchIconVisible: Boolean = true,
     onToggleAiSearch: (() -> Unit)? = null,
-    placeholder: String = "Message…",
+    placeholder: String = "Ask anything…",
     modifier: Modifier = Modifier
 ) {
-    val supportsMedia = (supportsVision || supportsFiles) && onAttach != null
+    // Photo attach is offered only to vision-capable models. There is no
+    // document path (no dead menu items) — unsupported models get no button.
+    val showAttach = supportsVision && onAttach != null
     val canSend      = inputText.isNotBlank() || selectedImage != null
     val isIdle       = inputText.isEmpty() && !isLoading && selectedImage == null
-    var showMediaMenu by remember { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "inputGlow")
     val glowAlpha by if (isIdle && !performanceMode) {
@@ -372,32 +392,12 @@ fun SharedAiInputBar(
                 Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (supportsMedia) {
-                    Box {
-                        IconButton(
-                            onClick = { showMediaMenu = true },
-                            modifier = Modifier.size(42.dp),
-                        ) {
-                            Icon(Icons.Rounded.Add, "Attach", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-                        }
-                        DropdownMenu(
-                            expanded = showMediaMenu,
-                            onDismissRequest = { showMediaMenu = false },
-                            offset = DpOffset(0.dp, (-8).dp),
-                            shape = LargeExpressiveShape,
-                            containerColor = AiDesign.surfaceColor(),
-                        ) {
-                            if (supportsVision) DropdownMenuItem(
-                                text = { Text("Photo", fontWeight = FontWeight.Medium) },
-                                onClick = { showMediaMenu = false; onAttach?.invoke() },
-                                leadingIcon = { Icon(Icons.Rounded.PhotoLibrary, null, Modifier.size(20.dp)) },
-                            )
-                            if (supportsFiles) DropdownMenuItem(
-                                text = { Text("Document", fontWeight = FontWeight.Medium) },
-                                onClick = { showMediaMenu = false },
-                                leadingIcon = { Icon(Icons.Rounded.Description, null, Modifier.size(20.dp)) },
-                            )
-                        }
+                if (showAttach) {
+                    IconButton(
+                        onClick = { onAttach?.invoke() },
+                        modifier = Modifier.size(42.dp),
+                    ) {
+                        Icon(Icons.Rounded.Add, "Attach photo", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
 
@@ -426,22 +426,68 @@ fun SharedAiInputBar(
                 )
 
                 if (aiSearchIconVisible && onToggleAiSearch != null) {
-                    val searchColor by animateColorAsState(
-                        targetValue = if (aiSearchEnabled) MaterialTheme.colorScheme.primary else AiDesign.textColor(0.28f),
-                        label = "searchColor",
+                    // Revamped web-search toggle: labeled pill, ON by default, clear affordance.
+                    // ON = primary pill with globe + "Search"; OFF = ghost with PublicOff.
+                    val searchBg by animateColorAsState(
+                        targetValue = if (aiSearchEnabled) MaterialTheme.colorScheme.primaryContainer
+                        else Color.Transparent,
+                        label = "searchBg",
+                    )
+                    val searchFg by animateColorAsState(
+                        targetValue = if (aiSearchEnabled) MaterialTheme.colorScheme.onPrimaryContainer
+                        else AiDesign.textColor(0.45f),
+                        label = "searchFg",
                     )
                     val searchScale by animateFloatAsState(
-                        targetValue = if (aiSearchEnabled) 1.18f else 1f,
+                        targetValue = if (aiSearchEnabled) 1f else 0.94f,
                         animationSpec = spring(Spring.DampingRatioMediumBouncy),
                         label = "searchScale",
                     )
-                    IconButton(onClick = onToggleAiSearch) {
-                        Icon(
-                            imageVector = if (aiSearchEnabled) Icons.Rounded.Language else Icons.Rounded.PublicOff,
-                            contentDescription = "Web Search",
-                            tint = searchColor,
-                            modifier = Modifier.size(20.dp).graphicsLayer { scaleX = searchScale; scaleY = searchScale },
-                        )
+                    Surface(
+                        onClick = onToggleAiSearch,
+                        shape = MediumExpressiveShape,
+                        color = searchBg,
+                        border = BorderStroke(
+                            1.dp,
+                            if (aiSearchEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                            else AiDesign.textColor(0.14f)
+                        ),
+                        modifier = Modifier
+                            .padding(end = 2.dp)
+                            .graphicsLayer { scaleX = searchScale; scaleY = searchScale },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (aiSearchEnabled) Icons.Rounded.Language else Icons.Rounded.PublicOff,
+                                contentDescription = if (aiSearchEnabled) "Web search ON — tap to disable" else "Web search OFF — tap to enable",
+                                tint = searchFg,
+                                modifier = Modifier.size(17.dp),
+                            )
+                            Text(
+                                if (aiSearchEnabled) "Search" else "Off",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = searchFg,
+                            )
+                            if (aiSearchEnabled) {
+                                Box(
+                                    Modifier
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Box(
+                                        Modifier.size(6.dp).background(
+                                            MaterialTheme.colorScheme.primary, CircleShape
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -497,6 +543,7 @@ fun SharedAiInputBar(
 fun SourcesPill(sources: List<SearchResult>, isUser: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick, shape = MediumExpressiveShape,
+        modifier = Modifier.defaultMinSize(minHeight = 40.dp),
         color   = if (isUser) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f)
         else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
         border  = BorderStroke(
@@ -556,6 +603,8 @@ fun getIconForConfig(selected: String, provider: String): ImageVector = when (se
     "GROQ"     -> Icons.Rounded.Bolt
     "CLAUDE"   -> Icons.Rounded.HistoryEdu
     "DEEPSEEK" -> Icons.Rounded.Troubleshoot
+    "OPENCODE_ZEN", "ZEN" -> Icons.Rounded.AllInclusive
+    "OPENCODE_GO", "GO" -> Icons.Rounded.RocketLaunch
     "BOT"      -> Icons.Rounded.SmartToy
     "SPARKLE"  -> Icons.Rounded.AutoFixHigh
     else       -> when (provider) {
@@ -563,6 +612,9 @@ fun getIconForConfig(selected: String, provider: String): ImageVector = when (se
         "Groq"     -> Icons.Rounded.Bolt
         "Claude"   -> Icons.Rounded.HistoryEdu
         "DeepSeek" -> Icons.Rounded.Troubleshoot
+        "OpenRouter" -> Icons.Rounded.Hub
+        "OpenCode Zen" -> Icons.Rounded.AllInclusive
+        "OpenCode Go" -> Icons.Rounded.RocketLaunch
         else       -> Icons.Rounded.Chat
     }
 }

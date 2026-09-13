@@ -244,6 +244,8 @@ fun CaffeinateScreen(
                     isRunning = isRunning,
                     isAutoRunning = isAutoRunning,
                     elapsedTimeMillis = elapsedTime,
+                    autoStopEnabled = autoStopEnabled,
+                    autoStopMins = autoStopMins,
                     onClick = {
                         vibrationManager?.vibrateClick()
                         viewModel.toggleService()
@@ -441,6 +443,8 @@ private fun LiquidCoffeeHeroButton(
     isRunning: Boolean,
     isAutoRunning: Boolean,
     elapsedTimeMillis: Long,
+    autoStopEnabled: Boolean,
+    autoStopMins: Int,
     onClick: () -> Unit
 ) {
     val performanceMode = LocalPerformanceMode.current
@@ -651,7 +655,7 @@ private fun LiquidCoffeeHeroButton(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (isRunning) "ACTIVE" else if (isAutoRunning) "AUTO" else "START",
+                    text = if (isAutoRunning) "AUTO" else if (isRunning) "ACTIVE" else "START",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
@@ -660,51 +664,203 @@ private fun LiquidCoffeeHeroButton(
             }
         }
 
-        // Monospace timer / status description below cup
-        val formattedTime = remember(elapsedTimeMillis) {
-            val hours = TimeUnit.MILLISECONDS.toHours(elapsedTimeMillis)
-            val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsedTimeMillis) % 60
-            val seconds = TimeUnit.MILLISECONDS.toSeconds(elapsedTimeMillis) % 60
-            String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
-        }
+        // M3 Expressive countdown card below the cup
+        ExpressiveCaffeinateCountdown(
+            isRunning = isRunning,
+            isAutoRunning = isAutoRunning,
+            elapsedTimeMillis = elapsedTimeMillis,
+            autoStopEnabled = autoStopEnabled,
+            autoStopMins = autoStopMins
+        )
+    }
+}
 
-        if (isRunning) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+/**
+ * M3 Expressive countdown: oversized tabular numerals in segmented containers,
+ * status pill, and auto-stop progress. Stable width (monospace) so digits never
+ * jitter while ticking every second.
+ */
+@Composable
+private fun ExpressiveCaffeinateCountdown(
+    isRunning: Boolean,
+    isAutoRunning: Boolean,
+    elapsedTimeMillis: Long,
+    autoStopEnabled: Boolean,
+    autoStopMins: Int
+) {
+    val isManuallyActive = isRunning && !isAutoRunning
+    val isAnyActive = isRunning || isAutoRunning
+
+    val hours = TimeUnit.MILLISECONDS.toHours(elapsedTimeMillis)
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsedTimeMillis) % 60
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(elapsedTimeMillis) % 60
+    val hh = String.format(Locale.getDefault(), "%02d", hours)
+    val mm = String.format(Locale.getDefault(), "%02d", minutes)
+    val ss = String.format(Locale.getDefault(), "%02d", seconds)
+
+    ExpressiveCard(
+        onClick = {},
+        enabled = false,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(
+            1.dp,
+            if (isAnyActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Segmented HH : MM : SS — M3 Expressive display type, tabular.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CountdownSegment(
+                    value = hh,
+                    caption = "HRS",
+                    highlighted = isAnyActive,
+                    modifier = Modifier.weight(1f)
+                )
                 Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.headlineSmall.copy(fontFamily = FontFamily.Monospace),
+                    text = ":",
+                    style = MaterialTheme.typography.displayMedium.copy(fontFamily = FontFamily.Monospace),
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.primary
+                    color = if (isAnyActive) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outline
+                )
+                CountdownSegment(
+                    value = mm,
+                    caption = "MIN",
+                    highlighted = isAnyActive,
+                    modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = "Tap cup to stop caffeinate",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = ":",
+                    style = MaterialTheme.typography.displayMedium.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = FontWeight.Black,
+                    color = if (isAnyActive) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outline
+                )
+                CountdownSegment(
+                    value = ss,
+                    caption = "SEC",
+                    highlighted = isAnyActive,
+                    accent = true,
+                    modifier = Modifier.weight(1f)
                 )
             }
-        } else if (isAutoRunning) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+            // Footer: auto-stop progress when armed, else contextual hint.
+            if (isManuallyActive && autoStopEnabled) {
+                val totalMs = (autoStopMins.coerceIn(1, 1440) * 60_000L).coerceAtLeast(1L)
+                val remainingMs = (totalMs - elapsedTimeMillis).coerceAtLeast(0L)
+                val progress = (elapsedTimeMillis.toFloat() / totalMs).coerceIn(0f, 1f)
+                val rHours = TimeUnit.MILLISECONDS.toHours(remainingMs)
+                val rMins = TimeUnit.MILLISECONDS.toMinutes(remainingMs) % 60
+                val remainingLabel = if (rHours > 0) "${rHours}h ${rMins}m left"
+                else {
+                    val rSecs = TimeUnit.MILLISECONDS.toSeconds(remainingMs) % 60
+                    if (rMins > 0) "${rMins}m ${String.format(Locale.getDefault(), "%02d", rSecs)} left"
+                    else "${rSecs}s left"
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Auto-stop in $remainingLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "of ${formatAutoStopLabel(autoStopMins)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
                 Text(
-                    text = "Auto-Caffeinate Active",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                Text(
-                    text = "Screen stays awake while inside target app",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Tap cup to start infinite mode",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = when {
+                        isAutoRunning -> "Screen stays awake inside your target app"
+                        isManuallyActive -> "Tap the cup or Stop to end the session"
+                        else -> "Tap the cup to start infinite mode"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CountdownSegment(
+    value: String,
+    caption: String,
+    highlighted: Boolean,
+    accent: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = when {
+                accent && highlighted -> MaterialTheme.colorScheme.primary
+                highlighted -> MaterialTheme.colorScheme.surfaceContainerHighest
+                else -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f)
+            },
+            border = if (!accent && highlighted) {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+            } else null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = value,
+                modifier = Modifier.padding(vertical = 10.dp),
+                style = MaterialTheme.typography.displayMedium.copy(fontFamily = FontFamily.Monospace),
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-1).sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                color = when {
+                    accent && highlighted -> MaterialTheme.colorScheme.onPrimary
+                    highlighted -> MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                }
+            )
+        }
+        Text(
+            text = caption,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 2.sp,
+            color = if (highlighted) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        )
     }
 }
 

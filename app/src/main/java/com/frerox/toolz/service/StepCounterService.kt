@@ -111,6 +111,7 @@ class StepCounterService : Service(), SensorEventListener {
     // ------------------------------------------------------------------
     private var currentGoal = 10000
     private var isNotificationEnabled = true
+    private var isBackgroundNotificationsEnabled = true
     private var isGpsEnabled = false
     private var hasActivityPermission = false
     private var isBatterySaveActive = true
@@ -258,11 +259,12 @@ class StepCounterService : Service(), SensorEventListener {
         // Observe settings changes and update engine/location accordingly
         serviceScope.launch {
             combine(
-                combine(settingsRepository.stepGoal, settingsRepository.notificationsEnabled, settingsRepository.stepNotifications) { g, n, s -> Triple(g, n, s) },
-                combine(settingsRepository.stepCounterEnabled, settingsRepository.stepUseGps, settingsRepository.stepBatterySave) { c, u, b -> Triple(c, u, b) },
+                combine(settingsRepository.stepGoal, settingsRepository.notificationsEnabled, settingsRepository.stepNotifications) { g: Int, n: Boolean, s: Boolean -> Triple(g, n, s) },
+                combine(settingsRepository.stepCounterEnabled, settingsRepository.stepUseGps, settingsRepository.stepBatterySave) { c: Boolean, u: Boolean, b: Boolean -> Triple(c, u, b) },
                 settingsRepository.stepSensitivity,
-                settingsRepository.stepEngineMode
-            ) { t1, t2, sensitivity, engineMode ->
+                settingsRepository.stepEngineMode,
+                settingsRepository.backgroundNotificationsEnabled
+            ) { t1: Triple<Int, Boolean, Boolean>, t2: Triple<Boolean, Boolean, Boolean>, sensitivity: Int, engineMode: String, backgroundEnabled: Boolean ->
                 val goal = t1.first
                 val globalEnabled = t1.second
                 val stepEnabled = t1.third
@@ -271,6 +273,7 @@ class StepCounterService : Service(), SensorEventListener {
                 val batterySave = t2.third
 
                 isCounterEnabled = counterEnabled
+                isBackgroundNotificationsEnabled = backgroundEnabled
 
                 if (!counterEnabled) {
                     sensorManager?.unregisterListener(this@StepCounterService)
@@ -284,6 +287,8 @@ class StepCounterService : Service(), SensorEventListener {
 
                 currentGoal = goal
                 isNotificationEnabled = globalEnabled && stepEnabled
+                // Refresh ongoing notification visibility when background toggle flips.
+                updateNotificationVisibility()
 
                 val batterySaveChanged = batterySave != isBatterySaveActive
                 isBatterySaveActive = batterySave
@@ -555,6 +560,13 @@ class StepCounterService : Service(), SensorEventListener {
     }
 
     private fun updateNotification() {
+        // Background toggle OFF → hide step-counter ongoing notification entirely.
+        if (!isBackgroundNotificationsEnabled) {
+            try {
+                getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_STEP_COUNTER)
+            } catch (_: Exception) {}
+            return
+        }
         serviceScope.launch {
             val steps = stepRepository.currentSteps.first()
             withContext(Dispatchers.Main) {
@@ -564,8 +576,32 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
+    private fun updateNotificationVisibility() {
+        if (!isBackgroundNotificationsEnabled) {
+            try {
+                getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_STEP_COUNTER)
+            } catch (_: Exception) {}
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+        } else {
+            updateNotification()
+        }
+    }
+
     private fun startForegroundWithCorrectType(steps: Int) {
         val notification = createNotification(steps)
+        // Background toggle OFF → satisfy FGS start, then hide immediately.
+        if (!isBackgroundNotificationsEnabled) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(NotificationHelper.ID_STEP_COUNTER, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+                } else {
+                    startForeground(NotificationHelper.ID_STEP_COUNTER, notification)
+                }
+            } catch (_: Exception) {}
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            try { getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.ID_STEP_COUNTER) } catch (_: Exception) {}
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NotificationHelper.ID_STEP_COUNTER, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
         } else {

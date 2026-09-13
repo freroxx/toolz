@@ -69,6 +69,9 @@ class ToolzApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var shizukuWatcher: com.frerox.toolz.service.PurgeShotShizukuWatcher
 
+    @Inject
+    lateinit var aiCatalogRepository: com.frerox.toolz.data.ai.AiCatalogRepository
+
     private val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     override fun onCreate() {
@@ -102,6 +105,14 @@ class ToolzApplication : Application(), Configuration.Provider {
         appScope.launch {
             try { dohClientFactory.getClient() } catch (e: Exception) {
                 android.util.Log.w("ToolzApplication", "DoH warmup failed; first search will build it lazily", e)
+            }
+        }
+        // AI model catalog: install last cached payload instantly, refresh
+        // from the server when stale. Offline/first-launch falls back to
+        // the bundled tables in AiSettingsHelper — identical behavior.
+        appScope.launch {
+            try { aiCatalogRepository.warmup() } catch (e: Exception) {
+                android.util.Log.w("ToolzApplication", "AI catalog warmup failed; bundled tables apply", e)
             }
         }
         // PurgeShot: ensure it works outside Toolz — start observer service + JobScheduler trigger + Shizuku watcher

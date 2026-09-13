@@ -60,13 +60,20 @@ class CaffeinateService : Service() {
     private var savedScreenTimeout: Int = -1  // stores original timeout to restore on stop
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // Independent scope for critical DataStore persistence. Never cancelled by
+    // serviceScope.cancel() in onDestroy, so STOP persistence always lands even
+    // when stopSelf() tears the service down mid-write. This was the root cause
+    // of "can't turn off": mode stayed INFINITE in DataStore after stop.
+    private val prefsScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var notificationJob: Job? = null
     private var reminderJob: Job? = null
+    private var watchdogJob: Job? = null
+    private var configJob: Job? = null
 
     private var startTimeMillis: Long = 0
     private var currentMode: String = "OFF" // "OFF" | "INFINITE" | "AUTO"
-    private var targetAppName: String? = null
     private var notificationsEnabled: Boolean = true
+    private var backgroundNotificationsEnabled: Boolean = true
 
     companion object {
         private const val TAG = "CaffeinateService"
@@ -83,6 +90,7 @@ class CaffeinateService : Service() {
         const val ACTION_AUTO_STOP = "ACTION_AUTO_STOP"
         const val ACTION_TIMED_STOP = "ACTION_TIMED_STOP"
         const val ACTION_KEEP_GOING = "ACTION_KEEP_GOING"
+        const val ACTION_UPDATE_CONFIG = "ACTION_UPDATE_CONFIG"
 
         const val EXTRA_TARGET_APP = "EXTRA_TARGET_APP"
         const val EXTRA_INFINITE = "EXTRA_INFINITE"
@@ -95,8 +103,19 @@ class CaffeinateService : Service() {
         private val _isAutoRunningFlow = MutableStateFlow(false)
         val isAutoRunningFlow = _isAutoRunningFlow.asStateFlow()
 
+        // Reactive running state so UI / tiles can collect instead of polling the
+        // static var (which drifts when the service is toggled from tile or auto).
+        private val _isRunningFlow = MutableStateFlow(false)
+        val isRunningFlow = _isRunningFlow.asStateFlow()
+
         var isRunning = false
             private set
+
+        /** Thread-safe snapshot for TileService / AccessibilityService fast paths. */
+        fun setRunningFlag(running: Boolean) {
+            isRunning = running
+            _isRunningFlow.value = running
+        }
     }
 
     private val screenReceiver = object : BroadcastReceiver() {
@@ -121,12 +140,35 @@ class CaffeinateService : Service() {
         }
     }
 
-    private fun ensureForeground(notificationText: String = "Starting Caffeinate…") {
-        val initialNotification = createStatusNotification(notificationText)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_STATUS_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_STATUS_ID, initialNotification)
+    private fun ensureForeground() {
+        // Background toggle OFF → satisfy FGS requirement, then hide "Caffeinate is active".
+        if (!backgroundNotificationsEnabled) {
+            try {
+                val placeholder = createStatusNotification(currentStatusText())
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(NOTIFICATION_STATUS_ID, placeholder, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIFICATION_STATUS_ID, placeholder)
+                }
+            } catch (_: Exception) {}
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            try {
+                (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(NOTIFICATION_STATUS_ID)
+            } catch (_: Exception) {}
+            return
+        }
+        val initialNotification = createStatusNotification(currentStatusText())
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_STATUS_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_STATUS_ID, initialNotification)
+            }
+        } catch (e: Exception) {
+            // Android 12+ can throw ForegroundServiceStartNotAllowedException when the
+            // start came from background (boot/tile). Log and stop cleanly instead of crashing.
+            Log.e(TAG, "startForeground failed — stopping session", e)
+            try { stopSelf() } catch (_: Exception) {}
         }
     }
 
@@ -135,10 +177,18 @@ class CaffeinateService : Service() {
 
         when (action) {
             ACTION_START, ACTION_START_INFINITE -> {
-                ensureForeground()
+                // Idempotent: repeated taps must not reset the timer or leak jobs.
+                if (isRunning && currentMode == "INFINITE") {
+                    updateStatusNotificationSafe()
+                    requestTileUpdate()
+                    return START_STICKY
+                }
+                // If auto was running, promote to manual infinite (keep original start time).
+                try {
+                    ensureForeground()
+                } catch (_: Exception) { return START_STICKY }
                 currentMode = "INFINITE"
                 _isAutoRunningFlow.value = false
-                targetAppName = null
                 startSession(isAuto = false)
             }
             ACTION_AUTO_START -> {
@@ -146,16 +196,17 @@ class CaffeinateService : Service() {
                 if (isRunning && currentMode == "INFINITE") {
                     // Already running manually in infinite mode, ignore auto start
                 } else {
-                    targetAppName = intent.getStringExtra(EXTRA_TARGET_APP)
                     if (!isRunning) {
-                        ensureForeground()
+                        try {
+                            ensureForeground()
+                        } catch (_: Exception) { return START_STICKY }
                         currentMode = "AUTO"
                         _isAutoRunningFlow.value = true
                         startSession(isAuto = true)
                     } else {
                         currentMode = "AUTO"
                         _isAutoRunningFlow.value = true
-                        updateStatusNotification()
+                        updateStatusNotificationSafe()
                     }
                 }
             }
@@ -169,39 +220,61 @@ class CaffeinateService : Service() {
             }
             ACTION_TIMED_STOP -> {
                 serviceScope.launch {
-                    val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (e: Exception) { 60 }
+                    val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (_: Exception) { 60 }
+                    // Guard: only honor the alarm if it matches the current session.
+                    // Stale alarms (e.g. after a restart with a new start time) must not
+                    // kill a fresh session.
+                    val expectedTrigger = startTimeMillis + autostopMins * 60_000L
+                    val drift = kotlin.math.abs(System.currentTimeMillis() - expectedTrigger)
                     stopSession()
-                    if (notificationsEnabled) {
-                        postAlertNotification(
-                            NOTIFICATION_AUTOSTOP_ID,
-                            "Caffeinate Stopped",
-                            "Screen awake ended after $autostopMins min."
-                        )
+                    if (notificationsEnabled && backgroundNotificationsEnabled && drift < 5 * 60_000L) {
+                        try {
+                            postAlertNotification(
+                                NOTIFICATION_AUTOSTOP_ID,
+                                "Caffeinate Stopped",
+                                "Screen awake ended after $autostopMins min."
+                            )
+                        } catch (_: Exception) {}
                     }
                 }
             }
             ACTION_KEEP_GOING -> {
                 // Dismiss reminder notification
-                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.cancel(NOTIFICATION_REMINDER_ID)
+                try {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.cancel(NOTIFICATION_REMINDER_ID)
+                } catch (_: Exception) {}
+            }
+            ACTION_UPDATE_CONFIG -> {
+                if (isRunning) applyLiveConfig()
             }
             else -> {
                 if (intent == null && isRunning) {
                     // Resurrected by START_STICKY
                     serviceScope.launch {
-                        val savedMode = settingsRepository.caffeinateMode.first()
-                        val savedStart = settingsRepository.caffeinateStartTime.first()
-                        if (savedMode != "OFF") {
-                            currentMode = savedMode
-                            startTimeMillis = if (savedStart > 0) savedStart else System.currentTimeMillis()
-                            _isAutoRunningFlow.value = (savedMode == "AUTO")
-                            acquireWakeLocks()
-                            showKeepScreenOnOverlay()
-                            startLoops()
-                        } else {
+                        try {
+                            val savedMode = try { settingsRepository.caffeinateMode.first() } catch (_: Exception) { "OFF" }
+                            val savedStart = try { settingsRepository.caffeinateStartTime.first() } catch (_: Exception) { 0L }
+                            if (savedMode != "OFF") {
+                                currentMode = savedMode
+                                startTimeMillis = if (savedStart > 0) savedStart else System.currentTimeMillis()
+                                _isAutoRunningFlow.value = (savedMode == "AUTO")
+                                acquireWakeLocks()
+                                showKeepScreenOnOverlay()
+                                startLoops()
+                                startWatchdog()
+                                observeConfigWhileRunning()
+                            } else {
+                                stopSession()
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Resurrection failed", e)
                             stopSession()
                         }
                     }
+                } else if (intent == null) {
+                    // System restarted us with no state and nothing persisted: nothing to do.
+                    stopSelf()
                 }
             }
         }
@@ -209,77 +282,185 @@ class CaffeinateService : Service() {
     }
 
     private fun startSession(isAuto: Boolean) {
-        isRunning = true
-        acquireWakeLocks()
+        setRunningFlag(true)
+        try { acquireWakeLocks() } catch (e: Exception) {
+            Log.e(TAG, "acquireWakeLocks failed", e)
+        }
         showKeepScreenOnOverlay()
         overrideScreenTimeout()  // prevent dimming
 
-        if (startTimeMillis == 0L) {
-            startTimeMillis = System.currentTimeMillis()
+        if (startTimeMillis <= 0L) {
+            // Fresh process (e.g. boot restore): keep the persisted start so the
+            // timer and auto-stop deadline survive reboots instead of resetting.
+            startTimeMillis = try {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(1500L) {
+                        settingsRepository.caffeinateStartTime.first()
+                    } ?: 0L
+                }.takeIf { it > 0L } ?: System.currentTimeMillis()
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+            // Guard against clock changes producing a future start time.
+            if (startTimeMillis > System.currentTimeMillis()) {
+                startTimeMillis = System.currentTimeMillis()
+            }
         }
 
-        serviceScope.launch {
-            notificationsEnabled = try { settingsRepository.caffeinateNotificationsEnabled.first() } catch (e: Exception) { true }
-            settingsRepository.setCaffeinateMode(currentMode)
-            settingsRepository.setCaffeinateStartTime(startTimeMillis)
+        // Persist on the independent prefsScope so the write survives onDestroy.
+        prefsScope.launch {
+            try {
+                notificationsEnabled = try { settingsRepository.caffeinateNotificationsEnabled.first() } catch (_: Exception) { true }
+                backgroundNotificationsEnabled = try { settingsRepository.backgroundNotificationsEnabled.first() } catch (_: Exception) { true }
+                settingsRepository.setCaffeinateMode(currentMode)
+                settingsRepository.setCaffeinateStartTime(startTimeMillis)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist caffeinate start", e)
+            }
+        }
 
-            // Setup Auto-stop Alarm if applicable (only in manual infinite mode)
-            if (!isAuto) {
-                val autostopEnabled = try { settingsRepository.caffeinateAutoStopEnabled.first() } catch (e: Exception) { false }
-                if (autostopEnabled) {
-                    val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (e: Exception) { 60 }
-                    scheduleAutoStopAlarm(autostopMins)
+        applyLiveConfig()
+        startLoops()
+        startWatchdog()
+        observeConfigWhileRunning()
+        updateStatusNotificationSafe()
+        requestTileUpdate()
+    }
+
+    /**
+     * (Re)applies auto-stop + reminder from current settings without touching
+     * the session start time. Called on start and on [ACTION_UPDATE_CONFIG]
+     * so slider changes take effect live.
+     */
+    private fun applyLiveConfig() {
+        serviceScope.launch {
+            try {
+                notificationsEnabled = try { settingsRepository.caffeinateNotificationsEnabled.first() } catch (_: Exception) { true }
+                backgroundNotificationsEnabled = try { settingsRepository.backgroundNotificationsEnabled.first() } catch (_: Exception) { true }
+                val isAuto = currentMode == "AUTO" || _isAutoRunningFlow.value
+                if (!isAuto) {
+                    val autostopEnabled = try { settingsRepository.caffeinateAutoStopEnabled.first() } catch (_: Exception) { false }
+                    if (autostopEnabled) {
+                        val autostopMins = try { settingsRepository.caffeinateAutoStopMins.first() } catch (_: Exception) { 60 }
+                        scheduleAutoStopAlarm(autostopMins)
+                        // If the deadline already passed (e.g. device slept through it),
+                        // stop now instead of waiting for a stale alarm.
+                        val remaining = startTimeMillis + autostopMins * 60_000L - System.currentTimeMillis()
+                        if (remaining <= 0L) {
+                            Log.d(TAG, "Auto-stop deadline already passed -> stopping now")
+                            stopSession()
+                            return@launch
+                        }
+                    } else {
+                        cancelAutoStopAlarm()
+                    }
+
+                    val reminderEnabled = try { settingsRepository.caffeinateReminderEnabled.first() } catch (_: Exception) { false }
+                    if (reminderEnabled && notificationsEnabled) {
+                        val reminderMins = try { settingsRepository.caffeinateReminderMins.first() } catch (_: Exception) { 30 }
+                        startReminderLoop(reminderMins)
+                    } else {
+                        reminderJob?.cancel()
+                        reminderJob = null
+                    }
                 } else {
                     cancelAutoStopAlarm()
-                }
-
-                // Setup Reminder loop if applicable
-                val reminderEnabled = try { settingsRepository.caffeinateReminderEnabled.first() } catch (e: Exception) { false }
-                if (reminderEnabled && notificationsEnabled) {
-                    val reminderMins = try { settingsRepository.caffeinateReminderMins.first() } catch (e: Exception) { 30 }
-                    startReminderLoop(reminderMins)
-                } else {
                     reminderJob?.cancel()
+                    reminderJob = null
                 }
-            } else {
-                cancelAutoStopAlarm()
-                reminderJob?.cancel()
+                updateStatusNotificationSafe()
+                requestTileUpdate()
+            } catch (e: Exception) {
+                Log.w(TAG, "applyLiveConfig failed", e)
             }
-
-            updateStatusNotification()
-            requestTileUpdate()
         }
+    }
 
-        startLoops()
+    /** Observes settings while the session runs so toggles apply without restart. */
+    private fun observeConfigWhileRunning() {
+        configJob?.cancel()
+        configJob = serviceScope.launch {
+            try {
+                kotlinx.coroutines.flow.combine(
+                    settingsRepository.caffeinateAutoStopEnabled,
+                    settingsRepository.caffeinateAutoStopMins,
+                    settingsRepository.caffeinateReminderEnabled,
+                    settingsRepository.caffeinateReminderMins,
+                    settingsRepository.caffeinateNotificationsEnabled
+                ) { _: Boolean, _: Int, _: Boolean, _: Int, _: Boolean -> Unit }
+                    .collect {
+                        if (isRunning) applyLiveConfig()
+                    }
+            } catch (_: Exception) {
+                // Flow collection ended (scope cancelled on stop) — expected.
+            }
+        }
+        // Background master switch applies live without restart.
+        serviceScope.launch {
+            try {
+                settingsRepository.backgroundNotificationsEnabled.collect { enabled ->
+                    val changed = enabled != backgroundNotificationsEnabled
+                    backgroundNotificationsEnabled = enabled
+                    if (changed && isRunning) {
+                        if (!enabled) {
+                            try {
+                                (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(NOTIFICATION_STATUS_ID)
+                            } catch (_: Exception) {}
+                        }
+                        applyLiveConfig()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     private fun stopSession() {
-        isRunning = false
-        currentMode = "OFF"
-        _isAutoRunningFlow.value = false
-        startTimeMillis = 0
-        _elapsedTimeFlow.value = 0
+        // Idempotent + thread-safe: concurrent STOP intents (tile + notification
+        // + UI) must not double-release wakelocks or double-persist.
+        synchronized(this) {
+            if (!isRunning && startTimeMillis == 0L && currentMode == "OFF") {
+                try { stopSelf() } catch (_: Exception) {}
+                return
+            }
+            setRunningFlag(false)
+            currentMode = "OFF"
+            _isAutoRunningFlow.value = false
+            startTimeMillis = 0
+            _elapsedTimeFlow.value = 0
+        }
 
-        cancelAutoStopAlarm()
+        try { cancelAutoStopAlarm() } catch (_: Exception) {}
+        configJob?.cancel()
+        configJob = null
+        watchdogJob?.cancel()
+        watchdogJob = null
         reminderJob?.cancel()
         reminderJob = null
         notificationJob?.cancel()
         notificationJob = null
 
-        releaseWakeLocks()
-        removeKeepScreenOnOverlay()
-        restoreScreenTimeout()  // undo our dimming-prevention override
+        try { releaseWakeLocks() } catch (_: Exception) {}
+        try { removeKeepScreenOnOverlay() } catch (_: Exception) {}
+        try { restoreScreenTimeout() } catch (_: Exception) {}  // undo our dimming-prevention override
 
-        serviceScope.launch {
+        // CRITICAL: persist on prefsScope (independent of serviceScope) so the
+        // write is never cancelled by onDestroy -> stopSelf ordering.
+        prefsScope.launch {
             try {
                 settingsRepository.setCaffeinateMode("OFF")
                 settingsRepository.setCaffeinateStartTime(0L)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist caffeinate stop", e)
+            }
         }
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(NOTIFICATION_STATUS_ID)
+        } catch (_: Exception) {}
         requestTileUpdate()
-        stopSelf()
+        try { stopSelf() } catch (_: Exception) {}
     }
 
     private fun startLoops() {
@@ -287,29 +468,61 @@ class CaffeinateService : Service() {
         notificationJob = serviceScope.launch {
             var lastText: String? = null
             while (isActive && isRunning) {
-                val elapsed = System.currentTimeMillis() - startTimeMillis
-                _elapsedTimeFlow.value = elapsed
+                try {
+                    val elapsed = (System.currentTimeMillis() - startTimeMillis).coerceAtLeast(0L)
+                    _elapsedTimeFlow.value = elapsed
 
-                val text = currentStatusText()
-                if (text != lastText) {
-                    lastText = text
-                    updateStatusNotification()
+                    val text = currentStatusText()
+                    if (text != lastText) {
+                        lastText = text
+                        updateStatusNotificationSafe()
+                    }
+                } catch (_: Exception) {
+                    // Never let the loop die on a transient failure.
                 }
                 delay(1000)
             }
         }
     }
 
+    /**
+     * Watchdog: some OEMs (Xiaomi/MIUI, OnePlus, Samsung) aggressively release
+     * wakelocks or kill overlays. Re-acquire every 30s if still supposed to run.
+     */
+    private fun startWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = serviceScope.launch {
+            while (isActive && isRunning) {
+                delay(30_000L)
+                if (!isActive || !isRunning) break
+                try {
+                    if (cpuWakeLock?.isHeld != true || screenWakeLock?.isHeld != true) {
+                        Log.w(TAG, "Watchdog: wakelock lost -> re-acquiring")
+                        acquireWakeLocks()
+                    }
+                    if (overlayView == null) {
+                        showKeepScreenOnOverlay()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Watchdog re-acquire failed", e)
+                }
+            }
+        }
+    }
+
     private fun startReminderLoop(intervalMins: Int) {
         reminderJob?.cancel()
+        val safeInterval = intervalMins.coerceIn(1, 480)
         reminderJob = serviceScope.launch {
-            val intervalMillis = intervalMins * 60_000L
+            val intervalMillis = safeInterval * 60_000L
             while (isActive && isRunning) {
                 delay(intervalMillis)
                 if (isActive && isRunning && notificationsEnabled) {
-                    val elapsed = System.currentTimeMillis() - startTimeMillis
-                    val elapsedMins = TimeUnit.MILLISECONDS.toMinutes(elapsed)
-                    postReminderNotification(elapsedMins)
+                    try {
+                        val elapsed = (System.currentTimeMillis() - startTimeMillis).coerceAtLeast(0L)
+                        val elapsedMins = TimeUnit.MILLISECONDS.toMinutes(elapsed)
+                        postReminderNotification(elapsedMins)
+                    } catch (_: Exception) {}
                 }
             }
         }
@@ -317,7 +530,11 @@ class CaffeinateService : Service() {
 
     private fun scheduleAutoStopAlarm(minutes: Int) {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val triggerAt = startTimeMillis + (minutes * 60_000L)
+        val safeMinutes = minutes.coerceIn(1, 1440)
+        // Clamp stale start times (clock changed while running) so we never
+        // schedule an alarm in the past that fires instantly.
+        val base = startTimeMillis.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val triggerAt = (base + safeMinutes * 60_000L).coerceAtLeast(System.currentTimeMillis() + 60_000L)
         val intent = Intent(this, CaffeinateService::class.java).apply {
             action = ACTION_TIMED_STOP
         }
@@ -329,14 +546,28 @@ class CaffeinateService : Service() {
         )
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try { alarmManager.canScheduleExactAlarms() } catch (_: Exception) { true }
+            } else true
+            if (canExact) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                } else {
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                }
             } else {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+                // No exact-alarm permission (Android 12+): fall back to inexact so
+                // auto-stop still works, just with Doze batching tolerance.
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
             }
-            Log.d(TAG, "Scheduled auto-stop alarm in $minutes minutes")
+            Log.d(TAG, "Scheduled auto-stop alarm in $safeMinutes minutes (exact=$canExact)")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Exact alarm denied, falling back to inexact", e)
+            try {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
+            } catch (_: Exception) {}
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to schedule exact auto-stop alarm", e)
+            Log.w(TAG, "Failed to schedule auto-stop alarm", e)
         }
     }
 
@@ -358,37 +589,71 @@ class CaffeinateService : Service() {
     }
 
     private fun acquireWakeLocks() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-
-        if (cpuWakeLock == null) {
-            cpuWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Toolz:CaffeinateCpuLock").apply {
-                setReferenceCounted(false)
-            }
-        }
-        if (cpuWakeLock?.isHeld == false) {
-            cpuWakeLock?.acquire()
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: run {
+            Log.e(TAG, "PowerManager unavailable — cannot acquire wakelocks")
+            return
         }
 
-        if (screenWakeLock == null) {
-            @Suppress("DEPRECATION")
-            screenWakeLock = powerManager.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
-                "Toolz:CaffeinateScreenLock"
-            ).apply {
-                setReferenceCounted(false)
+        try {
+            if (cpuWakeLock == null) {
+                cpuWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Toolz:CaffeinateCpuLock").apply {
+                    setReferenceCounted(false)
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create CPU wakelock", e)
         }
-        if (screenWakeLock?.isHeld == false) {
-            screenWakeLock?.acquire()
+        try {
+            if (cpuWakeLock?.isHeld == false) {
+                cpuWakeLock?.acquire()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to acquire CPU wakelock", e)
+        }
+
+        try {
+            if (screenWakeLock == null) {
+                @Suppress("DEPRECATION")
+                screenWakeLock = powerManager.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
+                    "Toolz:CaffeinateScreenLock"
+                ).apply {
+                    setReferenceCounted(false)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create screen wakelock", e)
+        }
+        try {
+            if (screenWakeLock?.isHeld == false) {
+                // 10-min timeout with watchdog re-acquire: bounds the hold so a
+                // leaked lock can never drain the battery forever, while the
+                // watchdog keeps an active session alive indefinitely.
+                screenWakeLock?.acquire(10 * 60_000L)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to acquire screen wakelock", e)
         }
     }
 
     private fun releaseWakeLocks() {
-        if (screenWakeLock?.isHeld == true) {
-            try { screenWakeLock?.release() } catch (_: Exception) {}
+        try {
+            if (screenWakeLock?.isHeld == true) {
+                screenWakeLock?.release()
+            }
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Screen wakelock under-locked on release", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to release screen wakelock", e)
         }
-        if (cpuWakeLock?.isHeld == true) {
-            try { cpuWakeLock?.release() } catch (_: Exception) {}
+        try {
+            if (cpuWakeLock?.isHeld == true) {
+                cpuWakeLock?.release()
+            }
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "CPU wakelock under-locked on release", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to release CPU wakelock", e)
         }
     }
 
@@ -437,6 +702,16 @@ class CaffeinateService : Service() {
 
     private fun showKeepScreenOnOverlay() {
         if (overlayView != null) return
+        // Avoid a SecurityException log-spam loop when the user never granted
+        // "Display over other apps" — the wakelock is the primary mechanism.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                if (!Settings.canDrawOverlays(this)) {
+                    Log.d(TAG, "Overlay skipped (no SYSTEM_ALERT_WINDOW) — wakelock is primary")
+                    return
+                }
+            } catch (_: Exception) {}
+        }
         try {
             val params = WindowManager.LayoutParams(
                 1, 1,
@@ -471,35 +746,20 @@ class CaffeinateService : Service() {
     }
 
     private fun currentStatusText(): String {
-        if (!notificationsEnabled) {
-            return if (currentMode == "AUTO") "Auto-Caffeinate active" else "Caffeinate active"
-        }
-
-        val elapsed = System.currentTimeMillis() - startTimeMillis
+        val elapsed = (System.currentTimeMillis() - startTimeMillis).coerceAtLeast(0L)
         val hours = TimeUnit.MILLISECONDS.toHours(elapsed)
         val minutes = TimeUnit.MILLISECONDS.toMinutes(elapsed) % 60
 
-        val timeStr = if (hours > 0) {
-            String.format(Locale.getDefault(), "%02d:%02d h", hours, minutes)
+        return if (hours > 0) {
+            String.format(Locale.getDefault(), "%dh %02d min", hours, minutes)
         } else {
-            String.format(Locale.getDefault(), "%02d min", minutes)
-        }
-
-        return if (currentMode == "AUTO") {
-            if (!targetAppName.isNullOrBlank()) {
-                "Active for $timeStr • $targetAppName"
-            } else {
-                "Active for $timeStr"
-            }
-        } else {
-            "Active for $timeStr"
+            String.format(Locale.getDefault(), "%d min", minutes)
         }
     }
 
     private fun createStatusNotification(text: String): Notification {
-        val title = if (currentMode == "AUTO") "Auto-Caffeinate Active" else "Caffeinate is Active"
         return NotificationCompat.Builder(this, CHANNEL_STATUS_ID)
-            .setContentTitle(title)
+            .setContentTitle("Caffeinate is active")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notif_caffeinate)
             .setOngoing(true)
@@ -515,10 +775,26 @@ class CaffeinateService : Service() {
 
     private fun updateStatusNotification() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Background toggle hides the ongoing "Caffeinate is active" status.
+        if (!backgroundNotificationsEnabled) {
+            try { notificationManager.cancel(NOTIFICATION_STATUS_ID) } catch (_: Exception) {}
+            return
+        }
         notificationManager.notify(NOTIFICATION_STATUS_ID, createStatusNotification(currentStatusText()))
     }
 
+    /** Never-crash variant used from idempotent paths and background loops. */
+    private fun updateStatusNotificationSafe() {
+        try {
+            if (!isRunning) return
+            updateStatusNotification()
+        } catch (e: Exception) {
+            Log.w(TAG, "updateStatusNotification failed", e)
+        }
+    }
+
     private fun postReminderNotification(minutesElapsed: Long) {
+        if (!backgroundNotificationsEnabled) return
         val keepGoingIntent = Intent(this, CaffeinateService::class.java).apply {
             action = ACTION_KEEP_GOING
         }
@@ -542,6 +818,7 @@ class CaffeinateService : Service() {
     }
 
     private fun postAlertNotification(id: Int, title: String, message: String) {
+        if (!backgroundNotificationsEnabled) return
         val notification = NotificationCompat.Builder(this, CHANNEL_ALERTS_ID)
             .setContentTitle(title)
             .setContentText(message)
@@ -583,7 +860,9 @@ class CaffeinateService : Service() {
 
     private fun requestTileUpdate() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            TileService.requestListeningState(this, ComponentName(this, CaffeinateTileService::class.java))
+            try {
+                TileService.requestListeningState(this, ComponentName(this, CaffeinateTileService::class.java))
+            } catch (_: Exception) {}
         }
     }
 
@@ -614,16 +893,38 @@ class CaffeinateService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Swiping the app away must NOT kill an active session. START_STICKY
+        // already asks for resurrection, but re-assert foreground state now so
+        // there is no gap on OEMs that trim background services aggressively.
+        if (isRunning) {
+            try {
+                ensureForeground()
+            } catch (_: Exception) {}
+        }
+    }
+
     override fun onDestroy() {
-        isRunning = false
-        super.onDestroy()
+        // If the system killed us while a session was active, keep the static
+        // flags + persisted mode so START_STICKY resurrection and the boot
+        // receiver can restore. Only an explicit stopSession() clears them.
+        val wasRunning = isRunning
+        if (!wasRunning) {
+            setRunningFlag(false)
+        }
+        configJob?.cancel()
+        watchdogJob?.cancel()
         reminderJob?.cancel()
         notificationJob?.cancel()
         serviceScope.cancel()
-        releaseWakeLocks()
-        removeKeepScreenOnOverlay()
+        // NOTE: prefsScope is intentionally NOT cancelled here — a pending
+        // stop-persist must be allowed to land.
+        try { releaseWakeLocks() } catch (_: Exception) {}
+        try { removeKeepScreenOnOverlay() } catch (_: Exception) {}
         try {
             unregisterReceiver(screenReceiver)
         } catch (_: Exception) {}
+        super.onDestroy()
     }
 }

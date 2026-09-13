@@ -51,6 +51,7 @@ class OnboardingViewModel @Inject constructor(
         val performanceMode: Boolean = false,
         val groqApiKey: String = "",
         val notificationsEnabled: Boolean = true,
+        val backgroundNotificationsEnabled: Boolean = true,
         val vaultEnabled: Boolean = true,
         val shizukuAuthorized: Boolean = false,
         val deviceSpecs: DeviceSpecHelper.DeviceSpecs? = null,
@@ -80,6 +81,7 @@ class OnboardingViewModel @Inject constructor(
     fun updatePerformanceMode(enabled: Boolean) = _uiState.update { it.copy(performanceMode = enabled) }
     fun updateGroqKey(key: String) = _uiState.update { it.copy(groqApiKey = key) }
     fun updateNotifications(enabled: Boolean) = _uiState.update { it.copy(notificationsEnabled = enabled) }
+    fun updateBackgroundNotifications(enabled: Boolean) = _uiState.update { it.copy(backgroundNotificationsEnabled = enabled) }
     fun updateVault(enabled: Boolean) = _uiState.update { it.copy(vaultEnabled = enabled) }
 
     fun checkForUpdates() {
@@ -100,6 +102,7 @@ class OnboardingViewModel @Inject constructor(
             settingsRepository.setBackgroundGradientEnabled(s.backgroundGradient)
             settingsRepository.setPerformanceMode(s.performanceMode)
             settingsRepository.setNotificationsEnabled(s.notificationsEnabled)
+            settingsRepository.setBackgroundNotificationsEnabled(s.backgroundNotificationsEnabled)
             settingsRepository.setNotificationVaultEnabled(s.vaultEnabled)
             
             if (s.groqApiKey.isNotBlank()) {

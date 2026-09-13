@@ -58,6 +58,10 @@ data class AiMessage(
     val searchSources: String? = null,
     val canDeepDive: Boolean = false,
     val deepDiveState: DeepDiveState = DeepDiveState.NONE,
+    /** Exact model id that produced this reply (null for user msgs / legacy rows). */
+    val modelName: String? = null,
+    /** Wall-clock inference time in ms (null for user msgs / legacy rows). */
+    val responseTimeMs: Long? = null,
 )
 
 @Dao

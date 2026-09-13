@@ -34,6 +34,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.launch
 
 /**
  * Manages Whisper in-process push notifications.
@@ -46,6 +47,7 @@ class WhisperNotificationManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val mutePrefs: WhisperMutePreferences,
     private val hiddenChatsStore: WhisperHiddenChatsStore,
+    private val settingsRepository: com.frerox.toolz.data.settings.SettingsRepository,
 ) {
     companion object {
         const val CHANNEL_ID = "whisper_messages"
@@ -75,6 +77,10 @@ class WhisperNotificationManager @Inject constructor(
     }
 
     private val notifManager = NotificationManagerCompat.from(context)
+    // Master Whisper toggle (Settings → Notifications → Whisper, enabled by default).
+    // Cached from DataStore so the synchronous show*() path never blocks.
+    @Volatile private var whisperNotificationsEnabled = true
+    private val managerScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     // Stable per-sender notification IDs: hashCode() collisions silently overwrote one
     // conversation's notification with another's. Allocation is persisted so IDs survive
     // process death and remain unique until the (practically unreachable) band exhausts.
@@ -92,6 +98,25 @@ class WhisperNotificationManager @Inject constructor(
     init {
         createChannel()
         observeAppLifecycle()
+        managerScope.launch {
+            try {
+                // Whisper respects both its own toggle and the global master switch.
+                kotlinx.coroutines.flow.combine(
+                    settingsRepository.whisperNotificationsEnabled,
+                    settingsRepository.notificationsEnabled
+                ) { whisper, global -> whisper && global }.collect { enabled ->
+                    whisperNotificationsEnabled = enabled
+                    if (!enabled) {
+                        // Clear any lingering Whisper notifications when disabled.
+                        runCatching {
+                            notifManager.activeNotifications
+                                .filter { it.notification.group == GROUP_KEY || it.id == SUMMARY_NOTIF_ID }
+                                .forEach { notifManager.cancel(it.id) }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
         synchronized(senderNotifIds) {
             for ((key, value) in idPrefs.all) {
                 if (key.startsWith("id_") && value is Int) senderNotifIds[key.removePrefix("id_")] = value
@@ -150,6 +175,8 @@ class WhisperNotificationManager @Inject constructor(
         messageId: String? = null,
         isRead: Boolean = false,
     ) {
+        // Master Whisper toggle (enabled by default) — hides all Whisper message pings.
+        if (!whisperNotificationsEnabled) return
         // Never notify for read messages (ghost after mark-as-read).
         if (isRead) return
         // Dedupe same messageId from FCM + realtime within TTL.
@@ -228,6 +255,7 @@ class WhisperNotificationManager @Inject constructor(
 
     /** Friend request notification — stable sender id avoids display-name collisions. V2-FIX M-H?: id lives in the dedicated FRIEND_REQUEST_* band, disjoint from conversation ids. */
     fun showFriendRequestNotification(fromId: String, fromName: String) {
+        if (!whisperNotificationsEnabled) return
         if (isInForeground && isViewingFriendRequests) return
         val notifId = friendRequestNotifId(fromId)
         // Tapping the notification opens MainActivity and surfaces the request list

@@ -194,13 +194,31 @@ class PurgeShotService : Service() {
     }
 
     private fun tryStartForeground(notification: Notification) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIF_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-            } else {
-                startForeground(NOTIF_ID, notification)
+        // Background toggle OFF → satisfy FGS requirement, then hide "PurgeShot active".
+        scope.launch {
+            val backgroundEnabled = try { settingsRepository.backgroundNotificationsEnabled.first() } catch (_: Exception) { true }
+            if (!backgroundEnabled) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(NOTIF_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                    } else {
+                        startForeground(NOTIF_ID, notification)
+                    }
+                } catch (_: Exception) {}
+                try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+                try {
+                    (getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager)?.cancel(NOTIF_ID)
+                } catch (_: Exception) {}
+                try { PurgeShotObserverJobService.schedule(this@PurgeShotService) } catch (_: Exception) {}
+                return@launch
             }
-        } catch (e: Exception) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIF_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIF_ID, notification)
+                }
+            } catch (e: Exception) {
             // Android 14+ throws ForegroundServiceStartNotAllowedException when starting FGS from background
             // after swipe or boot while app not in foreground. Don't crash — keep the ContentObserver
             // alive as a background observer (works while process is alive) and rely on JobScheduler +
@@ -208,7 +226,8 @@ class PurgeShotService : Service() {
             // while the service process lives, just without a sticky notification.
             Log.w(TAG, "startForeground blocked (background), continuing as background observer", e)
             // Still ensure detector + Job are armed so "outside Toolz" path works.
-            try { PurgeShotObserverJobService.schedule(this) } catch (_: Exception) {}
+            try { PurgeShotObserverJobService.schedule(this@PurgeShotService) } catch (_: Exception) {}
+            }
         }
     }
 

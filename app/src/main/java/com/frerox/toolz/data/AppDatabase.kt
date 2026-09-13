@@ -125,7 +125,9 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // PDF remake 57: drops pdf_annotations, extends pdf_metadata (lastPage/lastZoom/
     // readingMode/paperMode/title/author/pageCount), adds note_attachments with
     // backfill from notes.attached* columns (see MIGRATION_56_57).
-    version = 57,
+    // AI meta 58: ai_messages gains modelName + responseTimeMs (nullable, shown
+    // in the message actions sheet; see MIGRATION_57_58).
+    version = 58,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.

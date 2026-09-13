@@ -69,6 +69,9 @@ class SettingsViewModel @Inject constructor(
 
     val notificationsEnabled = repository.notificationsEnabled
     val notificationVaultEnabled = repository.notificationVaultEnabled
+    val backgroundNotificationsEnabled = repository.backgroundNotificationsEnabled
+    val whisperNotificationsEnabled = repository.whisperNotificationsEnabled
+    val offlinePopupEnabled = repository.offlinePopupEnabled
     val stepNotifications = repository.stepNotifications
     val timerNotifications = repository.timerNotifications
     val voiceRecordNotifications = repository.voiceRecordNotifications
@@ -78,6 +81,7 @@ class SettingsViewModel @Inject constructor(
     val taskReminderNotifications = repository.taskReminderNotifications
     val eventReminderNotifications = repository.eventReminderNotifications
     val pomodoroNotifications = repository.pomodoroNotifications
+    val backupNotifications = repository.backupNotifications
     val flashlightNotificationsEnabled = repository.flashlightNotificationsEnabled
     val purgeShotNotifications = repository.purgeShotNotificationsEnabled
     val notificationRetentionDays = repository.notificationRetentionDays
@@ -158,6 +162,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationsEnabled(enabled) }
     fun setNotificationVaultEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotificationVaultEnabled(enabled) }
+    fun setBackgroundNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBackgroundNotificationsEnabled(enabled) }
+    fun setWhisperNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setWhisperNotificationsEnabled(enabled) }
+    fun setOfflinePopupEnabled(enabled: Boolean) = viewModelScope.launch { repository.setOfflinePopupEnabled(enabled) }
     fun setStepNotifications(enabled: Boolean) = viewModelScope.launch { repository.setStepNotifications(enabled) }
     fun setTimerNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTimerNotifications(enabled) }
     fun setVoiceRecordNotifications(enabled: Boolean) = viewModelScope.launch { repository.setVoiceRecordNotifications(enabled) }
@@ -167,6 +174,7 @@ class SettingsViewModel @Inject constructor(
     fun setTaskReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setTaskReminderNotifications(enabled) }
     fun setEventReminderNotifications(enabled: Boolean) = viewModelScope.launch { repository.setEventReminderNotifications(enabled) }
     fun setPomodoroNotifications(enabled: Boolean) = viewModelScope.launch { repository.setPomodoroNotifications(enabled) }
+    fun setBackupNotifications(enabled: Boolean) = viewModelScope.launch { repository.setBackupNotifications(enabled) }
     fun setFlashlightNotificationsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setFlashlightNotificationsEnabled(enabled) }
     fun setPurgeShotNotifications(enabled: Boolean) = viewModelScope.launch { repository.setPurgeShotNotificationsEnabled(enabled) }
     fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }

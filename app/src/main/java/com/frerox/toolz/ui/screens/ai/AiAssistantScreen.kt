@@ -155,6 +155,7 @@ fun AiAssistantScreen(
 ) {
     val uiState         by viewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by viewModel.settingsUiState.collectAsStateWithLifecycle()
+    val isOnline        by viewModel.isOnline.collectAsStateWithLifecycle()
     val listState       = rememberLazyListState()
     val scope           = rememberCoroutineScope()
     val context         = LocalContext.current
@@ -191,11 +192,18 @@ fun AiAssistantScreen(
     // ── Overlays ──────────────────────────────────────────────────────────────
     if (showSettings) AiSettingsDialog(
         state = settingsUiState, savedConfigs = uiState.savedConfigs,
-        onDismiss = { showSettings = false },
+        onDismiss = { showSettings = false; viewModel.cancelConfigSwitch() },
         onProviderChange = viewModel::updateProvider, onApiKeyChange = viewModel::updateApiKey,
         onModelChange = viewModel::updateModel, onIconChange = viewModel::updateIcon,
         onCustomIconClick = { configIconPicker.launch("image/*") },
-        onSave = { viewModel.onSettingsSaveRequest(); showSettings = false },
+        onSave = {
+            viewModel.onSettingsSaveRequest()
+            // Stay open when a follow-up decision is needed (pending switch
+            // or missing-key warning); otherwise the save applied — close.
+            if (viewModel.uiState.value.pendingConfig == null &&
+                viewModel.settingsUiState.value.showNoKeyWarningFor == null
+            ) showSettings = false
+        },
         onSaveConfig = viewModel::saveConfig, onDeleteConfig = viewModel::deleteConfig,
         onEditConfig = viewModel::editConfig, onMoveConfig = viewModel::moveConfig,
         onTest = viewModel::testConnection,
@@ -204,6 +212,11 @@ fun AiAssistantScreen(
         onPromptFormatChange = viewModel::updatePromptFormat,
         aiSearchIconVisible = uiState.aiSearchIconVisible,
         onSetAiSearchIconVisible = viewModel::setAiSearchIconVisible,
+        catalogVersion = settingsUiState.catalogVersion,
+        catalogUpdatedAt = settingsUiState.catalogUpdatedAt,
+        isRefreshingCatalog = settingsUiState.isRefreshingCatalog,
+        catalogRefreshResult = settingsUiState.catalogRefreshResult,
+        onRefreshCatalog = viewModel::refreshCatalog,
     )
 
     if (showQuotaDialog) ModernAiDialog(
@@ -226,6 +239,7 @@ fun AiAssistantScreen(
         message = selectedMessageForActions!!,
         onDismiss = { selectedMessageForActions = null },
         onRegenerate = { viewModel.regenerateMessage(it); selectedMessageForActions = null },
+        onShowSources = { selectedMessageForSources = it; selectedMessageForActions = null },
     )
 
     if (selectedMessageForSources != null) MessageSourcesSheet(
@@ -239,6 +253,37 @@ fun AiAssistantScreen(
         onDismiss = viewModel::dismissGroqDialog,
         onSave = viewModel::saveGroqKey,
         onGetLink = { onNavigateToBrowser("https://console.groq.com/keys") },
+    )
+
+    // Unsaved-switch confirmation: Save was tapped with an active chat, so the
+    // new provider/model waits here instead of silently discarding (or worse,
+    // silently applying mid-chat). Either choice also closes Settings.
+    if (uiState.pendingConfig != null) ModernAiDialog(
+        title = "Apply new settings?",
+        icon = Icons.Rounded.Tune,
+        iconColor = MaterialTheme.colorScheme.primary,
+        description = "Switch to ${uiState.pendingConfig!!.provider} • ${uiState.pendingConfig!!.model}?",
+        supportingText = "The current chat keeps its original settings. A fresh chat starts with the new ones — stored keys are never deleted.",
+        primaryButtonText = "APPLY & NEW CHAT",
+        onPrimaryClick = { viewModel.confirmConfigSwitch(); showSettings = false },
+        secondaryButtonText = "KEEP EDITING",
+        onSecondaryClick = { viewModel.cancelConfigSwitch() },
+        onDismiss = { viewModel.cancelConfigSwitch() },
+    )
+
+    // Missing-key warning: the chosen provider has no key set, so chats on
+    // it would fail. User can go back and paste one, or save anyway.
+    if (settingsUiState.showNoKeyWarningFor != null) ModernAiDialog(
+        title = "No API key",
+        icon = Icons.Rounded.VpnKey,
+        iconColor = MaterialTheme.colorScheme.error,
+        description = "No API key set for ${settingsUiState.showNoKeyWarningFor}.",
+        supportingText = "Chats on this provider will fail until you add one. Paste a key in the field above, or save anyway and add it later.",
+        primaryButtonText = "SAVE ANYWAY",
+        onPrimaryClick = { viewModel.confirmSaveWithoutKey() },
+        secondaryButtonText = "GO BACK",
+        onSecondaryClick = { viewModel.dismissNoKeyWarning() },
+        onDismiss = { viewModel.dismissNoKeyWarning() },
     )
 
     // ── Main layout ───────────────────────────────────────────────────────────
@@ -281,12 +326,12 @@ fun AiAssistantScreen(
                 )
             },
             bottomBar = {
-                AiInputBar(
+                // Online-only tool: no input while offline (gate below explains why).
+                if (isOnline) AiInputBar(
                     inputText      = inputText,
                     isLoading      = uiState.isLoading,
                     selectedImage  = uiState.selectedImage,
                     supportsVision = AiSettingsHelper.supportsVision(settingsUiState.provider, settingsUiState.selectedModel),
-                    supportsFiles  = AiSettingsHelper.supportsFiles(settingsUiState.provider, settingsUiState.selectedModel),
                     performanceMode = performanceMode,
                     onInputChange  = { inputText = it },
                     onSend = {
@@ -317,7 +362,14 @@ fun AiAssistantScreen(
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        AnimatedContent(
+                        if (!isOnline) {
+                            // Assistant is online-only: chats, models and web
+                            // search are all server-side. Auto-clears on reconnect.
+                            OfflineGate(
+                                performanceMode = performanceMode,
+                                onRetry = viewModel::retryConnection,
+                            )
+                        } else AnimatedContent(
                             targetState = isStarted,
                             transitionSpec = { fadeIn(tween(600)) togetherWith fadeOut(tween(400)) },
                             label = "chat_root",
@@ -339,7 +391,8 @@ fun AiAssistantScreen(
                                     loadingPhaseText = uiState.loadingPhaseText,
                                     onDeepDive      = { viewModel.performDeepDive(it) },
                                     onDismissDeepDive = { viewModel.dismissDeepDive(it) },
-                                    isCoachMode     = uiState.isCoachMode
+                                    isCoachMode     = uiState.isCoachMode,
+                                    onRetryError    = viewModel::retryLastMessage,
                                 )
                             } else {
                                 EmptyChatState(
@@ -528,7 +581,6 @@ private fun AiInputBar(
     isLoading: Boolean,
     selectedImage: Bitmap?,
     supportsVision: Boolean,
-    supportsFiles: Boolean,
     performanceMode: Boolean,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
@@ -544,7 +596,6 @@ private fun AiInputBar(
         isLoading = isLoading,
         selectedImage = selectedImage,
         supportsVision = supportsVision,
-        supportsFiles = supportsFiles,
         performanceMode = performanceMode,
         onInputChange = onInputChange,
         onSend = onSend,
@@ -581,6 +632,7 @@ fun ChatMessageList(
     onDeepDive: (AiMessage) -> Unit,
     onDismissDeepDive: (AiMessage) -> Unit,
     isCoachMode: Boolean = false,
+    onRetryError: (() -> Unit)? = null,
 ) {
     val isAtBottom by remember { derivedStateOf { !listState.canScrollForward } }
 
@@ -623,7 +675,7 @@ fun ChatMessageList(
                     )
                 }
             }
-            if (error != null) item { ErrorMessage(error) }
+            if (error != null) item { ErrorMessage(error, onRetry = onRetryError) }
             item { Spacer(Modifier.height(100.dp)) }
         }
 
@@ -826,7 +878,7 @@ fun EmptyChatState(
         Text(stringResource(R.string.st_AiAssistantScreen_1a2b), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = AiDesign.textColor(), textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(stringResource(R.string.st_AiAssistantScreen_7c4d), style = MaterialTheme.typography.bodyMedium, color = AiDesign.textColor(0.5f), textAlign = TextAlign.Center, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(28.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -991,16 +1043,92 @@ fun ActionRow(icon: ImageVector, label: String, color: Color, onClick: () -> Uni
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Offline Gate — the assistant is online-only, so offline gets a full
+// takeover (not a banner): no chat, no input. Clears itself on reconnect.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun OfflineGate(
+    performanceMode: Boolean,
+    onRetry: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Surface(
+            modifier = Modifier.size(80.dp), shape = SquircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = if (performanceMode) 0.dp else 18.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.CloudOff, null, Modifier.size(38.dp), tint = AiDesign.textColor(0.55f))
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "You're offline",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+            color = AiDesign.textColor(),
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "AI Assistant needs a connection — chats, models and web search all run server-side.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = AiDesign.textColor(0.55f),
+            textAlign = TextAlign.Center,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(24.dp))
+        ToolzExpressiveButton(onClick = onRetry, shape = BouncyShape, modifier = Modifier.height(52.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
+                Text("Try again", fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error Message
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ErrorMessage(error: String) {
+fun ErrorMessage(error: String, onRetry: (() -> Unit)? = null) {
     Surface(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), LargeExpressiveShape, MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-            Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Rounded.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+                Text(error, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            if (onRetry != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = onRetry,
+                        shape = MediumExpressiveShape,
+                        color = MaterialTheme.colorScheme.error,
+                    ) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.Refresh, null, Modifier.size(15.dp), Color.White)
+                            Text("Retry", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                    // Quick hint for 404s: jump to settings is faster than retrying blindly
+                    if (error.contains("404", true) || error.contains("retired", true)) {
+                        Text(
+                            "Tip: Settings → model list shows live models. FREE-tagged ones cost \$0.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                            modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1064,9 +1192,19 @@ fun ChatSummarySheet(summary: String?, isSummarizing: Boolean, onDismiss: () -> 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate: (Int) -> Unit) {
+fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate: (Int) -> Unit, onShowSources: ((AiMessage) -> Unit)? = null) {
     val clipboard = LocalClipboardManager.current
     val context   = LocalContext.current
+    // Second entry point to the sources sheet (long-press menu), so sources
+    // stay reachable even if the inline pill is off-screen or missed.
+    val sourceCount = remember(message.searchSources) {
+        if (message.searchSources.isNullOrBlank()) 0
+        else runCatching {
+            val moshi = Moshi.Builder().add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory()).build()
+            val type  = Types.newParameterizedType(List::class.java, SearchResult::class.java)
+            moshi.adapter<List<SearchResult>>(type).fromJson(message.searchSources)?.size ?: 0
+        }.getOrDefault(0)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1083,6 +1221,30 @@ fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate:
             Surface(Modifier.fillMaxWidth().padding(bottom = 18.dp), LargeExpressiveShape, MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                 Text(message.text.take(120) + if (message.text.length > 120) "…" else "", Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall, color = AiDesign.textColor(0.6f), lineHeight = 18.sp)
             }
+            // Provenance: exact model that replied + wall-clock inference time.
+            // (Null on user messages and pre-v58 rows — row hidden then.)
+            if (!message.isUser && (message.modelName != null || message.responseTimeMs != null)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 18.dp, start = 4.dp),
+                ) {
+                    Icon(Icons.Rounded.SmartToy, null, Modifier.size(15.dp), tint = AiDesign.textColor(0.5f))
+                    Text(
+                        message.modelName ?: "Unknown model",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AiDesign.textColor(0.7f),
+                    )
+                    message.responseTimeMs?.let { ms ->
+                        Text(
+                            "• " + if (ms < 1000) "${ms}ms" else "%.1fs".format(ms / 1000f),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AiDesign.textColor(0.45f),
+                        )
+                    }
+                }
+            }
             Text(stringResource(R.string.st_AiAssistantScreen_m3n4_v2), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, modifier = Modifier.padding(bottom = 12.dp, start = 4.dp))
             HorizontalDivider(Modifier.padding(bottom = 12.dp), color = AiDesign.glassBorder())
 
@@ -1091,6 +1253,9 @@ fun MessageActionsSheet(message: AiMessage, onDismiss: () -> Unit, onRegenerate:
             }
             if (!message.isUser) ActionRow(Icons.Rounded.Refresh, stringResource(R.string.st_AiAssistantScreen_1b2c), MaterialTheme.colorScheme.primary) {
                 onRegenerate(message.id); onDismiss()
+            }
+            if (sourceCount > 0 && onShowSources != null) ActionRow(Icons.Rounded.Language, "View $sourceCount sources", MaterialTheme.colorScheme.tertiary) {
+                onShowSources(message); onDismiss()
             }
             ActionRow(Icons.Rounded.Share, stringResource(R.string.st_AiAssistantScreen_3c4d), MaterialTheme.colorScheme.onSurface) {
                 context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, message.text) }, context.getString(R.string.st_AiAssistantScreen_5d6e)))
@@ -1150,6 +1315,16 @@ fun MessageSourcesSheet(message: AiMessage, onDismiss: () -> Unit, onLinkClick: 
             }
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                if (sources.isEmpty()) {
+                    item {
+                        Text(
+                            "No sources attached to this message. Sources appear on replies written with web search on.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AiDesign.textColor(0.55f),
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                    }
+                }
                 itemsIndexed(sources, key = { i, s -> "${s.url}_$i" }) { _, source ->
                     Surface(shape = LargeExpressiveShape, color = MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, AiDesign.glassBorder())) {
                         Column(Modifier.padding(14.dp)) {
@@ -1303,6 +1478,8 @@ fun AiSettingsDialog(
     onTest: () -> Unit, performanceMode: Boolean,
     onToggleDynamicPrompts: (Boolean) -> Unit, onPromptFormatChange: (String) -> Unit,
     aiSearchIconVisible: Boolean, onSetAiSearchIconVisible: (Boolean) -> Unit,
+    catalogVersion: Int?, catalogUpdatedAt: String?, isRefreshingCatalog: Boolean,
+    catalogRefreshResult: String?, onRefreshCatalog: () -> Unit,
 ) {
     val context         = LocalContext.current
     var configName      by remember(state.editingConfig) { mutableStateOf(state.editingConfig?.name ?: "") }
@@ -1371,7 +1548,12 @@ fun AiSettingsDialog(
 
                             SettingsAdvancedSection(
                                 aiSearchIconVisible = aiSearchIconVisible,
-                                onSetAiSearchIconVisible = onSetAiSearchIconVisible
+                                onSetAiSearchIconVisible = onSetAiSearchIconVisible,
+                                catalogVersion = state.catalogVersion,
+                                catalogUpdatedAt = state.catalogUpdatedAt,
+                                isRefreshingCatalog = state.isRefreshingCatalog,
+                                catalogRefreshResult = state.catalogRefreshResult,
+                                onRefreshCatalog = onRefreshCatalog,
                             )
 
                             SettingsTestSaveSection(
@@ -1483,8 +1665,41 @@ private fun SettingsModelSection(
                     containerColor = AiDesign.cardColor(),
                     shape = LargeExpressiveShape
                 ) {
+                    // Provider description as header (helps Zen/Go discovery)
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                AiSettingsHelper.getProviderDescription(provider),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AiDesign.textColor(0.55f),
+                            )
+                        },
+                        onClick = {},
+                        enabled = false,
+                    )
+                    HorizontalDivider(color = AiDesign.glassBorder())
                     AiSettingsHelper.getModels(provider).forEach { m ->
-                        DropdownMenuItem({ Text(m) }, { onModelChange(m); onShowModelMenuChange(false) })
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(m, modifier = Modifier.weight(1f, fill = false))
+                                    if (AiSettingsHelper.isFreeModel(provider, m)) {
+                                        Surface(shape = CircleShape, color = Color(0xFF4CAF50).copy(alpha = 0.15f)) {
+                                            Text("FREE", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color(0xFF2E7D32), fontSize = 9.sp)
+                                        }
+                                    }
+                                    if (m == AiSettingsHelper.getRecommendedModel(provider)) {
+                                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
+                                            Text("FAST", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary, fontSize = 9.sp)
+                                        }
+                                    }
+                                }
+                            },
+                            onClick = { onModelChange(m); onShowModelMenuChange(false) },
+                            trailingIcon = if (m == selectedModel) {
+                                { Icon(Icons.Rounded.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) }
+                            } else null,
+                        )
                     }
                 }
             }
@@ -1588,7 +1803,12 @@ private fun SettingsPromptsSection(
 @Composable
 private fun SettingsAdvancedSection(
     aiSearchIconVisible: Boolean,
-    onSetAiSearchIconVisible: (Boolean) -> Unit
+    onSetAiSearchIconVisible: (Boolean) -> Unit,
+    catalogVersion: Int?,
+    catalogUpdatedAt: String?,
+    isRefreshingCatalog: Boolean,
+    catalogRefreshResult: String?,
+    onRefreshCatalog: () -> Unit,
 ) {
     SettingsSection(stringResource(R.string.st_AiAssistantScreen_y5z7)) {
         Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
@@ -1598,6 +1818,39 @@ private fun SettingsAdvancedSection(
                     Text(stringResource(R.string.st_AiAssistantScreen_c9d1), style = MaterialTheme.typography.labelSmall, color = AiDesign.textColor(0.55f))
                 }
                 ExpressiveSwitch(checked = aiSearchIconVisible, onCheckedChange = onSetAiSearchIconVisible)
+            }
+        }
+        // Server model catalog — updated without app releases (see api/models.ts).
+        Surface(Modifier.fillMaxWidth(), MediumExpressiveShape, AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Model catalog", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (catalogVersion != null)
+                                "Server list" + (catalogUpdatedAt?.let { " • updated $it" } ?: "") + " (v$catalogVersion)"
+                            else "Not loaded — tap refresh to fetch",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AiDesign.textColor(0.55f),
+                        )
+                    }
+                    if (isRefreshingCatalog) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(onClick = onRefreshCatalog, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Rounded.Refresh, "Refresh model catalog", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                if (catalogRefreshResult != null) {
+                    Text(
+                        catalogRefreshResult,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (catalogRefreshResult.startsWith("✓")) Color(0xFF4CAF50)
+                        else MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
     }
@@ -1653,7 +1906,7 @@ private fun SettingsPresetEditSection(
                     }
                 }
             }
-            items(listOf("AUTO","GEMINI","CHATGPT","GROQ","CLAUDE","DEEPSEEK","BOT","SPARKLE")) { ik ->
+            items(listOf("AUTO","GEMINI","CHATGPT","GROQ","CLAUDE","DEEPSEEK","OPENCODE_ZEN","OPENCODE_GO","BOT","SPARKLE")) { ik ->
                 val isSelected = selectedIcon == ik
                 Surface(onClick = { onIconChange(ik) }, modifier = Modifier.size(48.dp), shape = MediumExpressiveShape, color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else AiDesign.glassColor(), border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) MaterialTheme.colorScheme.primary else AiDesign.glassBorder())) {
                     Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig(ik, provider), null, Modifier.size(24.dp), tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else AiDesign.textColor(0.7f)) }
@@ -1720,6 +1973,7 @@ private fun SettingsSection(label: String, content: @Composable ColumnScope.() -
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun GuideDialog(onDismiss: () -> Unit) {
+    val context    = LocalContext.current
     val providers  = AiSettingsHelper.providers
     val pagerState = rememberPagerState { providers.size }
     Dialog(onDismissRequest = onDismiss) {
@@ -1727,17 +1981,81 @@ fun GuideDialog(onDismiss: () -> Unit) {
             Column(Modifier.padding(24.dp)) {
                 Text(stringResource(R.string.st_AiAssistantScreen_s5t7), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(16.dp))
-                HorizontalPager(state = pagerState, modifier = Modifier.height(260.dp)) { page ->
+                HorizontalPager(state = pagerState, modifier = Modifier.height(360.dp)) { page ->
                     val provider = providers[page]
                     val pColor   = AiDesign.providerColor(provider) ?: MaterialTheme.colorScheme.primary
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val steps    = AiSettingsHelper.tutorials[provider].orEmpty()
+                    val keyUrl   = AiSettingsHelper.getApiKeyUrl(provider)
+                    Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Surface(modifier = Modifier.size(36.dp), shape = SmallExpressiveShape, color = pColor.copy(alpha = 0.12f)) {
                                 Box(contentAlignment = Alignment.Center) { Icon(getIconForConfig("AUTO", provider), null, Modifier.size(18.dp), pColor) }
                             }
                             Text(provider, fontWeight = FontWeight.Black, color = pColor, style = MaterialTheme.typography.titleMedium)
                         }
-                        Text(AiSettingsHelper.getApiKeyPlaceholder(provider), color = AiDesign.textColor(0.65f), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            AiSettingsHelper.getProviderDescription(provider),
+                            color = AiDesign.textColor(0.65f),
+                            style = MaterialTheme.typography.bodySmall,
+                            lineHeight = 19.sp,
+                        )
+                        if (steps.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                steps.forEachIndexed { i, step ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                                        Surface(
+                                            modifier = Modifier.size(22.dp),
+                                            shape = CircleShape,
+                                            color = pColor.copy(alpha = 0.14f),
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    "${i + 1}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = pColor,
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            step,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = AiDesign.textColor(0.8f),
+                                            lineHeight = 19.sp,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ToolzOutlinedExpressiveButton(
+                                onClick = {
+                                    if (keyUrl.isNotBlank()) {
+                                        runCatching {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(keyUrl)))
+                                        }
+                                    }
+                                },
+                                shape = MediumExpressiveShape,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Rounded.VpnKey, null, Modifier.size(15.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Get key", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                            }
+                            Surface(shape = SmallExpressiveShape, color = AiDesign.glassColor(), border = BorderStroke(1.dp, AiDesign.glassBorder())) {
+                                Text(
+                                    AiSettingsHelper.getApiKeyPlaceholder(provider),
+                                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AiDesign.textColor(0.55f),
+                                )
+                            }
+                        }
                     }
                 }
                 // Pager indicators

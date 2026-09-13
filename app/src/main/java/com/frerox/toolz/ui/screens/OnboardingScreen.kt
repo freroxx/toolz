@@ -84,6 +84,7 @@ import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Shield
@@ -338,9 +339,11 @@ fun OnboardingScreen(
                             )
                             5 -> AccessStep(
                                 notificationsEnabled = uiState.notificationsEnabled,
+                                backgroundNotificationsEnabled = uiState.backgroundNotificationsEnabled,
                                 vaultEnabled = uiState.vaultEnabled,
                                 shizukuAuthorized = uiState.shizukuAuthorized,
                                 onNotificationsChange = viewModel::updateNotifications,
+                                onBackgroundNotificationsChange = viewModel::updateBackgroundNotifications,
                                 onVaultChange = viewModel::updateVault,
                                 refreshShizuku = viewModel::refreshShizukuStatus,
                                 onNext = goNext
@@ -1043,9 +1046,11 @@ fun IntelligenceStep(apiKey: String, onApiKeyChange: (String) -> Unit, onNext: (
 @Composable
 fun AccessStep(
     notificationsEnabled: Boolean,
+    backgroundNotificationsEnabled: Boolean,
     vaultEnabled: Boolean,
     shizukuAuthorized: Boolean,
     onNotificationsChange: (Boolean) -> Unit,
+    onBackgroundNotificationsChange: (Boolean) -> Unit,
     onVaultChange: (Boolean) -> Unit,
     refreshShizuku: () -> Unit,
     onNext: () -> Unit
@@ -1183,6 +1188,10 @@ fun AccessStep(
 
                     item {
                         OnboardingToggleExpressive("Push notifications", "Real-time updates from Toolz", Icons.Rounded.NotificationsActive, notificationsEnabled, onNotificationsChange)
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    item {
+                        OnboardingToggleExpressive("Background notifications", "Lets you know if anything is running on the background", Icons.Rounded.NotificationsOff, backgroundNotificationsEnabled, onBackgroundNotificationsChange)
                         Spacer(Modifier.height(10.dp))
                     }
                     item {
@@ -1518,9 +1527,11 @@ fun AccessStepPreview() {
     ToolzTheme(performanceMode = true) {
         AccessStep(
             notificationsEnabled = true,
+            backgroundNotificationsEnabled = true,
             vaultEnabled = true,
             shizukuAuthorized = false,
             onNotificationsChange = {},
+            onBackgroundNotificationsChange = {},
             onVaultChange = {},
             refreshShizuku = {},
             onNext = {}

@@ -34,6 +34,8 @@ import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.delay
+import retrofit2.HttpException
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,6 +44,8 @@ private const val TAG = "AiRepositoryImpl"
 private const val MAX_HISTORY_MESSAGES = 24
 private const val OPEN_ROUTER_REFERER = "https://github.com/frerox/toolz"
 private const val OPEN_ROUTER_TITLE = "Toolz AI"
+private const val MAX_API_ATTEMPTS = 3
+private const val RETRY_BASE_DELAY_MS = 600L
 
 // ─────────────────────────────────────────────────────────────
 //  Request Models
@@ -196,84 +200,190 @@ class AiRepositoryImpl @Inject constructor(
             emit(Result.failure(Exception("AI Assistant is unavailable in offline mode.")))
             return@flow
         }
-        val provider = providerOverride ?: settingsManager.getAiProvider()
+        val rawProvider = providerOverride ?: settingsManager.getAiProvider()
+        val provider = AiSettingsHelper.canonicalProvider(rawProvider)
         val keyState = settingsManager.resolveApiKey(provider)
-        val modelName = modelOverride ?: settingsManager.getSelectedModel(provider)
+        // Fall back to canonical recommended model if stored model is blank
+        val storedModel = modelOverride ?: settingsManager.getSelectedModel(provider)
+        val modelName = AiSettingsHelper.migrateRetiredModel(provider, storedModel)
+            ?.also { migrated ->
+                Log.w(TAG, "Migrated retired $provider model '$storedModel' -> '$migrated'")
+                runCatching { settingsManager.setSelectedModel(migrated, provider) }
+            } ?: storedModel
         val searchEnabled = settingsRepository.aiSearchEnabled.first()
-        
-        if (searchEnabled) {
-            val groqKey = settingsManager.resolveApiKey("Groq")
-            if (groqKey.source != ApiKeySource.NONE) {
-                // Try to extract a search query. If the model thinks a search is useful, it returns the query.
-                val searchQuery = extractSearchQuery(groqKey.value, prompt)
-                if (searchQuery != null) {
-                    val rawResults = webSearchRepository.search(searchQuery)
-                    if (rawResults.isNotEmpty()) {
-                        // Pick best 5 sources for the final response
-                        val bestResults = selectBestSources(groqKey.value, prompt, rawResults)
-                        val contextText = bestResults.joinToString("\n\n") { "TITLE: ${it.title}\nURL: ${it.url}\nSNIPPET: ${it.snippet}" }
-                        
-                        val sourcesAdapter = moshi.adapter<List<SearchResult>>(Types.newParameterizedType(List::class.java, SearchResult::class.java))
-                        val searchSources = sourcesAdapter.toJson(bestResults)
-                        
-                        val enrichedPrompt = "User Prompt: $prompt\n\n" +
-                            "BELOW ARE SEARCH RESULTS FROM THE WEB. USE THEM TO ANSWER:\n$contextText\n\n" +
-                            "INSTRUCTIONS:\n" +
-                            "1. Answer the prompt using the search results above.\n" +
-                            "2. Do NOT claim you cannot find information; use the snippets provided.\n" +
-                            "3. Use inline citations [Title](URL).\n" +
-                            "4. List all URLs in a 'Sources' section at the end."
-                            
-                        emit(callProvider(provider, keyState, modelName, enrichedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, true, systemPromptOverride).let {
-                            if (it.isSuccess) Result.success(it.getOrThrow().copy(sources = searchSources)) else it
-                        })
-                        return@flow
-                    } else {
-                        // Search returned nothing - inform the AI
-                        val failedPrompt = "User Prompt: $prompt\n\n" +
-                            "(Note: A web search for '$searchQuery' was attempted but returned no results. " +
-                            "Answer based on your training data, but mention that live search failed to find results.)"
-                        emit(callProvider(provider, keyState, modelName, failedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, false, systemPromptOverride))
-                        return@flow
-                    }
+
+        if (searchEnabled && needsWebSearchHeuristic(prompt)) {
+            // Resolve a key for query extraction: prefer current provider, else Groq, else Zen/Go.
+            val extractionKey = resolveSearchHelperKey(provider)
+            val searchQuery = if (extractionKey != null) {
+                extractSearchQuery(extractionKey.first, extractionKey.second, prompt)
+                    ?: heuristicSearchQuery(prompt)
+            } else {
+                heuristicSearchQuery(prompt)
+            }
+            if (searchQuery != null) {
+                val rawResults = try {
+                    webSearchRepository.search(searchQuery)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Web search failed for '$searchQuery'", e)
+                    emptyList()
+                }
+                if (rawResults.isNotEmpty()) {
+                    // Rank locally first (fast, free), then optionally refine with LLM top-5.
+                    val ranked = rankResultsLocally(prompt, rawResults)
+                    val bestResults = if (extractionKey != null) {
+                        selectBestSources(extractionKey.first, extractionKey.second, prompt, ranked)
+                    } else ranked.take(5)
+                    val contextText = bestResults.joinToString("\n\n") { "TITLE: ${it.title}\nURL: ${it.url}\nSNIPPET: ${it.snippet}" }
+
+                    val sourcesAdapter = moshi.adapter<List<SearchResult>>(Types.newParameterizedType(List::class.java, SearchResult::class.java))
+                    val searchSources = sourcesAdapter.toJson(bestResults)
+
+                    val enrichedPrompt = "User Prompt: $prompt\n\n" +
+                        "BELOW ARE LIVE WEB SEARCH RESULTS (query: \"$searchQuery\"). USE THEM TO ANSWER:\n$contextText\n\n" +
+                        "INSTRUCTIONS:\n" +
+                        "1. Answer the prompt using the search results above. Prefer fresh facts over training data.\n" +
+                        "2. Do NOT claim you cannot find information; use the snippets provided.\n" +
+                        "3. Use inline citations [Title](URL).\n" +
+                        "4. List all URLs in a 'Sources' section at the end."
+
+                    emit(callProvider(provider, keyState, modelName, enrichedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, true, systemPromptOverride).let {
+                        if (it.isSuccess) Result.success(it.getOrThrow().copy(sources = searchSources)) else it
+                    })
+                    return@flow
+                } else {
+                    // Search returned nothing - inform the AI so it can still answer
+                    val failedPrompt = "User Prompt: $prompt\n\n" +
+                        "(Note: A live web search for '$searchQuery' returned no results " +
+                        "(engine rate-limit or no coverage). Answer from training data and " +
+                        "mention live search came up empty.)"
+                    emit(callProvider(provider, keyState, modelName, failedPrompt, history.takeLast(MAX_HISTORY_MESSAGES), image, false, systemPromptOverride))
+                    return@flow
                 }
             }
         }
         emit(callProvider(provider, keyState, modelName, prompt.trim(), history.takeLast(MAX_HISTORY_MESSAGES), image, false, systemPromptOverride))
     }
 
-    private suspend fun extractSearchQuery(apiKey: String, prompt: String): String? {
-        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
-        for (modelName in models) {
-            try {
-                val request = OpenAiRequest(
-                    model = modelName,
-                    messages = listOf(
-                        OpenAiMessage("system", MessageContent.Text("You are an expert searcher. Generate a concise search query for the user prompt. " +
-                            "If it's a simple greeting or doesn't need data, output 'NONE'. Otherwise, output ONLY the search query.")),
-                        OpenAiMessage("user", MessageContent.Text("User says: $prompt\n\nQuery:"))
-                    ),
-                    maxTokens = 40
-                )
-                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
-                val query = response.choices.firstOrNull()?.message?.content?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: "NONE"
-                return if (query.equals("NONE", ignoreCase = true) || query.isBlank()) null else query
-            } catch (e: Exception) {
-                Log.e(TAG, "Search extraction failed with $modelName, trying fallback if available", e)
+    // ── Web-search helpers ──────────────────────────────────────────
+
+    /** Cheap local gate so greetings / chit-chat skip the search pipeline entirely. */
+    private fun needsWebSearchHeuristic(prompt: String): Boolean {
+        val p = prompt.trim().lowercase()
+        if (p.length < 4) return false
+        val noSearch = listOf(
+            "hi", "hello", "hey", "thanks", "thank you", "bye", "good morning",
+            "good afternoon", "good evening", "how are you", "who are you"
+        )
+        if (noSearch.any { p == it || p.startsWith("$it ") }) return false
+        // Explicit user intent always searches
+        if (p.contains("search") || p.contains("latest") || p.contains("today") ||
+            p.contains("news") || p.contains("price") || p.contains("score") ||
+            p.contains("weather") || p.contains("who won") || p.contains("release")
+        ) return true
+        // Questions about current/factual topics default to search
+        if (p.endsWith("?") && p.split(" ").size >= 4) return true
+        if (p.split(" ").size >= 3) return true
+        return false
+    }
+
+    /** Local keyword query when LLM extraction is unavailable or says NONE. */
+    private fun heuristicSearchQuery(prompt: String): String? {
+        val cleaned = prompt.trim()
+            .removePrefix("search for").removePrefix("search").removePrefix("google")
+            .trim(' ', ':', '-', '?', '!', '.', '"', '\'')
+        if (cleaned.length < 3) return null
+        // Cap length so engine URLs stay short
+        return cleaned.take(180)
+    }
+
+    /** Pick any usable key for the tiny helper LLM calls (extraction / ranking). */
+    private fun resolveSearchHelperKey(currentProvider: String): Pair<String, String>? {
+        // Prefer current provider (keeps quota in one place), then Groq, then Zen/Go.
+        val order = listOf(currentProvider, "Groq", "OpenCode Zen", "OpenCode Go", "OpenRouter", "DeepSeek")
+            .distinct()
+        for (p in order) {
+            val key = settingsManager.resolveApiKey(p).value
+            if (key.isNotBlank()) {
+                val helperModel = when (AiSettingsHelper.canonicalProvider(p)) {
+                    "Groq" -> "openai/gpt-oss-20b"
+                    "OpenCode Zen" -> "muse-spark-1.3-contributor-free"
+                    "OpenCode Go" -> "glm-5.3-flash"
+                    else -> settingsManager.getSelectedModel(p)
+                }
+                return p to helperModel
             }
         }
         return null
     }
 
-    private suspend fun selectBestSources(apiKey: String, prompt: String, results: List<SearchResult>): List<SearchResult> {
+    /** Local BM25-lite ranking: overlap of query terms + title boost + freshness. */
+    private fun rankResultsLocally(prompt: String, results: List<SearchResult>): List<SearchResult> {
         if (results.size <= 5) return results
-        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
-        for (modelName in models) {
+        val terms = prompt.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 }.toSet()
+        if (terms.isEmpty()) return results.take(10)
+        return results.map { r ->
+            val hay = "${r.title} ${r.snippet}".lowercase()
+            var score = 0.0
+            terms.forEach { t ->
+                if (r.title.lowercase().contains(t)) score += 3.0 else if (hay.contains(t)) score += 1.0
+            }
+            // Prefer results corroborated by multiple engines + with dates
+            score += r.engines.size * 0.5
+            if (!r.date.isNullOrBlank()) score += 0.3
+            // Penalize very short snippets (usually nav junk)
+            if (r.snippet.length < 60) score -= 1.0
+            r to score
+        }.sortedByDescending { it.second }.map { it.first }.take(12)
+    }
+
+    private suspend fun extractSearchQuery(provider: String, model: String, prompt: String): String? {
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        val url = AiSettingsHelper.getChatCompletionUrl(canonical) ?: return heuristicSearchQuery(prompt)
+        val apiKey = settingsManager.resolveApiKey(canonical).value.ifBlank { return heuristicSearchQuery(prompt) }
+        val modelsToTry = listOf(model) + AiSettingsHelper.getFallbackModels(canonical)
+        for (modelName in modelsToTry.distinct().take(2)) {
             try {
-                val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" + 
-                    results.take(15).withIndex().joinToString("\n") { (i, r) -> "[$i] ${r.title}: ${r.snippet}" } +
+                val request = OpenAiRequest(
+                    model = modelName,
+                    messages = listOf(
+                        OpenAiMessage("system", MessageContent.Text("You are an expert searcher. Generate a concise search query for the user prompt. " +
+                            "Strip chit-chat. If it's a simple greeting or doesn't need live data, output 'NONE'. Otherwise, output ONLY the search query, no quotes.")),
+                        OpenAiMessage("user", MessageContent.Text("User says: $prompt\n\nQuery:"))
+                    ),
+                    maxTokens = 40
+                )
+                val response = callChatCompletionWithRetry(
+                    provider = canonical,
+                    url = url,
+                    apiKey = apiKey,
+                    request = request
+                )
+                val query = response.choices.firstOrNull()?.message?.content?.trim()?.removeSurrounding("\"")?.removeSurrounding("'") ?: "NONE"
+                if (query.equals("NONE", ignoreCase = true) || query.isBlank()) {
+                    // Greeting → no search, but long factual prompts still get heuristic query
+                    return if (prompt.trim().split(" ").size >= 6) heuristicSearchQuery(prompt) else null
+                }
+                return query
+            } catch (e: Exception) {
+                Log.e(TAG, "Search extraction failed with $modelName, trying fallback if available", e)
+            }
+        }
+        return heuristicSearchQuery(prompt)
+    }
+
+    private suspend fun selectBestSources(provider: String, model: String, prompt: String, results: List<SearchResult>): List<SearchResult> {
+        if (results.size <= 5) return results
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        val url = AiSettingsHelper.getChatCompletionUrl(canonical) ?: return results.take(5)
+        val apiKey = settingsManager.resolveApiKey(canonical).value.ifBlank { return results.take(5) }
+        val modelsToTry = listOf(model) + AiSettingsHelper.getFallbackModels(canonical)
+        for (modelName in modelsToTry.distinct().take(2)) {
+            try {
+                val selectionPrompt = "User Prompt: $prompt\n\nResults:\n" +
+                    results.take(12).withIndex().joinToString("\n") { (i, r) -> "[$i] ${r.title}: ${r.snippet.take(220)}" } +
                     "\n\nBased on the user prompt, identify the top 5 most relevant results by index. Respond with ONLY a comma-separated list of numbers, e.g., 0,3,7,2,5"
-                
+
                 val request = OpenAiRequest(
                     model = modelName,
                     messages = listOf(
@@ -282,8 +392,13 @@ class AiRepositoryImpl @Inject constructor(
                     ),
                     maxTokens = 32
                 )
-                
-                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
+
+                val response = callChatCompletionWithRetry(
+                    provider = canonical,
+                    url = url,
+                    apiKey = apiKey,
+                    request = request
+                )
                 val indices = response.choices.firstOrNull()?.message?.content?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
                 return indices.mapNotNull { results.getOrNull(it) }.distinctBy { it.url }.take(5).ifEmpty { results.take(5) }
             } catch (e: Exception) {
@@ -298,30 +413,32 @@ class AiRepositoryImpl @Inject constructor(
         sourcesJson: String,
         history: List<AiMessage>
     ): Flow<Result<ChatRepository.ChatResponseChunk>> = flow {
-        val provider = settingsManager.getAiProvider()
+        val rawProvider = settingsManager.getAiProvider()
+        val provider = AiSettingsHelper.canonicalProvider(rawProvider)
         val keyState = settingsManager.resolveApiKey(provider)
-        val modelName = settingsManager.getSelectedModel(provider)
-        val groqKey = settingsManager.resolveApiKey("Groq")
+        val storedModel = settingsManager.getSelectedModel(provider)
+        val modelName = AiSettingsHelper.migrateRetiredModel(provider, storedModel) ?: storedModel
+        val helperKey = resolveSearchHelperKey(provider)
 
-        if (groqKey.source == ApiKeySource.NONE) {
-            emit(Result.failure(Exception("Groq key required for deep dive")))
+        if (helperKey == null) {
+            emit(Result.failure(Exception("Add any API key (Groq / Zen / current provider) for deep dive")))
             return@flow
         }
 
         try {
             val sourcesAdapter = moshi.adapter<List<SearchResult>>(Types.newParameterizedType(List::class.java, SearchResult::class.java))
             val sources = sourcesAdapter.fromJson(sourcesJson) ?: emptyList()
-            
+
             val deepContext = StringBuilder()
             sources.take(3).forEach { source ->
                 val content = webSearchRepository.fetchWebsiteContent(source.url)
-                val structured = structureWebsiteContent(groqKey.value, source.title, content)
+                val structured = structureWebsiteContent(helperKey.first, helperKey.second, source.title, content)
                 deepContext.append("SOURCE: ${source.title}\nURL: ${source.url}\nCONTENT: $structured\n\n")
             }
 
-            val finalPrompt = "DEEP DIVE CONTEXT (Fetched from websites):\n$deepContext\n\n" +
+            val finalPrompt = "DEEP DIVE CONTEXT (Fetched live from websites):\n$deepContext\n\n" +
                 "User original question: $prompt\n\n" +
-                "Provide an extremely detailed answer using this full website context. Cite everything."
+                "Provide an extremely detailed answer using this full website context. Cite everything with [Title](URL)."
 
             // Filter history to avoid consecutive assistant messages (important for Claude/OpenAI)
             val filteredHistory = history.filter { !it.text.contains("dig deeper", ignoreCase = true) }
@@ -332,25 +449,34 @@ class AiRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun structureWebsiteContent(apiKey: String, title: String, content: String): String {
-        val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
-        for (modelName in models) {
+    private suspend fun structureWebsiteContent(provider: String, model: String, title: String, content: String): String {
+        if (content.isBlank() || content.startsWith("Error:")) return content.take(1000)
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        val url = AiSettingsHelper.getChatCompletionUrl(canonical) ?: return content.take(2000)
+        val apiKey = settingsManager.resolveApiKey(canonical).value.ifBlank { return content.take(2000) }
+        val modelsToTry = (listOf(model) + AiSettingsHelper.getFallbackModels(canonical)).distinct().take(2)
+        for (modelName in modelsToTry) {
             try {
                 val request = OpenAiRequest(
                     model = modelName,
                     messages = listOf(
-                        OpenAiMessage("system", MessageContent.Text("You are a content structurer. Clean text and keep facts.")),
-                        OpenAiMessage("user", MessageContent.Text("Title: $title\n\n$content"))
+                        OpenAiMessage("system", MessageContent.Text("You are a content structurer. Clean boilerplate, keep facts, dates, numbers, quotes. Max 1200 chars.")),
+                        OpenAiMessage("user", MessageContent.Text("Title: $title\n\n${content.take(6000)}"))
                     ),
                     maxTokens = 1024
                 )
-                val response = openAiService.getChatCompletion("https://api.groq.com/openai/v1/chat/completions", "Bearer $apiKey", null, null, request)
+                val response = callChatCompletionWithRetry(
+                    provider = canonical,
+                    url = url,
+                    apiKey = apiKey,
+                    request = request
+                )
                 return response.choices.firstOrNull()?.message?.content ?: content.take(1000)
             } catch (e: Exception) {
                 Log.e(TAG, "Website structuring failed with $modelName", e)
             }
         }
-        return content.take(1000)
+        return content.take(2000)
     }
 
     override fun testConnection(config: AiConfig): Flow<Result<String>> = flow {
@@ -380,27 +506,23 @@ class AiRepositoryImpl @Inject constructor(
     }
 
     override suspend fun checkModelAvailability(provider: String, model: String): Boolean {
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
         // 1. Check hardcoded list first for instant response
-        if (AiSettingsHelper.isKnownModel(provider, model)) return true
+        if (AiSettingsHelper.isKnownModel(canonical, model)) return true
 
         // 2. Try to fetch from API if key is available
-        val apiKey = settingsManager.resolveApiKey(provider).value
+        val apiKey = settingsManager.resolveApiKey(canonical).value
         if (apiKey.isBlank()) return false
 
-        return when (provider) {
-            "ChatGPT", "Groq", "DeepSeek", "OpenRouter" -> {
-                val baseUrl = when (provider) {
-                    "ChatGPT" -> "https://api.openai.com/v1/models"
-                    "Groq" -> "https://api.groq.com/openai/v1/models"
-                    "DeepSeek" -> "https://api.deepseek.com/v1/models"
-                    "OpenRouter" -> "https://openrouter.ai/api/v1/models"
-                    else -> return false
-                }
+        return when (canonical) {
+            "ChatGPT", "Groq", "DeepSeek", "OpenRouter", "OpenCode Zen", "OpenCode Go" -> {
+                val baseUrl = AiSettingsHelper.getModelsUrl(canonical) ?: return false
                 try {
-                    val resp = openAiService.listModels(baseUrl, "Bearer $apiKey")
+                    val (referer, title) = referralHeaders(canonical)
+                    val resp = openAiService.listModels(baseUrl, "Bearer $apiKey", referer, title)
                     resp.data.any { it.id.equals(model, ignoreCase = true) }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to list models for $provider", e)
+                    Log.e(TAG, "Failed to list models for $canonical", e)
                     false
                 }
             }
@@ -417,6 +539,74 @@ class AiRepositoryImpl @Inject constructor(
         }
     }
 
+    // ── Retry core: 3 attempts, exponential backoff, 404 migration ──
+
+    private fun isModelNotFound(e: Throwable): Boolean {
+        if (e is HttpException && e.code() == 404) return true
+        val msg = (e.message ?: "").lowercase()
+        return msg.contains("404") && (msg.contains("model") || msg.contains("not found") || msg.contains("decommissioned")) ||
+            msg.contains("model_not_found") || msg.contains("model not found") ||
+            msg.contains("does not exist") || msg.contains("decommissioned")
+    }
+
+    private fun isRateLimited(e: Throwable): Boolean {
+        if (e is HttpException && (e.code() == 429 || e.code() == 503)) return true
+        val msg = (e.message ?: "").lowercase()
+        return msg.contains("429") || msg.contains("rate limit") || msg.contains("quota") ||
+            msg.contains("503") || msg.contains("overloaded")
+    }
+
+    private fun referralHeaders(provider: String): Pair<String?, String?> = when (AiSettingsHelper.canonicalProvider(provider)) {
+        "OpenRouter", "OpenCode Zen", "OpenCode Go" -> OPEN_ROUTER_REFERER to OPEN_ROUTER_TITLE
+        else -> null to null
+    }
+
+    /**
+     * Single chat-completion POST with up to [MAX_API_ATTEMPTS] attempts.
+     * Retries transient failures (429/5xx/timeout) with exponential backoff.
+     * Does NOT retry 404 (caller migrates the model instead).
+     */
+    private suspend fun callChatCompletionWithRetry(
+        provider: String,
+        url: String,
+        apiKey: String,
+        request: OpenAiRequest,
+        attempts: Int = MAX_API_ATTEMPTS
+    ): OpenAiResponse {
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        val (referer, title) = referralHeaders(canonical)
+        var lastError: Exception? = null
+        repeat(attempts) { attempt ->
+            try {
+                return openAiService.getChatCompletion(url, "Bearer $apiKey", referer, title, request)
+            } catch (e: HttpException) {
+                lastError = e
+                when {
+                    e.code() == 404 -> throw e // model gone — caller must migrate, retrying same ID is useless
+                    e.code() == 401 || e.code() == 403 -> throw e // bad key — retry won't help
+                    attempt < attempts - 1 -> {
+                        val backoff = RETRY_BASE_DELAY_MS * (1L shl attempt)
+                        Log.w(TAG, "Chat call $canonical/${request.model} attempt ${attempt + 1}/$attempts failed HTTP ${e.code()}, retry in ${backoff}ms")
+                        delay(backoff)
+                    }
+                    else -> throw e
+                }
+            } catch (e: Exception) {
+                lastError = e
+                if (isModelNotFound(e)) throw e
+                val msg = (e.message ?: "").lowercase()
+                val isAuth = msg.contains("unauthorized") || msg.contains("invalid api key") || msg.contains("401")
+                if (isAuth) throw e
+                if (attempt < attempts - 1) {
+                    val backoff = RETRY_BASE_DELAY_MS * (1L shl attempt)
+                    Log.w(TAG, "Chat call $canonical/${request.model} attempt ${attempt + 1}/$attempts failed (${e.message}), retry in ${backoff}ms")
+                    delay(backoff)
+                }
+            }
+        }
+        throw lastError ?: Exception("Chat completion failed after $attempts attempts")
+    }
+
     private suspend fun callProvider(
         provider: String,
         keyState: ResolvedApiKey,
@@ -427,38 +617,61 @@ class AiRepositoryImpl @Inject constructor(
         searchEnabled: Boolean,
         systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
         if (keyState.value.isBlank()) {
-            return Result.failure(Exception("No API key available for $provider"))
+            return Result.failure(Exception("No API key for $canonical. Open Settings → $canonical and paste a key."))
         }
-        
-        var currentModel = modelName
+
+        // Build candidate chain: stored model → retired-model migration → provider fallbacks.
+        // Dedupe while preserving order. Cap at 4 to bound latency.
+        val candidates = buildList {
+            add(modelName)
+            AiSettingsHelper.migrateRetiredModel(canonical, modelName)?.let { add(it) }
+            addAll(AiSettingsHelper.getFallbackModels(canonical))
+        }.distinct().take(4)
+
         var lastError: Throwable? = null
-        
-        // Try initial model, then try fallback if available
-        repeat(2) { attempt ->
+        for ((index, currentModel) in candidates.withIndex()) {
             try {
-                if (image != null && !AiSettingsHelper.supportsVision(provider, currentModel)) {
-                    return Result.failure(Exception("$provider model '$currentModel' does not support vision."))
+                if (image != null && !AiSettingsHelper.supportsVision(canonical, currentModel)) {
+                    return Result.failure(Exception("$canonical model '$currentModel' does not support image input. Pick a vision-capable model or remove the image."))
                 }
-                return executeProviderCall(provider, keyState.value, currentModel, prompt, history, image, searchEnabled, systemPromptOverride)
+                val result = executeProviderCall(canonical, keyState.value, currentModel, prompt, history, image, searchEnabled, systemPromptOverride)
+                if (result.isSuccess && index > 0) {
+                    // Persist the working fallback so the next message doesn't 404 again.
+                    runCatching { settingsManager.setSelectedModel(currentModel, canonical) }
+                    Log.i(TAG, "Auto-recovered $canonical: now using $currentModel")
+                }
+                return result
             } catch (e: Exception) {
                 lastError = e
-                Log.w(TAG, "Call failed with $currentModel, checking for fallback...", e)
-                val fallback = getFallbackModel(currentModel)
-                if (fallback != null && attempt == 0) {
-                    currentModel = fallback
-                    Log.i(TAG, "Retrying with fallback model: $currentModel")
-                } else {
-                    return Result.failure(e)
+                val recoverable = isModelNotFound(e) || isRateLimited(e)
+                Log.w(TAG, "Call failed with $currentModel (attempt ${index + 1}/${candidates.size}, recoverable=$recoverable)", e)
+                if (!recoverable) return Result.failure(friendlyError(canonical, currentModel, e))
+                if (isRateLimited(e) && index == candidates.size - 1) {
+                    // Last candidate also rate-limited — small extra wait already happened inside retry; surface clearly.
+                    return Result.failure(friendlyError(canonical, currentModel, e))
                 }
+                // else: try next candidate model
             }
         }
-        return Result.failure(lastError ?: Exception("Unknown error in callProvider"))
+        return Result.failure(lastError?.let { friendlyError(canonical, modelName, it) }
+            ?: Exception("Unknown error in callProvider"))
+    }
+
+    private fun friendlyError(provider: String, model: String, e: Throwable): Throwable {
+        val raw = e.message ?: "Unknown error"
+        return when {
+            isModelNotFound(e) -> Exception("Model '$model' is retired / not found on $provider (404). Pick ${AiSettingsHelper.getRecommendedModel(provider)} in Settings — or it auto-switched already. Detail: $raw")
+            isRateLimited(e) -> Exception("$provider rate limit hit for '$model'. Wait ~30s or switch to ${AiSettingsHelper.getFallbackModels(provider).firstOrNull() ?: "another model"}. Detail: $raw")
+            raw.contains("401", true) || raw.contains("unauthorized", true) -> Exception("Invalid API key for $provider. Open Settings → $provider and check the key. Detail: $raw")
+            else -> e
+        }
     }
 
     private fun getFallbackModel(model: String): String? = when (model) {
-        "meta-llama/llama-3.3-70b-instruct" -> "openai/gpt-oss-120b"
-        "meta-llama/llama-3.1-8b-instruct" -> "openai/gpt-oss-20b"
+        "meta-llama/llama-3.3-70b-instruct" -> "llama-3.3-70b-versatile"
+        "meta-llama/llama-3.1-8b-instruct", "llama-3.1-8b-instant" -> "openai/gpt-oss-20b"
         else -> null
     }
 
@@ -471,12 +684,14 @@ class AiRepositoryImpl @Inject constructor(
         image: Bitmap?,
         searchEnabled: Boolean,
         systemPromptOverride: String?
-    ): Result<ChatRepository.ChatResponseChunk> = when (provider) {
+    ): Result<ChatRepository.ChatResponseChunk> = when (AiSettingsHelper.canonicalProvider(provider)) {
         "Gemini" -> callGemini(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         "ChatGPT",
         "Groq",
         "DeepSeek",
-        "OpenRouter" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
+        "OpenRouter",
+        "OpenCode Zen",
+        "OpenCode Go" -> callOpenAiCompatible(provider, apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         "Claude" -> callClaude(apiKey, modelName, prompt, history, image, searchEnabled, systemPromptOverride)
         else -> Result.failure(Exception("Unknown provider: $provider"))
     }
@@ -490,33 +705,49 @@ class AiRepositoryImpl @Inject constructor(
         searchEnabled: Boolean,
         systemPromptOverride: String?
     ): Result<ChatRepository.ChatResponseChunk> {
-        // Gemini handles system prompt separately, but for now we just use it in the context if we have to, 
-        // wait actually the java GenerativeModel might support systemInstruction, but if not we can prepend it.
-        // Actually, let's just prepend systemPromptOverride to the user prompt if it's the first message
-        // since Gemini client here doesn't have a direct system prompt in the old version.
-        val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey, systemInstruction = systemPromptOverride?.let { content { text(it) } } ?: content { text(systemPrompt) })
-        val effectivePrompt = if (searchEnabled) {
-            "Toolz AI. Web search context provided. Prompt: $prompt"
-        } else prompt.ifBlank { if (image != null) "Describe image" else "Help me" }
+        var lastError: Exception? = null
+        repeat(MAX_API_ATTEMPTS) { attempt ->
+            try {
+                val generativeModel = GenerativeModel(modelName = model, apiKey = apiKey, systemInstruction = systemPromptOverride?.let { content { text(it) } } ?: content { text(systemPrompt) })
+                val effectivePrompt = if (searchEnabled) {
+                    "Toolz AI. Web search context provided. Prompt: $prompt"
+                } else prompt.ifBlank { if (image != null) "Describe image" else "Help me" }
 
-        return if (image != null) {
-            val text = generativeModel.generateContent(content { image(image); text(effectivePrompt) }).text ?: "No response"
-            Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
-        } else {
-            // Merge consecutive messages of same role for Gemini
-            val mergedHistory = mutableListOf<AiMessage>()
-            history.forEach { msg ->
-                val last = mergedHistory.lastOrNull()
-                if (last != null && last.isUser == msg.isUser) {
-                    mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
+                return if (image != null) {
+                    val text = generativeModel.generateContent(content { image(image); text(effectivePrompt) }).text ?: "No response"
+                    Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
                 } else {
-                    mergedHistory += msg
+                    // Merge consecutive messages of same role for Gemini
+                    val mergedHistory = mutableListOf<AiMessage>()
+                    history.forEach { msg ->
+                        val last = mergedHistory.lastOrNull()
+                        if (last != null && last.isUser == msg.isUser) {
+                            mergedHistory[mergedHistory.size - 1] = last.copy(text = last.text + "\n\n" + msg.text)
+                        } else {
+                            mergedHistory += msg
+                        }
+                    }
+                    val chat = generativeModel.startChat(mergedHistory.map { content(role = if (it.isUser) "user" else "model") { text(it.text) } })
+                    val text = chat.sendMessage(effectivePrompt).text ?: "No response"
+                    Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
                 }
+            } catch (e: Exception) {
+                lastError = e as? Exception ?: Exception(e.message)
+                if (isModelNotFound(e)) throw e // let callProvider migrate models
+                if (attempt < MAX_API_ATTEMPTS - 1 && (isRateLimited(e) || isTransient(e))) {
+                    delay(RETRY_BASE_DELAY_MS * (1L shl attempt))
+                } else if (attempt == MAX_API_ATTEMPTS - 1) {
+                    throw e
+                } else throw e
             }
-            val chat = generativeModel.startChat(mergedHistory.map { content(role = if (it.isUser) "user" else "model") { text(it.text) } })
-            val text = chat.sendMessage(effectivePrompt).text ?: "No response"
-            Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
         }
+        throw lastError ?: Exception("Gemini call failed")
+    }
+
+    private fun isTransient(e: Throwable): Boolean {
+        val msg = (e.message ?: "").lowercase()
+        return msg.contains("timeout") || msg.contains("unavailable") || msg.contains("deadline") ||
+            msg.contains("network") || msg.contains("500") || msg.contains("502") || msg.contains("503")
     }
 
     private suspend fun callOpenAiCompatible(
@@ -553,7 +784,13 @@ class AiRepositoryImpl @Inject constructor(
         } else MessageContent.Text(prompt)
         messages += OpenAiMessage("user", userContent)
 
-        val response = openAiService.getChatCompletion(url, "Bearer $apiKey", if (provider == "OpenRouter") OPEN_ROUTER_REFERER else null, if (provider == "OpenRouter") OPEN_ROUTER_TITLE else null, OpenAiRequest(model, messages, tools = null))
+        val canonical = AiSettingsHelper.canonicalProvider(provider)
+        val response = callChatCompletionWithRetry(
+            provider = canonical,
+            url = url,
+            apiKey = apiKey,
+            request = OpenAiRequest(model, messages, tools = null)
+        )
         val text = response.choices.firstOrNull()?.message?.content ?: "No response"
         return Result.success(ChatRepository.ChatResponseChunk(cleanResponseText(text)))
     }
