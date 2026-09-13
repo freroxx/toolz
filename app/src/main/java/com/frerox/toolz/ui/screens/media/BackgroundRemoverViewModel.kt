@@ -25,6 +25,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.R
 import com.frerox.toolz.data.media.BackgroundModel
+import com.frerox.toolz.data.media.FastBlur
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_1024
 import com.frerox.toolz.data.media.ISNET_PREPROCESS_1024
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_320
@@ -284,7 +285,11 @@ class BackgroundRemoverViewModel @Inject constructor(
         if (!modelFile.exists()) return false
         return try {
             runCatching { onnxSession?.close() }
-            onnxSession = onnxEngine.createSession(modelFile, tryNnapi = true)
+            // Ultra uses a Swin Transformer backbone (224 MB) — NNAPI drivers fail to
+            // build the session graph on most devices, surfacing as a startup crash.
+            // CPU-only is still hardware-threaded and correct; skip NNAPI for this tier.
+            val tryNnapi = model.id != "ultra_birefnet"
+            onnxSession = onnxEngine.createSession(modelFile, tryNnapi = tryNnapi)
             onnxSessionModelId = model.id
             Log.d("BgRemoverVM", "ONNX ready for ${model.id}")
             true
@@ -733,7 +738,7 @@ class BackgroundRemoverViewModel @Inject constructor(
                     is PreviewBackground.Blur ->
                         if (original != null) compositeOnBlur(bitmap, original) else bitmap
                     is PreviewBackground.CustomImage ->
-                        compositeOnImage(bitmap, background.bitmap)
+                        compositeOnImage(bitmap, background)
                 }
                 val wroteCustom = toSave !== bitmap
                 try {
@@ -768,13 +773,30 @@ class BackgroundRemoverViewModel @Inject constructor(
         return out
     }
 
-    private fun compositeOnImage(fg: Bitmap, backdrop: Bitmap): Bitmap {
+    private fun compositeOnImage(fg: Bitmap, custom: PreviewBackground.CustomImage): Bitmap {
         val out = Bitmap.createBitmap(fg.width, fg.height, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(out)
-        val bg = coverFit(backdrop, fg.width, fg.height)
+        val backdrop = custom.bitmap
+        val blurred = if (custom.blurRadius > 0f) {
+            val r = (custom.blurRadius * 25).toInt().coerceIn(1, 25)
+            FastBlur.blurredBackdrop(backdrop, radius = r) ?: backdrop
+        } else backdrop
+        val bg = if (custom.scaleMode == BgScaleMode.COVER) {
+            coverFit(blurred, fg.width, fg.height)
+        } else {
+            fitInside(blurred, fg.width, fg.height)
+        }
         c.drawBitmap(bg, 0f, 0f, null)
-        if (bg !== backdrop) recycleBitmap(bg)
+        if (custom.dimAmount > 0f) {
+            val dimPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.BLACK
+                alpha = (custom.dimAmount * 255).toInt().coerceIn(0, 255)
+            }
+            c.drawRect(0f, 0f, fg.width.toFloat(), fg.height.toFloat(), dimPaint)
+        }
         c.drawBitmap(fg, 0f, 0f, null)
+        if (bg !== blurred && bg !== backdrop) recycleBitmap(bg)
+        if (blurred !== backdrop) recycleBitmap(blurred)
         return out
     }
 
@@ -790,6 +812,20 @@ class BackgroundRemoverViewModel @Inject constructor(
         val cropped = Bitmap.createBitmap(scaled, x, y, min(w, sw), min(h, sh))
         if (scaled != cropped) scaled.recycle()
         return cropped
+    }
+
+    private fun fitInside(src: Bitmap, w: Int, h: Int): Bitmap {
+        val scale = min(w.toFloat() / src.width, h.toFloat() / src.height)
+        val sw = (src.width * scale).toInt().coerceAtLeast(1)
+        val sh = (src.height * scale).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        val x = (w - sw) / 2f
+        val y = (h - sh) / 2f
+        c.drawBitmap(scaled, x, y, null)
+        if (scaled !== src) scaled.recycle()
+        return out
     }
 
     /** Export backdrop: small stack-blur upscaled smooth. Falls back to src, never crashes save. */
@@ -905,12 +941,19 @@ enum class RetryAction { RETRY_DOWNLOAD, RETRY_PROCESS, OPEN_HUB, PICK_IMAGE }
 
 data class BgFailure(val message: String, val retry: RetryAction?)
 
+enum class BgScaleMode { COVER, FIT }
+
 sealed interface PreviewBackground {
     data object Transparent : PreviewBackground
     data object White : PreviewBackground
     data class Color(val color: Int) : PreviewBackground
     data object Blur : PreviewBackground
-    data class CustomImage(val bitmap: Bitmap) : PreviewBackground
+    data class CustomImage(
+        val bitmap: Bitmap,
+        val scaleMode: BgScaleMode = BgScaleMode.COVER,
+        val blurRadius: Float = 0f,
+        val dimAmount: Float = 0f,
+    ) : PreviewBackground
 }
 
 data class BackgroundRemoverUiState(

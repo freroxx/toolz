@@ -897,8 +897,8 @@
     <string name="st_AiSelectText_title">Sélectionner du texte</string>
     <string name="st_AiSelectText_action">Sélectionner du texte</string>
     <string name="st_AiSelectText_formatted">Formaté</string>
-    <string name="st_AiSelectText_raw">Markdown brut</string>
-    <string name="st_AiSelectText_clean">Texte brut</string>
+    <string name="st_AiSelectText_raw">Brut</string>
+    <string name="st_AiSelectText_clean">Texte simple</string>
     <string name="st_AiSelectText_copy_all">Tout copier</string>
     <string name="st_AiSelectText_copied">Copié dans le presse-papiers</string>
     <string name="st_AiSelectText_tip">Faites glisser les poignées ou appuyez deux fois pour sélectionner</string>

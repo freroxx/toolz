@@ -242,15 +242,25 @@ fun AiSelectTextScreen(
                         currentMode = SelectTextMode.FORMATTED
                     },
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
-                    icon = {
+                    icon = {}
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
                         Icon(
                             Icons.Rounded.AutoAwesome,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            stringResource(R.string.st_AiSelectText_formatted),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (currentMode == SelectTextMode.FORMATTED) FontWeight.Bold else FontWeight.Medium
                         )
                     }
-                ) {
-                    Text(stringResource(R.string.st_AiSelectText_formatted), maxLines = 1)
                 }
 
                 SegmentedButton(
@@ -260,15 +270,25 @@ fun AiSelectTextScreen(
                         currentMode = SelectTextMode.RAW
                     },
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
-                    icon = {
+                    icon = {}
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
                         Icon(
                             Icons.Rounded.Code,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            stringResource(R.string.st_AiSelectText_raw),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (currentMode == SelectTextMode.RAW) FontWeight.Bold else FontWeight.Medium
                         )
                     }
-                ) {
-                    Text(stringResource(R.string.st_AiSelectText_raw), maxLines = 1)
                 }
 
                 SegmentedButton(
@@ -278,15 +298,25 @@ fun AiSelectTextScreen(
                         currentMode = SelectTextMode.CLEAN
                     },
                     shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
-                    icon = {
+                    icon = {}
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
                         Icon(
                             Icons.Rounded.FormatClear,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            stringResource(R.string.st_AiSelectText_clean),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (currentMode == SelectTextMode.CLEAN) FontWeight.Bold else FontWeight.Medium
                         )
                     }
-                ) {
-                    Text(stringResource(R.string.st_AiSelectText_clean), maxLines = 1)
                 }
             }
 

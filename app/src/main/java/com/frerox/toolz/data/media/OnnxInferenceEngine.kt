@@ -42,21 +42,42 @@ class OnnxInferenceEngine : AutoCloseable {
      * driver, unsupported ops) fall back to CPU automatically.
      */
     fun createSession(modelFile: File, tryNnapi: Boolean = true): OrtSession {
-        val opts = OrtSession.SessionOptions().apply {
+        if (tryNnapi) {
+            try {
+                val opts = OrtSession.SessionOptions().apply {
+                    val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                    setIntraOpNumThreads(threads)
+                    setInterOpNumThreads(1)
+                    setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                    addNnapi()
+                }
+                return env.createSession(modelFile.absolutePath, opts).also {
+                    Log.d(TAG, "NNAPI EP session created for ${modelFile.name}")
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "NNAPI session creation failed for ${modelFile.name}, falling back to CPU: ${e.message}")
+            }
+        }
+        val cpuOpts = OrtSession.SessionOptions().apply {
             val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
             setIntraOpNumThreads(threads)
             setInterOpNumThreads(1)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         }
-        if (tryNnapi) {
-            try {
-                opts.addNnapi()
-                Log.d(TAG, "NNAPI EP registered for ${modelFile.name}")
-            } catch (e: OrtException) {
-                Log.w(TAG, "NNAPI unavailable, CPU only for ${modelFile.name}: ${e.message}")
+        return try {
+            env.createSession(modelFile.absolutePath, cpuOpts).also {
+                Log.d(TAG, "CPU session (ALL_OPT) created for ${modelFile.name}")
             }
+        } catch (e: Throwable) {
+            Log.w(TAG, "CPU session ALL_OPT failed for ${modelFile.name}, trying BASIC_OPT: ${e.message}")
+            val basicOpts = OrtSession.SessionOptions().apply {
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                setIntraOpNumThreads(threads)
+                setInterOpNumThreads(1)
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
+            }
+            env.createSession(modelFile.absolutePath, basicOpts)
         }
-        return env.createSession(modelFile.absolutePath, opts)
     }
 
     /**

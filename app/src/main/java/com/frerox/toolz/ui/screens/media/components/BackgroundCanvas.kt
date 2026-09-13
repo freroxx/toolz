@@ -28,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.R
 import com.frerox.toolz.data.media.FastBlur
+import com.frerox.toolz.ui.screens.media.BgScaleMode
 import com.frerox.toolz.ui.screens.media.PreviewBackground
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -76,6 +77,7 @@ fun BackgroundCanvas(
     // Blur preview: capped long edge, built on Default so a 12 MP photo never
     // allocates ~50 MB or blocks composition on the main thread.
     var blurredOriginal by remember { mutableStateOf<Bitmap?>(null) }
+    var blurredCustom by remember { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(original, previewBackground) {
         val previous = blurredOriginal
         blurredOriginal =
@@ -90,6 +92,19 @@ fun BackgroundCanvas(
             }
         if (previous != null && !previous.isRecycled) {
             runCatching { previous.recycle() }
+        }
+
+        val prevCustom = blurredCustom
+        blurredCustom = if (previewBackground is PreviewBackground.CustomImage && previewBackground.blurRadius > 0f) {
+            val r = (previewBackground.blurRadius * 25).toInt().coerceIn(1, 25)
+            withContext(Dispatchers.Default) {
+                FastBlur.blurredPreview(previewBackground.bitmap, radius = r)
+            }
+        } else {
+            null
+        }
+        if (prevCustom != null && !prevCustom.isRecycled && (previewBackground !is PreviewBackground.CustomImage || prevCustom !== previewBackground.bitmap)) {
+            runCatching { prevCustom.recycle() }
         }
     }
 
@@ -144,20 +159,34 @@ fun BackgroundCanvas(
                         } else Checkerboard(checker, Modifier.fillMaxSize())
                     }
                     is PreviewBackground.CustomImage -> {
-                        Image(
-                            bitmap = previewBackground.bitmap.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp)
-                                .graphicsLayer(
-                                    scaleX = scale,
-                                    scaleY = scale,
-                                    translationX = offset.x,
-                                    translationY = offset.y,
-                                ),
-                            contentScale = ContentScale.Fit,
-                        )
+                        val displayBmp = if (previewBackground.blurRadius > 0f && blurredCustom != null) {
+                            blurredCustom!!
+                        } else {
+                            previewBackground.bitmap
+                        }
+                        Box(Modifier.fillMaxSize()) {
+                            Image(
+                                bitmap = displayBmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp)
+                                    .graphicsLayer(
+                                        scaleX = scale,
+                                        scaleY = scale,
+                                        translationX = offset.x,
+                                        translationY = offset.y,
+                                    ),
+                                contentScale = if (previewBackground.scaleMode == BgScaleMode.COVER) ContentScale.Crop else ContentScale.Fit,
+                            )
+                            if (previewBackground.dimAmount > 0f) {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = previewBackground.dimAmount))
+                                )
+                            }
+                        }
                     }
                 }
             }

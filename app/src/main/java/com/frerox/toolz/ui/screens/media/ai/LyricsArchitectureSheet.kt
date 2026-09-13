@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.frerox.toolz.R
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 
 data class ArchitectureLayerInfo(
@@ -128,7 +129,7 @@ fun LyricsArchitectureSheet(
                 badgeRes = R.string.st_LyricsArchitectureSheet_sss_badge,
                 summaryRes = R.string.st_LyricsArchitectureSheet_sss_summary,
                 technicalDetailsRes = R.string.st_LyricsArchitectureSheet_sss_details,
-                icon = Icons.Rounded.FolderZip,
+                icon = Icons.Rounded.Description,
                 isLocal = true
             ),
             ArchitectureLayerInfo(
@@ -155,7 +156,7 @@ fun LyricsArchitectureSheet(
                 badgeRes = R.string.st_LyricsArchitectureSheet_spaf_badge,
                 summaryRes = R.string.st_LyricsArchitectureSheet_spaf_summary,
                 technicalDetailsRes = R.string.st_LyricsArchitectureSheet_spaf_details,
-                icon = Icons.Rounded.AutoAwesome,
+                icon = Icons.Rounded.Public,
                 isLocal = false
             )
         )
@@ -300,34 +301,27 @@ fun LyricsArchitectureSheet(
 
             Spacer(Modifier.height(16.dp))
 
-            // Segmented Filter Bar
-            SingleChoiceSegmentedButtonRow(
+            // Connected Filter Button Group
+            ToolzConnectedButtonGroup(
+                selectedIndex = when (selectedFilter) {
+                    ArchitectureFilterTab.ALL -> 0
+                    ArchitectureFilterTab.LOCAL -> 1
+                    ArchitectureFilterTab.ONLINE -> 2
+                },
+                options = listOf(
+                    stringResource(R.string.st_LyricsArchitectureSheet_all_count, allLayers.size),
+                    stringResource(R.string.st_LyricsArchitectureSheet_local_count, allLayers.count { it.isLocal }),
+                    stringResource(R.string.st_LyricsArchitectureSheet_online_count, allLayers.count { !it.isLocal })
+                ),
+                onOptionSelected = { index ->
+                    selectedFilter = when (index) {
+                        0 -> ArchitectureFilterTab.ALL
+                        1 -> ArchitectureFilterTab.LOCAL
+                        else -> ArchitectureFilterTab.ONLINE
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
-            ) {
-                SegmentedButton(
-                    selected = selectedFilter == ArchitectureFilterTab.ALL,
-                    onClick = { selectedFilter = ArchitectureFilterTab.ALL },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
-                ) {
-                    Text(stringResource(R.string.st_LyricsArchitectureSheet_all_count, 6), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-
-                SegmentedButton(
-                    selected = selectedFilter == ArchitectureFilterTab.LOCAL,
-                    onClick = { selectedFilter = ArchitectureFilterTab.LOCAL },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
-                ) {
-                    Text(stringResource(R.string.st_LyricsArchitectureSheet_local_count, 3), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-
-                SegmentedButton(
-                    selected = selectedFilter == ArchitectureFilterTab.ONLINE,
-                    onClick = { selectedFilter = ArchitectureFilterTab.ONLINE },
-                    shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
-                ) {
-                    Text(stringResource(R.string.st_LyricsArchitectureSheet_online_count, 3), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
+            )
 
             Spacer(Modifier.height(16.dp))
 

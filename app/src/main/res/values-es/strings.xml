@@ -801,7 +801,7 @@
     <string name="st_AiSelectText_title">Seleccionar texto</string>
     <string name="st_AiSelectText_action">Seleccionar texto</string>
     <string name="st_AiSelectText_formatted">Con formato</string>
-    <string name="st_AiSelectText_raw">Markdown sin formato</string>
+    <string name="st_AiSelectText_raw">Sin formato</string>
     <string name="st_AiSelectText_clean">Texto plano</string>
     <string name="st_AiSelectText_copy_all">Copiar todo</string>
     <string name="st_AiSelectText_copied">Copiado al portapapeles</string>

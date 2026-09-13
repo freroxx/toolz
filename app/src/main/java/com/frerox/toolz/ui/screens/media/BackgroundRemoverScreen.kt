@@ -89,6 +89,7 @@ import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 import com.frerox.toolz.ui.screens.media.components.BackgroundCanvas
 import com.frerox.toolz.ui.screens.media.components.BackgroundOptionsBar
+import com.frerox.toolz.ui.screens.media.components.BackgroundPickerSheet
 import com.frerox.toolz.ui.screens.media.components.ModelHubContent
 import com.frerox.toolz.ui.screens.media.components.downloadStatusLine
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
@@ -120,6 +121,7 @@ fun BackgroundRemoverScreen(
     val scope = rememberCoroutineScope()
 
     var isHubOpen by remember { mutableStateOf(false) }
+    var isBgPickerOpen by remember { mutableStateOf(false) }
     var showOriginal by remember { mutableStateOf(false) }
     var meteredAsk by remember { mutableStateOf<BackgroundModel?>(null) }
 
@@ -228,6 +230,7 @@ fun BackgroundRemoverScreen(
                     showOriginal = showOriginal,
                     onToggleOriginal = { showOriginal = it == 1 },
                     onSelectBackground = { viewModel.setPreviewBackground(it) },
+                    onOpenColorPicker = { isBgPickerOpen = true },
                     onReset = {
                         showOriginal = false
                         viewModel.clearResult()
@@ -340,6 +343,14 @@ fun BackgroundRemoverScreen(
             )
         }
     }
+
+    if (isBgPickerOpen) {
+        BackgroundPickerSheet(
+            current = uiState.previewBackground,
+            onSelect = { viewModel.setPreviewBackground(it) },
+            onDismiss = { isBgPickerOpen = false },
+        )
+    }
 }
 
 // ─────────────────────────────── HERO ───────────────────────────────
@@ -442,6 +453,7 @@ private fun EditorPane(
     showOriginal: Boolean,
     onToggleOriginal: (Int) -> Unit,
     onSelectBackground: (PreviewBackground) -> Unit,
+    onOpenColorPicker: () -> Unit,
     onReset: () -> Unit,
     onSave: () -> Unit,
     onShare: () -> Unit,
@@ -498,6 +510,10 @@ private fun EditorPane(
                     onSelect = {
                         haptic.tick()
                         onSelectBackground(it)
+                    },
+                    onOpenColorPicker = {
+                        haptic.tick()
+                        onOpenColorPicker()
                     },
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
                 )
