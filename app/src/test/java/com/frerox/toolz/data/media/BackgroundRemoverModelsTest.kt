@@ -9,8 +9,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Lineup integrity (revamp 2026): ids unique, migration total, pins well-formed.
@@ -25,10 +23,9 @@ class BackgroundModelTest {
     }
 
     @Test
-    fun defaultIsFastGeneralOnnx() {
+    fun defaultIsProDetailOnnx() {
         val d = BackgroundModel.default()
-        assertEquals("fast_general", d.id)
-        assertEquals(InferenceRuntime.ONNX, d.runtime)
+        assertEquals("pro_detail", d.id)
         assertTrue(d.isRecommended)
     }
 
@@ -37,6 +34,7 @@ class BackgroundModelTest {
         val legacy = listOf(
             "selfie_portrait", "selfie_landscape",
             "selfie_multiclass", "modnet_hd", "deeplabv3_objects",
+            "instant_selfie",
         )
         for (old in legacy) {
             assertNull("retired id must not resolve: $old", BackgroundModel.fromId(old))
@@ -62,11 +60,9 @@ class BackgroundModelTest {
 
     @Test
     fun onnxModelsHavePinnedHashes() {
-        // Unpinned ONNX = silent-substitution risk. Every ONNX entry must pin.
+        // Unpinned model = silent-substitution risk. The ONNX-only lineup pins every entry.
         for (m in BackgroundModel.entries) {
-            if (m.runtime == InferenceRuntime.ONNX) {
-                assertNotNull("${m.id} must pin expectedSha256", m.expectedSha256)
-            }
+            assertNotNull("${m.id} must pin expectedSha256", m.expectedSha256)
         }
     }
 
@@ -91,8 +87,9 @@ class BackgroundModelTest {
         val ultra = BackgroundModel.fromId("ultra_birefnet")
         assertNotNull(ultra)
         ultra!!
-        assertEquals(InferenceRuntime.ONNX, ultra.runtime)
         assertEquals(1024, ultra.inputSize)
+        // Quality-first: no downscaling — tiling preserves the full 1024.
+        assertEquals(1024, ultra.inferenceInputSize)
         assertTrue("ultra needs sigmoid first", ultra.onnxPostSigmoid)
         assertTrue("ultra is wifi-gated", ultra.gatedOnWifi)
         assertEquals(224005088L, ultra.expectedSizeBytes)
@@ -104,48 +101,9 @@ class BackgroundModelTest {
 }
 
 /**
- * MaskDecoder contracts — the paths the revamp actually exercises.
+ * MaskDecoder contracts — the paths the ONNX-only lineup actually exercises.
  */
 class MaskDecoderTest {
-
-    private fun floatBuf(values: FloatArray): ByteBuffer =
-        ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).apply {
-            asFloatBuffer().put(values)
-            rewind()
-        }
-
-    @Test
-    fun singleChannelPassthroughClamped() {
-        val buf = floatBuf(floatArrayOf(0f, 0.5f, 1f, 2f, -1f))
-        val out = MaskDecoder.decode(buf, true, intArrayOf(1, 1, 5, 1), 5, 1, "fast_general")
-        assertEquals(0f, out[0], 1e-6f)
-        assertEquals(0.5f, out[1], 1e-6f)
-        assertEquals(1f, out[2], 1e-6f)
-        // out-of-range logits go through sigmoid, not clipping
-        assertTrue(out[3] > 0.5f && out[3] < 1f)
-        assertTrue(out[4] > 0f && out[4] < 0.5f)
-    }
-
-    @Test
-    fun multiclassForegroundWinsOverBackground() {
-        // 6 channels NHWC, pixel 0 = background, pixel 1 = foreground class.
-        val px0 = floatArrayOf(5f, 0f, 0f, 0f, 0f, 0f)
-        val px1 = floatArrayOf(0f, 0f, 4f, 0f, 0f, 0f)
-        val buf = floatBuf(px0 + px1)
-        val out = MaskDecoder.decode(buf, true, intArrayOf(1, 1, 2, 6), 2, 1, "selfie_multiclass")
-        assertTrue("bg pixel near 0, was ${out[0]}", out[0] < 0.05f)
-        assertTrue("fg pixel near 1, was ${out[1]}", out[1] > 0.95f)
-    }
-
-    @Test
-    fun quantizedLastChannelNormalized() {
-        val bytes = byteArrayOf(0, 127.toByte(), 255.toByte())
-        val buf = ByteBuffer.allocateDirect(3).apply { put(bytes); rewind() }
-        val out = MaskDecoder.decode(buf, false, intArrayOf(1, 1, 3, 1), 3, 1, "instant_selfie")
-        assertEquals(0f, out[0], 1e-6f)
-        assertEquals(127f / 255f, out[1], 1e-3f)
-        assertEquals(1f, out[2], 1e-6f)
-    }
 
     @Test
     fun minMaxStretchesWeakResponseToFullRange() {

@@ -544,6 +544,8 @@
     <string name="st_BackgroundRemover_DownloadSize">Descargar · %1$s</string>
     <string name="st_BackgroundRemover_WifiNote">Archivo grande (%1$s): se recomienda Wi-Fi</string>
     <string name="st_BackgroundRemover_Recommended">RECOMENDADO</string>
+    <string name="st_BackgroundRemover_TooHeavyUltra">Ultra necesita un dispositivo con mucha memoria para su modelo de máximo detalle. Prueba con el modelo Pro: la diferencia es mínima en un teléfono.</string>
+    <string name="st_BackgroundRemover_Default">PREDETERMINADO</string>
     <string name="st_BackgroundRemover_Ready">Listo</string>
     <string name="st_BackgroundRemover_RemoveModel">Quitar %1$s</string>
     <string name="st_BackgroundRemover_Retry">Reintentar</string>
@@ -2343,6 +2345,16 @@
     <string name="st_SearchScreen_ws_q_sd">SD</string>
     <string name="st_SearchScreen_ws_q_low">Baja</string>
     <string name="st_SearchScreen_ws_q_saver">Ahorro de datos</string>
+    <string name="st_SearchScreen_ws_q_checking">Comprobando calidades…</string>
+    <string name="st_SearchScreen_ws_q_best">Ideal para este vídeo</string>
+    <string name="st_SearchScreen_ws_dl_done_title">✓ Descarga completa</string>
+    <string name="st_SearchScreen_ws_dl_done_video">%1$s • %2$s</string>
+    <string name="st_SearchScreen_ws_dl_done_mp3">%1$s • MP3</string>
+    <string name="st_SearchScreen_ws_dl_failed_title">Descarga fallida</string>
+    <string name="st_SearchScreen_ws_dl_cancelled">Descarga cancelada</string>
+    <string name="st_SearchScreen_ws_dl_open">Abrir</string>
+    <string name="st_SearchScreen_ws_dl_dismiss">Descartar</string>
+    <string name="st_SearchScreen_ws_dl_cancel">Cancelar</string>
     <string name="st_SearchScreen_ws_no_videos">Sin vídeos disponibles</string>
     <string name="st_SearchScreen_ws_no_images">Sin imágenes disponibles</string>
     <string name="st_SearchScreen_ws_img_channel">Descargas de imágenes</string>

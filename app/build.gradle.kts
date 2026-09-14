@@ -46,10 +46,6 @@ android {
     namespace = "com.frerox.toolz"
     compileSdk = 37
 
-    androidResources {
-        noCompress += "tflite"
-    }
-
     defaultConfig {
         applicationId = "com.frerox.toolz"
         minSdk = 31
@@ -147,11 +143,6 @@ android {
         viewBinding = true
         aidl = true
     }
-    
-    androidResources {
-        noCompress += "tflite"
-    }
-
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -226,11 +217,7 @@ dependencies {
     // ZXing Android Embedded — replaces com.google.mlkit:barcode-scanning (F-Droid compliant)
     // zxing-core already pulled in transitively; listed explicitly for clarity
     implementation(libs.zxing.core)
-    // LiteRT (TFLite successor) — bundled runtime, works on every device with zero Play
-    // Services dependency, and ships 16 KB-aligned native libs (Play requirement, Android 15+).
-    // Same org.tensorflow.lite package / classic Interpreter API — no code change needed.
-    implementation(libs.litert)
-    // ONNX Runtime Mobile — quality-tier segmentation (U2Net/RVM/MODNet/ISNet).
+    // ONNX Runtime Mobile — quality-tier segmentation (U2Net/RVM/ISNet/BiRefNet).
     // MIT licensed, MavenCentral, per-ABI .so ships via existing ABI splits
     // (~+32 MB arm64-v8a, ~+23 MB armeabi-v7a). Models stay download-on-demand.
     implementation(libs.onnxruntime.android)

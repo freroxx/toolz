@@ -53,15 +53,11 @@
 -keep interface com.google.ai.client.generativeai.** { *; }
 -dontwarn com.google.ai.client.generativeai.**
 
-# TFLite / LiteRT Runtime & JNI
+# Native runtimes (ORT) & JNI
 # ------------------------------------------------------------------------------
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }
-
--keep class org.tensorflow.** { *; }
--keep interface org.tensorflow.** { *; }
--dontwarn org.tensorflow.**
 
 # ------------------------------------------------------------------------------
 # Preserve Gemini's internal Part and Content serialization (fixes "Cannot serialize abstract class")

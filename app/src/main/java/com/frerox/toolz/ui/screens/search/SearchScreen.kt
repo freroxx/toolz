@@ -283,14 +283,22 @@ fun SearchScreen(
             Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_needed), Toast.LENGTH_LONG).show()
         }
     }
-    // Observe video+mp3 download WorkManager for global progress banners
+    // Observe video+mp3 download WorkManager for global progress banners.
+    // Only downloads enqueued from THIS screen (tracked ids) are shown, so
+    // stale finished work from other sessions never leaks in as phantom rows.
     val videoWorkInfos by WorkManager.getInstance(context.applicationContext).getWorkInfosByTagFlow(com.frerox.toolz.worker.VideoDownloadWorker.TAG_VIDEO_DOWNLOAD).collectAsState(initial = emptyList())
-    val hasActiveVideoDownload = videoWorkInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
-    val activeVideoProgress = videoWorkInfos.firstOrNull { it.state == WorkInfo.State.RUNNING }?.progress?.getFloat(com.frerox.toolz.worker.VideoDownloadWorker.KEY_PROGRESS, 0f)?.takeIf { it > 0f }
-
     val mp3WorkInfos by WorkManager.getInstance(context.applicationContext).getWorkInfosByTagFlow(com.frerox.toolz.worker.YouTubeMp3DownloadWorker.TAG_MP3_DOWNLOAD).collectAsState(initial = emptyList())
-    val hasActiveMp3Download = mp3WorkInfos.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
-    val activeMp3Progress = mp3WorkInfos.firstOrNull { it.state == WorkInfo.State.RUNNING }?.progress?.getFloat(com.frerox.toolz.worker.YouTubeMp3DownloadWorker.KEY_PROGRESS, 0f)?.takeIf { it > 0f }
+    val trackedMeta = viewModel.trackedDownloads.value
+    val trackedIds = trackedMeta.keys
+    val trackedInfos = remember(videoWorkInfos, mp3WorkInfos, trackedIds) {
+        (videoWorkInfos + mp3WorkInfos).filter { trackedIds.contains(it.id.toString()) }
+    }
+    val activeDownloads = remember(trackedInfos) {
+        trackedInfos.filter { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }.take(3)
+    }
+    val finishedDownloads = remember(trackedInfos) {
+        trackedInfos.filter { it.state.isFinished }.take(3)
+    }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -303,6 +311,7 @@ fun SearchScreen(
     videoDownloadTarget?.let { target ->
         YouTubeDownloadSheet(
             title = target.title,
+            availableHeights = viewModel.videoDownloadHeights.value,
             onDismiss = { viewModel.dismissVideoDownloadSheet() },
             onDownload = { quality ->
                 // Permission gate: Android 13+ needs POST_NOTIFICATIONS
@@ -436,43 +445,145 @@ fun SearchScreen(
                             onClick        = { showSearchOptions = true },
                         )
                     }
-                    if (hasActiveVideoDownload) {
+                    // Active YouTube downloads — one honest row per download (its own
+                    // title + progress), never the first-arbitrary-work's progress.
+                    val mp3IdSet = remember(mp3WorkInfos) { mp3WorkInfos.map { it.id.toString() }.toSet() }
+                    activeDownloads.forEach { info ->
+                        val meta = trackedMeta[info.id.toString()]
+                        val isMp3 = meta?.isMp3 ?: mp3IdSet.contains(info.id.toString())
+                        val dlTitle = info.ytTitle(meta?.title, isMp3)
+                        val prog = info.ytProgress()
                         Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (activeVideoProgress != null) {
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    progress = { activeVideoProgress },
-                                    modifier = Modifier.weight(1f).height(3.dp),
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(
+                                    if (isMp3) dlTitle else "$dlTitle • ${ytRequestedQuality(meta?.quality)}",
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
                                 )
-                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_video_pct, (activeVideoProgress * 100).toInt()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                            } else {
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    modifier = Modifier.weight(1f).height(3.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                if (prog != null) {
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        progress = { prog },
+                                        modifier = Modifier.fillMaxWidth().height(3.dp),
+                                        color = if (isMp3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    )
+                                } else {
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        modifier = Modifier.fillMaxWidth().height(3.dp),
+                                        color = if (isMp3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    )
+                                }
+                            }
+                            if (prog != null) {
+                                Text(
+                                    stringResource(
+                                        if (isMp3) com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_mp3_pct
+                                        else com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_video_pct,
+                                        (prog * 100).toInt(),
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isMp3) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
                                 )
-                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_video), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            }
+                            androidx.compose.material3.TextButton(
+                                onClick = { viewModel.cancelTrackedDownload(context, info.id.toString()) },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text(
+                                    stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_cancel),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
-                    if (hasActiveMp3Download) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (activeMp3Progress != null) {
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    progress = { activeMp3Progress },
-                                    modifier = Modifier.weight(1f).height(3.dp),
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                )
-                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_mp3_pct, (activeMp3Progress * 100).toInt()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
-                            } else {
-                                androidx.compose.material3.LinearProgressIndicator(
-                                    modifier = Modifier.weight(1f).height(3.dp),
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                )
-                                Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_downloading_mp3), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                    // Finished downloads — success shows the HONEST saved quality
+                    // (actual vs asked), failure shows the worker's reason. Both
+                    // stay until dismissed; nothing vanishes silently.
+                    finishedDownloads.forEach { info ->
+                        val meta = trackedMeta[info.id.toString()]
+                        val isMp3 = meta?.isMp3 ?: mp3IdSet.contains(info.id.toString())
+                        val dlTitle = info.ytTitle(meta?.title, isMp3)
+                        when (info.state) {
+                            WorkInfo.State.SUCCEEDED -> {
+                                Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_done_title),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            if (isMp3) stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_done_mp3, dlTitle)
+                                            else stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_done_video, dlTitle, info.ytHonestQuality(meta?.quality)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        androidx.compose.material3.TextButton(
+                                            onClick = { viewModel.openDownload(context, info) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        ) {
+                                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_open), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        }
+                                        androidx.compose.material3.TextButton(
+                                            onClick = { viewModel.dismissTrackedDownload(info.id.toString()) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        ) {
+                                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_dismiss), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                            WorkInfo.State.FAILED -> {
+                                Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_failed_title),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            listOfNotNull(dlTitle, info.ytError()?.take(60)).joinToString(" — "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        androidx.compose.material3.TextButton(
+                                            onClick = { viewModel.dismissTrackedDownload(info.id.toString()) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        ) {
+                                            Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_dismiss), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_cancelled),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                    )
+                                    androidx.compose.material3.TextButton(
+                                        onClick = { viewModel.dismissTrackedDownload(info.id.toString()) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    ) {
+                                        Text(stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_dl_dismiss), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
                             }
                         }
                     }
@@ -2403,4 +2514,50 @@ fun QuickLinkDialog(
         },
         shape = RoundedCornerShape(24.dp),
     )
+}
+
+// ── YouTube download banner helpers ──────────────────────────────────────────
+// WorkInfo exposes output/progress but NOT input, so title/quality/isMp3 come
+// from SearchViewModel.trackedDownloads (snapshotted at enqueue). Output keys
+// ("display_name", "requested_quality", "actual_height", "error", "progress")
+// mirror the worker companions.
+
+/** Display title: tracked title, else saved file name on success. Never blank. */
+private fun WorkInfo.ytTitle(metaTitle: String?, isMp3: Boolean): String {
+    return metaTitle?.takeIf { it.isNotBlank() }
+        ?: outputData.getString(com.frerox.toolz.worker.VideoDownloadWorker.KEY_DISPLAY_NAME)
+            ?.takeIf { it.isNotBlank() }
+        ?: if (isMp3) "MP3" else "Video"
+}
+
+/** 0..1 progress while RUNNING, or null when nothing reported yet (indeterminate). */
+private fun WorkInfo.ytProgress(): Float? {
+    if (state != WorkInfo.State.RUNNING) return null
+    return progress.getFloat(com.frerox.toolz.worker.VideoDownloadWorker.KEY_PROGRESS, -1f)
+        .takeIf { it > 0f }?.coerceIn(0f, 1f)
+}
+
+/** Requested quality label from tracked meta ("1080p", "MP3"…). Never blank. */
+private fun ytRequestedQuality(metaQuality: String?): String {
+    return metaQuality?.takeIf { it.isNotBlank() } ?: "Video"
+}
+
+/**
+ * Honest saved-quality label from worker output: actual height when known,
+ * downgrade suffix when the worker saved lower than asked, requested when the
+ * exact height is unknown (yt-dlp path caps at the request, so ≈ requested).
+ */
+private fun WorkInfo.ytHonestQuality(metaQuality: String?): String {
+    val requested = outputData.getString(com.frerox.toolz.worker.VideoDownloadWorker.KEY_REQUESTED_QUALITY)
+        ?: ytRequestedQuality(metaQuality)
+    val actual = outputData.getInt(com.frerox.toolz.worker.VideoDownloadWorker.KEY_ACTUAL_HEIGHT, -1)
+    if (actual <= 0) return requested
+    val reqH = requested.replace("p", "", ignoreCase = true).toIntOrNull()
+    return if (reqH != null && actual < reqH - 60) "${actual}p (asked $requested)" else "${actual}p"
+}
+
+/** Worker-reported failure reason, if any. */
+private fun WorkInfo.ytError(): String? {
+    return outputData.getString(com.frerox.toolz.worker.VideoDownloadWorker.KEY_ERROR)
+        ?.takeIf { it.isNotBlank() }
 }

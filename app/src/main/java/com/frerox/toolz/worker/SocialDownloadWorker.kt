@@ -287,8 +287,9 @@ class SocialDownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotification(id: Int, contentTitle: String, progress: Int): android.app.Notification {
+        // Cancel targets this exact WorkRequest id (see VideoDownloadWorker).
         val cancelIntent = Intent(applicationContext, DownloadCancelReceiver::class.java).apply {
-            putExtra("work_id", id.toString())
+            putExtra("work_id", this@SocialDownloadWorker.id.toString())
         }
         val cancelPendingIntent = PendingIntent.getBroadcast(
             applicationContext, id.hashCode(), cancelIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

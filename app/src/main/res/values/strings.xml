@@ -566,6 +566,7 @@
     <string name="st_BackgroundRemover_DownloadSize">Download · %1$s</string>
     <string name="st_BackgroundRemover_WifiNote">Large file (%1$s) — Wi-Fi recommended</string>
     <string name="st_BackgroundRemover_Recommended">RECOMMENDED</string>
+    <string name="st_BackgroundRemover_Default">DEFAULT</string>
     <string name="st_BackgroundRemover_Ready">Ready</string>
     <string name="st_BackgroundRemover_RemoveModel">Remove %1$s</string>
     <string name="st_BackgroundRemover_Retry">Retry</string>
@@ -617,9 +618,9 @@
     <string name="st_BackgroundRemover_WorkingWarmupDesc">First run takes a moment to compile the neural network graph</string>
     <string name="st_BackgroundRemover_EmptyMask">No clear subject was detected in this photo. Try choosing a different AI model or another image.</string>
     <string name="st_BackgroundRemover_EmptyMaskUltra">Ultra didn\'t detect a clear subject. Try switching to the Pro model.</string>
-    <string name="st_BackgroundRemover_EmptyMaskInstant">Instant Selfie works best on human portraits. For objects or pets, try the Fast or Pro model.</string>
     <string name="st_BackgroundRemover_Timeout">Processing timed out with %1$s. This model might be too demanding for this device — try the Pro or Fast model.</string>
     <string name="st_BackgroundRemover_SwitchModel">Switch model</string>
+    <string name="st_BackgroundRemover_TooHeavyUltra">Ultra needs a high-memory device for its full-detail model. Try the Pro model instead — the difference is minimal on a phone screen.</string>
 
     <!-- SettingsScreen -->
     <string name="st_SettingsScreen_a1b2">Perfect Gray Suggestion</string>
@@ -2538,6 +2539,16 @@
     <string name="st_SearchScreen_ws_q_sd">SD</string>
     <string name="st_SearchScreen_ws_q_low">Low</string>
     <string name="st_SearchScreen_ws_q_saver">Data saver</string>
+    <string name="st_SearchScreen_ws_q_checking">Checking available qualities…</string>
+    <string name="st_SearchScreen_ws_q_best">Best for this video</string>
+    <string name="st_SearchScreen_ws_dl_done_title">✓ Download complete</string>
+    <string name="st_SearchScreen_ws_dl_done_video">%1$s • %2$s</string>
+    <string name="st_SearchScreen_ws_dl_done_mp3">%1$s • MP3</string>
+    <string name="st_SearchScreen_ws_dl_failed_title">Download failed</string>
+    <string name="st_SearchScreen_ws_dl_cancelled">Download cancelled</string>
+    <string name="st_SearchScreen_ws_dl_open">Open</string>
+    <string name="st_SearchScreen_ws_dl_dismiss">Dismiss</string>
+    <string name="st_SearchScreen_ws_dl_cancel">Cancel</string>
     <string name="st_SearchScreen_ws_no_videos">No videos available</string>
     <string name="st_SearchScreen_ws_no_images">No images available</string>
     <string name="st_SearchScreen_ws_img_channel">Image Downloads</string>

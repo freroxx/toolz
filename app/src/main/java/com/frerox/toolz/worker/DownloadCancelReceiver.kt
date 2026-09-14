@@ -55,7 +55,13 @@ class DownloadCancelReceiver : BroadcastReceiver() {
             return
         }
         if (trackId != null) {
-            WorkManager.getInstance(context).cancelAllWorkByTag("download_$trackId")
+            // Preferred: exact WorkRequest UUID (sent by Video/Social workers).
+            val asUuid = runCatching { UUID.fromString(trackId) }.getOrNull()
+            if (asUuid != null) {
+                WorkManager.getInstance(context).cancelWorkById(asUuid)
+            } else {
+                WorkManager.getInstance(context).cancelAllWorkByTag("download_$trackId")
+            }
         }
     }
 }

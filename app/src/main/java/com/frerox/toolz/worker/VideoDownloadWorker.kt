@@ -57,6 +57,11 @@ class VideoDownloadWorker @AssistedInject constructor(
         const val KEY_FILE_URI = "file_uri"
         const val KEY_DISPLAY_NAME = "display_name"
         const val KEY_MIME_TYPE = "mime_type"
+        /** Honest-quality keys: requested vs actually saved height (-1 = unknown, e.g. yt-dlp). */
+        const val KEY_REQUESTED_QUALITY = "requested_quality"
+        const val KEY_ACTUAL_HEIGHT = "actual_height"
+        /** Failure reason for UI banners (Result.failure carries no message otherwise). */
+        const val KEY_ERROR = "error"
         const val CHANNEL_ID = NotificationHelper.CHANNEL_VIDEO_DOWNLOADS
         const val NOTIFICATION_ID_BASE = 2000
     }
@@ -234,19 +239,85 @@ class VideoDownloadWorker @AssistedInject constructor(
                     } else {
                         // Merged format: DASH video+audio when available (true HD with audio —
                         // the bundled yt-dlp ffmpeg handles the merge), else best progressive.
-                        val format = "bestvideo[height<=$maxHeight][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=$maxHeight]+bestaudio/best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
+                        // Cap scope at 1080p H264: higher VP9/AV1 would need re-encode.
+                        val format = "bestvideo[height<=$maxHeight][height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=$maxHeight][height<=1080][ext=mp4]+bestaudio/bestvideo[height<=$maxHeight][height<=1080]+bestaudio/best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
                         addOption.invoke(request, "-f", format)
                         addOption.invoke(request, "-o", outputTemplate)
                         addFlag?.invoke(request, "--no-playlist")
+                        // Fresh player clients: the bundled yt-dlp may default to a stale
+                        // client that only sees 360p. Request android+web so HD formats
+                        // appear even on older binaries.
+                        try { addOption.invoke(request, "--extractor-args", "youtube:player_client=android,web") } catch (_: Exception) {}
+                        try { addOption.invoke(request, "--merge-output-format", "mp4") } catch (_: Exception) {}
+                        try { addOption.invoke(request, "--concurrent-fragments", "4") } catch (_: Exception) {}
+                        try { addOption.invoke(request, "--retries", "3") } catch (_: Exception) {}
                     }
 
                     val youtubeDl = youtubeDlClass.getMethod("getInstance").invoke(null)
                     try {
                         youtubeDl.javaClass.getMethod("init", Context::class.java).invoke(youtubeDl, applicationContext)
                     } catch (_: Exception) {}
+                    // Best-effort binary refresh: an outdated bundled yt-dlp is the
+                    // classic cause of "only 360p" (misses SABR/player fixes).
+                    // Never blocks the download on failure (offline / rate-limited).
+                    try {
+                        val updateMethod = youtubeDl.javaClass.methods.firstOrNull { it.name == "updateYoutubeDL" }
+                        if (updateMethod != null) {
+                            val status = runCatching {
+                                if (updateMethod.parameterTypes.size == 2) updateMethod.invoke(youtubeDl, applicationContext, null)
+                                else updateMethod.invoke(youtubeDl, applicationContext)
+                            }.getOrNull()
+                            android.util.Log.i("VideoDownloadWorker", "yt-dlp update check: $status")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("VideoDownloadWorker", "yt-dlp update check failed (continuing with bundled): ${e.message}")
+                    }
+                    try {
+                        val versionMethod = youtubeDl.javaClass.methods.firstOrNull { it.name == "version" || it.name == "versionName" }
+                        android.util.Log.i("VideoDownloadWorker", "yt-dlp version probe: ${runCatching { versionMethod?.invoke(youtubeDl, applicationContext) }.getOrNull()}")
+                    } catch (_: Exception) {}
 
-                    val exec = youtubeDl.javaClass.methods.firstOrNull { it.name == "execute" && it.parameterTypes.size >= 1 }
-                    exec?.invoke(youtubeDl, request)
+                    val execResponse = try {
+                        // Prefer the 3-arg overload with a progress callback so the
+                        // long yt-dlp phase moves the bar (previously it sat at 8%
+                        // for minutes: the "stuck progress" bug).
+                        val cbClass = try {
+                            Class.forName("com.yausername.youtubedl_android.DownloadProgressCallback")
+                        } catch (_: Exception) { null }
+                        val exec3 = youtubeDl.javaClass.methods.firstOrNull {
+                            it.name == "execute" && it.parameterTypes.size == 3 &&
+                                it.parameterTypes[0].isAssignableFrom(requestClass)
+                        }
+                        if (exec3 != null && cbClass != null) {
+                            val cb = java.lang.reflect.Proxy.newProxyInstance(
+                                cbClass.classLoader, arrayOf(cbClass),
+                            ) { _, m, args ->
+                                if (m.name == "onProgressUpdate" && !args.isNullOrEmpty()) {
+                                    val p = (args[0] as? Float) ?: (args[0] as? Number)?.toFloat() ?: 0f
+                                    // yt-dlp reports 0..100; map into the 8%..85% band.
+                                    val norm = 0.08f + (p.coerceIn(0f, 100f) / 100f * 0.77f)
+                                    notificationManager.notify(
+                                        notificationId,
+                                        createNotification(notificationId, "Downloading $safeTitle ($quality)...", (norm * 100).toInt()),
+                                    )
+                                    progressChannel.trySend(norm)
+                                }
+                                null
+                            }
+                            exec3.invoke(youtubeDl, request, "ytdlp_${System.currentTimeMillis()}", cb)
+                        } else {
+                            val exec = youtubeDl.javaClass.methods.firstOrNull { it.name == "execute" && it.parameterTypes.size >= 1 }
+                            exec?.invoke(youtubeDl, request)
+                        }
+                    } catch (e: Exception) {
+                        val cause = e.cause?.message ?: e.message
+                        android.util.Log.w("VideoDownloadWorker", "yt-dlp execute threw for $quality: ${cause?.take(300)}")
+                        throw e
+                    }
+                    try {
+                        val err = execResponse?.javaClass?.methods?.firstOrNull { it.name == "getErr" }?.invoke(execResponse) as? String
+                        if (!err.isNullOrBlank()) android.util.Log.w("VideoDownloadWorker", "yt-dlp stderr tail: ${err.takeLast(500)}")
+                    } catch (_: Exception) {}
 
                     val now = System.currentTimeMillis()
                     outputDir.listFiles()?.filter { it.length() > 1024 && (now - it.lastModified()) < 120_000 }?.maxByOrNull { it.lastModified() }
@@ -290,7 +361,7 @@ class VideoDownloadWorker @AssistedInject constructor(
             if (finalFile == null || finalFile.length() < 1024) {
                 showErrorNotification(notificationId, safeTitle, "Could not resolve or download stream")
                 finalFile?.delete()
-                return@withContext Result.failure()
+                return@withContext Result.failure(workDataOf(KEY_ERROR to "Could not resolve or download stream"))
             }
 
             val downgraded = !isMp3 && VideoQualityPolicy.isDowngrade(actualHeight, maxHeight)
@@ -317,16 +388,20 @@ class VideoDownloadWorker @AssistedInject constructor(
                         KEY_FILE_URI to savedUri,
                         KEY_DISPLAY_NAME to displayName,
                         KEY_MIME_TYPE to mime,
+                        KEY_REQUESTED_QUALITY to quality,
+                        KEY_ACTUAL_HEIGHT to (actualHeight ?: -1),
                     )
                 )
             } else {
                 showErrorNotification(notificationId, safeTitle, "Could not save file to gallery")
-                Result.failure()
+                Result.failure(workDataOf(KEY_ERROR to "Could not save file to gallery"))
             }
         } catch (e: Exception) {
             android.util.Log.e("VideoDownloadWorker", "Failure downloading $sourceUrl", e)
-            showErrorNotification(notificationId, safeTitle, e.message ?: "Download failed")
-            Result.failure()
+            try {
+                showErrorNotification(notificationId, title, e.message ?: "Download failed")
+            } catch (_: Exception) {}
+            Result.failure(workDataOf(KEY_ERROR to (e.message?.take(120) ?: "Download failed")))
         }
     }
 
@@ -338,8 +413,10 @@ class VideoDownloadWorker @AssistedInject constructor(
             val addOption = requestClass.methods.firstOrNull { it.name == "addOption" && it.parameterTypes.size == 2 } ?: return@withContext null
             val addFlag = requestClass.methods.firstOrNull { it.name == "addOption" && it.parameterTypes.size == 1 }
             try { addFlag?.invoke(request, "--no-playlist") } catch (_: Exception) {}
-            val fmt = if (isMp3) "bestaudio[ext=m4a]/bestaudio" else "bestvideo[height<=$maxHeight][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=$maxHeight]+bestaudio/best[height<=$maxHeight][ext=mp4]/best[height<=$maxHeight]/best"
+            val cappedHeight = minOf(maxHeight, 1080)
+            val fmt = if (isMp3) "bestaudio[ext=m4a]/bestaudio" else "bestvideo[height<=$cappedHeight][height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=$cappedHeight][height<=1080]+bestaudio/best[height<=$cappedHeight][ext=mp4]/best[height<=$cappedHeight]/best"
             addOption.invoke(request, "-f", fmt)
+            try { addOption.invoke(request, "--extractor-args", "youtube:player_client=android,web") } catch (_: Exception) {}
             try { addOption.invoke(request, "--print", "urls") } catch (_: Exception) {
                 try { addFlag?.invoke(request, "-g") ?: addOption.invoke(request, "-g", "") } catch (_: Exception) {}
             }
@@ -453,8 +530,16 @@ class VideoDownloadWorker @AssistedInject constructor(
         }
     }
 
+    /**
+     * Single reporting path for BOTH surfaces: the system notification AND
+     * WorkManager progress (observed by the web-search banner + downloader rows).
+     * Previously only setForeground was called here, so in-app progress froze
+     * at the last download-callback value and never reached completion.
+     */
     private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
-        val progressInt = (progress.coerceIn(0f, 1f) * 100).toInt()
+        val clamped = progress.coerceIn(0f, 1f)
+        try { setProgress(workDataOf(KEY_PROGRESS to clamped)) } catch (_: Exception) {}
+        val progressInt = (clamped * 100).toInt()
         try {
             val notification = createNotification(notificationId, contentTitle, progressInt)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -470,8 +555,11 @@ class VideoDownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotification(id: Int, contentTitle: String, progress: Int): android.app.Notification {
+        // Cancel targets this exact WorkRequest id (the receiver cancels by UUID).
+        // Previously the notification id was sent, which matched no work tag and
+        // made the Cancel action a no-op.
         val cancelIntent = Intent(applicationContext, DownloadCancelReceiver::class.java).apply {
-            putExtra("work_id", id.toString())
+            putExtra("work_id", this@VideoDownloadWorker.id.toString())
         }
         val cancelPendingIntent = PendingIntent.getBroadcast(
             applicationContext, id.hashCode(), cancelIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

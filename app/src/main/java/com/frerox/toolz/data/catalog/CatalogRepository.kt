@@ -263,8 +263,10 @@ class CatalogRepository @Inject constructor(
     }
 
     /**
-     * HD video+audio pair for on-device merge (true 1080p+ with audio).
-     * InnerTube adaptive first, then NewPipe videoOnly+audio fallback.
+     * HD video+audio pair for on-device merge (true 720p/1080p H264 with audio).
+     * NewPipe FIRST (it deciphers signatureCipher + n-param internally, so its
+     * DASH urls actually download), InnerTube adaptive second. Cap at 1080p:
+     * higher VP9/AV1 needs re-encode and is skipped on purpose.
      */
     data class HdVideoPair(val videoUrl: String, val audioUrl: String, val height: Int)
 
@@ -273,19 +275,11 @@ class CatalogRepository @Inject constructor(
             val videoId = sourceUrl.substringAfter("v=", "")
                 .substringBefore("&")
                 .ifBlank { sourceUrl.substringAfterLast("/", "").substringBefore("?") }
+            // Cap scope: 1080p H264. A 4K ask still resolves the best <=1080p
+            // H264 pair instead of a VP9/AV1 file that would need re-encode.
+            val ceiling = minOf(maxHeight, 1080)
 
-            // 1) InnerTube adaptive (fastest, no page scrape)
-            try {
-                val adaptive = innerTubeClient.resolveAdaptivePair(videoId, maxHeight)
-                if (adaptive != null) {
-                    android.util.Log.i("CatalogRepo", "HD pair via InnerTube ${adaptive.height}p for $videoId")
-                    return@withContext HdVideoPair(adaptive.videoUrl, adaptive.audioUrl, adaptive.height)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("CatalogRepo", "InnerTube HD pair failed: ${e.message}")
-            }
-
-            // 2) NewPipe videoOnly + audio fallback
+            // 1) NewPipe videoOnly + audio (deciphered, downloads reliably)
             try {
                 val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
                 val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
@@ -295,31 +289,44 @@ class CatalogRepository @Inject constructor(
                     if (wxh != null) return wxh.groupValues.getOrNull(2)?.toIntOrNull() ?: 0
                     return Regex("(\\d{3,4})").find(res)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
                 }
-                val candidates = streamInfo.videoOnlyStreams
-                    ?.filter { npHeight(it.resolution) in 1..maxHeight }
-                    ?.sortedWith(
-                        compareByDescending<org.schabi.newpipe.extractor.stream.VideoStream> {
-                            // Prefer mp4/avc for clean FFmpeg mux, then height, then bitrate.
-                            val fmt = it.format?.name?.lowercase() ?: ""
-                            when {
-                                fmt.contains("m4v") || fmt.contains("mp4") || fmt.contains("avc") -> 2
-                                fmt.contains("webm") || fmt.contains("vp9") || fmt.contains("av01") -> 1
-                                else -> 0
-                            }
-                        }.thenByDescending { npHeight(it.resolution) }
-                         .thenByDescending { it.bitrate }
-                    )
-                val videoOnly = candidates?.firstOrNull()
+                // Prefer H264/mp4 (muxes with -c:v copy); VP9/AV1 only if no H264
+                // reaches a useful height.
+                val inScope = streamInfo.videoOnlyStreams
+                    ?.filter { npHeight(it.resolution) in 1..ceiling } ?: emptyList()
+                val h264 = inScope.filter {
+                    val fmt = it.format?.name?.lowercase() ?: ""
+                    fmt.contains("m4v") || fmt.contains("mp4") || fmt.contains("avc")
+                }.sortedWith(
+                    compareByDescending<org.schabi.newpipe.extractor.stream.VideoStream> { npHeight(it.resolution) }
+                        .thenByDescending { it.bitrate },
+                )
+                val fallback = inScope.sortedWith(
+                    compareByDescending<org.schabi.newpipe.extractor.stream.VideoStream> { npHeight(it.resolution) }
+                        .thenByDescending { it.bitrate },
+                )
+                val videoOnly = h264.firstOrNull() ?: fallback.firstOrNull()
                 val audio = streamInfo.audioStreams?.sortedByDescending { it.averageBitrate }?.firstOrNull()
                 if (videoOnly?.content != null && audio?.content != null) {
                     val h = npHeight(videoOnly.resolution)
-                    android.util.Log.i("CatalogRepo", "HD pair via NewPipe ${h}p (${videoOnly.resolution} ${videoOnly.format?.name}) for $videoId (candidates=${candidates?.size})")
+                    android.util.Log.i("CatalogRepo", "HD pair via NewPipe ${h}p (${videoOnly.resolution} ${videoOnly.format?.name}) for $videoId (h264=${h264.size} total=${inScope.size})")
                     return@withContext HdVideoPair(videoOnly.content, audio.content, h)
                 } else {
-                    android.util.Log.w("CatalogRepo", "NewPipe HD pair empty for $videoId (videoOnly=${streamInfo.videoOnlyStreams?.size} audio=${streamInfo.audioStreams?.size})")
+                    android.util.Log.w("CatalogRepo", "NewPipe HD pair empty for $videoId (videoOnly=${streamInfo.videoOnlyStreams?.size} audio=${streamInfo.audioStreams?.size} inScope=${inScope.size})")
                 }
             } catch (e: Exception) {
                 android.util.Log.w("CatalogRepo", "NewPipe HD pair failed: ${e.message}")
+            }
+
+            // 2) InnerTube adaptive (fastest, no page scrape) — best effort when
+            // NewPipe scrape fails. Uses fresh multi-client player above.
+            try {
+                val adaptive = innerTubeClient.resolveAdaptivePair(videoId, ceiling)
+                if (adaptive != null) {
+                    android.util.Log.i("CatalogRepo", "HD pair via InnerTube ${adaptive.height}p for $videoId")
+                    return@withContext HdVideoPair(adaptive.videoUrl, adaptive.audioUrl, adaptive.height)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CatalogRepo", "InnerTube HD pair failed: ${e.message}")
             }
             null
         }
@@ -340,13 +347,16 @@ class CatalogRepository @Inject constructor(
         try {
             heights += innerTubeClient.listMuxedHeights(videoId)
         } catch (_: Exception) {}
-        if (heights.isEmpty()) {
-            try {
-                val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
-                val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
-                streamInfo.videoStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
-                streamInfo.videoOnlyStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
-            } catch (_: Exception) {}
+        // Always union with NewPipe (deciphered DASH): InnerTube alone is often
+        // cipher-only and reports just [360], hiding real 720p/1080p that
+        // resolveHdVideoPair() can actually mux. Union fixes the visible cap.
+        try {
+            val cleanUrl = if (sourceUrl.startsWith("http")) sourceUrl else "https://www.youtube.com/watch?v=$videoId"
+            val streamInfo = StreamInfo.getInfo(youtubeService, cleanUrl)
+            streamInfo.videoStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
+            streamInfo.videoOnlyStreams?.mapNotNullTo(heights) { parseStreamHeight(it.resolution) }
+        } catch (e: Exception) {
+            android.util.Log.w("CatalogRepo", "availableVideoHeights NewPipe probe failed: ${e.message}")
         }
         heights.distinct().sorted()
     }
@@ -473,10 +483,17 @@ class CatalogRepository @Inject constructor(
         outputFile: java.io.File,
         onProgress: suspend (Float) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
+        // Same client-UA rule as YtVideoMerge: Android UA first, desktop fallback.
+        val uas = listOf(
+            "com.google.android.youtube/21.03.36 (Linux; U; Android 15; en_US) gzip",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+        )
+        var lastCode = -1
+        for (ua in uas) {
         try {
             val request = Request.Builder()
                 .url(streamUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
+                .header("User-Agent", ua)
                 .header("Accept", "*/*")
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Origin", "https://www.youtube.com")
@@ -485,8 +502,10 @@ class CatalogRepository @Inject constructor(
             val response = okHttpClient.newCall(request).execute()
             
             if (!response.isSuccessful) {
+                lastCode = response.code
                 response.close()
-                return@withContext false
+                android.util.Log.w("CatalogRepo", "downloadAudioStream http=$lastCode ua=${ua.take(24)}")
+                continue
             }
             
             val body = response.body
@@ -535,13 +554,17 @@ class CatalogRepository @Inject constructor(
             withContext(Dispatchers.Main) {
                 onProgress(1f)
             }
-            true
+            return@withContext true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (outputFile.exists()) outputFile.delete()
-            false
+            android.util.Log.w("CatalogRepo", "downloadAudioStream failed ua=${ua.take(24)}: ${e.message}")
+            continue
         }
+        }
+        if (outputFile.exists()) outputFile.delete()
+        android.util.Log.w("CatalogRepo", "downloadAudioStream all UA attempts failed lastHttp=$lastCode")
+        false
     }
 
     /**

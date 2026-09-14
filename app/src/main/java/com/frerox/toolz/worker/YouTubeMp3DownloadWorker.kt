@@ -48,6 +48,8 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         const val KEY_FILE_URI = "file_uri"
         const val KEY_DISPLAY_NAME = "display_name"
         const val KEY_MIME_TYPE = "mime_type"
+        /** Failure reason for UI banners. */
+        const val KEY_ERROR = "error"
         const val CHANNEL_ID = "music_downloads"
         const val NOTIFICATION_ID_BASE = 3000
     }
@@ -94,7 +96,7 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
 
             if (!success || !tempFile.exists() || tempFile.length() < 1024) {
                 showErrorNotification(notificationId, title, "MP3 download failed")
-                return@withContext Result.failure()
+                return@withContext Result.failure(workDataOf(KEY_ERROR to "MP3 download failed"))
             }
 
             // Thumbnail
@@ -121,13 +123,13 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
             val finalFile = if (ok) processedFile else tempFile
             if (!finalFile.exists() || finalFile.length() < 1024) {
                 showErrorNotification(notificationId, title, "Processing failed")
-                return@withContext Result.failure()
+                return@withContext Result.failure(workDataOf(KEY_ERROR to "Processing failed"))
             }
 
             publishProgress(notificationId, "Saving MP3...", 0.94f)
             val storedUri = saveToMusic(finalFile, "$safeTitle.mp3") ?: run {
                 showErrorNotification(notificationId, title, "Could not save")
-                return@withContext Result.failure()
+                return@withContext Result.failure(workDataOf(KEY_ERROR to "Could not save"))
             }
 
             if (tempFile.exists()) tempFile.delete()
@@ -160,7 +162,7 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         } catch (e: Exception) {
             android.util.Log.e("YouTubeMp3DownloadWorker", "MP3 failed", e)
             try { showErrorNotification(notificationId, title, e.message ?: "Error") } catch (_: Exception) {}
-            Result.failure()
+            Result.failure(workDataOf(KEY_ERROR to (e.message?.take(120) ?: "Error")))
         }
     }
 

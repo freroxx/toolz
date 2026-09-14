@@ -181,6 +181,18 @@ private fun ModelCard(
                                 )
                             }
                         }
+                        if (model.id == BackgroundModel.default().id) {
+                            Spacer(Modifier.width(6.dp))
+                            Surface(shape = SquircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+                                Text(
+                                    stringResource(R.string.st_BackgroundRemover_Default),
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
+                                    fontWeight = FontWeight.Black,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
+                        }
                         if (isDownloaded) {
                             Spacer(Modifier.width(6.dp))
                             Icon(Icons.Rounded.CheckCircle, stringResource(R.string.st_BackgroundRemover_Ready), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)

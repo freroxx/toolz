@@ -63,9 +63,9 @@ object BackgroundRemoverEngine {
     private const val DECONTAM_RADIUS = 6
 
     // Confidence thresholds that drive adaptive pass selection (fast models only).
-    private const val ENTROPY_CLEAN_THRESHOLD  = 0.35f  // below → skip second GF pass
+    private const val ENTROPY_CLEAN_THRESHOLD  = 0.25f  // below → simple object
     private const val ENTROPY_NOISY_THRESHOLD  = 0.65f  // above → add median pre-pass
-    private const val EDGE_SIMPLE_THRESHOLD    = 0.03f  // below → single GF pass
+    private const val EDGE_SIMPLE_THRESHOLD    = 0.002f // 0.2 % ambiguous pixels: hair/fur is always above this
 
     /**
      * Model IDs that must always run the full refinement pipeline regardless of
@@ -73,7 +73,7 @@ object BackgroundRemoverEngine {
      * look entropy-clean even on complex hair/fur boundaries — skipping gradient
      * refinement for them degrades quality on the exact subject where it matters most.
      */
-    private val HIGH_QUALITY_MODEL_IDS = setOf("ultra_birefnet", "pro_detail")
+    private val HIGH_QUALITY_MODEL_IDS = setOf("ultra_birefnet", "pro_detail", "portrait_rvm")
 
     suspend fun removeBackground(
         source: Bitmap,
@@ -99,9 +99,9 @@ object BackgroundRemoverEngine {
         // ── 2. Refine alpha at bounded size ──
         var alphaSmall = bilinearUpsample(maskArray, maskW, maskH, rw, rh)
 
-        // High-quality models (Ultra/Pro) always run the full pipeline.
+        // High-quality models (Ultra/Pro/Portrait) always run the full pipeline.
         // Their masks may appear entropy-clean even for complex hair — this is a property
-        // of BiRefNet/ISNet's strong bilateral priors, NOT a sign that the boundary is simple.
+        // of strong priors, NOT a sign that the boundary is simple.
         val forceFullPipeline = modelId in HIGH_QUALITY_MODEL_IDS
 
         // Decide refinement depth from the model's confidence profile.
@@ -109,7 +109,7 @@ object BackgroundRemoverEngine {
         val entropy         = confidence.maskEntropy
         val hasComplexEdges = edgeRatio > EDGE_SIMPLE_THRESHOLD
         val isNoisy         = entropy > ENTROPY_NOISY_THRESHOLD
-        // isClean shortcut is ONLY valid for fast models — never for Ultra/Pro.
+        // isClean shortcut is ONLY valid for fast models on trivial subjects — never for Ultra/Pro.
         val isClean         = !forceFullPipeline && entropy < ENTROPY_CLEAN_THRESHOLD && !hasComplexEdges
 
         if (!isClean) {
@@ -126,8 +126,8 @@ object BackgroundRemoverEngine {
             alphaSmall = guidedFilterPassIntegral(alphaSmall, smallPixels, rw, rh, r1, GF_EPS)
 
             // Second pass + gradient refinement:
-            // - Always for high-quality models (Ultra/Pro) — non-negotiable for hair/fur.
-            // - Also for complex-edge or noisy masks from fast models.
+            // - Always for high-quality models (Ultra/Pro/Portrait) — non-negotiable for hair/fur.
+            // - Also for any subject with subtle edge transitions or noise.
             if (forceFullPipeline || hasComplexEdges || isNoisy) {
                 alphaSmall = guidedFilterPassIntegral(alphaSmall, smallPixels, rw, rh, r2, GF_EPS2)
                 alphaSmall = refineEdgeGradients(alphaSmall, smallPixels, rw, rh)
@@ -146,16 +146,16 @@ object BackgroundRemoverEngine {
             decontaminateInPlace(pixels, alphaFull, w, h, dr)
         }
 
-        // ── 5. Composite in place (smooth S-curve) ──
+        // ── 5. Composite in place ──
+        // Preserve fine hair fidelity: do NOT crush semi-transparent alpha with a steep S-curve.
+        // Clean true background (< 0.01) and true foreground (> 0.99), preserving the smooth alpha
+        // gradient for delicate strands, fur, and anti-aliasing.
         for (i in pixels.indices) {
             val rawA = alphaFull[i]
             val a = when {
-                rawA <= 0.04f -> 0f
-                rawA >= 0.96f -> 1f
-                else -> {
-                    val t = (rawA - 0.04f) / (0.96f - 0.04f)
-                    t * t * (3f - 2f * t)
-                }
+                rawA <= 0.01f -> 0f
+                rawA >= 0.99f -> 1f
+                else -> (rawA - 0.01f) / 0.98f
             }
             val alphaInt = (a * 255f + 0.5f).toInt().coerceIn(0, 255)
             pixels[i] = (alphaInt shl 24) or (pixels[i] and 0x00FFFFFF)

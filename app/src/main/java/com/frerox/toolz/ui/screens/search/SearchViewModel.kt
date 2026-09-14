@@ -169,6 +169,7 @@ class SearchViewModel @Inject constructor(
     private val dnsEngine:         com.frerox.toolz.util.network.DnsEngine,
     private val offlineManager:    com.frerox.toolz.util.OfflineManager,
     private val metaMerger:        MetaMerger,
+    private val catalogRepository: com.frerox.toolz.data.catalog.CatalogRepository,
 ) : ViewModel() {
 
     // ─── Offline state (cached as StateFlow for synchronous .value access) ───
@@ -668,6 +669,38 @@ class SearchViewModel @Inject constructor(
     private val _videoDownloadTarget = mutableStateOf<SearchResult?>(null)
     val videoDownloadTarget: State<SearchResult?> = _videoDownloadTarget
 
+    /**
+     * Honest quality probe for the sheet target. null = probing/not-yet-probed,
+     * empty = probe failed (unknown → full ladder, "if available" semantics),
+     * non-empty = real playable heights → ladder capped at the true max.
+     * Without this the sheet promised 1080p on 360p-only videos.
+     */
+    private val _videoDownloadHeights = mutableStateOf<List<Int>?>(null)
+    val videoDownloadHeights: State<List<Int>?> = _videoDownloadHeights
+    private var probeJob: Job? = null
+
+    /**
+     * Downloads enqueued from this screen (WorkInfo carries no input data, so
+     * the title/quality/isMp3 snapshot is kept here). Bounded newest-last.
+     * Lets the UI match finished WorkInfos to THIS screen's downloads (instead
+     * of showing stale finished work) and dismiss them.
+     */
+    data class TrackedDownload(val title: String, val quality: String, val isMp3: Boolean)
+
+    private val _trackedDownloads = mutableStateOf<Map<String, TrackedDownload>>(emptyMap())
+    val trackedDownloads: State<Map<String, TrackedDownload>> = _trackedDownloads
+
+    private fun trackDownload(id: java.util.UUID, title: String, quality: String, isMp3: Boolean) {
+        val next = _trackedDownloads.value.toMutableMap()
+        next[id.toString()] = TrackedDownload(title, quality, isMp3)
+        while (next.size > 8) next.remove(next.keys.first())
+        _trackedDownloads.value = next
+    }
+
+    fun dismissTrackedDownload(id: String) {
+        _trackedDownloads.value = _trackedDownloads.value - id
+    }
+
     fun playVideo(result: SearchResult) {
         youTubeVideoId(result.url)?.let { id ->
             _activeVideoResult.value = result
@@ -682,8 +715,27 @@ class SearchViewModel @Inject constructor(
         _activeVideoResult.value = null
     }
 
-    fun showVideoDownloadSheet(result: SearchResult) { _videoDownloadTarget.value = result }
-    fun dismissVideoDownloadSheet() { _videoDownloadTarget.value = null }
+    fun showVideoDownloadSheet(result: SearchResult) {
+        _videoDownloadTarget.value = result
+        _videoDownloadHeights.value = null
+        probeJob?.cancel()
+        probeJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val heights = try {
+                catalogRepository.availableVideoHeights(result.url)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            // Only publish if the sheet is still on the same video.
+            if (_videoDownloadTarget.value?.url == result.url) {
+                _videoDownloadHeights.value = heights
+            }
+        }
+    }
+    fun dismissVideoDownloadSheet() {
+        probeJob?.cancel()
+        _videoDownloadTarget.value = null
+        _videoDownloadHeights.value = null
+    }
 
     /**
      * Downloads a YouTube video as MP3 via dedicated MP3 worker (Catalog pattern).
@@ -720,6 +772,7 @@ class SearchViewModel @Inject constructor(
                     androidx.work.ExistingWorkPolicy.REPLACE,
                     mp3Request,
                 )
+                trackDownload(mp3Request.id, title, "MP3", true)
                 android.util.Log.d("SearchViewModel", "MP3 download enqueued: $videoUrl id=${mp3Request.id}")
                 kotlinx.coroutines.delay(600)
                 try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_mp3_queued, title), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
@@ -773,6 +826,7 @@ class SearchViewModel @Inject constructor(
                     androidx.work.ExistingWorkPolicy.REPLACE,
                     request,
                 )
+                trackDownload(request.id, title, quality, quality.equals("MP3", ignoreCase = true))
                 android.util.Log.d("SearchViewModel", "Video download enqueued: $videoUrl $quality id=${request.id}")
                 kotlinx.coroutines.delay(600)
                 try {
@@ -789,6 +843,92 @@ class SearchViewModel @Inject constructor(
                 } catch (_: Exception) {}
             }
         }
+    }
+
+    /** Opens a finished download (file_uri from worker outputData) in an external viewer. */
+    fun openDownload(context: android.content.Context, info: androidx.work.WorkInfo) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val out = info.outputData
+            val mime = out.getString("mime_type")
+            val displayName = out.getString("display_name")
+            var uri = out.getString("file_uri")?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+            if (uri != null && !uriResolves(context, uri)) uri = null
+            if (uri == null && displayName != null) uri = findInMediaStore(context, displayName)
+            if (uri == null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    toast(context, context.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+                }
+                return@launch
+            }
+            val resolvedMime = mime
+                ?: context.contentResolver.getType(uri)
+                ?: "video/*"
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, resolvedMime)
+                addFlags(
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                try {
+                    context.startActivity(intent)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    toast(context, context.getString(com.frerox.toolz.R.string.st_MediaDownloader_NoApp))
+                } catch (_: Exception) {
+                    toast(context, context.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+                }
+            }
+        }
+    }
+
+    fun cancelTrackedDownload(context: android.content.Context, id: String) {
+        try {
+            val uuid = runCatching { java.util.UUID.fromString(id) }.getOrNull() ?: return
+            androidx.work.WorkManager.getInstance(context.applicationContext).cancelWorkById(uuid)
+        } catch (_: Exception) {}
+    }
+
+    private fun uriResolves(context: android.content.Context, uri: android.net.Uri): Boolean = try {
+        if (uri.scheme == "file") {
+            java.io.File(uri.path ?: "").exists()
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { true } ?: false
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun findInMediaStore(context: android.content.Context, displayName: String): android.net.Uri? {
+        val collections = listOf(
+            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+        )
+        for (collection in collections) {
+            try {
+                context.contentResolver.query(
+                    collection,
+                    arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                    "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                    arrayOf(displayName),
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val id = cursor.getLong(0)
+                        return android.content.ContentUris.withAppendedId(collection, id)
+                    }
+                }
+            } catch (_: Exception) {
+                // Try the next collection.
+            }
+        }
+        return null
+    }
+
+    private fun toast(context: android.content.Context, msg: String) {
+        try {
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
 
     /**

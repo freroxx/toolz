@@ -37,7 +37,7 @@ data class MaskConfidence(
     val likelyFull: Boolean,
 ) {
     companion object {
-        /** Sentinel used when no confidence analysis was performed (e.g. LiteRT path). */
+        /** Sentinel used when no confidence analysis was performed. */
         val UNKNOWN = MaskConfidence(
             edgeRatio = 0.05f,
             fgCoverage = 0.5f,

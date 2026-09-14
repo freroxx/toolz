@@ -30,7 +30,6 @@ import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_1024
 import com.frerox.toolz.data.media.ISNET_PREPROCESS_1024
 import com.frerox.toolz.data.media.IMAGENET_PREPROCESS_320
 import com.frerox.toolz.data.media.InferenceResult
-import com.frerox.toolz.data.media.InferenceRuntime
 import com.frerox.toolz.data.media.MaskConfidence
 import com.frerox.toolz.data.media.MaskDecoder
 import com.frerox.toolz.data.media.ModelDownloadManager
@@ -53,13 +52,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import org.tensorflow.lite.Interpreter
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.channels.FileChannel
 import javax.inject.Inject
 import kotlin.math.max
 import kotlin.math.min
@@ -67,7 +61,7 @@ import kotlin.math.min
 /**
  * ViewModel for Background Remover — 2026 revamp.
  *
- * Dual backend: LiteRT (instant fallback) + ONNX Runtime (quality tiers).
+ * ONNX Runtime backend for all quality tiers (Pro default, Ultra tiled).
  * The UI reads [BgStage] — it never guesses what "processing" means anymore.
  */
 @HiltViewModel
@@ -82,7 +76,6 @@ class BackgroundRemoverViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BackgroundRemoverUiState())
     val uiState: StateFlow<BackgroundRemoverUiState> = _uiState.asStateFlow()
 
-    private var tfliteInterpreter: Interpreter? = null
     private var onnxSession: OrtSession? = null
     private var onnxSessionModelId: String? = null
     private val initMutex = Mutex()
@@ -247,8 +240,6 @@ class BackgroundRemoverViewModel @Inject constructor(
     // ── Backends ──
 
     private fun closeBackends() {
-        runCatching { tfliteInterpreter?.close() }
-        tfliteInterpreter = null
         runCatching { onnxSession?.close() }
         onnxSession = null
         onnxSessionModelId = null
@@ -257,29 +248,8 @@ class BackgroundRemoverViewModel @Inject constructor(
     private suspend fun ensureBackendReady(): Boolean = initMutex.withLock {
         val currentModel = _uiState.value.selectedModel ?: return@withLock false
         if (!downloadManager.isVerified(currentModel)) return@withLock false
-        return@withLock when (currentModel.runtime) {
-            InferenceRuntime.LITERT -> ensureTfliteReady(currentModel)
-            InferenceRuntime.ONNX -> ensureOnnxReady(currentModel)
-        }
-    }
-
-    private fun ensureTfliteReady(model: BackgroundModel): Boolean {
-        if (tfliteInterpreter != null) return true
-        val modelFile = downloadManager.modelFile(model)
-        if (!modelFile.exists()) return false
-        return try {
-            val modelBuffer = loadModelFile(modelFile)
-            val options = Interpreter.Options().apply {
-                setNumThreads(Runtime.getRuntime().availableProcessors().coerceAtMost(4))
-            }
-            tfliteInterpreter = Interpreter(modelBuffer, options)
-            Log.d("BgRemoverVM", "LiteRT ready for ${model.id}")
-            true
-        } catch (e: Throwable) {
-            Log.e("BgRemoverVM", "Interpreter init failed for ${model.id}", e)
-            fail(context.getString(R.string.st_BackgroundRemover_EngineStartFail), RetryAction.OPEN_HUB)
-            false
-        }
+        // ONNX-only lineup (LiteRT/Instant removed): every model runs on ONNX Runtime.
+        return@withLock ensureOnnxReady(currentModel)
     }
 
     private suspend fun ensureOnnxReady(model: BackgroundModel): Boolean {
@@ -304,14 +274,6 @@ class BackgroundRemoverViewModel @Inject constructor(
             Log.e("BgRemoverVM", "ONNX session failed for ${model.id}", e)
             fail(context.getString(R.string.st_BackgroundRemover_EngineStartFail), RetryAction.OPEN_HUB)
             false
-        }
-    }
-
-    private fun loadModelFile(file: File): ByteBuffer {
-        FileInputStream(file).use { inputStream ->
-            val fileChannel = inputStream.channel
-            val length = fileChannel.size()
-            return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, length)
         }
     }
 
@@ -500,10 +462,7 @@ class BackgroundRemoverViewModel @Inject constructor(
 
             val inferenceResult = withContext(Dispatchers.Default) {
                 withTimeout(inferenceTimeoutMs(model)) {
-                    when (model.runtime) {
-                        InferenceRuntime.LITERT -> runTfliteInference(bitmap, model)
-                        InferenceRuntime.ONNX   -> runOnnxInference(bitmap, model)
-                    }
+                    runOnnxInference(bitmap, model)
                 }
             }
 
@@ -520,7 +479,6 @@ class BackgroundRemoverViewModel @Inject constructor(
             if (confidence.likelyEmpty) {
                 val suggestion = when (model.id) {
                     "ultra_birefnet" -> context.getString(R.string.st_BackgroundRemover_EmptyMaskUltra)
-                    "instant_selfie" -> context.getString(R.string.st_BackgroundRemover_EmptyMaskInstant)
                     else             -> context.getString(R.string.st_BackgroundRemover_EmptyMask)
                 }
                 fail(suggestion, RetryAction.SWITCH_MODEL)
@@ -565,71 +523,25 @@ class BackgroundRemoverViewModel @Inject constructor(
         } catch (e: OutOfMemoryError) {
             Log.e("BgRemoverVM", "processImage OOM", e)
             fail(context.getString(R.string.st_BackgroundRemover_TooLarge), RetryAction.PICK_IMAGE)
+        } catch (e: UltraTooHeavyException) {
+            Log.w("BgRemoverVM", "ultra refused: no headroom", e)
+            fail(context.getString(R.string.st_BackgroundRemover_TooHeavyUltra), RetryAction.SWITCH_MODEL)
         } catch (e: Exception) {
             if (e !is CancellationException) {
-                Log.e("BgRemoverVM", "processImage failed", e)
-                fail(context.getString(R.string.st_BackgroundRemover_ProcessingFailed), RetryAction.RETRY_PROCESS)
+                // A catchable ORT failure on Ultra means this device can't hold the
+                // 1024 graph — say so and point at Pro instead of a dead-end retry.
+                if (model.id == "ultra_birefnet" && e is ai.onnxruntime.OrtException) {
+                    Log.e("BgRemoverVM", "ultra ORT failed", e)
+                    fail(context.getString(R.string.st_BackgroundRemover_TooHeavyUltra), RetryAction.SWITCH_MODEL)
+                } else {
+                    Log.e("BgRemoverVM", "processImage failed", e)
+                    fail(context.getString(R.string.st_BackgroundRemover_ProcessingFailed), RetryAction.RETRY_PROCESS)
+                }
             }
         }
     }
 
-    private fun runTfliteInference(bitmap: Bitmap, model: BackgroundModel): InferenceResult {
-        val interpreter = tfliteInterpreter
-            ?: throw IllegalStateException("AI Engine uninitialized.")
-        val inputTensor = interpreter.getInputTensor(0)
-        val inputShape = inputTensor.shape()
-        val modelH = if (inputShape.size >= 3) inputShape[1] else model.inputSize
-        val modelW = if (inputShape.size >= 3) inputShape[2] else model.inputSize
-
-        val outputTensor = interpreter.getOutputTensor(0)
-        val outputShape = outputTensor.shape()
-
-        Log.d("BgRemoverVM", "LiteRT ${model.id} input=${inputShape.contentToString()} output=${outputShape.contentToString()}")
-
-        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, modelW, modelH, true)
-        val inputPixels = IntArray(modelW * modelH)
-        scaledBitmap.getPixels(inputPixels, 0, modelW, 0, 0, modelW, modelH)
-        if (scaledBitmap != bitmap) scaledBitmap.recycle()
-
-        val isFloatInput = inputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
-        val inputBuffer = ByteBuffer.allocateDirect(1 * modelH * modelW * 3 * (if (isFloatInput) 4 else 1))
-        inputBuffer.order(ByteOrder.nativeOrder())
-        for (pixel in inputPixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            if (isFloatInput) {
-                inputBuffer.putFloat(r / 255.0f)
-                inputBuffer.putFloat(g / 255.0f)
-                inputBuffer.putFloat(b / 255.0f)
-            } else {
-                inputBuffer.put(r.toByte()); inputBuffer.put(g.toByte()); inputBuffer.put(b.toByte())
-            }
-        }
-        inputBuffer.rewind()
-
-        val totalOutputElements = outputShape.fold(1) { acc, i -> acc * i }
-        val isFloatOutput = outputTensor.dataType() == org.tensorflow.lite.DataType.FLOAT32
-        val outputBuffer = ByteBuffer.allocateDirect(totalOutputElements * (if (isFloatOutput) 4 else 1))
-        outputBuffer.order(ByteOrder.nativeOrder())
-
-        interpreter.run(inputBuffer, outputBuffer)
-        outputBuffer.rewind()
-
-        val maskData = MaskDecoder.decode(
-            outputBuffer = outputBuffer,
-            isFloatOutput = isFloatOutput,
-            outputShape = outputShape,
-            modelW = modelW,
-            modelH = modelH,
-            modelId = model.id,
-        )
-        // LiteRT (Instant Selfie) is fast enough that the adaptive refinement
-        // overhead would add more time than it saves — use the UNKNOWN sentinel.
-        return InferenceResult(SingleMask(maskData, modelW, modelH), MaskConfidence.UNKNOWN)
-    }
-
-    private fun runOnnxInference(bitmap: Bitmap, model: BackgroundModel): InferenceResult {
+    private suspend fun runOnnxInference(bitmap: Bitmap, model: BackgroundModel): InferenceResult {
         val session = onnxSession?.takeIf { onnxSessionModelId == model.id }
             ?: throw IllegalStateException("ONNX session not ready.")
 
@@ -652,8 +564,12 @@ class BackgroundRemoverViewModel @Inject constructor(
                 onnxEngine.runSingleMask(session, chw, 3, sz, sz)
             }
             "ultra_birefnet" -> {
-                // BiRefNet recipe (rembg BiRefNetSessionGeneral): ImageNet norm;
-                // raw logits → sigmoid + min-max handled in the post block below.
+                // BiRefNet recipe (rembg BiRefNetSessionGeneral): ImageNet norm at the
+                // full 1024; raw logits → sigmoid + min-max handled in the post block
+                // below. The export has FIXED [1,3,1024,1024] dims (verified from the
+                // file) — any other feed size is rejected by ORT — so small phones are
+                // gated out up-front (see hasUltraHeadroom) instead of crashing.
+                if (!hasUltraHeadroom()) throw UltraTooHeavyException()
                 val sz = model.inferenceInputSize
                 val chw = IMAGENET_PREPROCESS_1024.toChw(bitmap, sz, sz)
                 onnxEngine.runSingleMask(session, chw, 3, sz, sz)
@@ -686,6 +602,26 @@ class BackgroundRemoverViewModel @Inject constructor(
             val cookedConfidence = com.frerox.toolz.data.media.MaskQualityAnalyzer.analyze(normalised)
             Log.d("BgRemoverVM", "ONNX ${model.id} mask=${cookedMask.maskW}x${cookedMask.maskH}")
             InferenceResult(cookedMask, cookedConfidence)
+        }
+    }
+
+    /**
+     * Whether this device can plausibly survive Ultra's ~1 GB native spike.
+     *
+     * The BiRefNet export fixes its input at 1024×1024, so there is no smaller
+     * feed to fall back to — attempting inference without headroom ends in a
+     * native abort / lmkd kill (uncatchable), not an error card. Refuse early
+     * with an honest redirect to Pro instead.
+     */
+    private fun hasUltraHeadroom(): Boolean {
+        return try {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                ?: return false
+            val info = android.app.ActivityManager.MemoryInfo()
+            am.getMemoryInfo(info)
+            info.totalMem >= ULTRA_MIN_TOTAL_RAM_BYTES && info.availMem >= ULTRA_MIN_AVAIL_RAM_BYTES
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -788,6 +724,10 @@ class BackgroundRemoverViewModel @Inject constructor(
     companion object {
         /** Matting transient + result footprint per source pixel (conservative). */
         private const val MATTING_BYTES_PER_PX = 12L
+        /** Ultra pre-flight: refuse below 6 GB total RAM — the 1024 spike would kill us. */
+        private const val ULTRA_MIN_TOTAL_RAM_BYTES = 6L * 1024 * 1024 * 1024
+        /** …and require 1.5 GB actually free right now (spike + matting headroom). */
+        private const val ULTRA_MIN_AVAIL_RAM_BYTES = 1536L * 1024 * 1024
     }
 
     // ── Export (honest: every preview mode composites for real) ──
@@ -996,8 +936,9 @@ class BackgroundRemoverViewModel @Inject constructor(
     fun dismissSaveSuccess() { _uiState.update { it.copy(saveSuccess = false) } }
 
     private fun reclaimLegacyFilesOnce() {
-        if (prefs.getBoolean("legacy_reclaimed_v2", false)) return
-        prefs.edit().putBoolean("legacy_reclaimed_v2", true).apply()
+        // v3: adds selfie_segmenter.tflite (LiteRT/Instant removal) to the reclaim list.
+        if (prefs.getBoolean("legacy_reclaimed_v3", false)) return
+        prefs.edit().putBoolean("legacy_reclaimed_v3", true).apply()
         try {
             val bytes = downloadManager.deleteLegacyFiles(BackgroundModel.LEGACY_FILE_NAMES)
             if (bytes > 0) Log.i("BgRemoverVM", "Reclaimed ${bytes / 1024 / 1024} MB of retired models")
@@ -1017,6 +958,9 @@ class BackgroundRemoverViewModel @Inject constructor(
 
 /** Explicit pipeline state — the UI renders this, never infers it. */
 enum class BgStage { IDLE, DOWNLOADING, WARMING_UP, SEGMENTING, MATTING, DONE, FAILED }
+
+/** Thrown when the device has no headroom for Ultra's fixed 1024 graph. */
+private class UltraTooHeavyException : Exception()
 
 enum class RetryAction { RETRY_DOWNLOAD, RETRY_PROCESS, OPEN_HUB, SWITCH_MODEL, PICK_IMAGE }
 

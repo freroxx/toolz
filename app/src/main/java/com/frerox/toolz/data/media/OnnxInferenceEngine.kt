@@ -30,7 +30,7 @@ import java.nio.FloatBuffer
  *   at 4 intra + 2 inter to avoid thermal spikes on mid-range SoCs.
  * - NNAPI: attempted for all models except Ultra (its Swin graph compiles to a 8-second
  *   NNAPI graph on most vendors vs. 2 seconds CPU-BASIC_OPT — and then falls back to CPU
- *   op-by-op anyway, making NNAPI a net loss).
+ *   op-by-op anyway, making NNAPI a net loss). Ultra goes straight to XNNPACK → CPU.
  * - CPU graph optimisation: Ultra uses BASIC_OPT (graph already optimised at export;
  *   ALL_OPT adds 6+ extra seconds for negligible runtime gain on Swin).
  *   All other models keep ALL_OPT.
@@ -51,24 +51,47 @@ class OnnxInferenceEngine : AutoCloseable {
      */
     fun createSession(modelFile: File, modelId: String = "", tryNnapi: Boolean = true): OrtSession {
         val isUltra = modelId == "ultra_birefnet" || modelFile.name.contains("birefnet", ignoreCase = true)
-        // Ultra: always CPU-only — NNAPI driver compilation hangs or crashes on the Swin graph.
-        val actualTryNnapi = tryNnapi && !isUltra
 
-        if (actualTryNnapi) {
+        // 1. Try NNAPI with USE_FP16 first for non-Ultra models.
+        // On Snapdragon hardware, NNAPI delegates supported layers to the Hexagon NPU / Adreno GPU
+        // in FP16, halving tensor memory and executing outside the app's CPU heap.
+        // Ultra (Swin) is excluded: its graph compiles for ~8 s on most vendors and then
+        // falls back to CPU op-by-op anyway — a net loss that also prolongs the memory peak.
+        if (tryNnapi && !isUltra) {
             try {
-                val opts = buildSessionOptions(modelId, useBasicOpt = false)
-                opts.addNnapi()
+                val opts = buildSessionOptions(modelId, useBasicOpt = isUltra)
+                opts.addNnapi(java.util.EnumSet.of(ai.onnxruntime.providers.NNAPIFlags.USE_FP16))
                 return env.createSession(modelFile.absolutePath, opts).also {
-                    Log.d(TAG, "NNAPI EP session created for ${modelFile.name}")
+                    Log.d(TAG, "NNAPI (FP16) EP session created for ${modelFile.name}")
                 }
             } catch (e: Throwable) {
-                Log.w(TAG, "NNAPI failed for ${modelFile.name}, falling back to CPU: ${e.message}")
+                Log.w(TAG, "NNAPI (FP16) failed for ${modelFile.name}: ${e.message}, trying standard NNAPI")
+                try {
+                    val opts = buildSessionOptions(modelId, useBasicOpt = isUltra)
+                    opts.addNnapi()
+                    return env.createSession(modelFile.absolutePath, opts).also {
+                        Log.d(TAG, "NNAPI EP session created for ${modelFile.name}")
+                    }
+                } catch (e2: Throwable) {
+                    Log.w(TAG, "NNAPI failed for ${modelFile.name}: ${e2.message}, falling back to CPU")
+                }
             }
         }
 
-        // Ultra uses BASIC_OPT: the Swin graph is already optimised at export time.
-        // ALL_OPT adds 6+ seconds of recompilation for near-zero runtime improvement
-        // on Snapdragon class hardware — and causes an ANR-class pause on the first load.
+        // 2. Try XNNPACK next for Ultra / CPU models — ARM NEON acceleration with compact workspace
+        if (isUltra) {
+            try {
+                val opts = buildSessionOptions(modelId, useBasicOpt = true)
+                opts.addXnnpack(mapOf("intra_op_num_threads" to "1"))
+                return env.createSession(modelFile.absolutePath, opts).also {
+                    Log.d(TAG, "XNNPACK EP session created for ${modelFile.name}")
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "XNNPACK not available or failed for ${modelFile.name}: ${e.message}")
+            }
+        }
+
+        // 3. Fallback to CPU with BASIC_OPT for Ultra or ALL_OPT for others
         val useBasicOpt = isUltra
         return try {
             val opts = buildSessionOptions(modelId, useBasicOpt = useBasicOpt)
@@ -86,19 +109,17 @@ class OnnxInferenceEngine : AutoCloseable {
      * Builds session options with model-appropriate thread counts and memory allocation policies.
      *
      * Thread & Memory strategy:
-     * - Ultra (Swin-Tiny 224 MB):
-     *   * intra=2: keeps CPU cool on big.LITTLE architectures (Snapdragon 6 Gen 3 etc.)
-     *     and prevents thermal runaway / device reboots.
-     *   * inter=1: sequential operator execution to prevent concurrent layer memory spikes.
-     *   * setCPUArenaAllocator(false): disables the multi-gigabyte static memory arena.
-     *     Tensors are allocated and freed per operator by the OS instead of lingering in RAM.
-     *   * setMemoryPatternOptimization(false): prevents peak memory reservation upfront.
-     * - All others (CNNs / MobileNet): intra=min(cpuCount - 1, 4), inter=1, arena enabled.
+     * - Disable thread spinning (intra_op / inter_op allow_spinning = "0"): prevents ORT worker
+     *   threads from burning 100% CPU in busy-wait loops, avoiding thermal throttling and device slowdown.
+     * - Ultra on CPU uses 1 thread: prevents multi-thread workspace replication across big/little cores.
+     * - Ultra disables memory pattern pre-allocation to prevent multi-gigabyte contiguous reservations.
+     * - CPU arena allocator is enabled with arena shrinkage so memory is released after inference.
      */
     private fun buildSessionOptions(modelId: String, useBasicOpt: Boolean): OrtSession.SessionOptions {
         val isUltra = modelId == "ultra_birefnet"
         val cpuCount = Runtime.getRuntime().availableProcessors()
-        val intraThreads = if (isUltra) 2 else (cpuCount - 1).coerceIn(2, 4)
+        // Ultra uses 1 thread on CPU to minimize intermediate workspace duplication
+        val intraThreads = if (isUltra) 1 else (cpuCount - 1).coerceIn(2, 4)
         val interThreads = 1
 
         return OrtSession.SessionOptions().apply {
@@ -108,9 +129,18 @@ class OnnxInferenceEngine : AutoCloseable {
                 if (useBasicOpt) OrtSession.SessionOptions.OptLevel.BASIC_OPT
                 else OrtSession.SessionOptions.OptLevel.ALL_OPT,
             )
+            // Prevent worker threads from busy-waiting/spinning at 100% CPU
+            runCatching { addConfigEntry("session.intra_op.allow_spinning", "0") }
+            runCatching { addConfigEntry("session.inter_op.allow_spinning", "0") }
+
             if (isUltra) {
-                setCPUArenaAllocator(false)
+                // For Ultra: avoid massive contiguous upfront pattern reservation
                 setMemoryPatternOptimization(false)
+                setCPUArenaAllocator(true)
+                runCatching { addConfigEntry("session.use_device_allocator_for_initializers", "1") }
+            } else {
+                setMemoryPatternOptimization(true)
+                setCPUArenaAllocator(true)
             }
         }
     }
@@ -119,12 +149,13 @@ class OnnxInferenceEngine : AutoCloseable {
 
     /**
      * Single-input / single-output segmentation (U²-Net, ISNet, BiRefNet).
-     * First graph input, first graph output; output[0] is the foreground mask
-     * with shape [1,1,H,W].
      *
      * Uses direct [java.nio.FloatBuffer] zero-copy transfer instead of boxed
      * Object arrays (`result.get(0).value`), avoiding allocating 1,000,000+ Float
      * heap objects per inference pass.
+     *
+     * Requests only the declared output tensor and triggers CPU memory arena shrinkage
+     * immediately after inference to release activation pages back to the OS.
      *
      * @return [InferenceResult] with mask in 0..1 and computed [MaskConfidence].
      */
@@ -135,28 +166,59 @@ class OnnxInferenceEngine : AutoCloseable {
         height: Int,
         width: Int,
     ): InferenceResult {
+        val maskData = runSingleMaskLogits(session, chw, channels, height, width)
+        val singleMask = SingleMask(maskData, width, height)
+        val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
+        return InferenceResult(singleMask, confidence)
+    }
+
+    /**
+     * Raw-logit variant of [runSingleMask] without confidence analysis.
+     *
+     * Used by the tiled Ultra path: each tile's raw logits are stitched first and the
+     * merged result goes through the single global sigmoid + min-max post step, which
+     * preserves calibration (blending post-sigmoid probabilities would cause seams).
+     *
+     * @return raw model output, row-major [height × width].
+     */
+    fun runSingleMaskLogits(
+        session: OrtSession,
+        chw: FloatArray,
+        channels: Int,
+        height: Int,
+        width: Int,
+    ): FloatArray {
         val inputName = session.inputNames.firstOrNull()
             ?: throw OrtException("ONNX graph has no inputs")
-        OnnxTensor.createTensor(
-            env, FloatBuffer.wrap(chw),
-            longArrayOf(1, channels.toLong(), height.toLong(), width.toLong()),
-        ).use { input ->
-            session.run(mapOf(inputName to input)).use { result ->
-                val outputValue = result.get(0)
-                val maskData = FloatArray(height * width)
-                if (outputValue is OnnxTensor) {
-                    val floatBuf = outputValue.floatBuffer
-                    val count = minOf(floatBuf.remaining(), height * width)
-                    floatBuf.get(maskData, 0, count)
-                } else {
-                    val raw = outputValue.value
-                    val extracted = extractFirstChannel(raw, "single")
-                    System.arraycopy(extracted.data, 0, maskData, 0, minOf(extracted.data.size, maskData.size))
+        val outputName = session.outputNames.firstOrNull()
+            ?: throw OrtException("ONNX graph has no outputs")
+
+        val runOptions = OrtSession.RunOptions().apply {
+            runCatching { addRunConfigEntry("memory.enable_memory_arena_shrinkage", "cpu:0") }
+        }
+
+        try {
+            OnnxTensor.createTensor(
+                env, FloatBuffer.wrap(chw),
+                longArrayOf(1, channels.toLong(), height.toLong(), width.toLong()),
+            ).use { input ->
+                session.run(mapOf(inputName to input), setOf(outputName), runOptions).use { result ->
+                    val outputValue = result.get(0)
+                    val maskData = FloatArray(height * width)
+                    if (outputValue is OnnxTensor) {
+                        val floatBuf = outputValue.floatBuffer
+                        val count = minOf(floatBuf.remaining(), height * width)
+                        floatBuf.get(maskData, 0, count)
+                    } else {
+                        val raw = outputValue.value
+                        val extracted = extractFirstChannel(raw, "single")
+                        System.arraycopy(extracted.data, 0, maskData, 0, minOf(extracted.data.size, maskData.size))
+                    }
+                    return maskData
                 }
-                val singleMask = SingleMask(maskData, width, height)
-                val confidence = MaskQualityAnalyzer.analyze(singleMask.data)
-                return InferenceResult(singleMask, confidence)
             }
+        } finally {
+            runCatching { runOptions.close() }
         }
     }
 

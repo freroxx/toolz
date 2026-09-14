@@ -121,7 +121,7 @@ class ModelDownloadManager(
             if (!verifySha256(file, pinned)) return false
             writeHashMarker(model)
         }
-        // Basic TFLite magic: first 4 bytes not HTML "<!DO" — check file header
+        // Basic model-file magic: first bytes must not be an HTML error page.
         return try {
             file.inputStream().use { ins ->
                 val header = ByteArray(16)
@@ -342,7 +342,7 @@ class ModelDownloadManager(
                         }
                     }
                     // HTML sniff second line after download (some CDNs return 200 with HTML body)
-                    if (!looksLikeTflite(tmp)) {
+                    if (!looksLikeModelFile(tmp)) {
                         tmp.delete()
                         val msg = "Downloaded file is not a valid model (HTML detected). URL may have expired."
                         flow.value = DownloadState.Failed(msg)
@@ -441,13 +441,14 @@ class ModelDownloadManager(
         }
     }
 
-    private fun looksLikeTflite(file: File): Boolean {        return try {
+    private fun looksLikeModelFile(file: File): Boolean {
+        return try {
             file.inputStream().use { ins ->
                 val b = ByteArray(32)
                 val n = ins.read(b)
                 if (n < 4) return false
                 val head = String(b, 0, minOf(n, 20))
-                // TFLite flatbuffer starts with "TFL3" at offset 4, but we just rule out HTML
+                // ONNX files start with a protobuf header; we just rule out HTML error pages.
                 !(head.contains("<!DOCTYPE") || head.contains("<html") || head.contains("<HTML") || head.trimStart().startsWith("<"))
             }
         } catch (_: Exception) { false }

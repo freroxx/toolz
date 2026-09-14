@@ -70,44 +70,64 @@ object YtVideoMerge {
         outputFile: File,
         onProgress: suspend (Float) -> Unit = {},
     ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url(streamUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36")
-                .header("Accept", "*/*")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
-                .build()
-            val response = okHttpClient.newCall(request).execute()
-            if (!response.isSuccessful) { response.close(); return@withContext false }
-            val body = response.body ?: run { response.close(); return@withContext false }
-            val total = body.contentLength()
-            var done = 0L
-            var lastEmit = 0L
-            body.byteStream().use { input ->
-                outputFile.outputStream().use { output ->
-                    val buf = ByteArray(32 * 1024)
-                    var n: Int
-                    while (input.read(buf).also { n = it } != -1) {
-                        output.write(buf, 0, n)
-                        done += n
-                        val now = System.currentTimeMillis()
-                        if (now - lastEmit > 200) {
-                            lastEmit = now
-                            val p = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0.5f
-                            withContext(Dispatchers.Main) { onProgress(p) }
+        // googlevideo URLs are minted for a given player client. Fresh ANDROID
+        // streams (and NewPipe-deciphered urls) 403 with a desktop Chrome UA,
+        // so try the Android UA first, then desktop as fallback.
+        val uas = listOf(
+            "com.google.android.youtube/21.03.36 (Linux; U; Android 15; en_US) gzip",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+        )
+        var lastCode = -1
+        for ((attempt, ua) in uas.withIndex()) {
+            try {
+                val request = Request.Builder()
+                    .url(streamUrl)
+                    .header("User-Agent", ua)
+                    .header("Accept", "*/*")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+                    .build()
+                val response = okHttpClient.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    lastCode = response.code
+                    response.close()
+                    android.util.Log.w("YtVideoMerge", "downloadStream attempt ${attempt + 1} http=$lastCode")
+                    continue
+                }
+                val body = response.body ?: run { response.close(); return@withContext false }
+                val total = body.contentLength()
+                var done = 0L
+                var lastEmit = 0L
+                body.byteStream().use { input ->
+                    outputFile.outputStream().use { output ->
+                        val buf = ByteArray(32 * 1024)
+                        var n: Int
+                        while (input.read(buf).also { n = it } != -1) {
+                            output.write(buf, 0, n)
+                            done += n
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit > 200) {
+                                lastEmit = now
+                                val p = if (total > 0) (done.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0.5f
+                                withContext(Dispatchers.Main) { onProgress(p) }
+                            }
                         }
                     }
                 }
+                response.close()
+                withContext(Dispatchers.Main) { onProgress(1f) }
+                if (outputFile.exists() && outputFile.length() > 1024) return@withContext true
+                try { outputFile.delete() } catch (_: Exception) {}
+                return@withContext false
+            } catch (e: Exception) {
+                android.util.Log.w("YtVideoMerge", "downloadStream attempt ${attempt + 1} failed: ${e.message}")
+                try { outputFile.delete() } catch (_: Exception) {}
             }
-            response.close()
-            withContext(Dispatchers.Main) { onProgress(1f) }
-            outputFile.exists() && outputFile.length() > 1024
-        } catch (e: Exception) {
-            android.util.Log.w("YtVideoMerge", "downloadStream failed: ${e.message}")
-            try { outputFile.delete() } catch (_: Exception) {}
-            false
         }
+        android.util.Log.w("YtVideoMerge", "downloadStream all attempts failed lastHttp=$lastCode")
+        try { outputFile.delete() } catch (_: Exception) {}
+        false
     }
 
     /** Muxes [videoFile] (video-only) + [audioFile] into [outputMp4]. No re-encode of video. */

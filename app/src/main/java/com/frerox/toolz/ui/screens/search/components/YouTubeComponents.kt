@@ -322,10 +322,17 @@ fun YouTubeEmbedOverlay(
  * YouTube video download quality sheet — M3 expressive. Ranges 1080p (max) down
  * to 240p (min); the chosen quality routes into the yt-dlp video worker.
  *
- * HD rows (1080p+) merge DASH video+audio on-device via FFmpegKit for true HD
- * with audio — muxed-only streams cap at 720p, which caused the old low-quality
- * output. 1440p/2160p rows appear only when [hdAvailable] confirms the source
- * offers them (see CatalogRepository.availableVideoHeights).
+ * HD rows (1080p) merge DASH video+audio on-device via FFmpegKit for true HD
+ * with audio — muxed-only streams cap at 360p, which caused the old low-quality
+ * output. 1440p/2160p rows appear only when [availableHeights] confirms the
+ * source offers them (see CatalogRepository.availableVideoHeights).
+ *
+ * Honesty contract (no fake rows):
+ * - null [availableHeights] = still probing → rows disabled with a "checking"
+ *   note, so a tap can never promise a quality we haven't verified.
+ * - empty list = probe failed (unknown) → full ladder, enabled.
+ * - non-empty = real playable heights → ladder capped at the true max, and the
+ *   top row of a low-only video is labeled "Best for this video".
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -333,8 +340,7 @@ fun YouTubeDownloadSheet(
     title: String,
     onDismiss: () -> Unit,
     onDownload: (String) -> Unit,
-    hdAvailable: Boolean = false,
-    availableHeights: List<Int> = emptyList(),
+    availableHeights: List<Int>? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hdSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_hd)
@@ -344,18 +350,30 @@ fun YouTubeDownloadSheet(
     val mergedFullHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_fullhd_merged)
     val quadHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_quadhd)
     val ultraHd = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_ultrahd)
-    val qualities = buildList {
-        // Ultra HD rows only when the source actually offers them.
-        if (hdAvailable || 2160 in availableHeights) add("2160p" to ultraHd)
-        if (hdAvailable || 1440 in availableHeights) add("1440p" to quadHd)
-        // 1080p is always offered: the worker merges DASH video+audio on-device,
-        // falling back to 720p muxed only if no HD pair resolves.
-        add("1080p" to mergedFullHd)
-        add("720p" to hdSub)
-        add("480p" to sdSub)
-        add("360p" to lowSub)
-        add("240p" to saverSub)
+    val checkingSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_checking)
+    val bestSub = stringResource(com.frerox.toolz.R.string.st_SearchScreen_ws_q_best)
+    val probing = availableHeights == null
+    val maxH = availableHeights?.maxOrNull() ?: 0
+    // Honest ladder: capped at the real max; unknown (empty probe) keeps the
+    // full ladder. Never invent 1080p for a 360p-only video.
+    val offered = when {
+        probing -> listOf(1080, 720, 480, 360, 240)
+        else -> com.frerox.toolz.util.VideoQualityPolicy.offeredHeights(availableHeights ?: emptyList())
     }
+    fun subtitleFor(h: Int): String {
+        if (probing) return checkingSub
+        if (maxH in 1..359 && h == maxH) return bestSub
+        return when (h) {
+            2160 -> ultraHd
+            1440 -> quadHd
+            1080 -> mergedFullHd
+            720 -> hdSub
+            480 -> sdSub
+            360 -> lowSub
+            else -> saverSub
+        }
+    }
+    val qualities = offered.map { h -> "${h}p" to subtitleFor(h) }
     var isDownloading by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -401,10 +419,12 @@ fun YouTubeDownloadSheet(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
             qualities.forEach { (label, subtitle) ->
-                // Gray out the entire row once any download is in progress
-                val rowAlpha = if (isDownloading) 0.40f else 1f
+                // Gray out the entire row once any download is in progress, and
+                // while qualities are still being probed (no unverified promises).
+                val enabled = !isDownloading && !probing
+                val rowAlpha = if (enabled) 1f else 0.40f
                 Surface(
-                    onClick = { if (!isDownloading) { isDownloading = true; onDownload(label) } },
+                    onClick = { if (enabled) { isDownloading = true; onDownload(label) } },
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = androidx.compose.foundation.BorderStroke(
@@ -449,9 +469,9 @@ fun YouTubeDownloadSheet(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
-            val mp3Alpha = if (isDownloading) 0.40f else 1f
+            val mp3Alpha = if (isDownloading || probing) 0.40f else 1f
             Surface(
-                onClick = { if (!isDownloading) { isDownloading = true; onDownload("MP3") } },
+                onClick = { if (!isDownloading && !probing) { isDownloading = true; onDownload("MP3") } },
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(
