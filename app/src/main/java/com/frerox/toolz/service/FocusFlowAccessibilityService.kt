@@ -363,14 +363,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun triggerClipboardCheck() {
-        val intent = Intent(this, ClipboardService::class.java).apply {
-            action = ClipboardService.ACTION_CHECK_CLIPBOARD
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+        // PAUSED — clipboard tool is under development. No-op until re-enabled.
     }
 
     private var homePackages = setOf<String>()

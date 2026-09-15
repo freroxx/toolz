@@ -349,15 +349,11 @@ class ClipboardViewModel @Inject constructor(
     }
 
     private fun applyServiceState(monitoring: Boolean, status: ClipboardGate.Status) {
+        // PAUSED — clipboard tool is under development. Never start the service;
+        // always stop it if it is still running from a previous build.
+        // To re-enable: restore the gate check + ClipboardService.startIfNeeded().
         try {
-            if (monitoring &&
-                (status == ClipboardGate.Status.ACTIVE_SHIZUKU ||
-                    status == ClipboardGate.Status.ACTIVE_ACCESSIBILITY)
-            ) {
-                ClipboardService.startIfNeeded(application)
-            } else {
-                application.stopService(Intent(application, ClipboardService::class.java))
-            }
+            application.stopService(Intent(application, ClipboardService::class.java))
         } catch (e: Exception) {
             e.printStackTrace()
         }

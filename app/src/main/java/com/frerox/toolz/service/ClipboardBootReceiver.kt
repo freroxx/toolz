@@ -16,20 +16,7 @@ import android.util.Log
 
 class ClipboardBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action ?: return
-        if (action != Intent.ACTION_BOOT_COMPLETED &&
-            action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
-            action != Intent.ACTION_MY_PACKAGE_REPLACED &&
-            action != Intent.ACTION_USER_PRESENT
-        ) {
-            return
-        }
-        // The service self-stops if monitoring is off or neither Shizuku nor
-        // accessibility is available — so it is safe to request a start here.
-        try {
-            ClipboardService.startIfNeeded(context.applicationContext)
-        } catch (e: Exception) {
-            Log.w("ClipboardBoot", "start failed: ${e.message}")
-        }
+        // PAUSED — clipboard tool is under development. Do not start the service.
+        // To re-enable: call ClipboardService.startIfNeeded(context.applicationContext).
     }
 }
