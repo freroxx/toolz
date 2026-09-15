@@ -151,6 +151,14 @@ class PlaybackTransport(
     fun playTrack(track: MusicTrack, tracks: List<MusicTrack> = uiState.value.tracks) {
         onStartService()
         hapticClick()
+        // Permission revoked (auto-revoke after inactivity): don't feed dead
+        // content:// URIs that instantly error + look "blocked". The screen's
+        // permission gate explains the fix.
+        if (!repository.hasAudioPermission() && !track.uri.startsWith("http")) {
+            uiState.update { it.copy(isResolvingCatalog = false, playbackError = "NO_PERMISSION", playbackErrorCode = androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION) }
+            android.util.Log.w("MusicPlayerVM", "playTrack blocked: no audio permission")
+            return
+        }
         scope.launch {
             if (track.path == null && track.sourceUrl != null && !track.uri.startsWith("content://") && !track.uri.startsWith("file://")) {
                 uiState.update { it.copy(isResolvingCatalog = true) }
@@ -428,6 +436,13 @@ class PlaybackTransport(
             if (p.mediaItemCount == 0) {
                 // Empty after process death: rebuild from the visible library so
                 // the button never looks dead. Prefer the last current track.
+                // If permission is gone the cached tracks are stale content://
+                // URIs — don't rebuild a dead queue, surface NO_PERMISSION.
+                if (!repository.hasAudioPermission()) {
+                    uiState.update { it.copy(playbackError = "NO_PERMISSION", playbackErrorCode = androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION) }
+                    android.util.Log.w("MusicPlayerVM", "togglePlayPause: no audio permission, not rebuilding queue")
+                    return@runCatching
+                }
                 val tracks = uiState.value.tracks
                 if (tracks.isNotEmpty()) {
                     val anchor = uiState.value.currentTrack?.let { cur ->
@@ -453,6 +468,11 @@ class PlaybackTransport(
         val p: Player = playerOrController()
         runCatching {
             if (p.mediaItemCount == 0) {
+                if (!repository.hasAudioPermission()) {
+                    uiState.update { it.copy(playbackError = "NO_PERMISSION", playbackErrorCode = androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION) }
+                    android.util.Log.w("MusicPlayerVM", "play: no audio permission, not rebuilding queue")
+                    return@runCatching
+                }
                 val tracks = uiState.value.tracks
                 if (tracks.isNotEmpty()) {
                     val anchor = uiState.value.currentTrack?.let { cur ->

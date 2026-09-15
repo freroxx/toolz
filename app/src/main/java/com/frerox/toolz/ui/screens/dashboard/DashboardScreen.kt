@@ -18,6 +18,7 @@
 package com.frerox.toolz.ui.screens.dashboard
 
 import android.content.Intent
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -57,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
@@ -1548,9 +1550,16 @@ private fun PinnedItem(
 // Uniform YOUR NOTES card sizing: every card is the largest variant so audio,
 // image and plain notes all fit identically. The carousel slot drives the
 // actual size; the card itself just fills it.
+// Shape matches ToolGridCard (RoundedCornerShape(24.dp)) for a unified
+// dashboard look: a perfect rectangle with mild rounded corners.
 private val NoteCardWidth = 280.dp
 private val NoteCardHeight = 252.dp
-private val NoteCardShape = RoundedCornerShape(32.dp, 20.dp, 32.dp, 20.dp)
+private val NoteCardShape = RoundedCornerShape(24.dp)
+
+// Max blur applied to fully-unfocused carousel cards. The per-item value is
+// driven by the carousel's own focus fraction, so it crossfades 0 ↔ 18px
+// smoothly while swiping. Heavy but not a whiteout.
+private const val NoteFocusMaxBlur = 18f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1560,6 +1569,7 @@ private fun NotesCarouselRow(
     musicViewModel: MusicPlayerViewModel,
     pdfViewModel: PdfViewModel,
 ) {
+    val performanceMode = LocalPerformanceMode.current
     val carouselState = rememberCarouselState { notes.size }
     HorizontalMultiBrowseCarousel(
         state              = carouselState,
@@ -1571,7 +1581,39 @@ private fun NotesCarouselRow(
         // maskClip is scroll-position-driven: the focused card renders full
         // while the peeking neighbor squashes — the affordance that more
         // cards are a swipe away. Same pattern as TrackCarouselRow.
-        Box(Modifier.fillMaxSize().maskClip(NoteCardShape)) {
+        // Focus blur uses the same scroll signal (carouselItemDrawInfo size
+        // interpolates minSize → maxSize with focus), so blur crossfades
+        // smoothly while swiping: the incoming card sharpens 18px → 0px as
+        // it centers, the outgoing one blurs 0px → 18px. Blur only — no dim.
+        // The read happens inside graphicsLayer (not composition, per M3
+        // guidance) so it updates at draw time without recomposing on
+        // every scroll frame.
+        val itemInfo = carouselItemDrawInfo
+        Box(
+            Modifier
+                .fillMaxSize()
+                .maskClip(NoteCardShape)
+                .graphicsLayer {
+                    val focusFraction = if (itemInfo.maxSize > itemInfo.minSize) {
+                        ((itemInfo.size - itemInfo.minSize) /
+                            (itemInfo.maxSize - itemInfo.minSize)).coerceIn(0f, 1f)
+                    } else 1f
+                    val blurPx = (NoteFocusMaxBlur * (1f - focusFraction))
+                        .coerceIn(0f, NoteFocusMaxBlur)
+                    renderEffect =
+                        if (!performanceMode &&
+                            blurPx > 0.1f &&
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                        ) {
+                            android.graphics.RenderEffect
+                                .createBlurEffect(
+                                    blurPx, blurPx,
+                                    android.graphics.Shader.TileMode.CLAMP,
+                                )
+                                .asComposeRenderEffect()
+                        } else null
+                }
+        ) {
             QuickNoteCard(notes[index], onNavigate, musicViewModel, pdfViewModel)
         }
     }
@@ -1793,34 +1835,50 @@ private fun AudioAttachmentPill(
     val vibrationManager = LocalVibrationManager.current
     val musicState by musicViewModel.uiState.collectAsStateWithLifecycle()
     // Live transport position — uiState.playbackPosition only moves on
-    // seek/stop, so the progress bar would sit frozen without this.
+    // seek/stop, so the fill would sit frozen without this. When paused the
+    // flow simply stops emitting, so the fill freezes where it stopped;
+    // it resets only when another track becomes current.
     val livePosition by musicViewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = 0L)
     val isCurrent = isCurrentNoteTrack(musicState.currentTrack, uri)
     val isPlaying = isCurrent && musicState.isPlaying
     val progress = if (isCurrent && musicState.duration > 0L) {
         (livePosition.toFloat() / musicState.duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
-    Column(modifier = modifier) {
-        Surface(
-            onClick = {
-                vibrationManager?.vibrateClick()
-                if (isCurrent) {
-                    musicViewModel.togglePlayPause()
-                } else {
-                    val track = musicState.tracks.find { it.uri == uri }
-                    if (track != null) musicViewModel.playTrack(track)
-                    else musicViewModel.playUri(uri.toUri())
-                    // Dashboard previews loop the single track too.
-                    musicViewModel.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE)
-                }
-            },
-            shape = CircleShape,
-            color = color.copy(alpha = 0.12f),
-            border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
-            modifier = Modifier.height(40.dp).fillMaxWidth()
-        ) {
+    // The pill itself is the progress indicator: a darker twin of the note
+    // color fills it left → right behind the icon + title. No separate bar.
+    Surface(
+        onClick = {
+            vibrationManager?.vibrateClick()
+            if (isCurrent) {
+                musicViewModel.togglePlayPause()
+            } else {
+                val track = musicState.tracks.find { it.uri == uri }
+                if (track != null) musicViewModel.playTrack(track)
+                else musicViewModel.playUri(uri.toUri())
+                // Dashboard previews loop the single track too.
+                musicViewModel.setRepeatMode(androidx.media3.common.Player.REPEAT_MODE_ONE)
+            }
+        },
+        shape = CircleShape,
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.5.dp, color.copy(alpha = 0.25f)),
+        modifier = modifier.height(40.dp).fillMaxWidth()
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (progress > 0.005f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .fillMaxWidth(progress)
+                        .clip(CircleShape)
+                        .background(color.copy(alpha = 0.32f))
+                )
+            }
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -1839,14 +1897,6 @@ private fun AudioAttachmentPill(
                     modifier = Modifier.weight(1f, fill = false)
                 )
             }
-        }
-        if (isCurrent && progress > 0.005f) {
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(3.dp).clip(CircleShape),
-                color = color.copy(alpha = 0.8f),
-                trackColor = color.copy(alpha = 0.18f),
-            )
         }
     }
 }

@@ -51,15 +51,21 @@ fun MusicTrack.toMediaItem(): MediaItem {
     // Prefer the content:// URI: it is granted via MediaStore and survives
     // file-path moves. Raw File(path) breaks under scoped storage and after
     // re-index (DATA column stale) — the old order caused "visible but
-    // unplayable" queues. Only use File() when the URI itself is a raw path.
+    // unplayable" queues. Only use File() when the file actually exists and is
+    // readable; otherwise keep the content:// uri so the player gets
+    // IO_NO_PERMISSION (actionable) instead of a dead file:// (silent).
     val playableUri = when {
         uri.startsWith("content://") || uri.startsWith("file://") -> uri
         uri.startsWith("http://") || uri.startsWith("https://") -> uri
         path != null && (path.startsWith("content://") || path.startsWith("file://")) -> path
         path != null && (path.startsWith("http://") || path.startsWith("https://")) -> path
-        uri.startsWith("/") -> Uri.fromFile(File(uri)).toString()
-        path != null && path.startsWith("/") && File(path).exists() -> Uri.fromFile(File(path)).toString()
-        path != null && path.startsWith("/") -> Uri.fromFile(File(path)).toString()
+        // Raw absolute paths: only trust File() when it exists on disk.
+        path != null && path.startsWith("/") && runCatching { java.io.File(path).exists() && java.io.File(path).canRead() }.getOrDefault(false) -> Uri.fromFile(File(path)).toString()
+        uri.startsWith("/") && runCatching { java.io.File(uri).exists() && java.io.File(uri).canRead() }.getOrDefault(false) -> Uri.fromFile(File(uri)).toString()
+        // File missing (moved/deleted/re-indexed DATA stale): fall back to the
+        // content:// uri when available, never a dead file://.
+        uri.startsWith("content://") -> uri
+        path != null && path.startsWith("content://") -> path
         else -> uri
     }
     val parsedUri = if (playableUri.startsWith("/")) Uri.fromFile(File(playableUri)) else playableUri.toUri()

@@ -30,5 +30,8 @@ data class ClipboardEntry(
     val previewUrl: String? = null,
     val sourceApp: String? = null,
     val summary: String? = null,
-    val isAiProcessed: Boolean = false
+    val isAiProcessed: Boolean = false,
+    // Revamp v59: dedup hash + capture source (SHIZUKU / FOREGROUND / MANUAL / TILE).
+    val contentHash: Int = 0,
+    val source: String? = null
 )

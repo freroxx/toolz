@@ -99,8 +99,30 @@ class ClipboardClassifier @Inject constructor() {
         
         // Personal / Emotional
         if (personalKeywords.count { lowerText.contains(it) } >= 2) return "PERSONAL"
-        
+
         return "TEXT"
+    }
+
+    private val passwordLikeRegex = Regex("(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d!@#\$%^&*()_+\\-=]{12,}")
+    private val cardRegex = Regex("\\b(?:\\d[ -]?){13,19}\\b")
+    private val bearerRegex = Regex("\\b(bearer|api[_-]?key|secret|passwd|pwd)\\b\\s*[:=]\\s*\\S+", RegexOption.IGNORE_CASE)
+
+    /** True for OTP / card numbers / password-like secrets the user likely wants excluded. */
+    fun isSensitive(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.length > 2000) return false // long pastes are notes/code, not secrets
+        val lower = trimmed.lowercase()
+        // OTP near verification keywords
+        if (otpRegex.containsMatchIn(trimmed) && otpKeywords.any { lower.contains(it) }) return true
+        // Bare card-shaped digit run
+        if (cardRegex.containsMatchIn(trimmed.replace(" ", ""))) return true
+        // Bearer / api-key style secrets
+        if (bearerRegex.containsMatchIn(trimmed)) return true
+        // Short single-line high-entropy secret (e.g. pasted password, no spaces)
+        if (!trimmed.contains(" ") && !trimmed.contains("\n") &&
+            trimmed.length in 12..128 && passwordLikeRegex.matches(trimmed)
+        ) return true
+        return false
     }
 
     fun getTypeEmoji(type: String): String = when (type) {

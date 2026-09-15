@@ -39,6 +39,8 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
@@ -150,42 +152,52 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private var isDucking = false
     private var shouldResumeOnFocusGain = false
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var hasAudioFocus = false
+    // Consecutive playback-error guard: prevents an error-skip storm from
+    // walking the whole queue in milliseconds when every item shares the same
+    // root cause (permission revoked, MediaStore re-index, dead cache).
+    // Timestamps (elapsedRealtime) of recent onPlayerError calls.
+    private val recentPlaybackErrors = ArrayDeque<Long>()
+    private var lastFocusRequestMs = 0L
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         if (!audioFocusEnabled) return@OnAudioFocusChangeListener
+        Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange isPlaying=${runCatching { player.isPlaying }.getOrDefault(false)}")
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true
                 if (isDucking) {
-                    player.volume = 1.0f
+                    runCatching { player.volume = 1.0f }
                     isDucking = false
                 }
                 if (shouldResumeOnFocusGain) {
                     shouldResumeOnFocusGain = false
-                    if (!player.isPlaying) player.play()
+                    if (runCatching { !player.isPlaying }.getOrDefault(false)) runCatching { player.play() }
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false
                 shouldResumeOnFocusGain = false
                 if (isDucking) {
-                    player.volume = 1.0f
+                    runCatching { player.volume = 1.0f }
                     isDucking = false
                 }
-                if (player.isPlaying) player.pause()
+                if (runCatching { player.isPlaying }.getOrDefault(false)) runCatching { player.pause() }
                 abandonAudioFocus()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                shouldResumeOnFocusGain = player.isPlaying
-                if (player.isPlaying) player.pause()
+                shouldResumeOnFocusGain = runCatching { player.isPlaying }.getOrDefault(false)
+                if (runCatching { player.isPlaying }.getOrDefault(false)) runCatching { player.pause() }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 if (audioFocusDucking) {
-                    if (!isDucking && player.isPlaying) {
-                        player.volume = 0.2f
+                    if (!isDucking && runCatching { player.isPlaying }.getOrDefault(false)) {
+                        runCatching { player.volume = 0.2f }
                         isDucking = true
                     }
                 } else {
-                    shouldResumeOnFocusGain = player.isPlaying
-                    if (player.isPlaying) player.pause()
+                    shouldResumeOnFocusGain = runCatching { player.isPlaying }.getOrDefault(false)
+                    if (runCatching { player.isPlaying }.getOrDefault(false)) runCatching { player.pause() }
                 }
             }
         }
@@ -194,37 +206,63 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     private fun requestAudioFocus(): Boolean {
         if (!audioFocusEnabled) return false
         val am = audioManager ?: return false
+        // Don't flap focus: if we already hold a request, keep it. The old code
+        // abandoned + re-requested on every onIsPlayingChanged(true), which could
+        // dispatch LOSS to our own listener and instantly pause the fresh play().
+        if (audioFocusRequest != null && hasAudioFocus) return true
+        // Throttle rapid re-requests (resume spam) to one per 500ms.
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastFocusRequestMs < 500 && audioFocusRequest != null) return hasAudioFocus
+        lastFocusRequestMs = now
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
             val frameworkAttrs = android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build()
-            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            // Reuse existing request if present; only build once.
+            val req = audioFocusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(frameworkAttrs)
                 .setWillPauseWhenDucked(!audioFocusDucking)
-                .setOnAudioFocusChangeListener(audioFocusListener)
-                .build()
-            am.requestAudioFocus(audioFocusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+                // Explicit Main handler: callbacks on a known thread, no binder-thread race
+                // with player.play()/pause() and no AppOps attribution surprises.
+                .setOnAudioFocusChangeListener(audioFocusListener, Handler(Looper.getMainLooper()))
+                .build().also { audioFocusRequest = it }
+            val res = try {
+                am.requestAudioFocus(req)
+            } catch (e: Exception) {
+                Log.w("MusicPlayerService", "requestAudioFocus threw", e)
+                AudioManager.AUDIOFOCUS_REQUEST_FAILED
+            }
+            hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            if (!hasAudioFocus) Log.w("MusicPlayerService", "audio focus not granted res=$res, continuing playback (pause only on LOSS callback)")
+            hasAudioFocus
         } else {
             @Suppress("DEPRECATION")
-            am.requestAudioFocus(audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            val res = try {
+                am.requestAudioFocus(audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            } catch (e: Exception) {
+                Log.w("MusicPlayerService", "legacy requestAudioFocus threw", e)
+                AudioManager.AUDIOFOCUS_REQUEST_FAILED
+            }
+            hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            hasAudioFocus
         }
     }
 
     private fun abandonAudioFocus() {
         val am = audioManager ?: return
+        hasAudioFocus = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioFocusRequest?.let {
-                am.abandonAudioFocusRequest(it)
+                runCatching { am.abandonAudioFocusRequest(it) }
                 audioFocusRequest = null
             }
         } else {
             @Suppress("DEPRECATION")
-            am.abandonAudioFocus(audioFocusListener)
+            runCatching { am.abandonAudioFocus(audioFocusListener) }
         }
         if (isDucking) {
-            player.volume = 1.0f
+            runCatching { player.volume = 1.0f }
             isDucking = false
         }
     }
@@ -333,11 +371,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 startStatePersistenceLoop()
                 observeShakeSetting()
                 if (audioFocusEnabled) {
-                    val granted = requestAudioFocus()
-                    // If focus not granted, pause playback to respect system
-                    if (!granted) {
-                        player.pause()
-                    }
+                    // Best-effort only: NEVER pause here on denial. Pausing
+                    // synchronously inside onIsPlayingChanged creates the
+                    // "press resume -> instantly pauses" loop when focus is
+                    // transiently unavailable (call, assistant, HyperOS quirk).
+                    // Real pauses come from the async LOSS/TRANSIENT callbacks.
+                    requestAudioFocus()
                 }
             } else {
                 stopWidgetCorrectionLoop()
@@ -392,7 +431,34 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
-            Log.e("MusicPlayerService", "Playback error in background: ${error.errorCodeName}", error)
+            Log.e("MusicPlayerService", "Playback error in background: ${error.errorCodeName} code=${error.errorCode} uri=${runCatching { player.currentMediaItem?.localConfiguration?.uri }.getOrNull()}", error)
+            // Error-storm guard: when every item shares the same root cause
+            // (permission revoked, MediaStore re-index, all SAF perms lost), blindly
+            // seeking to next walks the whole queue in ms and leaves everything
+            // looking "blocked" + paused. After 4 errors in 10s, stop and stay
+            // paused so the user can grant permission / rescan instead.
+            val nowErr = SystemClock.elapsedRealtime()
+            recentPlaybackErrors.addLast(nowErr)
+            while (recentPlaybackErrors.isNotEmpty() && nowErr - recentPlaybackErrors.first() > 10_000) {
+                recentPlaybackErrors.removeFirst()
+            }
+            if (recentPlaybackErrors.size >= 4) {
+                Log.w("MusicPlayerService", "error storm (${recentPlaybackErrors.size}/10s) — pausing instead of skipping; likely global cause (permission/re-index)")
+                recentPlaybackErrors.clear()
+                runCatching { player.pause() }
+                // Kick one debounced rescan so a re-index can heal without jank.
+                serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { musicRepository.scanDeviceForMusic() }
+                }
+                return
+            }
+            // If storage permission is gone, skipping is pointless — every item
+            // will fail with IO_NO_PERMISSION. Pause and let the UI gate prompt.
+            if (!musicRepository.hasAudioPermission()) {
+                Log.w("MusicPlayerService", "playback error with no audio permission — pausing, awaiting grant")
+                runCatching { player.pause() }
+                return
+            }
             // Catalog streams are set with the watch URL first and resolved to a
             // direct stream async in onMediaItemTransition. If the player errors
             // before that resolve lands, the URL was never playable — retry the
@@ -469,8 +535,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     override fun onCreate() {
         super.onCreate()
 
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // Use applicationContext for system services so AudioManager / sensors /
+        // vibrator attribution stays on the base package (avoids empty
+        // attributionTag AppOps spam seen on HyperOS: "attributionTag not
+        // declared in manifest").
+        sensorManager = applicationContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         acceleration = 10f
         currentAcceleration = SensorManager.GRAVITY_EARTH
         lastAcceleration = SensorManager.GRAVITY_EARTH
@@ -615,6 +685,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         val setter = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
         serviceScope.launch {
             runCatching {
+                // No permission -> fail fast with a clear cause instead of
+                // returning stale content:// items that instantly error.
+                if (!musicRepository.hasAudioPermission()) {
+                    setter.setException(SecurityException("Audio permission revoked"))
+                    return@launch
+                }
                 val uri = settingsRepository.musicLastPlayedUri.first()
                 val pos = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
                 val queueJson = settingsRepository.musicLastPlayedQueue.first()
@@ -760,6 +836,19 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         .build()
                     // Disable ExoPlayer automatic handling; we manage focus manually
                     player.setAudioAttributes(audioAttributes, false)
+                    // willPauseWhenDucked is immutable per AudioFocusRequest: drop the
+                    // cached request so the next requestAudioFocus() rebuilds it with
+                    // the new ducking preference instead of reusing a stale one.
+                    if (oldDucking != ducking) {
+                        runCatching {
+                            audioFocusRequest?.let {
+                                (applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+                                    ?.abandonAudioFocusRequest(it)
+                            }
+                        }
+                        audioFocusRequest = null
+                        hasAudioFocus = false
+                    }
                 }
 
                 if (!enabled) {
@@ -1173,21 +1262,74 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         saved: List<Triple<String, String?, String?>>
     ): List<MediaItem> {
         if (saved.isEmpty()) return emptyList()
+        // Permission gone (auto-revoke / reboot): every content:// will throw
+        // IO_NO_PERMISSION. Return empty fast so callers fall back to a clear
+        // "grant permission" state instead of feeding a queue of dead items that
+        // error-skip one by one and look "blocked".
+        if (!musicRepository.hasAudioPermission()) {
+            Log.w("MusicPlayerService", "resolveQueueTracks: no audio permission, skipping resolve")
+            return emptyList()
+        }
         val resolved = mutableListOf<MediaItem>()
         var missing = 0
+        var unreadable = 0
         for ((uri, stableId, sourceUrl) in saved) {
             val track = musicRepository.resolveTrackForPlayback(uri, sourceUrl, stableId)
-            if (track != null) resolved.add(track.toMediaItem())
-            else missing++
+            if (track != null) {
+                if (isTrackReadable(track.uri, track.path)) {
+                    resolved.add(track.toMediaItem())
+                } else {
+                    unreadable++
+                }
+            } else missing++
         }
-        if (missing > 0) {
-            Log.w("MusicPlayerService", "restore resolved ${resolved.size}/${saved.size} (pruned $missing deleted)")
+        if (missing > 0 || unreadable > 0) {
+            Log.w("MusicPlayerService", "restore resolved ${resolved.size}/${saved.size} (pruned $missing deleted, $unreadable unreadable)")
         }
         return resolved
     }
 
+    /** Best-effort readability probe: content:// via fd, file via exists+canRead. http(s) assumed readable. */
+    private fun isTrackReadable(uri: String, path: String?): Boolean {
+        return try {
+            when {
+                uri.startsWith("http://") || uri.startsWith("https://") -> true
+                uri.startsWith("content://") -> {
+                    applicationContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { true } ?: false
+                }
+                uri.startsWith("file://") -> {
+                    val p = android.net.Uri.parse(uri).path ?: return false
+                    java.io.File(p).exists() && java.io.File(p).canRead()
+                }
+                uri.startsWith("/") -> java.io.File(uri).exists() && java.io.File(uri).canRead()
+                path != null && path.startsWith("content://") -> {
+                    applicationContext.contentResolver.openFileDescriptor(android.net.Uri.parse(path), "r")?.use { true } ?: false
+                }
+                path != null && path.startsWith("/") -> java.io.File(path).exists()
+                // SAF tree URIs (document) or unknown schemes: try generic open
+                else -> runCatching {
+                    applicationContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { true } ?: true
+                }.getOrDefault(true)
+            }
+        } catch (_: SecurityException) {
+            false
+        } catch (_: Exception) {
+            // Probe failures are advisory only — keep the item so a transient
+            // I/O blip doesn't prune a healthy song. The player error path will
+            // handle truly dead files.
+            true
+        }
+    }
+
     private fun restorePlaybackState(autoPlay: Boolean = false) {
         serviceScope.launch {
+            // Permission revoked (system auto-revoke after inactivity is common on
+            // HyperOS): don't restore a dead queue — every item would error and
+            // look "blocked". Stay empty; the UI permission gate explains why.
+            if (!musicRepository.hasAudioPermission()) {
+                Log.w("MusicPlayerService", "restorePlaybackState: no audio permission, staying empty")
+                return@launch
+            }
             val uri = settingsRepository.musicLastPlayedUri.first()
             val position = settingsRepository.musicLastPlayedPosition.first().coerceAtLeast(0L)
             val queueJson = settingsRepository.musicLastPlayedQueue.first()

@@ -79,7 +79,11 @@ data class MusicUiState(
     val isMutedByAi             : Boolean                   = false,
     val karaokeSessionsCount    : Int                       = 0,
     val karaokeAvgScore         : Int                       = -1,
-    val downloadedOnlyFilter    : Boolean                   = false
+    val downloadedOnlyFilter    : Boolean                   = false,
+    // Last playback failure (set by onPlayerError, cleared on READY/playing).
+    // Lets the UI explain "can't play" instead of silently looking blocked.
+    val playbackError           : String?                   = null,
+    val playbackErrorCode       : Int?                      = null
 )
 
 data class QueueEntry(val id: String, val track: MusicTrack)

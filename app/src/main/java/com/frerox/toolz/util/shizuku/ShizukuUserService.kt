@@ -83,25 +83,29 @@ class ShizukuUserService : IUserService.Stub() {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "cmd clipboard get"))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText().trim()
+            process.waitFor()
 
             if (output.isBlank()) return null
+            if (output.contains("No primary clip")) return null
 
-            // Primary parser: extract after "T:" prefix, before trailing " }"
-            // Output format: ClipData { label } ( Item { T:actual text } )
-            val tIdx = output.indexOf("T:")
-            if (tIdx >= 0) {
-                val content = output.substring(tIdx + 2)
-                // Strip the trailing " }" that closes the Item block
-                val trimmed = content.trimEnd()
-                val result = if (trimmed.endsWith(" }")) {
-                    trimmed.dropLast(2)
-                } else if (trimmed.endsWith("}")) {
-                    trimmed.dropLast(1).trimEnd()
-                } else {
-                    trimmed
-                }
-                return result.ifBlank { null }
+            // Collect every "T:<text>" item block; join multi-item clips with newlines.
+            // Format: ClipData { ... ( Item { T:text } ) ( Item { T:more } ) }
+            val items = mutableListOf<String>()
+            var searchFrom = 0
+            while (true) {
+                val tIdx = output.indexOf("T:", searchFrom)
+                if (tIdx < 0) break
+                var end = output.indexOf(" }", tIdx)
+                if (end < 0) end = output.indexOf("})", tIdx)
+                if (end < 0) end = output.length
+                val chunk = output.substring(tIdx + 2, end)
+                    .replace("\\n", "\n")
+                    .trim()
+                if (chunk.isNotBlank() && chunk != "null") items.add(chunk)
+                searchFrom = end + 2
+                if (searchFrom >= output.length) break
             }
+            if (items.isNotEmpty()) return items.joinToString("\n").ifBlank { null }
 
             // Fallback: extract between first and last double-quote
             // Works for simpler output formats on some ROMs

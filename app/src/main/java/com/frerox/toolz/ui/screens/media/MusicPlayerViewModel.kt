@@ -141,7 +141,7 @@ class MusicPlayerViewModel @Inject constructor(
     private val playerListener = object : Player.Listener {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _uiState.update { it.copy(isPlaying = isPlaying) }
+            _uiState.update { it.copy(isPlaying = isPlaying, playbackError = if (isPlaying) null else it.playbackError, playbackErrorCode = if (isPlaying) null else it.playbackErrorCode) }
             if (isPlaying) {
                 playbackTransport.startProgressUpdate()
                 startPlayerService()
@@ -217,7 +217,7 @@ class MusicPlayerViewModel @Inject constructor(
 
                 Player.STATE_READY -> {
                     val dur = player.duration.coerceAtLeast(0L)
-                    _uiState.update { it.copy(duration = dur, isResolvingCatalog = false) }
+                    _uiState.update { it.copy(duration = dur, isResolvingCatalog = false, playbackError = null, playbackErrorCode = null) }
                     playbackTransport.updateDuration(dur)
 
                     val currentTrack = _uiState.value.currentTrack
@@ -254,44 +254,40 @@ class MusicPlayerViewModel @Inject constructor(
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             super.onPlayerError(error)
-            Log.e("MusicPlayerViewModel", "Playback error: ${error.errorCodeName}", error)
-            _uiState.update { it.copy(isResolvingCatalog = false, isPlaying = false, isLoading = false) }
+            val errorName = error.errorCodeName
+            Log.e("MusicPlayerViewModel", "Playback error: $errorName code=${error.errorCode}", error)
+            // Service owns queue recovery (single skipper). The VM only reflects
+            // state + triggers a debounced rescan for IO errors. Previously both
+            // layers called seekToNext()+play() per error, skipping 2 tracks per
+            // failure and walking the whole queue in ms when the cause was global
+            // (permission revoked / re-index) — the "all songs blocked" look.
+            _uiState.update { it.copy(isResolvingCatalog = false, isPlaying = false, isLoading = false, playbackError = errorName, playbackErrorCode = error.errorCode) }
 
             // User-first: never toast-loop or full-scan on every bad file.
-            // Silently skip to the next playable item; kick a debounced
-            // background re-scan (max 1/5min) only for IO errors so a moved
-            // file can re-resolve without janking the UI mid-tap.
+            // Live-window/timeout is transient — just re-prepare.
             if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW
                 || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT
             ) {
                 runCatching { player.prepare() }
-            } else {
-                viewModelScope.launch(Dispatchers.Main) {
-                    runCatching {
-                        val p: Player = controller ?: player
-                        if (p.hasNextMediaItem()) {
-                            p.seekToNext()
-                            p.prepare()
-                            p.play()
-                        } else {
-                            p.pause()
-                        }
+                return
+            }
+            val isIoError = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED ||
+                error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
+            if (isIoError) {
+                val now = System.currentTimeMillis()
+                if (now - lastErrorScanMs > 5 * 60 * 1000L) {
+                    lastErrorScanMs = now
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { repository.scanDeviceForMusic() }
                     }
-                }
-                val isIoError = error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
-                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
-                if (isIoError) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastErrorScanMs > 5 * 60 * 1000L) {
-                        lastErrorScanMs = now
-                        viewModelScope.launch(Dispatchers.IO) {
-                            runCatching { repository.scanDeviceForMusic() }
-                        }
-                    } else {
-                        Log.w("MusicPlayerVM", "Skipping error-triggered rescan (debounced)")
-                    }
+                } else {
+                    Log.w("MusicPlayerVM", "Skipping error-triggered rescan (debounced)")
                 }
             }
         }

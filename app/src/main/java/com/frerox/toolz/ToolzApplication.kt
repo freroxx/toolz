@@ -78,6 +78,8 @@ class ToolzApplication : Application(), Configuration.Provider {
         super.onCreate()
         // The new standard for SQLCipher 4.6.1+ is a direct native load
         System.loadLibrary("sqlcipher")
+        // Reliable foreground tracking (replaces single-Activity focus flag).
+        ToolzForegroundTracker.register(this)
         // P0-09: ensure live observer unregisters on low memory to avoid leak
         registerComponentCallbacks(object : android.content.ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
@@ -100,6 +102,7 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperLocalCleanup()
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
+        com.frerox.toolz.worker.ClipboardCleanupWorker.schedule(this)
         // Warm the search DNS client at startup so the user's first search doesn't pay the
         // DoH bootstrap cost (blocking InetAddress bootstrap + DataStore reads) mid-query.
         appScope.launch {

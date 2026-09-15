@@ -325,8 +325,29 @@ fun MusicPlayerScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    // Queue-mismatch toast removed: mismatches are Logcat-only so playback never
-    // gets interrupted by a snackbar. Host is kept for future non-queue messages.
+    // Surface real playback failures (permission revoked, file moved, network)
+    // so "tap resume -> instantly pauses" explains itself instead of looking
+    // blocked. Queue mismatches stay Logcat-only.
+    LaunchedEffect(state.playbackError, state.playbackErrorCode) {
+        val err = state.playbackError ?: return@LaunchedEffect
+        // Don't nag while successfully playing.
+        if (state.isPlaying) return@LaunchedEffect
+        val msg = when {
+            err == "NO_PERMISSION" || state.playbackErrorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION ->
+                "Audio permission needed — grant to play your songs"
+            err.contains("NO_PERMISSION", ignoreCase = true) ->
+                "Can't access audio files — check permission"
+            err.contains("FILE_NOT_FOUND", ignoreCase = true) ->
+                "Song file moved or deleted — rescan to refresh"
+            err.contains("NETWORK", ignoreCase = true) || err.contains("TIMEOUT", ignoreCase = true) || err.contains("BAD_HTTP", ignoreCase = true) ->
+                "Network stream failed — check connection and retry"
+            else -> "Couldn't play this song ($err) — try another or rescan"
+        }
+        runCatching {
+            val res = snackbarHostState.showSnackbar(msg, actionLabel = "Rescan", withDismissAction = true)
+            if (res == SnackbarResult.ActionPerformed) viewModel.scanMusic()
+        }
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {

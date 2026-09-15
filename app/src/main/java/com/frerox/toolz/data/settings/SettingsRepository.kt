@@ -563,6 +563,13 @@ class SettingsRepository @Inject constructor(
     // AI Clipboard Monitoring
     private val AI_CLIPBOARD_MONITORING = booleanPreferencesKey("ai_clipboard_monitoring")
 
+    // Clipboard — revamp: hard requirement (Shizuku OR Accessibility), retention, sensitive filter,
+    // master AI kill-switch (hides even opt-in AI UI when OFF; default ON).
+    private val CLIPBOARD_MONITORING_ENABLED = booleanPreferencesKey("clipboard_monitoring_enabled")
+    private val CLIPBOARD_AI_ENABLED = booleanPreferencesKey("clipboard_ai_enabled")
+    private val CLIPBOARD_RETENTION_DAYS = intPreferencesKey("clipboard_retention_days")
+    private val CLIPBOARD_EXCLUDE_SENSITIVE = booleanPreferencesKey("clipboard_exclude_sensitive")
+
     // Crypto Settings
     private val CRYPTO_LAST_ALGORITHM = stringPreferencesKey("crypto_last_algorithm")
 
@@ -960,6 +967,18 @@ class SettingsRepository @Inject constructor(
         offlineModeEnabled
     ) { enabled, offline -> if (offline) false else enabled }
 
+    // Clipboard revamp prefs
+    val clipboardMonitoringEnabled: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_MONITORING_ENABLED] ?: true }
+    /** Master kill-switch: when false, hide ALL clipboard AI UI (summarize, badges, AI search). Default true. */
+    val clipboardAiEnabled: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_AI_ENABLED] ?: true }
+    /** Retention in days; 0 = keep until limit. Default 7. */
+    val clipboardRetentionDays: Flow<Int> =
+        dataStore.data.map { it[CLIPBOARD_RETENTION_DAYS] ?: 7 }
+    val clipboardExcludeSensitive: Flow<Boolean> =
+        dataStore.data.map { it[CLIPBOARD_EXCLUDE_SENSITIVE] ?: false }
+
     val lastCryptoAlgorithm: Flow<String?> = dataStore.data.map { it[CRYPTO_LAST_ALGORITHM] }
 
     val lastLoadingTime: Flow<Long> = dataStore.data.map { it[LAST_LOADING_TIME] ?: 0L }
@@ -1355,6 +1374,22 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiClipboardMonitoringEnabled(enabled: Boolean) {
         dataStore.edit { it[AI_CLIPBOARD_MONITORING] = enabled }
+    }
+
+    suspend fun setClipboardMonitoringEnabled(enabled: Boolean) {
+        dataStore.edit { it[CLIPBOARD_MONITORING_ENABLED] = enabled }
+    }
+
+    suspend fun setClipboardAiEnabled(enabled: Boolean) {
+        dataStore.edit { it[CLIPBOARD_AI_ENABLED] = enabled }
+    }
+
+    suspend fun setClipboardRetentionDays(days: Int) {
+        dataStore.edit { it[CLIPBOARD_RETENTION_DAYS] = days.coerceIn(0, 365) }
+    }
+
+    suspend fun setClipboardExcludeSensitive(enabled: Boolean) {
+        dataStore.edit { it[CLIPBOARD_EXCLUDE_SENSITIVE] = enabled }
     }
 
     suspend fun setLastCryptoAlgorithm(algorithm: String) {

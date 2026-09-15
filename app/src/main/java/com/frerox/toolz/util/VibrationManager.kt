@@ -168,13 +168,26 @@ class VibrationManager @Inject constructor(
 
     private fun dispatchEffect(effect: VibrationEffect) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val attrs = VibrationAttributes.Builder()
-                .setUsage(VibrationAttributes.USAGE_TOUCH)
-                .build()
-            vibrator.vibrate(effect, attrs)
+            // HyperOS logs "attributionTag not declared in manifest" (empty tag)
+            // for vibrate(effect, attrs) on some builds. App context is already
+            // the base package; if the attributed call throws, fall back to the
+            // plain call so haptics never break playback taps.
+            try {
+                val attrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_TOUCH)
+                    .build()
+                vibrator.vibrate(effect, attrs)
+            } catch (_: Exception) {
+                try {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(effect)
+                } catch (_: Exception) {}
+            }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(effect)
+            try {
+                vibrator.vibrate(effect)
+            } catch (_: Exception) {}
         }
     }
 }

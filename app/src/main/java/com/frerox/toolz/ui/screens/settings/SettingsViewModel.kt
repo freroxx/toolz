@@ -131,6 +131,10 @@ class SettingsViewModel @Inject constructor(
     val musicEqualizerPreset = repository.musicEqualizerPreset
     val showMusicVisualizer = repository.showMusicVisualizer
     val musicAiEnabled = repository.musicAiEnabled
+    val clipboardAiEnabled = repository.clipboardAiEnabled
+    val clipboardMonitoringEnabled = repository.clipboardMonitoringEnabled
+    val clipboardRetentionDays = repository.clipboardRetentionDays
+    val clipboardExcludeSensitive = repository.clipboardExcludeSensitive
     val musicKeepScreenOnLyrics = repository.musicKeepScreenOnLyrics
     val karaokeEnabled = repository.karaokeEnabled
     val aiClipboardMonitoringEnabled = repository.aiClipboardMonitoringEnabled
@@ -235,6 +239,10 @@ class SettingsViewModel @Inject constructor(
     fun setPdfAiToolsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setPdfAiToolsEnabled(enabled) }
     fun setNotepadAiToolsEnabled(enabled: Boolean) = viewModelScope.launch { repository.setNotepadAiToolsEnabled(enabled) }
     fun setAiClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setAiClipboardMonitoringEnabled(enabled) }
+    fun setClipboardAiEnabled(enabled: Boolean) = viewModelScope.launch { repository.setClipboardAiEnabled(enabled) }
+    fun setClipboardMonitoringEnabled(enabled: Boolean) = viewModelScope.launch { repository.setClipboardMonitoringEnabled(enabled) }
+    fun setClipboardRetentionDays(days: Int) = viewModelScope.launch { repository.setClipboardRetentionDays(days) }
+    fun setClipboardExcludeSensitive(enabled: Boolean) = viewModelScope.launch { repository.setClipboardExcludeSensitive(enabled) }
 
     fun scheduleBackup(frequency: String) {
         val workManager = WorkManager.getInstance(context)

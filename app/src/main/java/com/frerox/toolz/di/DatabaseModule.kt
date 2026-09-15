@@ -254,6 +254,13 @@ object DatabaseModule {
         }
     }
 
+    private val MIGRATION_58_59 = object : Migration(58, 59) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN contentHash INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE clipboard_entries ADD COLUMN source TEXT DEFAULT NULL")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -319,7 +326,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -371,7 +378,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

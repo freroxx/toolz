@@ -26,15 +26,19 @@ import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import com.frerox.toolz.data.device.DeviceSpecsRepository
+import com.frerox.toolz.data.notepad.NoteDao
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.data.update.UpdateRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @HiltViewModel
@@ -43,6 +47,7 @@ class LoadingViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val updateRepository: UpdateRepository,
     private val specsRepository: DeviceSpecsRepository,
+    private val noteDao: NoteDao,
 ) : ViewModel() {
 
     private val _isInitialized = MutableStateFlow(false)
@@ -64,10 +69,26 @@ class LoadingViewModel @Inject constructor(
 
     fun skipLoading() {
         viewModelScope.launch {
+            // Even on skip, wait for the real notes query so YOUR NOTES never pops in late.
+            awaitNotesReady(timeoutMs = 3_000L)
             _loadingProgress.value = 1f
             _isInitialized.value = true
             _isVisible.value = false
         }
+    }
+
+    /**
+     * Real gate for YOUR NOTES: suspends until Room emits its first list
+     * (empty or not). No simulation — this is the actual DB query the
+     * dashboard collector will then read from cache, so the notes section
+     * is already composed when the loading overlay fades.
+     */
+    private suspend fun awaitNotesReady(timeoutMs: Long) {
+        try {
+            withTimeoutOrNull(timeoutMs) {
+                withContext(Dispatchers.IO) { noteDao.getAllNotes().first() }
+            }
+        } catch (_: Exception) { /* Non-fatal: never hang boot on notes */ }
     }
 
     private fun performInitialization() {
@@ -77,7 +98,9 @@ class LoadingViewModel @Inject constructor(
             val shouldSkipLoading = currentTime - lastLoading < 5 * 60 * 1000L // 5-minute threshold
 
             if (shouldSkipLoading) {
-                // Fast-path: snap to 100% and exit immediately
+                // Fast-path: still await the real notes query (a few ms from
+                // Room cache) so the dashboard doesn't pop notes in late.
+                awaitNotesReady(timeoutMs = 3_000L)
                 _loadingProgress.value = 1f
                 _isInitialized.value = true
                 delay(100) // Minimal breather for Compose to render before hiding
@@ -85,9 +108,12 @@ class LoadingViewModel @Inject constructor(
                 return@launch
             }
 
-            // ── Stage 1: Environment ready ────────────────────────────────
+            // ── Stage 1: Environment ready + real notes load ──────────────
             _loadingMessage.value = "PREPARING WORKSPACE"
             _loadingProgress.value = 0.10f
+
+            // Real load, not staged: block progress here until Room emits.
+            awaitNotesReady(timeoutMs = 5_000L)
 
             // ── Stage 2 + 3: Run update check ────
             _loadingMessage.value = "CHECKING FOR UPDATES"

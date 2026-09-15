@@ -56,6 +56,12 @@ interface ClipboardDao {
     @Query("SELECT * FROM clipboard_entries WHERE id = :id")
     suspend fun getEntryById(id: Int): ClipboardEntry?
 
+    @Query("UPDATE clipboard_entries SET timestamp = :timestamp WHERE id = :id")
+    suspend fun updateTimestamp(id: Int, timestamp: Long)
+
+    @Query("SELECT * FROM clipboard_entries WHERE contentHash = :hash ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getByContentHash(hash: Int): ClipboardEntry?
+
     @Query("UPDATE clipboard_entries SET summary = :summary, type = :type, isAiProcessed = 1 WHERE id = :id")
     suspend fun updateAiDetails(id: Int, summary: String?, type: String)
 

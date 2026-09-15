@@ -5,14 +5,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.ui.components
@@ -21,11 +13,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -33,16 +24,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.ui.screens.clipboard.ClipboardViewModel
 
+/**
+ * Quick switcher launched from the QS tile: the 5 most recent clips,
+ * tap to copy back to the system clipboard, plus paste-current + open history.
+ */
 @Composable
 fun ClipboardPopup(
     onDismiss: () -> Unit,
@@ -50,182 +44,116 @@ fun ClipboardPopup(
     viewModel: ClipboardViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val entries by viewModel.entries.collectAsState()
-    val latestEntry = entries.firstOrNull()
-    
+    val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val recent = remember(entries) { entries.take(5) }
     val haptic = rememberToolzHapticFeedback()
 
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        // Scrim
+    // Capture anything new while the popup is visible (foreground read allowed).
+    LaunchedEffect(Unit) { viewModel.refreshClipboard() }
+
+    fun copy(text: String) {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Toolz", text))
+        haptic.success()
+    }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f))
-                .clickable { onDismiss() }
+            Modifier.fillMaxSize()
+                .clickable(onClick = onDismiss),
         )
-
-        StaggeredEntrance(index = 0) {
-            ExpressiveCard(
-                onClick = { },
-                modifier = Modifier
-                    .width(340.dp)
-                    .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Surface(
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.ContentPaste,
-                                null,
-                                modifier = Modifier.size(28.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+        ExpressiveCard(
+            onClick = {},
+            modifier = Modifier.width(360.dp).padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Icon(Icons.Rounded.ContentPaste, null, Modifier.padding(10.dp).size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Recent Clipboard",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    if (latestEntry != null) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    ExpressiveStatePill(
-                                        text = latestEntry.type,
-                                        icon = when (latestEntry.type) {
-                                            "URL" -> Icons.Rounded.Link
-                                            "PHONE" -> Icons.Rounded.Phone
-                                            "EMAIL" -> Icons.Rounded.Email
-                                            "CODE" -> Icons.Rounded.Code
-                                            "ADDRESS" -> Icons.Rounded.Place
-                                            else -> Icons.Rounded.ShortText
-                                        },
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                    
-                                    if (latestEntry.isPinned) {
-                                        Icon(
-                                            Icons.Rounded.PushPin,
-                                            null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                Text(
-                                    text = latestEntry.content,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 4,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-
-                                if (latestEntry.summary != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = latestEntry.summary!!,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    } else {
+                    Column(Modifier.weight(1f)) {
+                        Text("Clipboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            text = "No recent history",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            if (recent.isEmpty()) "No clips yet" else "${entries.size} clips • tap to copy",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.Close, null, Modifier.size(18.dp))
+                    }
+                }
 
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
+                if (recent.isEmpty()) {
+                    Text(
+                        "Copy something, then reopen — or paste the current clip.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = { viewModel.pasteCurrent() },
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ToolzExpressiveButton(
-                            onClick = {
-                                latestEntry?.let { entry ->
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("Toolz", entry.content))
-                                    haptic.success()
+                        Icon(Icons.Rounded.ContentPaste, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Paste current")
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 280.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(recent, key = { it.id }) { entry ->
+                            Surface(
+                                onClick = { copy(entry.content); onDismiss() },
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            entry.content,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            entry.type.lowercase().replaceFirstChar { c -> c.uppercase() },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (entry.isPinned) {
+                                        Icon(Icons.Rounded.PushPin, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = latestEntry != null,
-                            contentPadding = PaddingValues(vertical = 12.dp)
-                        ) {
-                            Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy", fontWeight = FontWeight.Bold)
-                        }
-
-                        ToolzOutlinedExpressiveButton(
-                            onClick = {
-                                haptic.click()
-                                viewModel.clearAll()
-                            },
-                            modifier = Modifier.weight(1f),
-                            enabled = entries.isNotEmpty(),
-                            contentPadding = PaddingValues(vertical = 12.dp)
-                        ) {
-                            Icon(Icons.Rounded.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Clear", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    ToolzOutlinedExpressiveButton(
-                        onClick = {
-                            haptic.click()
-                            val intent = Intent(context, MainActivity::class.java).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                                putExtra("navigate_to", "clipboard")
                             }
-                            context.startActivity(intent)
-                            onManageHistory()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(vertical = 12.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text("Manage Full History", fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(8.dp))
-                        Icon(Icons.Rounded.ArrowForward, null, modifier = Modifier.size(18.dp))
+                        }
                     }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        haptic.click()
+                        val intent = Intent(context, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            putExtra("navigate_to", "clipboard")
+                        }
+                        context.startActivity(intent)
+                        onManageHistory()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Open full history", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Rounded.ArrowForward, null, Modifier.size(16.dp))
                 }
             }
         }

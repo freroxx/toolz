@@ -575,14 +575,23 @@ fun SettingsScreen(
                                     )
                                 }
                                 if (matches(searchQuery, "ai", "clipboard", "monitoring", "summarize", "smart")) {
-                                    val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = true)
+                                    val aiMonitoring by viewModel.aiClipboardMonitoringEnabled.collectAsState(initial = false)
+                                    val clipboardAi by viewModel.clipboardAiEnabled.collectAsState(initial = true)
+                                    SettingsToggleItem(
+                                        title = "Clipboard AI",
+                                        subtitle = "Show Summarize, AI badges and semantic search in Clipboard. Turn off to hide all clipboard AI.",
+                                        icon = Icons.Rounded.ContentPaste,
+                                        checked = clipboardAi,
+                                        onCheckedChange = { viewModel.setClipboardAiEnabled(it) },
+                                        enabled = !offlineModeEnabled
+                                    )
                                     SettingsToggleItem(
                                         title = stringResource(R.string.st_SettingsScreen_u3v5),
                                         subtitle = stringResource(R.string.st_SettingsScreen_w5x7),
                                         icon = Icons.Rounded.AutoAwesome,
                                         checked = aiMonitoring,
                                         onCheckedChange = { viewModel.setAiClipboardMonitoringEnabled(it) },
-                                        enabled = !offlineModeEnabled
+                                        enabled = !offlineModeEnabled && clipboardAi
                                     )
                                 }
                                 if (matches(searchQuery, "pdf", "ai", "tools", "summarize", "smart", "extract")) {

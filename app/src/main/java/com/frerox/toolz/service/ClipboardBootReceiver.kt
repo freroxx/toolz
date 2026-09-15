@@ -5,14 +5,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.service
@@ -20,17 +12,24 @@ package com.frerox.toolz.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.util.Log
 
 class ClipboardBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            val serviceIntent = Intent(context, ClipboardService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
+        val action = intent.action ?: return
+        if (action != Intent.ACTION_BOOT_COMPLETED &&
+            action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
+            action != Intent.ACTION_MY_PACKAGE_REPLACED &&
+            action != Intent.ACTION_USER_PRESENT
+        ) {
+            return
+        }
+        // The service self-stops if monitoring is off or neither Shizuku nor
+        // accessibility is available — so it is safe to request a start here.
+        try {
+            ClipboardService.startIfNeeded(context.applicationContext)
+        } catch (e: Exception) {
+            Log.w("ClipboardBoot", "start failed: ${e.message}")
         }
     }
 }
