@@ -2807,6 +2807,8 @@
     <string name="st_StopwatchScreen_s5t6">Reset</string>
     <string name="st_StopwatchScreen_u7v8">Start</string>
     <string name="st_StopwatchScreen_w9x0">Pause</string>
+    <string name="st_StopwatchScreen_y1z2">Session restored after restart</string>
+    <string name="st_StopwatchScreen_a3b4">Lap limit reached (200 laps)</string>
 
     <!-- TimerScreen -->
     <string name="st_TimerScreen_a1b2">Timer</string>

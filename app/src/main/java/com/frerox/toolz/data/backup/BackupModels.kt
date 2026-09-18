@@ -78,5 +78,7 @@ data class BackupExportResult(
 data class BackupImportResult(
     val manifest: ToolzBackupManifest,
     val restoredEntries: Int,
-    val requiresAppRestart: Boolean = true
+    val requiresAppRestart: Boolean = true,
+    // CAL-P3 (additive): future calendar alarms re-scheduled after CALENDAR restore.
+    val rescheduledCalendarAlarms: Int = 0
 )

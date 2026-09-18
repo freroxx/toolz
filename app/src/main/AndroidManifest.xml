@@ -167,6 +167,9 @@
         <activity
             android:name=".ui.screens.calendar.EventAlarmActivity"
             android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="portrait"
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
@@ -467,6 +470,70 @@
         <receiver android:name=".service.EventReminderReceiver"
             android:enabled="true"
             android:exported="false" />
+
+        <!-- Timer survival (T-P0-01): boot restore + Doze watchdog. Additive only. -->
+        <receiver android:name=".service.TimerBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".service.TimerAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.frerox.toolz.TIMER_FINISH" />
+            </intent-filter>
+        </receiver>
+
+        <!-- P-P0-03: Pomodoro Doze watchdog + reboot restore (additive, mirrors Timer). -->
+        <receiver android:name=".service.PomodoroAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.frerox.toolz.POMODORO_FINISH" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".service.PomodoroBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
+        <!-- CAL-P0-03: re-schedule calendar alarms after reboot/update/timezone change (additive). -->
+        <receiver android:name=".service.CalendarRescheduleReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <receiver android:name="androidx.media3.session.MediaButtonReceiver"
             android:exported="true">

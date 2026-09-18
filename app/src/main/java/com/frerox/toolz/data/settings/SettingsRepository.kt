@@ -67,6 +67,13 @@ class SettingsRepository @Inject constructor(
     // Timer & Stopwatch Settings
     private val TIMER_KEEP_SCREEN_ON = booleanPreferencesKey("timer_keep_screen_on")
     private val STOPWATCH_KEEP_SCREEN_ON = booleanPreferencesKey("stopwatch_keep_screen_on")
+    // Stopwatch survival (S-P0-01): monotonic base + accumulated + running + capped laps.
+    // elapsedRealtime() based — never wall-clock. Laps JSON capped to 200 entries.
+    private val STOPWATCH_BASE_ELAPSED = longPreferencesKey("stopwatch_base_elapsed")
+    private val STOPWATCH_ACCUMULATED = longPreferencesKey("stopwatch_accumulated")
+    private val STOPWATCH_RUNNING = booleanPreferencesKey("stopwatch_running")
+    private val STOPWATCH_LAPS_JSON = stringPreferencesKey("stopwatch_laps_json")
+    private val STOPWATCH_SHOW_MS = booleanPreferencesKey("stopwatch_show_ms")
     private val TIMER_GRADUAL_VOLUME = booleanPreferencesKey("timer_gradual_volume")
     private val POMODORO_GRADUAL_VOLUME = booleanPreferencesKey("pomodoro_gradual_volume")
     
@@ -110,6 +117,13 @@ class SettingsRepository @Inject constructor(
     private val POMODORO_RINGTONE_URI = stringPreferencesKey("pomodoro_ringtone_uri")
     private val POMODORO_SHOW_QUOTES = booleanPreferencesKey("pomodoro_show_quotes")
     private val POMODORO_QUOTES = stringPreferencesKey("pomodoro_quotes")
+    // Pomodoro survival (elapsedRealtime, never wall-clock) — P-P0-03 mirror of Timer P0-01.
+    // Single source is ToolService.pomodoroEndTimestamp.
+    private val POMODORO_END_ELAPSED = longPreferencesKey("pomodoro_end_elapsed")
+    private val POMODORO_RUNNING = booleanPreferencesKey("pomodoro_running")
+    private val POMODORO_MODE = stringPreferencesKey("pomodoro_mode")
+    private val POMODORO_REMAINING_MS = longPreferencesKey("pomodoro_remaining_ms")
+    private val POMODORO_SAVE_WALL_MS = longPreferencesKey("pomodoro_save_wall_ms")
 
     private val CUSTOM_RINGTONE_ENABLED = booleanPreferencesKey("custom_ringtone_enabled")
     private val CUSTOM_RINGTONE_URI = stringPreferencesKey("custom_ringtone_uri")
@@ -174,6 +188,9 @@ class SettingsRepository @Inject constructor(
     companion object {
         val SEARCH_AUTOFILL_ENABLED = booleanPreferencesKey("search_autofill_enabled")
         val LAST_BIOMETRIC_VERIFICATION_TIME = longPreferencesKey("last_biometric_verification_time")
+
+        /** Cap for persisted/in-memory stopwatch laps (S-P1-02): block beyond this. */
+        const val STOPWATCH_MAX_LAPS = 200
 
         val DEFAULT_POMODORO_QUOTES = """
             "And the universe said I love you because you are love." (The End Poem, Minecraft)
@@ -527,6 +544,17 @@ class SettingsRepository @Inject constructor(
     private val TIMER_HISTORY = stringPreferencesKey("timer_history")  // JSON: "min:sec" -> count
     private val LOCKED_TIMER_PRESETS = stringPreferencesKey("locked_timer_presets") // JSON: List of "min:sec"
 
+    // Timer survival (elapsedRealtime, never wall-clock) — T-P0-01 / T-P1-04
+    private val TIMER_END_ELAPSED = longPreferencesKey("timer_end_elapsed")
+    private val TIMER_INITIAL_MS = longPreferencesKey("timer_initial_ms")
+    private val TIMER_RUNNING = booleanPreferencesKey("timer_running")
+    private val TIMER_REPEAT = booleanPreferencesKey("timer_repeat")
+    private val REPEAT_LAST_TIMER = longPreferencesKey("repeat_last_timer")
+    // Reboot fallback: elapsedRealtime resets on reboot, so keep remaining + wall save time
+    // to recompute remaining across reboot. End source stays elapsedRealtime (never wall end).
+    private val TIMER_REMAINING_MS = longPreferencesKey("timer_remaining_ms")
+    private val TIMER_SAVE_WALL_MS = longPreferencesKey("timer_save_wall_ms")
+
     // Update System
     private val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
     private val DOWNLOADED_APK_PATH = stringPreferencesKey("downloaded_apk_path")
@@ -639,6 +667,12 @@ class SettingsRepository @Inject constructor(
     
     val timerKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[TIMER_KEEP_SCREEN_ON] ?: true }
     val stopwatchKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_KEEP_SCREEN_ON] ?: true }
+    // Stopwatch survival state (S-P0-01). Base is SystemClock.elapsedRealtime()-based.
+    val stopwatchBaseElapsed: Flow<Long> = dataStore.data.map { it[STOPWATCH_BASE_ELAPSED] ?: 0L }
+    val stopwatchAccumulated: Flow<Long> = dataStore.data.map { it[STOPWATCH_ACCUMULATED] ?: 0L }
+    val stopwatchRunning: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_RUNNING] ?: false }
+    val stopwatchLapsJson: Flow<String> = dataStore.data.map { it[STOPWATCH_LAPS_JSON] ?: "" }
+    val stopwatchShowMs: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_SHOW_MS] ?: true }
     val timerGradualVolume: Flow<Boolean> = dataStore.data.map { it[TIMER_GRADUAL_VOLUME] ?: false }
     val pomodoroGradualVolume: Flow<Boolean> = dataStore.data.map { it[POMODORO_GRADUAL_VOLUME] ?: false }
 
@@ -686,47 +720,53 @@ class SettingsRepository @Inject constructor(
         }
     }
     
-    // Pomodoro Flows
-    val pomodoroWorkMinutes: Flow<Int> = dataStore.data.map { 
+    // Pomodoro Flows — P-P2-05: repo clamps + flow clamps (never trust raw Int).
+    val pomodoroWorkMinutes: Flow<Int> = dataStore.data.map {
         try {
-            it[POMODORO_WORK_MINUTES] ?: 25
+            (it[POMODORO_WORK_MINUTES] ?: 25).coerceIn(1, 60)
         } catch (e: ClassCastException) {
-            (it[stringPreferencesKey("pomodoro_work_minutes")]?.toIntOrNull()) ?: 25
+            ((it[stringPreferencesKey("pomodoro_work_minutes")]?.toIntOrNull()) ?: 25).coerceIn(1, 60)
         }
     }
-    val pomodoroShortBreakMinutes: Flow<Int> = dataStore.data.map { 
+    val pomodoroShortBreakMinutes: Flow<Int> = dataStore.data.map {
         try {
-            it[POMODORO_SHORT_BREAK_MINUTES] ?: 5
+            (it[POMODORO_SHORT_BREAK_MINUTES] ?: 5).coerceIn(1, 15)
         } catch (e: ClassCastException) {
-            (it[stringPreferencesKey("pomodoro_short_break_minutes")]?.toIntOrNull()) ?: 5
+            ((it[stringPreferencesKey("pomodoro_short_break_minutes")]?.toIntOrNull()) ?: 5).coerceIn(1, 15)
         }
     }
-    val pomodoroLongBreakMinutes: Flow<Int> = dataStore.data.map { 
+    val pomodoroLongBreakMinutes: Flow<Int> = dataStore.data.map {
         try {
-            it[POMODORO_LONG_BREAK_MINUTES] ?: 15
+            (it[POMODORO_LONG_BREAK_MINUTES] ?: 15).coerceIn(5, 45)
         } catch (e: ClassCastException) {
-            (it[stringPreferencesKey("pomodoro_long_break_minutes")]?.toIntOrNull()) ?: 15
+            ((it[stringPreferencesKey("pomodoro_long_break_minutes")]?.toIntOrNull()) ?: 15).coerceIn(5, 45)
         }
     }
     val pomodoroAutoStart: Flow<Boolean> = dataStore.data.map { it[POMODORO_AUTO_START] ?: false }
     val pomodoroKeepScreenOn: Flow<Boolean> = dataStore.data.map { it[POMODORO_KEEP_SCREEN_ON] ?: true }
-    val pomodoroSessionsGoal: Flow<Int> = dataStore.data.map { 
+    val pomodoroSessionsGoal: Flow<Int> = dataStore.data.map {
         try {
-            it[POMODORO_SESSIONS_GOAL] ?: 8
+            (it[POMODORO_SESSIONS_GOAL] ?: 8).coerceIn(1, 12)
         } catch (e: ClassCastException) {
-            (it[stringPreferencesKey("pomodoro_sessions_goal")]?.toIntOrNull()) ?: 8
+            ((it[stringPreferencesKey("pomodoro_sessions_goal")]?.toIntOrNull()) ?: 8).coerceIn(1, 12)
         }
     }
-    val pomodoroSessionsCompleted: Flow<Int> = dataStore.data.map { 
+    val pomodoroSessionsCompleted: Flow<Int> = dataStore.data.map {
         try {
-            it[POMODORO_SESSIONS_COMPLETED] ?: 0
+            (it[POMODORO_SESSIONS_COMPLETED] ?: 0).coerceAtLeast(0)
         } catch (e: ClassCastException) {
-            (it[stringPreferencesKey("pomodoro_sessions_completed")]?.toIntOrNull()) ?: 0
+            ((it[stringPreferencesKey("pomodoro_sessions_completed")]?.toIntOrNull()) ?: 0).coerceAtLeast(0)
         }
     }
     val pomodoroRingtoneUri: Flow<String?> = dataStore.data.map { it[POMODORO_RINGTONE_URI] ?: defaultAlarmUri }
     val pomodoroShowQuotes: Flow<Boolean> = dataStore.data.map { it[POMODORO_SHOW_QUOTES] ?: true }
     val pomodoroQuotes: Flow<String> = dataStore.data.map { it[POMODORO_QUOTES] ?: DEFAULT_POMODORO_QUOTES }
+    // Pomodoro survival flows — P-P0-03.
+    val pomodoroEndElapsed: Flow<Long> = dataStore.data.map { it[POMODORO_END_ELAPSED] ?: 0L }
+    val pomodoroRunning: Flow<Boolean> = dataStore.data.map { it[POMODORO_RUNNING] ?: false }
+    val pomodoroPersistedMode: Flow<String> = dataStore.data.map { it[POMODORO_MODE] ?: "WORK" }
+    val pomodoroRemainingMs: Flow<Long> = dataStore.data.map { (it[POMODORO_REMAINING_MS] ?: 0L).coerceAtLeast(0L) }
+    val pomodoroSaveWallMs: Flow<Long> = dataStore.data.map { it[POMODORO_SAVE_WALL_MS] ?: 0L }
 
     val customRingtoneEnabled: Flow<Boolean> = dataStore.data.map { it[CUSTOM_RINGTONE_ENABLED] ?: false }
     val customRingtoneUri: Flow<String?> = dataStore.data.map { it[CUSTOM_RINGTONE_URI] }
@@ -924,6 +964,15 @@ class SettingsRepository @Inject constructor(
         parseLockedPresetsJson(json)
     }
 
+    // Timer survival flows (elapsedRealtime) — single source is ToolService.timerEndTimestamp
+    val timerEndElapsed: Flow<Long> = dataStore.data.map { it[TIMER_END_ELAPSED] ?: 0L }
+    val timerInitialMs: Flow<Long> = dataStore.data.map { it[TIMER_INITIAL_MS] ?: 0L }
+    val timerRunning: Flow<Boolean> = dataStore.data.map { it[TIMER_RUNNING] ?: false }
+    val timerRepeat: Flow<Boolean> = dataStore.data.map { it[TIMER_REPEAT] ?: false }
+    val repeatLastTimerMs: Flow<Long> = dataStore.data.map { it[REPEAT_LAST_TIMER] ?: 0L }
+    val timerRemainingMs: Flow<Long> = dataStore.data.map { it[TIMER_REMAINING_MS] ?: 0L }
+    val timerSaveWallMs: Flow<Long> = dataStore.data.map { it[TIMER_SAVE_WALL_MS] ?: 0L }
+
     val lastUpdateCheck: Flow<Long> = dataStore.data.map { it[LAST_UPDATE_CHECK] ?: 0L }
     val downloadedApkPath: Flow<String?> = dataStore.data.map { it[DOWNLOADED_APK_PATH] }
     val autoUpdateEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_UPDATE_ENABLED] ?: false }
@@ -1030,6 +1079,53 @@ class SettingsRepository @Inject constructor(
     
     suspend fun setTimerKeepScreenOn(enabled: Boolean) { dataStore.edit { it[TIMER_KEEP_SCREEN_ON] = enabled } }
     suspend fun setStopwatchKeepScreenOn(enabled: Boolean) { dataStore.edit { it[STOPWATCH_KEEP_SCREEN_ON] = enabled } }
+    suspend fun setStopwatchShowMs(enabled: Boolean) { dataStore.edit { it[STOPWATCH_SHOW_MS] = enabled } }
+
+    /**
+     * Persist stopwatch survival state (S-P0-01). [lapsJson] must already be capped
+     * (see [serializeStopwatchLaps]); stored as-is.
+     */
+    suspend fun saveStopwatchState(
+        baseElapsed: Long,
+        accumulated: Long,
+        running: Boolean,
+        lapsJson: String,
+    ) {
+        dataStore.edit {
+            it[STOPWATCH_BASE_ELAPSED] = baseElapsed
+            it[STOPWATCH_ACCUMULATED] = accumulated.coerceAtLeast(0L)
+            it[STOPWATCH_RUNNING] = running
+            it[STOPWATCH_LAPS_JSON] = lapsJson
+        }
+    }
+
+    /** Clear running state (reset). Keeps STOPWATCH_SHOW_MS display preference. */
+    suspend fun clearStopwatchState() {
+        dataStore.edit {
+            it[STOPWATCH_BASE_ELAPSED] = 0L
+            it[STOPWATCH_ACCUMULATED] = 0L
+            it[STOPWATCH_RUNNING] = false
+            it[STOPWATCH_LAPS_JSON] = ""
+        }
+    }
+
+    /** Serialize laps newest-first, capped to [STOPWATCH_MAX_LAPS] (DataStore bloat guard). */
+    fun serializeStopwatchLaps(laps: List<Long>): String {
+        if (laps.isEmpty()) return ""
+        return laps.take(STOPWATCH_MAX_LAPS).joinToString(",")
+    }
+
+    /** Parse laps serialized by [serializeStopwatchLaps]; corrupt entries are dropped. */
+    fun parseStopwatchLaps(json: String): List<Long> {
+        if (json.isBlank()) return emptyList()
+        return try {
+            json.split(",")
+                .take(STOPWATCH_MAX_LAPS)
+                .mapNotNull { it.trim().toLongOrNull()?.takeIf { v -> v >= 0L } }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
     suspend fun setTimerGradualVolume(enabled: Boolean) { dataStore.edit { it[TIMER_GRADUAL_VOLUME] = enabled } }
     suspend fun setPomodoroGradualVolume(enabled: Boolean) { dataStore.edit { it[POMODORO_GRADUAL_VOLUME] = enabled } }
 
@@ -1114,17 +1210,42 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    // Pomodoro Setters
-    suspend fun setPomodoroWorkMinutes(minutes: Int) { dataStore.edit { it[POMODORO_WORK_MINUTES] = minutes } }
-    suspend fun setPomodoroShortBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_SHORT_BREAK_MINUTES] = minutes } }
-    suspend fun setPomodoroLongBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_LONG_BREAK_MINUTES] = minutes } }
+    // Pomodoro Setters — P-P2-05: coerce at write so legacy 0 / overflow never persists.
+    suspend fun setPomodoroWorkMinutes(minutes: Int) { dataStore.edit { it[POMODORO_WORK_MINUTES] = minutes.coerceIn(1, 60) } }
+    suspend fun setPomodoroShortBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_SHORT_BREAK_MINUTES] = minutes.coerceIn(1, 15) } }
+    suspend fun setPomodoroLongBreakMinutes(minutes: Int) { dataStore.edit { it[POMODORO_LONG_BREAK_MINUTES] = minutes.coerceIn(5, 45) } }
     suspend fun setPomodoroAutoStart(enabled: Boolean) { dataStore.edit { it[POMODORO_AUTO_START] = enabled } }
     suspend fun setPomodoroKeepScreenOn(enabled: Boolean) { dataStore.edit { it[POMODORO_KEEP_SCREEN_ON] = enabled } }
-    suspend fun setPomodoroSessionsGoal(goal: Int) { dataStore.edit { it[POMODORO_SESSIONS_GOAL] = goal } }
-    suspend fun setPomodoroSessionsCompleted(completed: Int) { dataStore.edit { it[POMODORO_SESSIONS_COMPLETED] = completed } }
+    suspend fun setPomodoroSessionsGoal(goal: Int) { dataStore.edit { it[POMODORO_SESSIONS_GOAL] = goal.coerceIn(1, 12) } }
+    suspend fun setPomodoroSessionsCompleted(completed: Int) { dataStore.edit { it[POMODORO_SESSIONS_COMPLETED] = completed.coerceAtLeast(0).coerceAtMost(999) } }
     suspend fun setPomodoroRingtoneUri(uri: String) { dataStore.edit { it[POMODORO_RINGTONE_URI] = uri } }
     suspend fun setPomodoroShowQuotes(enabled: Boolean) { dataStore.edit { it[POMODORO_SHOW_QUOTES] = enabled } }
     suspend fun setPomodoroQuotes(quotes: String) { dataStore.edit { it[POMODORO_QUOTES] = quotes } }
+
+    /** Atomic persist for Pomodoro run state (elapsedRealtime). Never persist remaining alone. */
+    suspend fun savePomodoroState(
+        endElapsed: Long,
+        mode: String,
+        running: Boolean,
+        remainingMs: Long = 0L,
+        saveWallMs: Long = 0L,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[POMODORO_END_ELAPSED] = endElapsed
+            prefs[POMODORO_MODE] = mode
+            prefs[POMODORO_RUNNING] = running
+            prefs[POMODORO_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
+            prefs[POMODORO_SAVE_WALL_MS] = saveWallMs
+        }
+    }
+
+    suspend fun clearPomodoroRunState() {
+        dataStore.edit { prefs ->
+            prefs[POMODORO_END_ELAPSED] = 0L
+            prefs[POMODORO_RUNNING] = false
+            prefs[POMODORO_REMAINING_MS] = 0L
+        }
+    }
 
     suspend fun setCustomRingtoneEnabled(enabled: Boolean) { dataStore.edit { it[CUSTOM_RINGTONE_ENABLED] = enabled } }
     suspend fun setCustomRingtoneUri(uri: String?) {
@@ -1274,6 +1395,41 @@ class SettingsRepository @Inject constructor(
             locked[index] = "$minutes:$seconds"
             prefs[LOCKED_TIMER_PRESETS] = serializeLockedPresetsJson(locked)
         }
+    }
+
+    /** Atomic persist: endElapsedRealtime + initial + running + repeat. Never persist remaining alone. */
+    suspend fun saveTimerState(
+        endElapsed: Long,
+        initialMs: Long,
+        running: Boolean,
+        repeat: Boolean,
+        remainingMs: Long = 0L,
+        saveWallMs: Long = 0L,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[TIMER_END_ELAPSED] = endElapsed
+            prefs[TIMER_INITIAL_MS] = initialMs
+            prefs[TIMER_RUNNING] = running
+            prefs[TIMER_REPEAT] = repeat
+            prefs[TIMER_REMAINING_MS] = remainingMs
+            prefs[TIMER_SAVE_WALL_MS] = saveWallMs
+        }
+    }
+
+    suspend fun clearTimerState() {
+        dataStore.edit { prefs ->
+            prefs[TIMER_END_ELAPSED] = 0L
+            prefs[TIMER_INITIAL_MS] = 0L
+            prefs[TIMER_RUNNING] = false
+        }
+    }
+
+    suspend fun setTimerRepeat(enabled: Boolean) {
+        dataStore.edit { it[TIMER_REPEAT] = enabled }
+    }
+
+    suspend fun setRepeatLastTimer(durationMs: Long) {
+        dataStore.edit { it[REPEAT_LAST_TIMER] = durationMs.coerceAtLeast(0L) }
     }
 
     private fun parseLockedPresetsJson(json: String): List<String> {

@@ -52,6 +52,7 @@ import com.frerox.toolz.data.ai.AiMessage
 import com.frerox.toolz.data.ai.AiDao
 import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.data.calendar.EventDao
+import com.frerox.toolz.data.calendar.CalendarConverters
 import com.frerox.toolz.data.password.PasswordEntity
 import com.frerox.toolz.data.password.PasswordDao
 import com.frerox.toolz.data.crypto.CryptoDao
@@ -129,13 +130,18 @@ import com.frerox.toolz.data.purgeshot.PurgeShotEntity
     // in the message actions sheet; see MIGRATION_57_58).
     // Clipboard revamp 59: clipboard_entries gains contentHash + source for
     // honest dedup (re-copy bumps timestamp instead of dropping).
-    version = 59,
+    // Calendar P1-05 (60): events gains endTimestamp/durationMinutes/recurringRule
+    // + indices on timestamp/eventType (see MIGRATION_59_60 in DatabaseModule).
+    // NOTE (shared-file protocol §7): Todo agent also needs 59->60 for its indices.
+    // If Todo lands in the same release, APPEND its CREATE INDEX statements to the
+    // SAME MIGRATION_59_60 object instead of bumping to 61 — never fork versions.
+    version = 60,
     // H-10 FIX (reviewwhisper.md): schemas are now exported to app/schemas (see
     // build.gradle.kts room.schemaLocation). Every future bump MUST ship a Migration —
     // the DatabaseModule comment documents this contract too.
     exportSchema = true
 )
-@TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class)
+@TypeConverters(CommonConverters::class, TodoConverters::class, DeviceSpecConverters::class, CalendarConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun noteAttachmentDao(): NoteAttachmentDao
