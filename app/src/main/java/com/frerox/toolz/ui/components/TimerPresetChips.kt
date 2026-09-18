@@ -17,21 +17,33 @@
 
 package com.frerox.toolz.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 
+/**
+ * T-P2-01: shared preset chips with parity to TimerScreen local presets.
+ * Filters >0, locale-aware labels, long-press edit, a11y descriptions.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TimerPresetChips(
     timerHistory: List<Pair<Int, Int>>,
     enabled: Boolean,
     accent: androidx.compose.ui.graphics.Color,
     onPresetSelected: (minutes: Int, seconds: Int) -> Unit,
+    onPresetLongClick: ((index: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -50,34 +62,51 @@ fun TimerPresetChips(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             val presets = if (timerHistory.isNotEmpty()) {
-                timerHistory.take(3)
+                timerHistory.filter { (m, s) -> m > 0 || s > 0 }.take(3)
             } else {
                 listOf(Pair(5, 0), Pair(15, 0), Pair(30, 0))
-            }
+            }.ifEmpty { listOf(Pair(5, 0), Pair(15, 0), Pair(30, 0)) }
 
-            presets.forEach { (mins, secs) ->
+            presets.forEachIndexed { index, (mins, secs) ->
                 val label = if (secs > 0) {
-                    if (mins > 0) "$mins:${String.format("%02d", secs)}" else "${secs}s"
+                    if (mins > 0) {
+                        String.format(Locale.getDefault(), "%d:%02d", mins, secs)
+                    } else {
+                        String.format(Locale.getDefault(), "%ds", secs)
+                    }
                 } else {
-                    "$mins min"
+                    String.format(Locale.getDefault(), "%d min", mins)
                 }
 
-                FilterChip(
-                    selected = false,
-                    onClick = { if (enabled) onPresetSelected(mins, secs) },
-                    label = {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Black,
+                Box(
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .combinedClickable(
+                            enabled = enabled,
+                            onClick = { onPresetSelected(mins, secs) },
+                            onLongClick = onPresetLongClick?.let { cb -> { cb(index) } },
                         )
-                    },
-                    enabled = enabled,
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                )
+                        .semantics {
+                            contentDescription = "Preset $label"
+                        },
+                ) {
+                    FilterChip(
+                        selected = false,
+                        onClick = {},
+                        label = {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Black,
+                            )
+                        },
+                        enabled = enabled,
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                }
             }
         }
     }

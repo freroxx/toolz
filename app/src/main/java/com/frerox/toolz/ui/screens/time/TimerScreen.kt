@@ -83,6 +83,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -90,6 +93,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -153,6 +157,7 @@ fun TimerScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val timerHistory by viewModel.timerHistory.collectAsState()
+    val userMessage by viewModel.userMessage.collectAsState()
     val rawAccent = if (state.isFinished || state.isRinging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val accent by animateColorAsState(
         targetValue = rawAccent,
@@ -160,20 +165,39 @@ fun TimerScreen(
         label = "timerAccent",
     )
     val view = LocalView.current
-    var showConfetti by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var presetToEdit by remember { mutableStateOf<Int?>(null) }
+    // T-P2-05: rememberSaveable (survives rotation even without configChanges).
+    var showConfetti by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var presetToEdit by rememberSaveable { mutableStateOf<Int?>(null) }
+    var pendingPreset by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingStaging by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(state.isFinished) {
-        if (state.isFinished) showConfetti = true
+    // T-P2-05: confetti keyed on isRinging (not isFinished) — no confetti on silent finish.
+    LaunchedEffect(state.isRinging) {
+        if (state.isRinging) showConfetti = true
     }
 
-    DisposableEffect(state.keepScreenOn) {
+    LaunchedEffect(userMessage) {
+        if (userMessage != null) {
+            snackbarHostState.showSnackbar(userMessage!!)
+            viewModel.consumeMessage()
+        }
+    }
+
+    // T-P1-04: gate keepScreenOn — screen off while idle 0:00 (no keep-on leak).
+    // Backgrounded fallback is the service WakeLock (no view flag while backgrounded).
+    DisposableEffect(state.keepScreenOn, state.isRunning, state.isRinging) {
         val previous = view.keepScreenOn
-        view.keepScreenOn = state.keepScreenOn
-        onDispose { 
+        view.keepScreenOn = state.keepScreenOn && (state.isRunning || state.isRinging)
+        onDispose {
             view.keepScreenOn = previous
         }
+    }
+
+    // T-P2-05: Back while ringing can't strand alarm — block back, require explicit Stop.
+    BackHandler(enabled = state.isRinging) {
+        // Intentionally no-op: user must tap Dismiss/Stop in the ringing overlay.
     }
 
     Scaffold(
@@ -229,14 +253,28 @@ fun TimerScreen(
         },
         floatingActionButtonPosition = FabPosition.Center,
         containerColor = Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             TimerContent(
                 state = state,
                 accent = accent,
                 contentPadding = padding,
-                onTimeSelected = viewModel::onTimeSelectedChange,
-                onPresetSelected = { mins, secs -> viewModel.setTimer(mins, secs) },
+                onTimeSelected = { m, s ->
+                    // T-P1-03: staging while paused requires confirm, never silent loss.
+                    if (!state.isRunning && state.remainingTime > 0L && state.isStarted && !state.isRinging) {
+                        pendingStaging = "$m:$s"
+                    } else {
+                        viewModel.onTimeSelectedChange(m, s)
+                    }
+                },
+                onPresetSelected = { mins, secs ->
+                    if (!state.isRunning && state.remainingTime > 0L && state.isStarted && !state.isRinging) {
+                        pendingPreset = "$mins:$secs"
+                    } else {
+                        viewModel.setTimer(mins, secs)
+                    }
+                },
                 onPresetLongClick = { index -> presetToEdit = index },
                 onAddTime = viewModel::addTime,
                 onDismissAlarm = {
@@ -249,9 +287,50 @@ fun TimerScreen(
             if (showConfetti) {
                 PomodoroSuccessConfetti(onFinished = { showConfetti = false })
             }
+
+            // Confirm dialog for staging/preset while paused (T-P1-03).
+            pendingPreset?.let { encoded ->
+                val parts = encoded.split(":")
+                val pm = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                val ps = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                AlertDialog(
+                    onDismissRequest = { pendingPreset = null },
+                    title = { Text(stringResource(R.string.st_TimerScreen_m9n0)) },
+                    text = { Text("A timer is paused. Replace it with $pm:${String.format(Locale.getDefault(), "%02d", ps)}?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.setTimer(pm, ps, true)
+                            pendingPreset = null
+                        }) { Text(stringResource(R.string.st_TimerScreen_s5t6)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingPreset = null }) { Text(stringResource(R.string.st_TimerScreen_q3r4)) }
+                    },
+                )
+            }
+            pendingStaging?.let { encoded ->
+                val parts = encoded.split(":")
+                val pm = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                val ps = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                AlertDialog(
+                    onDismissRequest = { pendingStaging = null },
+                    title = { Text(stringResource(R.string.st_TimerScreen_m9n0)) },
+                    text = { Text("A timer is paused. Replace it with $pm:${String.format(Locale.getDefault(), "%02d", ps)}?") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.onTimeSelectedChange(pm, ps, true)
+                            pendingStaging = null
+                        }) { Text(stringResource(R.string.st_TimerScreen_s5t6)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingStaging = null }) { Text(stringResource(R.string.st_TimerScreen_q3r4)) }
+                    },
+                )
+            }
             
             presetToEdit?.let { index ->
                 LockPresetDialog(
+                    presetIndex = index,
                     initialMinutes = timerHistory.getOrNull(index)?.first ?: 0,
                     initialSeconds = timerHistory.getOrNull(index)?.second ?: 0,
                     onDismiss = { presetToEdit = null },
@@ -343,7 +422,7 @@ private fun TimerContent(
         }
         StaggeredEntrance(index = 2) {
             TimerPresets(
-                enabled = !state.isRunning,
+                enabled = !state.isRunning && !state.isRinging,
                 onPresetSelected = onPresetSelected,
                 onPresetLongClick = onPresetLongClick,
                 timerHistory = timerHistory,
@@ -355,15 +434,13 @@ private fun TimerContent(
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut(),
         ) {
-            TimerQuickAddRow(onAddTime = onAddTime)
+            // T-P2-05: QuickAdd disabled at idle 0:00 (no implicit staging), cap feedback via snackbar.
+            TimerQuickAddRow(
+                onAddTime = onAddTime,
+                enabled = state.remainingTime > 0L || state.initialTime > 0L || state.isRunning,
+            )
         }
-        AnimatedVisibility(
-            visible = state.isRinging,
-            enter = fadeIn() + scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)),
-            exit = fadeOut() + scaleOut(),
-        ) {
-            TimerFinishedBanner(onDismissAlarm = onDismissAlarm)
-        }
+        // T-P2-05: dead TimerFinishedBanner removed (unreachable — ringing returns early via overlay).
         StaggeredEntrance(index = 3) {
             TimerDetailRow(state = state, accent = accent)
         }
@@ -377,9 +454,10 @@ private fun TimerDial(state: TimerState, accent: Color) {
     } else {
         0f
     }
+    // T-P1-04: tick 250-500ms, snap progress (no 100ms tween waste).
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(100, easing = androidx.compose.animation.core.LinearEasing),
+        animationSpec = tween(300, easing = androidx.compose.animation.core.LinearEasing),
         label = "TimerProgress",
     )
 
@@ -399,21 +477,33 @@ private fun TimerDial(state: TimerState, accent: Color) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
+                    val display = displayMillis(state)
+                    val hasHours = display >= 3_600_000L
                     AnimatedContent(
-                        targetState = formatTimerTime(displayMillis(state)),
+                        targetState = formatTimerTime(display),
                         transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)).togetherWith(fadeOut()) },
                         label = "TimerTime",
                     ) { time: String ->
                         Text(
                             text = time,
-                            style = MaterialTheme.typography.displayMedium.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 0.sp,
-                            ),
+                            // T-P1-04: FittedBox/autoSize for hours (shrink to fit, no overflow).
+                            style = if (hasHours) {
+                                MaterialTheme.typography.displaySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.sp,
+                                )
+                            } else {
+                                MaterialTheme.typography.displayMedium.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 0.sp,
+                                )
+                            },
                             color = if (state.isRunning || state.isFinished) accent else MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.Center,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -441,27 +531,34 @@ private fun TimerWheelPicker(
     accent: Color,
     onTimeSelected: (Int, Int) -> Unit,
 ) {
-    var showCustomDurationDialog by remember { mutableStateOf(false) }
+    var showCustomDurationDialog by rememberSaveable { mutableStateOf(false) }
+    // T-P2-02: wheel disabled while paused (remaining>0) — staging needs confirm, never silent loss.
+    val pickerEnabled = !state.isRunning && !state.isRinging && !(state.remainingTime > 0L && state.isStarted)
 
     if (showCustomDurationDialog) {
         CustomDurationDialog(
             currentMinutes = state.selectedMinutes,
+            currentSeconds = state.selectedSeconds,
             accent = accent,
             onDismiss = { showCustomDurationDialog = false },
-            onConfirm = { mins ->
-                onTimeSelected(mins, state.selectedSeconds)
+            onConfirm = { mins, secs ->
+                onTimeSelected(mins, secs)
                 showCustomDurationDialog = false
             }
         )
     }
 
     ExpressiveCard(
-        onClick = {},
+        // T-P2-02: non-clickable card had misleading ripple — tap opens editor when idle.
+        onClick = {
+            if (pickerEnabled) showCustomDurationDialog = true
+        },
         onLongClick = {
-            if (!state.isRunning && !state.isRinging) {
+            if (pickerEnabled) {
                 showCustomDurationDialog = true
             }
         },
+        enabled = pickerEnabled,
         modifier = Modifier.fillMaxWidth(),
         shape = SquircleShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
@@ -505,7 +602,8 @@ private fun TimerWheelPicker(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     TextButton(
-                        onClick = { onTimeSelected(0, state.selectedSeconds) },
+                        // T-P2-02: >59 fallback caps at 59, never zeroes hours.
+                        onClick = { onTimeSelected(59, state.selectedSeconds.coerceIn(0, 59)) },
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                     ) {
                         Text(stringResource(R.string.st_TimerScreen_g3h4), fontWeight = FontWeight.Bold)
@@ -516,7 +614,7 @@ private fun TimerWheelPicker(
                     minutes = state.selectedMinutes,
                     seconds = state.selectedSeconds,
                     accent = accent,
-                    enabled = !state.isRunning && !state.isRinging,
+                    enabled = !state.isRunning && !state.isRinging && !(state.remainingTime > 0L && state.isStarted),
                     onChange = onTimeSelected,
                 )
             }
@@ -634,18 +732,22 @@ private fun PresetCard(
 
 @Composable
 private fun LockPresetDialog(
+    presetIndex: Int,
     initialMinutes: Int,
     initialSeconds: Int,
     onDismiss: () -> Unit,
     onConfirm: (Int, Int) -> Unit,
     accent: Color
 ) {
-    var mins by remember { mutableStateOf(initialMinutes) }
-    var secs by remember { mutableStateOf(initialSeconds) }
+    // T-P2-03: key remember on index+initial (no stale), reject 0:00, support hours via custom minutes up to 999.
+    var mins by remember(presetIndex, initialMinutes) { mutableStateOf(initialMinutes.coerceIn(0, 999)) }
+    var secs by remember(presetIndex, initialSeconds) { mutableStateOf(initialSeconds.coerceIn(0, 59)) }
+    var error by remember(presetIndex) { mutableStateOf<String?>(null) }
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         ExpressiveCard(
             onClick = {},
+            enabled = false,
             shape = LargeExpressiveShape,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             containerColor = MaterialTheme.colorScheme.surface,
@@ -673,17 +775,20 @@ private fun LockPresetDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Icon(Icons.Rounded.Lock, null, tint = accent, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Lock, contentDescription = stringResource(R.string.st_TimerScreen_m9n0), tint = accent, modifier = Modifier.size(24.dp))
                 }
 
                 VerticalSmoothDurationPicker(
-                    minutes = mins,
+                    minutes = mins.coerceIn(0, 59),
                     seconds = secs,
                     accent = accent,
                     enabled = true,
-                    onChange = { m, s -> mins = m; secs = s },
+                    onChange = { m, s -> mins = m; secs = s; error = null },
                     modifier = Modifier.height(180.dp)
                 )
+                if (error != null) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -697,7 +802,13 @@ private fun LockPresetDialog(
                         Text(stringResource(R.string.st_TimerScreen_q3r4), fontWeight = FontWeight.Bold)
                     }
                     ToolzExpressiveButton(
-                        onClick = { onConfirm(mins, secs) },
+                        onClick = {
+                            if (mins <= 0 && secs <= 0) {
+                                error = "Pick a duration greater than 0:00"
+                            } else {
+                                onConfirm(mins.coerceIn(0, 999), secs.coerceIn(0, 59))
+                            }
+                        },
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = MediumExpressiveShape,
                         colors = ButtonDefaults.buttonColors(containerColor = accent)
@@ -712,24 +823,25 @@ private fun LockPresetDialog(
 
 
 @Composable
-private fun TimerQuickAddRow(onAddTime: (Long) -> Unit) {
+private fun TimerQuickAddRow(onAddTime: (Long) -> Unit, enabled: Boolean = true) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        QuickAddButton(label = "+10s", millis = 10_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
-        QuickAddButton(label = "+1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
-        QuickAddButton(label = "+5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime)
+        QuickAddButton(label = "+10s", millis = 10_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
+        QuickAddButton(label = "+1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
+        QuickAddButton(label = "+5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
     }
 }
 
 @Composable
-private fun QuickAddButton(label: String, millis: Long, modifier: Modifier, onAddTime: (Long) -> Unit) {
+private fun QuickAddButton(label: String, millis: Long, modifier: Modifier, onAddTime: (Long) -> Unit, enabled: Boolean = true) {
     ExpressiveCard(
-        onClick = { onAddTime(millis) },
+        onClick = { if (enabled) onAddTime(millis) },
+        enabled = enabled,
         modifier = modifier.height(56.dp),
         shape = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (enabled) 0.7f else 0.35f),
         elevation = 0.dp,
     ) {
         Row(
@@ -737,7 +849,7 @@ private fun QuickAddButton(label: String, millis: Long, modifier: Modifier, onAd
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Rounded.Add, contentDescription = label, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(6.dp))
             Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
         }
@@ -749,14 +861,14 @@ private fun TimerDetailRow(state: TimerState, accent: Color) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         TimerMetricCard(
             modifier = Modifier.weight(1f),
-            icon = { Icon(Icons.Rounded.HourglassEmpty, contentDescription = null) },
+            icon = { Icon(Icons.Rounded.HourglassEmpty, contentDescription = stringResource(R.string.st_TimerScreen_u7v8)) },
             label = stringResource(R.string.st_TimerScreen_u7v8),
             value = formatTimerTime(state.initialTime),
             accent = accent,
         )
         TimerMetricCard(
             modifier = Modifier.weight(1f),
-            icon = { Icon(Icons.Rounded.Alarm, contentDescription = null) },
+            icon = { Icon(Icons.Rounded.Alarm, contentDescription = stringResource(R.string.st_TimerScreen_w9x0)) },
             label = stringResource(R.string.st_TimerScreen_w9x0),
             value = formatTimerTime(displayMillis(state)),
             accent = MaterialTheme.colorScheme.secondary,
@@ -774,6 +886,7 @@ private fun TimerMetricCard(
 ) {
     ExpressiveCard(
         onClick = {},
+        enabled = false,
         modifier = modifier,
         shape = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.78f),
@@ -787,27 +900,6 @@ private fun TimerMetricCard(
             }
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun TimerFinishedBanner(onDismissAlarm: () -> Unit) {
-    ExpressiveCard(
-        onClick = onDismissAlarm,
-        modifier = Modifier.fillMaxWidth(),
-        shape = BouncyShape,
-        containerColor = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        elevation = 0.dp,
-    ) {
-        Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(28.dp))
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.st_TimerScreen_y1z2), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                Text(stringResource(R.string.st_TimerScreen_a3b4), style = MaterialTheme.typography.bodyMedium)
-            }
         }
     }
 }
@@ -827,6 +919,13 @@ private fun TimerControlDock(
     val pauseLabel = stringResource(R.string.st_TimerScreen_i1j2)
     val dismissLabel = stringResource(R.string.st_TimerScreen_k3l4)
     val startLabel = stringResource(R.string.st_TimerScreen_m5n6)
+    val toggleCd = when {
+        state.isRunning -> pauseLabel
+        state.isRinging -> dismissLabel
+        else -> startLabel
+    }
+    // T-P1-04: guard reset when idle (never enabled at 0:00).
+    val canReset = state.remainingTime > 0L || state.initialTime > 0L || state.isRunning || state.isRinging || state.isStarted
 
     ToolzHorizontalFloatingToolbar(
         expanded = true,
@@ -840,7 +939,7 @@ private fun TimerControlDock(
                 icon = {
                     Icon(
                         if (state.alarmsEnabled) Icons.Rounded.Notifications else Icons.Rounded.NotificationsOff,
-                        contentDescription = null,
+                        contentDescription = if (state.alarmsEnabled) onLabel else offLabel,
                         tint = if (state.alarmsEnabled) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                 },
@@ -848,7 +947,8 @@ private fun TimerControlDock(
             )
             clickableItem(
                 onClick = onReset,
-                icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                enabled = canReset,
+                icon = { Icon(Icons.Rounded.Refresh, contentDescription = resetLabel) },
                 label = resetLabel,
             )
         },
@@ -867,7 +967,7 @@ private fun TimerControlDock(
                 if (state.isRunning) Icons.Rounded.Pause
                 else if (state.isRinging) Icons.Rounded.NotificationsActive
                 else Icons.Rounded.PlayArrow,
-                contentDescription = null,
+                contentDescription = toggleCd,
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(8.dp))
@@ -899,14 +999,9 @@ private fun timerStatusIcon(state: TimerState) = when {
 }
 
 private fun displayMillis(state: TimerState): Long = when {
+    // T-P1-04: no fallback masking — dial shows raw remaining; staged preview lives in wheel picker.
     state.isRinging -> 0L
-    state.remainingTime > 0L -> state.remainingTime
-    state.initialTime > 0L && !state.isRinging -> state.initialTime
-    else -> selectedDurationMillis(state)
-}
-
-private fun selectedDurationMillis(state: TimerState): Long {
-    return (state.selectedMinutes * 60L + state.selectedSeconds) * 1000L
+    else -> state.remainingTime.coerceAtLeast(0L)
 }
 
 private fun formatTimerTime(timeMillis: Long): String {
@@ -925,12 +1020,19 @@ private fun formatTimerTime(timeMillis: Long): String {
 @Composable
 private fun CustomDurationDialog(
     currentMinutes: Int,
+    currentSeconds: Int = 0,
     accent: Color,
     onDismiss: () -> Unit,
-    onConfirm: (Int) -> Unit
+    onConfirm: (Int, Int) -> Unit
 ) {
-    var text by remember { mutableStateOf(if (currentMinutes > 0) currentMinutes.toString() else "") }
+    // T-P2-04: key remember, validate 1..999 + secs, error for 0, hoist focus effect.
+    var minsText by remember(currentMinutes) { mutableStateOf(if (currentMinutes > 0) currentMinutes.toString() else "") }
+    var secsText by remember(currentSeconds) { mutableStateOf(if (currentSeconds > 0) currentSeconds.toString() else "") }
+    var error by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -938,32 +1040,61 @@ private fun CustomDurationDialog(
             Text(stringResource(R.string.st_TimerScreen_e1f2), fontWeight = FontWeight.Bold)
         },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { 
-                    if (it.isEmpty() || (it.all { char -> char.isDigit() } && it.length <= 4)) {
-                        text = it
-                    }
-                },
-                label = { Text(stringResource(R.string.st_TimerScreen_u3v4)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = accent,
-                    focusedLabelColor = accent,
-                    cursorColor = accent
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = minsText,
+                    onValueChange = {
+                        if (it.isEmpty() || (it.all { char -> char.isDigit() } && it.length <= 3)) {
+                            minsText = it
+                            error = null
+                        }
+                    },
+                    label = { Text(stringResource(R.string.st_TimerScreen_u3v4)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accent,
+                        focusedLabelColor = accent,
+                        cursorColor = accent
+                    )
                 )
-            )
-            LaunchedEffect(Unit) {
-                focusRequester.requestFocus()
+                OutlinedTextField(
+                    value = secsText,
+                    onValueChange = {
+                        if (it.isEmpty() || (it.all { char -> char.isDigit() } && it.length <= 2)) {
+                            secsText = it
+                            error = null
+                        }
+                    },
+                    label = { Text(stringResource(R.string.st_TimerScreen_w3x4)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accent,
+                        focusedLabelColor = accent,
+                        cursorColor = accent
+                    )
+                )
+                if (error != null) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { 
-                    val mins = text.toIntOrNull() ?: 0
-                    onConfirm(mins)
+                onClick = {
+                    val mins = minsText.toIntOrNull() ?: -1
+                    val secs = secsText.toIntOrNull() ?: 0
+                    when {
+                        mins < 0 || mins > 999 -> error = "Enter 0–999 minutes"
+                        secs < 0 || secs > 59 -> error = "Enter 0–59 seconds"
+                        mins == 0 && secs == 0 -> error = "Pick a duration greater than 0:00"
+                        else -> onConfirm(mins.coerceIn(0, 999), secs.coerceIn(0, 59))
+                    }
                 },
                 colors = ButtonDefaults.textButtonColors(contentColor = accent)
             ) {
