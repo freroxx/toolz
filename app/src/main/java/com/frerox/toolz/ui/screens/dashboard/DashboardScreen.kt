@@ -2431,7 +2431,7 @@ fun UniversalPill(
                             is PillPage.Pomodoro        -> PomodoroPillContent(pomodoroState, pomodoroViewModel, onNavigate)
                             is PillPage.Steps           -> StepsPillContent(stepsState, stepsViewModel, onNavigate)
                             is PillPage.Recorder        -> RecorderPillContent(recordingState, recorderViewModel, onNavigate)
-                            is PillPage.Todo            -> TodoPillContent(todoState.tasks.firstOrNull(), onNavigate)
+                            is PillPage.Todo            -> TodoPillContent(todoState.tasks, onNavigate)
                             is PillPage.CatalogDownload -> CatalogDownloadPillContent(page.progress, page.count, onNavigate)
                             is PillPage.Caffeinate      -> CaffeinatePillContent(caffeinateMs, onNavigate)
                             is PillPage.Tip             -> TipPillContent(page.tip, onNavigate)
@@ -2495,7 +2495,7 @@ fun UniversalPill(
                             is PillPage.Pomodoro        -> PomodoroPillContent(pomodoroState, pomodoroViewModel, onNavigate)
                             is PillPage.Steps           -> StepsPillContent(stepsState, stepsViewModel, onNavigate)
                             is PillPage.Recorder        -> RecorderPillContent(recordingState, recorderViewModel, onNavigate)
-                            is PillPage.Todo            -> TodoPillContent(todoState.tasks.firstOrNull(), onNavigate)
+                            is PillPage.Todo            -> TodoPillContent(todoState.tasks, onNavigate)
                             is PillPage.CatalogDownload -> CatalogDownloadPillContent(page.progress, page.count, onNavigate)
                             is PillPage.Caffeinate      -> CaffeinatePillContent(caffeinateMs, onNavigate)
                             is PillPage.Tip             -> TipPillContent(page.tip, onNavigate)
@@ -3057,16 +3057,41 @@ fun RecorderPillContent(state: RecordingState, vm: VoiceRecorderViewModel, onNav
 }
 
 @Composable
-fun TodoPillContent(task: com.frerox.toolz.data.todo.TaskEntry?, onNavigate: (String) -> Unit) {
+fun TodoPillContent(tasks: List<com.frerox.toolz.data.todo.TaskEntry>, onNavigate: (String) -> Unit) {
     val c = MaterialTheme.colorScheme
+    // D-P2-01 (needs T-P0-01 first): earliest-due wins, overdue first; undated
+    // sink; Critical breaks ties (priority ASC = 1 first). Never first().
+    val now = System.currentTimeMillis()
+    val best = tasks.filter { !it.isCompleted }.minWithOrNull(
+        compareBy(
+            { if (it.dueDate == null) 1 else 0 },
+            { it.dueDate ?: Long.MAX_VALUE },
+            { it.priority }
+        )
+    )
+    val overdueN = tasks.count {
+        !it.isCompleted && it.dueDate != null &&
+            it.dueDate < now && !com.frerox.toolz.util.CalendarUtils.isSameDay(it.dueDate, now)
+    }
+    val dueTodayN = tasks.count {
+        !it.isCompleted && it.dueDate != null &&
+            com.frerox.toolz.util.CalendarUtils.isSameDay(it.dueDate, now)
+    }
+    val label = when {
+        overdueN > 0 && dueTodayN > 0 -> "$overdueN overdue · $dueTodayN due today"
+        overdueN > 0 -> if (overdueN == 1) "1 overdue" else "$overdueN overdue"
+        dueTodayN > 0 -> if (dueTodayN == 1) "1 due today" else "$dueTodayN due today"
+        else -> "Next Priority"
+    }
     Row(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
         .bouncyClick { onNavigate(Screen.Todo.route) }, verticalAlignment = Alignment.CenterVertically) {
         PillIcon(c.primaryContainer, Icons.Rounded.TaskAlt)
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text("Next Priority", style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Black, color = c.primary)
-            Text(task?.title ?: stringResource(R.string.st_Todo_NothingPlanned), style = MaterialTheme.typography.bodyLarge,
+            Text(label, style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = if (overdueN > 0) c.error else c.primary)
+            Text(best?.title ?: stringResource(R.string.st_Todo_NothingPlanned), style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         FilledTonalIconButton(onClick = { onNavigate(Screen.Todo.route) }, modifier = Modifier.size(46.dp),

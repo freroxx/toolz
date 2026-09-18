@@ -80,5 +80,7 @@ data class BackupImportResult(
     val restoredEntries: Int,
     val requiresAppRestart: Boolean = true,
     // CAL-P3 (additive): future calendar alarms re-scheduled after CALENDAR restore.
-    val rescheduledCalendarAlarms: Int = 0
+    val rescheduledCalendarAlarms: Int = 0,
+    // T-P0-03 (additive): future task alarms re-scheduled after TASKS restore.
+    val rescheduledTaskAlarms: Int = 0
 )

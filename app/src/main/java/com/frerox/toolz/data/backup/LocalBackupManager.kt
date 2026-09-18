@@ -74,7 +74,9 @@ class LocalBackupManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: AppDatabase,
     private val aiSettingsManager: AiSettingsManager,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    // T-P0-03 (additive): TASKS restore must reschedule (alarms don't survive export).
+    private val taskScheduler: com.frerox.toolz.util.TaskAlarmScheduler
 ) {
     private val manifestAdapter = moshi.adapter(ToolzBackupManifest::class.java)
     private val stringMapAdapter = moshi.adapter<Map<String, String>>(
@@ -311,6 +313,8 @@ class LocalBackupManager @Inject constructor(
         var restoredEntries = 0
         // CAL-P3: count of future calendar alarms re-scheduled after restore.
         var rescheduledCalendarAlarms = 0
+        // T-P0-03: count of future task alarms re-scheduled after restore.
+        var rescheduledTaskAlarms = 0
 
         ZipFile(stagingFile).use { zipFile ->
             val passphrase = zipFile.getInputStream(zipFile.getEntry("security/sqlcipher_passphrase.txt")).bufferedReader().use { it.readText() }
@@ -333,6 +337,10 @@ class LocalBackupManager @Inject constructor(
                             // CAL-P3: CALENDAR restore must reschedule (alarms don't survive export).
                             if (entry.name == "data/events.json") {
                                 rescheduledCalendarAlarms = rescheduleCalendarAlarmsAfterRestore()
+                            }
+                            // T-P0-03: TASKS restore must reschedule too.
+                            if (entry.name == "data/tasks.json") {
+                                rescheduledTaskAlarms = rescheduleTaskAlarmsAfterRestore()
                             }
                         }
                     }
@@ -375,7 +383,8 @@ class LocalBackupManager @Inject constructor(
         BackupImportResult(
             manifest = manifest,
             restoredEntries = restoredEntries,
-            rescheduledCalendarAlarms = rescheduledCalendarAlarms
+            rescheduledCalendarAlarms = rescheduledCalendarAlarms,
+            rescheduledTaskAlarms = rescheduledTaskAlarms
         )
     }
 
@@ -411,6 +420,24 @@ class LocalBackupManager @Inject constructor(
         }
     }
 
+    /**
+     * T-P0-03: after a TASKS restore, future reminders must be re-scheduled
+     * (exact alarms are not part of the backup payload). Mirrors the CAL-P3
+     * calendar path above; honors the reminders toggle, never schedules past.
+     *
+     * @return number of future tasks re-scheduled (shown to the user).
+     */
+    private suspend fun rescheduleTaskAlarmsAfterRestore(): Int {
+        return try {
+            val count = taskScheduler.rescheduleAllFuture()
+            android.util.Log.i("LocalBackupManager", "Restore rescheduled $count future task alarms")
+            count
+        } catch (e: Exception) {
+            android.util.Log.e("LocalBackupManager", "Task reschedule after restore failed", e)
+            0
+        }
+    }
+
     private suspend fun restoreDatabaseItem(
         zipFile: ZipFile,
         entry: ZipEntry,
@@ -424,7 +451,16 @@ class LocalBackupManager @Inject constructor(
                 true
             } else false
             "data/tasks.json" -> if (itemsToRestore.contains(BackupItem.TASKS)) {
-                database.taskDao().insertTasks(listAdapter<TaskEntry>().fromJson(json).orEmpty())
+                // D-P1-04: REPLACE-by-id clobbers newer rows + auto-inc collision.
+                // Dedup on (title, createdAt), force-insert (id=0) the rest so
+                // restore never overwrites or collides with live tasks.
+                val incoming = listAdapter<TaskEntry>().fromJson(json).orEmpty()
+                val existingKeys = database.taskDao().getAllTasksSync()
+                    .map { it.title.trim().lowercase() to it.createdAt }.toSet()
+                val fresh = incoming
+                    .filterNot { it.title.trim().lowercase() to it.createdAt in existingKeys }
+                    .map { it.copy(id = 0) }
+                if (fresh.isNotEmpty()) database.taskDao().insertTasks(fresh)
                 true
             } else false
             "data/ai_chats.json" -> if (itemsToRestore.contains(BackupItem.AI_HISTORY)) {

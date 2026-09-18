@@ -280,6 +280,14 @@ object DatabaseModule {
             } catch (_: Exception) { }
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_events_timestamp` ON `events` (`timestamp`)")
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_events_eventType` ON `events` (`eventType`)")
+            // T-P0-01/D-P1-02 (shared-file protocol §7: SAME 59->60, never fork
+            // to 61): tasks gains query indices for getActiveTasks
+            // (isCompleted+priority+dueDate) and completed queries
+            // (isCompleted+completedAt). Matches @Entity(indices) on TaskEntry.
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_isCompleted` ON `tasks` (`isCompleted`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_dueDate` ON `tasks` (`dueDate`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_priority` ON `tasks` (`priority`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_completedAt` ON `tasks` (`completedAt`)")
         }
     }
 

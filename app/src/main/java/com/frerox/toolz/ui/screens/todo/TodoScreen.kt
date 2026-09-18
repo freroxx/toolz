@@ -63,6 +63,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,6 +84,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Warning
@@ -108,6 +110,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -130,7 +134,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -155,6 +165,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.util.CalendarUtils
+import com.frerox.toolz.util.ScheduleOutcome
+import android.app.AlarmManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
@@ -170,6 +186,7 @@ import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveButton
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
+import com.frerox.toolz.ui.components.rememberLifecycleEvent
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
@@ -212,7 +229,13 @@ private fun formatDueDate(ts: Long): String {
         days == 0L -> "Today"
         days == 1L -> "Tomorrow"
         days < 7 -> "In ${days}d"
-        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(ts))
+        // D-P2-03: show the year when the due date isn't this year (was: "MMM d" always).
+        else -> {
+            val dueYear = Calendar.getInstance().apply { timeInMillis = ts }.get(Calendar.YEAR)
+            val thisYear = Calendar.getInstance().get(Calendar.YEAR)
+            val pattern = if (dueYear == thisYear) "MMM d" else "MMM d, yyyy"
+            SimpleDateFormat(pattern, Locale.getDefault()).format(Date(ts))
+        }
     }
 }
 
@@ -246,6 +269,28 @@ private fun isUpcoming(ts: Long): Boolean {
     return days in 1..14
 }
 
+// D-P2-03: rotation-safe List<SubTask> (rememberSaveable needs a Saver;
+// org.json ships on every device — no new dependency).
+private val SubTaskListSaver = listSaver<List<SubTask>, String>(
+    save = { list -> list.map { "${it.id}\u001F${it.title}\u001F${it.isDone}" } },
+    restore = { saved ->
+        saved.mapNotNull { line ->
+            val parts = line.split("\u001F")
+            if (parts.size != 3) null
+            else SubTask(id = parts[0], title = parts[1], isDone = parts[2].toBooleanStrictOrNull() == true)
+        }
+    }
+)
+
+private fun matchesQuery(task: TaskEntry, q: String): Boolean {
+    if (q.isBlank()) return true
+    val needle = q.trim().lowercase()
+    return task.title.lowercase().contains(needle) ||
+        (task.description?.lowercase()?.contains(needle) == true) ||
+        task.category.lowercase().contains(needle) ||
+        task.subTasks.any { it.title.lowercase().contains(needle) }
+}
+
 private val bouncySpring = spring<Float>(
     dampingRatio = Spring.DampingRatioLowBouncy,
     stiffness = Spring.StiffnessMediumLow
@@ -266,25 +311,71 @@ fun TodoScreen(
     viewModel: TodoViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // D-P1-03: tick collected separately — uiState no longer pulses at 1Hz.
+    val sessionTick by viewModel.sessionTick.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val vibrationManager = LocalVibrationManager.current
+    val context = LocalContext.current
 
     var selectedFilter by rememberSaveable { mutableStateOf(TaskFilter.ALL) }
     var selectedTaskForEdit by remember { mutableStateOf<TaskEntry?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showCompletedSection by rememberSaveable { mutableStateOf(true) }
+    var showHistorySection by rememberSaveable { mutableStateOf(false) }
+    // D-P2-02: search (title+desc+category+subTasks), rotation-safe.
+    var searchText by rememberSaveable { mutableStateOf("") }
+    // D-P1-01: last deleted task for Undo (restores + reschedules).
+    var pendingUndo by remember { mutableStateOf<TaskEntry?>(null) }
 
-    val filteredTasks by remember(uiState.tasks, selectedFilter) {
+    // T-P0-03: surface scheduler outcomes (at-due fallback is never silent).
+    LaunchedEffect(Unit) {
+        viewModel.scheduleNotes.collect { outcome ->
+            if (outcome == ScheduleOutcome.AT_DUE_FALLBACK) {
+                scope.launch {
+                    snackbarHostState.showSnackbar(context.getString(R.string.st_TodoScreen_dueSoonNote))
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.calendarAdded.collect {
+            scope.launch {
+                snackbarHostState.showSnackbar(context.getString(R.string.st_TodoScreen_calendarAdded))
+            }
+        }
+    }
+
+    fun deleteWithUndo(task: TaskEntry) {
+        pendingUndo = task
+        viewModel.deleteTask(task)
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = context.getString(R.string.st_TodoScreen_taskDeleted),
+                actionLabel = context.getString(R.string.st_TodoScreen_undo),
+                duration = SnackbarDuration.Long
+            )
+            // D-P1-01: Undo re-inserts with the ORIGINAL id + reschedules.
+            if (result == SnackbarResult.ActionPerformed) {
+                pendingUndo?.let { viewModel.restoreTask(it) }
+                pendingUndo = null
+            }
+        }
+    }
+
+    val queryFiltered by remember(uiState.tasks, searchText) {
+        derivedStateOf { uiState.tasks.filter { matchesQuery(it, searchText) } }
+    }
+    val filteredTasks by remember(queryFiltered, selectedFilter) {
         derivedStateOf {
             when (selectedFilter) {
-                TaskFilter.ALL -> uiState.tasks
+                TaskFilter.ALL -> queryFiltered
                 // D-P1-02: overdue stays visible in TODAY (previously only
                 // isToday -> overdue non-today tasks vanished from every filter).
-                TaskFilter.TODAY -> uiState.tasks.filter {
+                TaskFilter.TODAY -> queryFiltered.filter {
                     it.dueDate?.let { due -> isToday(due) || isOverdue(due) } == true
                 }
-                TaskFilter.UPCOMING -> uiState.tasks.filter { it.dueDate?.let(::isUpcoming) == true }
+                TaskFilter.UPCOMING -> queryFiltered.filter { it.dueDate?.let(::isUpcoming) == true }
             }
         }
     }
@@ -343,6 +434,7 @@ fun TodoScreen(
         bottomBar = {
             QuickAddBar(
                 categories = uiState.categories,
+                initialCategory = uiState.lastCategory,
                 onAddTask = { title, category, priority, dueDate ->
                     viewModel.addTask(title, null, category, priority, dueDate)
                     scope.launch { listState.animateScrollToItem(0) }
@@ -366,11 +458,43 @@ fun TodoScreen(
                 completedCount = uiState.completedToday.size,
                 totalCount = totalCount,
                 isSessionActive = uiState.isSessionActive,
-                sessionTimeMillis = uiState.sessionTimeMillis,
+                sessionTimeMillis = sessionTick,
                 sessionTaskId = uiState.sessionTaskId,
                 allTasks = uiState.tasks + uiState.completedToday,
                 onStopSession = { viewModel.stopSession() },
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+
+            // ── T-P0-03 exact-permission banner (inexact fallback is hours-late) ──
+            ExactAlarmBanner(modifier = Modifier.padding(horizontal = 16.dp))
+
+            // ── D-P2-02 search (title+desc+category+subTasks) ─────────────────
+            OutlinedTextField(
+                value = searchText,
+                onValueChange = {
+                    searchText = it
+                    viewModel.setSearchQuery(it)
+                },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchText.isNotEmpty()) {
+                        IconButton(onClick = {
+                            searchText = ""
+                            viewModel.setSearchQuery("")
+                        }) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = stringResource(R.string.st_TodoScreen_w9x0)
+                            )
+                        }
+                    }
+                },
+                placeholder = { Text(stringResource(R.string.st_TodoScreen_searchHint)) },
+                singleLine = true,
+                shape = SmallExpressiveShape,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
             // ── Filter bar ────────────────────────────────────────────────────
@@ -403,9 +527,10 @@ fun TodoScreen(
                             EmptyTasksPlaceholder(filter = selectedFilter)
                         }
                     } else {
-                        items(filteredTasks, key = { it.id }) { task ->
+                        // D-P2-03: itemsIndexed (was items + indexOf = O(n²)).
+                        itemsIndexed(filteredTasks, key = { _, t -> t.id }) { index, task ->
                             StaggeredEntrance(
-                                index = filteredTasks.indexOf(task),
+                                index = index,
                                 modifier = Modifier.animateItem(
                                     placementSpec = spring(
                                         dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -425,12 +550,10 @@ fun TodoScreen(
                                         vibrationManager?.vibrateTick()
                                         viewModel.toggleSubTask(task, subId)
                                     },
+                                    // D-P1-01: working Undo (restores + reschedules).
                                     onDelete = {
                                         vibrationManager?.vibrateTick()
-                                        viewModel.deleteTask(task)
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("Task deleted")
-                                        }
+                                        deleteWithUndo(task)
                                     },
                                     onStartSession = { viewModel.startSession(task.id) },
                                     onStopSession = { viewModel.stopSession() },
@@ -455,9 +578,12 @@ fun TodoScreen(
                         }
 
                         if (showCompletedSection) {
-                            items(uiState.completedToday, key = { "done_${it.id}" }) { task ->
+                            itemsIndexed(
+                                uiState.completedToday,
+                                key = { _, t -> "done_${t.id}" }
+                            ) { index, task ->
                                 StaggeredEntrance(
-                                    index = uiState.completedToday.indexOf(task),
+                                    index = index,
                                     modifier = Modifier.animateItem()
                                 ) {
                                     CompletedTaskCard(
@@ -468,7 +594,49 @@ fun TodoScreen(
                                         },
                                         onDelete = {
                                             vibrationManager?.vibrateTick()
-                                            viewModel.deleteTask(task)
+                                            deleteWithUndo(task)
+                                        },
+                                        onCardClick = { selectedTaskForEdit = task }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── D-P1-02 History: yesterday-and-older completed ────────
+                    // (were invisible orphans: satisfied NEITHER query).
+                    if (uiState.completedHistory.isNotEmpty()) {
+                        item(key = "history_header") {
+                            CompletedSectionHeader(
+                                count = uiState.completedHistory.size,
+                                expanded = showHistorySection,
+                                label = stringResource(R.string.st_TodoScreen_history),
+                                onToggle = {
+                                    vibrationManager?.vibrateTick()
+                                    showHistorySection = !showHistorySection
+                                },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
+
+                        if (showHistorySection) {
+                            itemsIndexed(
+                                uiState.completedHistory,
+                                key = { _, t -> "hist_${t.id}" }
+                            ) { index, task ->
+                                StaggeredEntrance(
+                                    index = index,
+                                    modifier = Modifier.animateItem()
+                                ) {
+                                    CompletedTaskCard(
+                                        task = task,
+                                        onToggleComplete = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.toggleTaskCompletion(task)
+                                        },
+                                        onDelete = {
+                                            vibrationManager?.vibrateTick()
+                                            deleteWithUndo(task)
                                         },
                                         onCardClick = { selectedTaskForEdit = task }
                                     )
@@ -494,7 +662,6 @@ fun TodoScreen(
                 viewModel.deleteTask(task)
                 selectedTaskForEdit = null
             },
-            onToggleSubTask = { subId -> viewModel.toggleSubTask(task, subId) },
             onStartSession = { viewModel.startSession(task.id) },
             onStopSession = { viewModel.stopSession() },
             onAddToCalendar = { viewModel.addToCalendar(task) }
@@ -666,6 +833,80 @@ private fun SessionBanner(
                 )
             ) {
                 Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.st_TodoScreen_o5p6), modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3b ─ Exact-alarm permission banner (T-P0-03)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ExactAlarmBanner(modifier: Modifier = Modifier) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    val context = LocalContext.current
+    val resumeEvent = rememberLifecycleEvent()
+    var canExact by remember { mutableStateOf(true) }
+
+    LaunchedEffect(resumeEvent) {
+        canExact = try {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.canScheduleExactAlarms()
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    AnimatedVisibility(
+        visible = !canExact,
+        enter = expandVertically(spring(dampingRatio = 0.7f)) + fadeIn(),
+        exit = shrinkVertically(tween(200)) + fadeOut(),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = SmallExpressiveShape,
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(18.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.st_TodoScreen_exactTitle),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Text(
+                        text = stringResource(R.string.st_TodoScreen_exactDesc),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.75f)
+                    )
+                }
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                        )
+                    } catch (_: Exception) { }
+                }) {
+                    Text(
+                        stringResource(R.string.st_TodoScreen_exactAction),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -954,6 +1195,8 @@ private fun AnimatedCheckbox(
     Box(
         modifier = modifier
             .size(44.dp)
+            // D-P2-03 a11y: checkbox role (was: no role, silent to TalkBack).
+            .semantics { role = Role.Checkbox }
             .graphicsLayer { scaleX = pressScale * scale.value; scaleY = pressScale * scale.value }
             .clickable(
                 interactionSource = interactionSource,
@@ -1075,6 +1318,8 @@ private fun SubTaskRow(subTask: SubTask, onToggle: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(SmallExpressiveShape)
+            // D-P2-03 a11y: checkbox role + label.
+            .semantics { role = Role.Checkbox; contentDescription = subTask.title }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -1150,13 +1395,19 @@ private fun CompletedTaskCard(
     onDelete: () -> Unit,
     onCardClick: () -> Unit
 ) {
+    // D-P1-01: single confirmValueChange pattern (was LaunchedEffect on
+    // currentValue = double-fire risk, inconsistent with ActiveTaskCard).
+    val vibrationManager = LocalVibrationManager.current
     val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { it == SwipeToDismissBoxValue.EndToStart },
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                vibrationManager?.vibrateTick()
+                onDelete()
+                true
+            } else false
+        },
         positionalThreshold = { it * 0.4f }
     )
-    LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) onDelete()
-    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -1238,7 +1489,8 @@ private fun CompletedSectionHeader(
     count: Int,
     expanded: Boolean,
     onToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    label: String? = null
 ) {
     Row(
         modifier = modifier
@@ -1258,7 +1510,7 @@ private fun CompletedSectionHeader(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
         Text(
-            text = "Completed today ($count)",
+            text = label ?: "Completed today ($count)",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
@@ -1322,6 +1574,7 @@ private fun EmptyTasksPlaceholder(filter: TaskFilter) {
 @Composable
 private fun QuickAddBar(
     categories: List<String>,
+    initialCategory: String = "Personal",
     onAddTask: (title: String, category: String, priority: Int, dueDate: Long?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1330,12 +1583,16 @@ private fun QuickAddBar(
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
 
-    var title by remember { mutableStateOf("") }
-    var isFocused by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf("Personal") }
-    var selectedPriority by remember { mutableIntStateOf(3) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    var selectedDueDate by remember { mutableStateOf<Long?>(null) }
+    // D-P2-03: rotation-safe (was remember — input lost on rotate).
+    var title by rememberSaveable { mutableStateOf("") }
+    var isFocused by rememberSaveable { mutableStateOf(false) }
+    // D-P2-02: opens on the last-used category (persisted in Settings).
+    var selectedCategory by rememberSaveable(categories, initialCategory) {
+        mutableStateOf(if (categories.contains(initialCategory)) initialCategory else "Personal")
+    }
+    var selectedPriority by rememberSaveable { mutableIntStateOf(3) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var selectedDueDate by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val isExpanded = isFocused || title.isNotEmpty()
 
@@ -1462,6 +1719,8 @@ private fun QuickAddBar(
                     )
 
                     // ── Priority selector ─────────────────────────────────────
+                    // D-P2-03 a11y names hoisted (semantics blocks aren't composable).
+                    val priorityNames = PriorityLabels.map { stringResource(it) }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1490,6 +1749,11 @@ private fun QuickAddBar(
                                 modifier = Modifier
                                     .size(28.dp)
                                     .graphicsLayer { scaleX = pScale; scaleY = pScale }
+                                    // D-P2-03 a11y: radio role + priority name.
+                                    .semantics {
+                                        role = Role.RadioButton
+                                        contentDescription = priorityNames[p - 1]
+                                    }
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null
@@ -1617,7 +1881,6 @@ private fun TaskDetailSheet(
     onDismiss: () -> Unit,
     onSaveTask: (TaskEntry) -> Unit,
     onDeleteTask: () -> Unit,
-    onToggleSubTask: (String) -> Unit,
     onStartSession: () -> Unit,
     onStopSession: () -> Unit,
     onAddToCalendar: () -> Unit
@@ -1626,16 +1889,19 @@ private fun TaskDetailSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    // Local edit state
+    // Local edit state (D-P2-03 rotation-safe; subtasks via JSON saver).
+    // T-P0-04: LOCAL-ONLY until Save — nothing here writes the DB directly.
     var editTitle by rememberSaveable { mutableStateOf(task.title) }
     var editDescription by rememberSaveable { mutableStateOf(task.description ?: "") }
     var editCategory by rememberSaveable { mutableStateOf(task.category) }
     var editPriority by rememberSaveable { mutableIntStateOf(task.priority) }
-    var editDueDate by remember { mutableStateOf<Long?>(task.dueDate) }
-    var newSubTaskText by remember { mutableStateOf("") }
-    var editSubTasks by remember { mutableStateOf(task.subTasks) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var showDatePicker by remember { mutableStateOf(false) }
+    var editDueDate by rememberSaveable { mutableStateOf<Long?>(task.dueDate) }
+    var newSubTaskText by rememberSaveable { mutableStateOf("") }
+    var editSubTasks by rememberSaveable(stateSaver = SubTaskListSaver) {
+        mutableStateOf(task.subTasks)
+    }
+    var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
 
     fun save() {
         if (editTitle.isBlank()) return
@@ -1728,6 +1994,7 @@ private fun TaskDetailSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(6.dp))
+            val sheetPriorityNames = PriorityLabels.map { stringResource(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 (1..5).forEach { p ->
                     val isSelected = editPriority == p
@@ -1742,6 +2009,11 @@ private fun TaskDetailSheet(
                             .weight(1f)
                             .graphicsLayer { scaleX = scale; scaleY = scale }
                             .clip(SmallExpressiveShape)
+                            // D-P2-03 a11y: radio role + priority name.
+                            .semantics {
+                                role = Role.RadioButton
+                                contentDescription = sheetPriorityNames[p - 1]
+                            }
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
@@ -1859,11 +2131,14 @@ private fun TaskDetailSheet(
                     ) {
                         SubTaskRow(
                             subTask = sub,
+                            // T-P0-04: LOCAL-ONLY until Save (was: immediate DB
+                            // write via onToggleSubTask on a stale snapshot, so
+                            // dismiss-without-Save still persisted while
+                            // add/delete stayed local — inconsistent + racy).
                             onToggle = {
                                 editSubTasks = editSubTasks.map {
                                     if (it.id == sub.id) it.copy(isDone = !it.isDone) else it
                                 }
-                                onToggleSubTask(sub.id)
                             }
                         )
                         Spacer(Modifier.weight(1f))
@@ -2196,6 +2471,8 @@ private fun SortDropdownMenu(
 // ─────────────────────────────────────────────────────────────────────────────
 
 private class SampleTaskProvider : PreviewParameterProvider<TaskEntry> {
+    // D-P2-03: fixed base (was System.currentTimeMillis() = nondeterministic previews).
+    private val base = 1_780_000_000_000L
     private val sampleSubTasks = listOf(
         SubTask(id = "1", title = "Research frameworks", isDone = true),
         SubTask(id = "2", title = "Write first draft", isDone = false),
@@ -2208,8 +2485,8 @@ private class SampleTaskProvider : PreviewParameterProvider<TaskEntry> {
             title = "Design new onboarding flow",
             description = "Create wireframes and user journey maps for the revamped sign-up.",
             category = "Dev",
-            priority = 4,
-            dueDate = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(18),
+            priority = 1,
+            dueDate = base + TimeUnit.HOURS.toMillis(18),
             subTasks = sampleSubTasks,
             isCompleted = false
         ),
@@ -2218,8 +2495,8 @@ private class SampleTaskProvider : PreviewParameterProvider<TaskEntry> {
             title = "Morning jog — 5km target",
             description = null,
             category = "Fitness",
-            priority = 2,
-            dueDate = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(1),
+            priority = 4,
+            dueDate = base + TimeUnit.DAYS.toMillis(1),
             subTasks = emptyList(),
             isCompleted = false
         ),
@@ -2228,8 +2505,8 @@ private class SampleTaskProvider : PreviewParameterProvider<TaskEntry> {
             title = "Submit quarterly report",
             description = "Compile metrics and attach board summary.",
             category = "Work",
-            priority = 5,
-            dueDate = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(2),
+            priority = 2,
+            dueDate = base - TimeUnit.HOURS.toMillis(2),
             subTasks = emptyList(),
             isCompleted = false
         )
@@ -2302,8 +2579,8 @@ private fun TodoScreenPreview() {
                     ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(sampleTasks, key = { it.id }) { task ->
-                        StaggeredEntrance(index = sampleTasks.indexOf(task)) {
+                    itemsIndexed(sampleTasks, key = { _, t -> t.id }) { index, task ->
+                        StaggeredEntrance(index = index) {
                             TaskCardSurface(
                                 task = task,
                                 isSessionTask = task.id == 1,
