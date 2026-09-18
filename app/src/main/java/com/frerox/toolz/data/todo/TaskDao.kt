@@ -33,8 +33,9 @@ interface TaskDao {
     // D-P1-02 midnight orphans: yesterday-completed satisfies NEITHER the active
     // query NOR getCompletedToday — without this they vanish forever (still
     // backed up). History surfaces them instead of auto-purging.
+    // (No default arg: Room kapt rejects Kotlin defaults on @Query methods.)
     @Query("SELECT * FROM tasks WHERE isCompleted = 1 ORDER BY completedAt DESC LIMIT :limit")
-    fun getCompletedHistory(limit: Int = 30): Flow<List<TaskEntry>>
+    fun getCompletedHistory(limit: Int): Flow<List<TaskEntry>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntry): Long

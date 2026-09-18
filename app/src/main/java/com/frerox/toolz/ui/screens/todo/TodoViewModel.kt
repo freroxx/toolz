@@ -125,7 +125,7 @@ class TodoViewModel @Inject constructor(
             sortOrder,
             settingsRepository.taskCategories,
             settingsRepository.taskLastCategory
-        ) { active, completed, history, order, cats, lastCat ->
+        ) { active: List<TaskEntry>, completed: List<TaskEntry>, history: List<TaskEntry>, order: TaskSortOrder, cats: Set<String>, lastCat: String ->
             _uiState.update {
                 it.copy(
                     tasks = sortTasks(active, order),
