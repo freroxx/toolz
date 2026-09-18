@@ -125,23 +125,13 @@ class TodoViewModel @Inject constructor(
             sortOrder,
             settingsRepository.taskCategories,
             settingsRepository.taskLastCategory
-        ) { flows ->
-            @Suppress("UNCHECKED_CAST")
-            val active = flows[0] as List<TaskEntry>
-            @Suppress("UNCHECKED_CAST")
-            val completed = flows[1] as List<TaskEntry>
-            @Suppress("UNCHECKED_CAST")
-            val history = flows[2] as List<TaskEntry>
-            val order = flows[3] as TaskSortOrder
-            @Suppress("UNCHECKED_CAST")
-            val cats = (flows[4] as Set<String>).sorted()
-            val lastCat = flows[5] as String
+        ) { active, completed, history, order, cats, lastCat ->
             _uiState.update {
                 it.copy(
                     tasks = sortTasks(active, order),
                     completedToday = completed,
                     completedHistory = history.filter { h -> completed.none { c -> c.id == h.id } },
-                    categories = cats,
+                    categories = cats.sorted(),
                     lastCategory = if (cats.contains(lastCat)) lastCat else cats.firstOrNull() ?: "Personal",
                     sortOrder = order
                 )
