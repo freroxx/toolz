@@ -17,6 +17,17 @@
 
 package com.frerox.toolz.data.calendar
 
+import androidx.room.TypeConverter
+
 class CalendarConverters {
-    // EventType was changed to String, so converters are no longer needed.
+    // EventType was changed to String, so its converters are no longer needed.
+    // CAL-P1-05: Recurrence enum <-> String (kept as TEXT for readable backup JSON).
+
+    @TypeConverter
+    fun fromRecurrence(value: Recurrence?): String? = value?.name
+
+    @TypeConverter
+    fun toRecurrence(value: String?): Recurrence =
+        runCatching { if (value.isNullOrBlank()) Recurrence.NONE else Recurrence.valueOf(value.uppercase()) }
+            .getOrDefault(Recurrence.NONE)
 }

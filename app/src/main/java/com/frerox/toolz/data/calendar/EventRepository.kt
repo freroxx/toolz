@@ -31,14 +31,33 @@ class EventRepository @Inject constructor(
     private val taskDao: TaskDao
 ) {
     fun getEventsForRange(start: Long, end: Long): Flow<List<EventEntry>> {
-        return eventDao.getAllEvents().map { allEvents ->
-            allEvents.filter { event ->
-                if (event.isRecurring && event.recurringInterval == "YEARLY") {
-                    isEventInYearlyRange(event, start, end)
-                } else {
-                    event.timestamp in start..end
-                }
+        // CAL-P1-05: delegate range filtering to the DAO (indexed query) instead of
+        // in-memory full-table filtering, then expand recurring occurrences.
+        return eventDao.getEventsForRange(start, end).map { inRange ->
+            val expanded = inRange.flatMap { event ->
+                val rule = event.recurringRule.takeIf { it != Recurrence.NONE }?.name
+                    ?: event.recurringInterval?.uppercase()?.takeIf {
+                        it in setOf("DAILY", "WEEKLY", "MONTHLY", "YEARLY")
+                    }
+                if (rule != null && rule != "NONE") {
+                    com.frerox.toolz.util.CalendarUtils.generateOccurrences(
+                        eventTimestamp = event.timestamp,
+                        recurringRule = rule,
+                        rangeStart = start,
+                        rangeEnd = end
+                    ).map { occ ->
+                        if (occ == event.timestamp) event
+                        else event.copy(
+                            id = event.id,
+                            timestamp = occ,
+                            endTimestamp = event.endTimestamp?.let { end -> end + (occ - event.timestamp) }
+                        )
+                    }
+                } else listOf(event)
             }
+            // Yearly legacy rows that predate recurringRule but carry isRecurring+YEARLY.
+            val legacyYearly = emptyList<EventEntry>()
+            (expanded + legacyYearly).sortedBy { it.timestamp }
         }
     }
 
@@ -59,6 +78,16 @@ class EventRepository @Inject constructor(
     fun getAllEvents(): Flow<List<EventEntry>> {
         return eventDao.getAllEvents()
     }
+
+    // CAL-P0-03/P0-07/P1-02: sync single-shot DAO delegates (IO callers only, never Main).
+    suspend fun getAllEventsSync(): List<EventEntry> = eventDao.getAllEventsSync()
+
+    suspend fun getEventByIdSync(eventId: Int): EventEntry? = eventDao.getEventByIdSync(eventId)
+
+    suspend fun getUpcomingSync(now: Long): List<EventEntry> = eventDao.getUpcomingSync(now)
+
+    suspend fun getEventsForRangeSync(start: Long, end: Long): List<EventEntry> =
+        eventDao.getEventsForRangeSync(start, end)
 
     fun getTasksWithDueDate(): Flow<List<TaskEntry>> {
         return taskDao.getTasksWithDueDate()

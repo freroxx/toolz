@@ -168,29 +168,25 @@ class CalendarViewModel @Inject constructor(
 
     fun setDate(year: Int, month: Int) {
         _uiState.update {
-            val cal = Calendar.getInstance().apply {
-                timeInMillis = it.selectedDate
-                set(Calendar.YEAR, year)
-                set(Calendar.MONTH, month)
-                set(Calendar.DAY_OF_MONTH, 1)
-            }
-            it.copy(selectedDate = cal.timeInMillis)
+            // CAL-P0-02: DAY=1 first, then set, then clamp (delegated for testability).
+            it.copy(
+                selectedDate = com.frerox.toolz.util.CalendarUtils.setYearMonthClamped(
+                    it.selectedDate, year, month
+                )
+            )
         }
     }
 
     fun nextMonth() {
         _uiState.update {
-            val cal = Calendar.getInstance().apply { timeInMillis = it.selectedDate }
-            cal.add(Calendar.MONTH, 1)
-            it.copy(selectedDate = cal.timeInMillis)
+            // CAL-P0-02: Jan-31 +1mo -> Feb-28, never Mar-03.
+            it.copy(selectedDate = com.frerox.toolz.util.CalendarUtils.addMonthsClamped(it.selectedDate, 1))
         }
     }
 
     fun previousMonth() {
         _uiState.update {
-            val cal = Calendar.getInstance().apply { timeInMillis = it.selectedDate }
-            cal.add(Calendar.MONTH, -1)
-            it.copy(selectedDate = cal.timeInMillis)
+            it.copy(selectedDate = com.frerox.toolz.util.CalendarUtils.addMonthsClamped(it.selectedDate, -1))
         }
     }
 
@@ -250,7 +246,22 @@ class CalendarViewModel @Inject constructor(
                 )
             }
 
-            val systemPrompt = buildSystemPrompt()
+            // CAL-P1-02.6: offline gate — never surface raw network errors in offline mode.
+            if (_uiState.value.offlineModeEnabled) {
+                handleAiFailure("Offline mode is on — AI parsing isn't available. Add the event manually.")
+                return@launch
+            }
+
+            // CAL-P1-02: prompt needs existing events; fetch once on IO (not per emission).
+            val existing: List<EventEntry> = try {
+                withContext(Dispatchers.IO) {
+                    repository.getAllEventsSync()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Existing-events fetch failed, continuing without", e)
+                emptyList()
+            }
+            val systemPrompt = buildSystemPrompt(existing)
             val userContent  = buildUserContent(
                 prompt      = prompt.ifBlank { _uiState.value.lastUserPrompt },
                 retryRawJson = retryRawJson,
@@ -258,18 +269,32 @@ class CalendarViewModel @Inject constructor(
             val fullPrompt   = "$systemPrompt\n\n$userContent"
 
             try {
-                val result = chatRepository
+                // CAL-P1-01: pass through the USER-selected model (never hardcoded).
+                // CAL-P1-02.4: collect the FULL response — .first() truncates streaming chats.
+                val selectedModel = withContext(Dispatchers.IO) {
+                    runCatching { aiSettingsManager.getSelectedModel() }.getOrNull()
+                }
+                val sb = StringBuilder()
+                var lastError: String? = null
+                chatRepository
                     .getChatResponse(
                         prompt        = fullPrompt,
                         history       = emptyList(),
                         image         = _uiState.value.attachedImage,
-                        modelOverride = "openai/gpt-oss-120b"
+                        modelOverride = selectedModel?.takeIf { it.isNotBlank() }
                     )
-                    .first()
+                    .collect { result ->
+                        result
+                            .onSuccess { chunk -> sb.append(chunk.text) }
+                            .onFailure { e -> lastError = e.message }
+                    }
 
-                result
-                    .onSuccess { chunk -> handleAiSuccess(chunk.text) }
-                    .onFailure { e   -> handleAiFailure(e.message) }
+                val fullText = sb.toString()
+                if (fullText.isNotBlank()) {
+                    handleAiSuccess(fullText)
+                } else {
+                    handleAiFailure(lastError)
+                }
 
             } catch (e: Exception) {
                 handleAiFailure(e.message)
@@ -375,6 +400,12 @@ class CalendarViewModel @Inject constructor(
         color: String,
         reminders: Boolean,
     ) {
+        // CAL-P1-04: past + reminders=true must warn, never silently skip.
+        if (reminders && timeMillis <= System.currentTimeMillis() + 60_000L) {
+            _uiState.update {
+                it.copy(errorMessage = "That time is in the past — reminders won't fire. Pick a future time.")
+            }
+        }
         viewModelScope.launch {
             val event = EventEntry(
                 title            = title.trim(),
@@ -384,31 +415,48 @@ class CalendarViewModel @Inject constructor(
                 subjectColor     = color,
                 remindersEnabled = reminders,
             )
-            val id = repository.insertEvent(event)
-            if (reminders) {
-                alarmScheduler.scheduleEventReminders(event.copy(id = id.toInt()))
+            try {
+                val id = repository.insertEvent(event)
+                if (reminders) {
+                    alarmScheduler.scheduleEventReminders(event.copy(id = id.toInt()))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "addManualEvent failed", e)
+                _uiState.update { it.copy(errorMessage = "Couldn't save the event. Please try again.") }
             }
         }
     }
 
     fun updateEvent(event: EventEntry) {
         viewModelScope.launch {
-            repository.updateEvent(event)
-            if (event.remindersEnabled && !event.isCompleted) {
-                alarmScheduler.scheduleEventReminders(event)
-            } else {
-                alarmScheduler.cancelEventReminders(event)
+            try {
+                repository.updateEvent(event)
+                // CAL-P0-04: cancel-first is inside scheduleEventReminders, but an
+                // update to past/disabled must actively cancel (no stale alarm).
+                if (event.remindersEnabled && !event.isCompleted) {
+                    alarmScheduler.scheduleEventReminders(event)
+                } else {
+                    alarmScheduler.cancelEventReminders(event)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "updateEvent failed for ${event.id}", e)
+                _uiState.update { it.copy(errorMessage = "Couldn't update the event. Please try again.") }
             }
         }
     }
 
     fun toggleEventCompletion(event: EventEntry) {
         viewModelScope.launch {
-            val updated = event.copy(isCompleted = !event.isCompleted)
-            repository.updateEvent(updated)
-            when {
-                updated.isCompleted      -> alarmScheduler.cancelEventReminders(updated)
-                updated.remindersEnabled -> alarmScheduler.scheduleEventReminders(updated)
+            try {
+                val updated = event.copy(isCompleted = !event.isCompleted)
+                repository.updateEvent(updated)
+                when {
+                    updated.isCompleted      -> alarmScheduler.cancelEventReminders(updated)
+                    updated.remindersEnabled -> alarmScheduler.scheduleEventReminders(updated)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "toggleEventCompletion failed for ${event.id}", e)
+                _uiState.update { it.copy(errorMessage = "Couldn't update the event. Please try again.") }
             }
         }
     }
@@ -430,8 +478,13 @@ class CalendarViewModel @Inject constructor(
 
     fun deleteEvent(event: EventEntry) {
         viewModelScope.launch {
-            repository.deleteEvent(event.id)
-            alarmScheduler.cancelEventReminders(event)
+            try {
+                repository.deleteEvent(event.id)
+                alarmScheduler.cancelEventReminders(event)
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteEvent failed for ${event.id}", e)
+                _uiState.update { it.copy(errorMessage = "Couldn't delete the event. Please try again.") }
+            }
         }
     }
 
@@ -448,23 +501,67 @@ class CalendarViewModel @Inject constructor(
      * - Provides the **next 14 days** as explicit reference dates.
      * - Passes **existing event titles + dates** for duplicate/conflict awareness.
      * - Includes worked examples for the most common failure modes.
+     *
+     * CAL-P1-02: implements what this doc promises (tz/ISO/week/existing).
      */
-    private fun buildSystemPrompt(): String {
-        val now = Calendar.getInstance()
+    private fun buildSystemPrompt(existing: List<EventEntry> = emptyList()): String {
+        val tz = TimeZone.getDefault()
+        val now = Calendar.getInstance(tz)
         val humanFmt = SimpleDateFormat("EEEE, MMMM dd, yyyy, h:mm a", Locale.US)
         val nowHuman = humanFmt.format(now.time)
+        val isoFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply {
+            timeZone = tz
+        }
+        val nowIso = isoFmt.format(now.time)
+        val utcOffset = formatUtcOffset(tz)
+
+        // Full current week Mon–Sun.
+        val weekStart = (now.clone() as Calendar).apply {
+            firstDayOfWeek = Calendar.MONDAY
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val dayFmt = SimpleDateFormat("EEEE yyyy-MM-dd", Locale.US)
+        val weekLines = (0..6).joinToString("\n") { i ->
+            val d = (weekStart.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, i) }
+            "- ${dayFmt.format(d.time)}"
+        }
+        // Next 14 days explicit reference.
+        val refFmt = SimpleDateFormat("EEEE yyyy-MM-dd", Locale.US)
+        val next14 = (0..13).joinToString("\n") { i ->
+            val d = (now.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, i) }
+            "- ${refFmt.format(d.time)}"
+        }
+        val existingLines = existing.take(50).joinToString("\n") { e ->
+            val f = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply { timeZone = tz }
+            "- ${e.title} @ ${try { f.format(Date(e.timestamp)) } catch (_: Exception) { "?" }}"
+        }.ifBlank { "(none)" }
 
         return """
 You are the core Calendar Parsing Engine for the "Toolz" utility ecosystem. Your sole purpose is to analyze natural language user requests, extract event metrics, and format them into a strict JSON payload for system execution.
 
 ### CRITICAL CONTEXT
 - Current Reference Date/Time: $nowHuman
+- Current ISO-8601: $nowIso
+- Device Timezone ID: ${tz.id} ($utcOffset) — resolve ALL relative times in this zone.
+- "Today" means ${dayFmt.format(now.time)} in ${tz.id}.
+
+### CURRENT WEEK (Monday-first):
+$weekLines
+
+### NEXT 14 DAYS REFERENCE:
+$next14
+
+### EXISTING EVENTS (avoid duplicates, detect conflicts):
+$existingLines
 
 ### STRICT OPERATIONAL RULES
-1. OUTPUT ONLY JSON. Do not include introductory text, conversational pleasantries, markdown blocks (other than the raw JSON), or concluding remarks. 
-2. DATE MATHEMATICS: Use the Current Reference Date to resolve all relative time statements ("tomorrow", "next Friday", "in 3 hours", "at 2pm").
-3. IMPLICIT DURATION: If the user does not specify an end time or duration, default "duration_minutes" to 60.
-4. UNRESOLVABLE INPUT: If the input contains absolutely no date or event intent, return an empty JSON object: {}.
+1. OUTPUT ONLY JSON. Do not include introductory text, conversational pleasantries, markdown blocks (other than the raw JSON), or concluding remarks.
+2. DATE MATHEMATICS: Use the Current Reference Date to resolve all relative time statements ("tomorrow", "next Friday", "in 3 hours", "at 2pm"). "next Friday" = the Friday of NEXT week, not this week if today is past Friday.
+3. TIMEZONE: Emit "start_time_iso" in LOCAL wall time (YYYY-MM-DDTHH:MM:SS, no Z suffix) as it appears in ${tz.id}.
+4. IMPLICIT DURATION: If the user does not specify an end time or duration, default "duration_minutes" to 60.
+5. UNRESOLVABLE INPUT: If the input contains absolutely no date or event intent, return an empty JSON object: {}.
 
 ### EXPECTED OUTPUT SCHEMA
 {
@@ -535,27 +632,35 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
 
     private suspend fun handleAiSuccess(rawResponse: String) {
         try {
-            val events = withContext(Dispatchers.Default) { parseAiJson(rawResponse) }
+            val rawEvents = withContext(Dispatchers.Default) { parseAiJson(rawResponse) }
 
-            if (events.isEmpty()) {
+            if (rawEvents.isEmpty()) {
                 _uiState.update {
                     it.copy(
                         isLoading   = false,
                         isScanning  = false,
                         syncResults = emptyList(),
+                        // CAL-P1-02.5: keep preview only until confirm/cancel — failed parse clears image.
+                        attachedImage = null,
                         errorMessage = "No events were found. Try rephrasing or adding more detail.",
                     )
                 }
                 return
             }
 
-            val syncResults = syncUseCase.processAiCalendarEvents(events)
+            // CAL-P1-02: validate every event on the unified AiCalendarEvent model.
+            val warnings = mutableListOf<String>()
+            val events = rawEvents.map { validateAiCalendarEvent(it, warnings) }
+
+            val (syncResults, syncWarnings) = syncUseCase.processAiCalendarEventsWithWarnings(events)
+            warnings.addAll(syncWarnings)
 
             _uiState.update {
                 it.copy(
                     isLoading   = false,
                     isScanning  = false,
                     syncResults = syncResults,
+                    errorMessage = warnings.takeIf { w -> w.isNotEmpty() }?.joinToString("\n"),
                 )
             }
         } catch (e: Exception) {
@@ -564,6 +669,8 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
                 it.copy(
                     isLoading            = false,
                     isScanning           = false,
+                    // CAL-P1-02.5: failed parse clears the preview image.
+                    attachedImage        = null,
                     errorMessage         = "Couldn't parse the AI response. Tap Retry to try again.",
                     rawAiFailureResponse = rawResponse,
                 )
@@ -572,13 +679,26 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
     }
 
     private fun handleAiFailure(message: String?) {
+        // CAL-P1-02.6: map raw network errors to user strings — never leak e.message verbatim.
+        val userMessage = when {
+            message.isNullOrBlank() -> "AI request failed. Please check your connection and API key."
+            message.contains("timeout", ignoreCase = true) ->
+                "AI request timed out. Check your connection and try again."
+            message.contains("offline", ignoreCase = true) ->
+                "You're offline — AI parsing isn't available. Add the event manually."
+            message.contains("401", ignoreCase = true) || message.contains("unauthorized", ignoreCase = true) ||
+                message.contains("api key", ignoreCase = true) || message.contains("apikey", ignoreCase = true) ->
+                "AI request rejected — check your API key in AI settings."
+            message.contains("429", ignoreCase = true) || message.contains("rate", ignoreCase = true) ->
+                "AI is rate-limited right now. Wait a minute and tap Retry."
+            else -> "AI request failed. Please check your connection and API key."
+        }
+        Log.w(TAG, "AI failure (mapped): $message -> $userMessage")
         _uiState.update {
             it.copy(
                 isLoading    = false,
                 isScanning   = false,
-                errorMessage = message
-                    ?.takeIf { it.isNotBlank() }
-                    ?: "AI request failed. Please check your connection and API key.",
+                errorMessage = userMessage,
             )
         }
     }
@@ -587,7 +707,10 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
      * Robustly parses the AI's JSON output.
      *
      * Handles: leading/trailing whitespace, markdown fences, BOM characters,
-     * single-object responses (not wrapped in an array), mixed 10/13-digit timestamps.
+     * single-object responses (not wrapped in an array), NDJSON (`}{` sequences),
+     * mixed 10/13-digit timestamps. Unknown fields ignored, null rows filtered.
+     *
+     * CAL-P1-02: balanced-brace scan so trailing prose can't corrupt the payload.
      */
     private fun parseAiJson(raw: String): List<AiCalendarEvent> {
         val cleaned = raw
@@ -598,27 +721,190 @@ Please output ONLY the corrected raw JSON array now. No markdown, no prose.
 
         if (cleaned == "{}" || cleaned.isBlank()) return emptyList()
 
+        // CAL-P1-02: NDJSON (`}\s*{`) -> wrap as array elements.
+        val ndjsonFixed = Regex("""\}\s*\{""").replace(cleaned) { "},{ " }
+
         // Extract outermost JSON array if present
-        val arrayStart = cleaned.indexOf('[')
-        val arrayEnd   = cleaned.lastIndexOf(']')
+        val arrayStart = ndjsonFixed.indexOf('[')
+        val arrayEnd   = ndjsonFixed.lastIndexOf(']')
         if (arrayStart != -1 && arrayEnd > arrayStart) {
-            return parseJsonArray(cleaned.substring(arrayStart, arrayEnd + 1))
+            return parseJsonArray(ndjsonFixed.substring(arrayStart, arrayEnd + 1))
+        }
+
+        // Balanced-brace scan: collect every top-level {...} object.
+        val objects = extractTopLevelObjects(ndjsonFixed)
+        if (objects.isNotEmpty()) {
+            return parseJsonArray("[${objects.joinToString(",")}]")
         }
 
         // Handle single object {} as per instructions
-        val objStart = cleaned.indexOf('{')
-        val objEnd   = cleaned.lastIndexOf('}')
+        val objStart = ndjsonFixed.indexOf('{')
+        val objEnd   = ndjsonFixed.lastIndexOf('}')
         if (objStart != -1 && objEnd > objStart) {
-            return parseJsonArray("[${cleaned.substring(objStart, objEnd + 1)}]")
+            return parseJsonArray("[${ndjsonFixed.substring(objStart, objEnd + 1)}]")
         }
 
         throw IllegalArgumentException("No JSON structure found in AI response.")
     }
 
+    /** Extracts top-level balanced `{...}` objects, respecting strings/escapes. */
+    private fun extractTopLevelObjects(s: String): List<String> {
+        val out = mutableListOf<String>()
+        var depth = 0
+        var start = -1
+        var inStr = false
+        var esc = false
+        for (i in s.indices) {
+            val c = s[i]
+            if (inStr) {
+                if (esc) esc = false
+                else if (c == '\\') esc = true
+                else if (c == '"') inStr = false
+                continue
+            }
+            when (c) {
+                '"' -> inStr = true
+                '{' -> {
+                    if (depth == 0) start = i
+                    depth++
+                }
+                '}' -> {
+                    depth--
+                    if (depth == 0 && start != -1) {
+                        out.add(s.substring(start, i + 1))
+                        start = -1
+                    }
+                    if (depth < 0) depth = 0
+                }
+            }
+        }
+        return out
+    }
+
+    // Nullable DTO: filters rows missing title/time instead of failing the batch.
+    private data class AiCalendarEventDto(
+        val title: String? = null,
+        val start_time_iso: String? = null,
+        val duration_minutes: Int? = null,
+        val description: String? = null
+    )
+
     private fun parseJsonArray(json: String): List<AiCalendarEvent> {
-        val type    = Types.newParameterizedType(List::class.java, AiCalendarEvent::class.java)
-        val adapter = moshi.adapter<List<AiCalendarEvent>>(type)
-        return adapter.fromJson(json) ?: emptyList()
+        return try {
+            val type    = Types.newParameterizedType(List::class.java, AiCalendarEventDto::class.java)
+            val adapter = moshi.adapter<List<AiCalendarEventDto>>(type)
+            (adapter.fromJson(json) ?: emptyList())
+                .filter { !it.title.isNullOrBlank() && !it.start_time_iso.isNullOrBlank() }
+                .map {
+                    AiCalendarEvent(
+                        title = it.title!!.trim(),
+                        start_time_iso = it.start_time_iso!!,
+                        duration_minutes = it.duration_minutes ?: 60,
+                        description = it.description ?: ""
+                    )
+                }
+        } catch (_: Exception) {
+            // Legacy strict path for payloads the DTO can't read.
+            val type    = Types.newParameterizedType(List::class.java, AiCalendarEvent::class.java)
+            val adapter = moshi.adapter<List<AiCalendarEvent>>(type)
+            adapter.fromJson(json) ?: emptyList()
+        }
+    }
+
+    /**
+     * CAL-P1-02: validates the unified [AiCalendarEvent] model.
+     * - Parses ISO wall time in device tz (lenient=false, never fallback to `now`).
+     * - Numeric guard is magnitude-based (`ts < 1e12` s->ms), never string-length.
+     * - Out-of-range clamps with a WARNING surfaced to the user (never silent tomorrow-09:00).
+     * - Sanitizes duration (1..1439, default 60).
+     */
+    private fun validateAiCalendarEvent(event: AiCalendarEvent, warnings: MutableList<String>): AiCalendarEvent {
+        val tz = TimeZone.getDefault()
+        val now = System.currentTimeMillis()
+        var ts = parseIsoToMillis(event.start_time_iso, tz)
+            ?: run {
+                // Unparseable -> skip-neutral: place at next rounded hour + warn (never `now`).
+                val fallback = Calendar.getInstance(tz).apply {
+                    timeInMillis = now
+                    add(Calendar.HOUR_OF_DAY, 1)
+                    set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+                warnings.add("“${event.title}”: date was unclear — placed at next hour. Please verify.")
+                Log.w(TAG, "Unparseable start_time_iso='${event.start_time_iso}', fallback=$fallback")
+                fallback
+            }
+
+        // Magnitude guard (epoch seconds vs millis) — not string length.
+        if (ts in 1..999_999_999_99L) {
+            ts *= 1_000L
+            Log.d(TAG, "Converted epoch-seconds → ms: $ts")
+        }
+
+        val minTs = Calendar.getInstance(tz).apply { add(Calendar.YEAR, -MAX_YEARS_IN_PAST) }.timeInMillis
+        val maxTs = Calendar.getInstance(tz).apply { add(Calendar.YEAR, MAX_YEARS_IN_FUTURE) }.timeInMillis
+        var description = event.description
+        if (ts < minTs || ts > maxTs) {
+            val clamped = Calendar.getInstance(tz).apply {
+                timeInMillis = now
+                add(Calendar.DAY_OF_YEAR, 1)
+                set(Calendar.HOUR_OF_DAY, 9)
+                set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val fmt = SimpleDateFormat("MMM d, yyyy h:mm a", Locale.US)
+            warnings.add("“${event.title}”: date out of range — moved to ${fmt.format(Date(clamped))}. Please verify.")
+            Log.w(TAG, "Timestamp $ts out of [$minTs..$maxTs]; clamped to $clamped with warning.")
+            ts = clamped
+            description = "[Date adjusted to valid range] $description".trim()
+        }
+
+        val duration = event.duration_minutes.coerceIn(1, 1439).let {
+            if (event.duration_minutes !in 1..1439) {
+                Log.w(TAG, "Duration ${event.duration_minutes} coerced to $it")
+                it
+            } else it
+        }
+        val title = event.title.trim().take(200)
+        return event.copy(title = title, start_time_iso = event.start_time_iso, duration_minutes = duration, description = description)
+            .let { validated ->
+                // Re-emit with corrected timestamp encoded back to ISO for the use case.
+                validated.copy(start_time_iso = millisToIso(ts, tz))
+            }
+    }
+
+    private fun parseIsoToMillis(iso: String, tz: TimeZone): Long? {
+        val formats = listOf(
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US),
+            SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        )
+        for (f in formats) {
+            try {
+                f.isLenient = false
+                f.timeZone = tz
+                val t = f.parse(iso.trim())?.time ?: continue
+                // Magnitude guard for pure-epoch strings that slipped in.
+                if (iso.trim().matches(Regex("""\d{9,13}"""))) {
+                    var num = iso.trim().toLong()
+                    if (num < 1_000_000_000_000L) num *= 1_000L
+                    return num
+                }
+                return t
+            } catch (_: Exception) { }
+        }
+        // Bare epoch digits.
+        iso.trim().toLongOrNull()?.let { num ->
+            return if (num < 1_000_000_000_000L) num * 1_000L else num
+        }
+        return null
+    }
+
+    private fun millisToIso(millis: Long, tz: TimeZone): String {
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+            timeZone = tz
+            isLenient = false
+        }.format(Date(millis))
     }
 
     /**

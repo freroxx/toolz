@@ -69,6 +69,16 @@ private val SNOOZE_OPTIONS = listOf(5, 10, 15, 30)
 class EventAlarmActivity : ComponentActivity() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var ringtone: android.media.Ringtone? = null
+    private var vibrator: android.os.Vibrator? = null
+    private var dismissed = false
+    private val autoDismissHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val autoDismissRunnable = Runnable {
+        if (!dismissed) {
+            android.util.Log.i("EventAlarmActivity", "Auto-dismissing alarm after 2 min timeout")
+            dismissAlarm()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,14 +99,15 @@ class EventAlarmActivity : ComponentActivity() {
         // Keep screen on while alarm is visible
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Acquire a WakeLock so CPU stays alive long enough to render the UI
+        // CAL-P0-05: PARTIAL_WAKE_LOCK + FLAG_KEEP_SCREEN_ON (never FULL/ACQUIRE_CAUSES_WAKEUP).
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
-            PowerManager.FULL_WAKE_LOCK or
-                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    PowerManager.ON_AFTER_RELEASE,
+            PowerManager.PARTIAL_WAKE_LOCK,
             "toolz:AlarmWakeLock"
-        ).also { it.acquire(60_000L /* 60 s max */ ) }
+        ).also {
+            try { it.acquire(120_000L /* 2 min max = auto-dismiss timeout */) }
+            catch (e: Exception) { android.util.Log.w("EventAlarmActivity", "WakeLock acquire failed", e) }
+        }
 
         // Edge-to-edge so the gradient fills the entire screen
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -104,6 +115,18 @@ class EventAlarmActivity : ComponentActivity() {
         val eventId    = intent.getIntExtra(AlarmIntentKeys.EVENT_ID, -1)
         val eventTitle = intent.getStringExtra(AlarmIntentKeys.EVENT_TITLE) ?: "Scheduled Event"
         val eventTime  = intent.getLongExtra(AlarmIntentKeys.EVENT_TIME, System.currentTimeMillis())
+
+        // CAL-P0-07: missing id can never ring correctly — log + finish.
+        if (eventId == -1) {
+            android.util.Log.w("EventAlarmActivity", "Launched without event_id, finishing")
+            finish()
+            return
+        }
+
+        // CAL-P0-05: sound + vibration (visual-only never wakes the user).
+        startAlertSound()
+        // CAL-P0-05: 2-min auto-dismiss guarantees ringtone/vib never loop forever.
+        autoDismissHandler.postDelayed(autoDismissRunnable, 120_000L)
 
         // Back press → same as Dismiss
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -122,12 +145,80 @@ class EventAlarmActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onResume() {
+        super.onResume()
+        // Restart sound if user returns within the 2-min window (onPause stops it).
+        if (!dismissed && ringtone?.isPlaying != true) {
+            startAlertSound()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // CAL-P0-05: release promptly so nothing holds wake/sound in background.
+        stopAlertSound()
         releaseWakeLock()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        autoDismissHandler.removeCallbacks(autoDismissRunnable)
+        stopAlertSound()
+        releaseWakeLock()
+    }
+
+    /** CAL-P0-05: alarm sound + vibration on the ALARM stream, always with timeout. */
+    private fun startAlertSound() {
+        try {
+            if (ringtone?.isPlaying == true) return
+            val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                ?: return
+            ringtone = android.media.RingtoneManager.getRingtone(applicationContext, uri)?.apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    audioAttributes = android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                }
+                play()
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("EventAlarmActivity", "Alarm sound failed", e)
+        }
+        try {
+            @Suppress("DEPRECATION")
+            vibrator = (getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator)?.also { vib ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val pattern = longArrayOf(0, 500, 500, 500, 500)
+                    vib.vibrate(
+                        android.os.VibrationEffect.createWaveform(pattern, 0),
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .build()
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(longArrayOf(0, 500, 500), 0)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("EventAlarmActivity", "Alarm vibration failed", e)
+        }
+    }
+
+    private fun stopAlertSound() {
+        try { ringtone?.takeIf { it.isPlaying }?.stop() } catch (_: Exception) { }
+        ringtone = null
+        try { vibrator?.cancel() } catch (_: Exception) { }
+        vibrator = null
+    }
+
     private fun dismissAlarm() {
+        if (dismissed) return
+        dismissed = true
+        autoDismissHandler.removeCallbacks(autoDismissRunnable)
+        stopAlertSound()
         releaseWakeLock()
         finish()
     }
@@ -135,8 +226,15 @@ class EventAlarmActivity : ComponentActivity() {
     /**
      * Schedules a new one-shot alarm [minutes] from now with the same
      * event data, then dismisses this instance.
+     *
+     * CAL-P0-06: never call setExact* without canScheduleExactAlarms() —
+     * revoked permission must fall back to inexact, never crash.
      */
     private fun snoozeAlarm(eventId: Int, title: String, originalTime: Long, minutes: Int) {
+        if (minutes !in SNOOZE_OPTIONS) {
+            android.util.Log.w("EventAlarmActivity", "Ignoring invalid snooze minutes=$minutes")
+            return
+        }
         val snoozeTime = System.currentTimeMillis() + (minutes * 60_000L)
 
         val intent = Intent(this, EventAlarmActivity::class.java).apply {
@@ -148,24 +246,58 @@ class EventAlarmActivity : ComponentActivity() {
 
         val pendingIntent = PendingIntent.getActivity(
             this,
-            // Use a unique request code per snooze to avoid clobbering other alarms
-            (eventId * 1000 + minutes),
+            // CAL-P0-08: centralized snooze namespace (distinct from lead-type codes).
+            com.frerox.toolz.util.CalendarUtils.snoozeRequestCode(eventId, minutes),
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
-        } else {
-            alarmManager.setExact(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+        var exactUsed = false
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+                    exactUsed = true
+                } else {
+                    // CAL-P0-06: surface fallback imprecision, don't silently swallow.
+                    android.widget.Toast.makeText(
+                        this,
+                        "Exact alarms not allowed — snooze may be a few minutes late",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+                exactUsed = true
+            } else {
+                @Suppress("DEPRECATION")
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+                exactUsed = true
+            }
+        } catch (e: SecurityException) {
+            // CAL-P0-06: revoked mid-flight — never crash.
+            android.util.Log.w("EventAlarmActivity", "Exact snooze denied, using inexact fallback", e)
+            try {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTime, pendingIntent)
+                android.widget.Toast.makeText(
+                    this,
+                    "Exact alarms not allowed — snooze may be a few minutes late",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } catch (e2: Exception) {
+                android.util.Log.e("EventAlarmActivity", "Snooze fallback also failed", e2)
+                android.widget.Toast.makeText(this, "Couldn't schedule snooze", android.widget.Toast.LENGTH_LONG).show()
+                return
+            }
         }
-
+        android.util.Log.i("EventAlarmActivity", "Snoozed event $eventId +${minutes}min (exact=$exactUsed)")
         dismissAlarm()
     }
 
     private fun releaseWakeLock() {
-        wakeLock?.takeIf { it.isHeld }?.release()
+        try { wakeLock?.takeIf { it.isHeld }?.release() } catch (_: Exception) { }
         wakeLock = null
     }
 }

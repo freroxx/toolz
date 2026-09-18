@@ -18,9 +18,16 @@
 package com.frerox.toolz.data.calendar
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "events")
+/** Recurrence rule for calendar events (CAL-P1-05). Stored via [CalendarConverters]. */
+enum class Recurrence { NONE, DAILY, WEEKLY, MONTHLY, YEARLY }
+
+@Entity(
+    tableName = "events",
+    indices = [Index("timestamp"), Index("eventType")]
+)
 data class EventEntry(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
@@ -31,5 +38,10 @@ data class EventEntry(
     val isRecurring: Boolean = false,
     val recurringInterval: String? = null,
     val isCompleted: Boolean = false,
-    val remindersEnabled: Boolean = false
+    val remindersEnabled: Boolean = false,
+    // CAL-P1-05: duration/end + typed recurrence. Keep isRecurring/recurringInterval
+    // for one version as compat (derived from recurringRule where possible).
+    val endTimestamp: Long? = null,
+    val durationMinutes: Int = 60,
+    val recurringRule: Recurrence = Recurrence.NONE
 )

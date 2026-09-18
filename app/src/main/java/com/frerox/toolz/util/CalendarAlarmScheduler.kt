@@ -22,11 +22,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.service.EventReminderReceiver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "CalendarAlarmScheduler"
 
 @Singleton
 class CalendarAlarmScheduler @Inject constructor(
@@ -35,8 +38,12 @@ class CalendarAlarmScheduler @Inject constructor(
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     fun scheduleEventReminders(event: EventEntry) {
+        // CAL-P0-04: cancel-before-schedule FIRST — stale PendingIntents from a
+        // previous time must never survive an edit (incl. future->past moves).
+        // Keep this line even when early-returning below.
+        cancelEventReminders(event)
+
         if (event.isCompleted || !event.remindersEnabled) {
-            cancelEventReminders(event)
             return
         }
 
@@ -49,20 +56,18 @@ class CalendarAlarmScheduler @Inject constructor(
     }
 
     private fun schedule(event: EventEntry, type: String, triggerTime: Long) {
+        // Past triggers are skipped — but the cancel above already ran, so no
+        // stale alarm survives a future->past edit (CAL-P0-04).
         if (triggerTime <= System.currentTimeMillis()) return
 
         val intent = Intent(context, EventReminderReceiver::class.java).apply {
             putExtra("event_id", event.id)
             putExtra("reminder_type", type)
+            putExtra("event_time", event.timestamp)
         }
 
-        // Unique requestCode for each reminder type of each event
-        val requestCode = event.id * 10 + when(type) {
-            "24H" -> 1
-            "12H" -> 2
-            "1H" -> 3
-            else -> 0
-        }
+        // CAL-P0-08: centralized requestCode scheme (see CalendarUtils).
+        val requestCode = CalendarUtils.alarmRequestCode(event.id, type)
 
         val pendingIntent = PendingIntent.getBroadcast(
             context,
@@ -71,33 +76,42 @@ class CalendarAlarmScheduler @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (alarmManager.canScheduleExactAlarms()) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                } else {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                }
             } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
             }
-        } else {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+        } catch (e: SecurityException) {
+            // CAL-P0-06: revoked exact-alarm permission must not crash — fall back.
+            Log.w(TAG, "Exact alarm denied for event ${event.id}/$type, using inexact fallback", e)
+            try {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Fallback alarm also failed for event ${event.id}/$type", e2)
+            }
         }
     }
 
     fun cancelEventReminders(event: EventEntry) {
         listOf("24H", "12H", "1H").forEach { type ->
-            val requestCode = event.id * 10 + when(type) {
-                "24H" -> 1
-                "12H" -> 2
-                "1H" -> 3
-                else -> 0
-            }
+            // CAL-P0-08: FLAG_NO_CREATE — never create a PendingIntent just to cancel it.
+            val requestCode = CalendarUtils.alarmRequestCode(event.id, type)
             val intent = Intent(context, EventReminderReceiver::class.java)
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
                 requestCode,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
             )
-            alarmManager.cancel(pendingIntent)
+            if (pendingIntent != null) {
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
         }
     }
 }

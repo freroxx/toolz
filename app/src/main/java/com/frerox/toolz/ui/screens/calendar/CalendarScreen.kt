@@ -28,6 +28,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -62,6 +63,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -138,6 +141,7 @@ import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
@@ -161,6 +165,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -186,6 +191,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -203,6 +209,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -234,6 +245,7 @@ import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.theme.LocalPerformanceMode
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import com.frerox.toolz.ui.theme.ToolzTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -292,6 +304,24 @@ private fun eventTypeIcon(type: String): ImageVector = when (type) {
     else         -> Icons.Rounded.Event
 }
 
+// CAL-P2-11: locale time/date text cached per timestamp (no per-recomp SimpleDateFormat).
+@Composable
+private fun rememberTimeText(timestamp: Long): String {
+    val fmt = remember { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT, Locale.getDefault()) }
+    return remember(timestamp) {
+        try { fmt.format(Date(timestamp)) } catch (_: Exception) { "" }
+    }
+}
+
+@Composable
+private fun rememberDateTimeText(timestamp: Long): String {
+    return remember(timestamp) {
+        try {
+            SimpleDateFormat("EEE, MMM d · HH:mm", Locale.getDefault()).format(Date(timestamp))
+        } catch (_: Exception) { "" }
+    }
+}
+
 private val bouncySpring = spring<Float>(
     dampingRatio = Spring.DampingRatioLowBouncy,
     stiffness = Spring.StiffnessMediumLow
@@ -323,12 +353,48 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
     val vibrationManager  = LocalVibrationManager.current
     val scope             = rememberCoroutineScope()
 
+    // CAL-P2-04: deferred delete — Snackbar Undo 5s before the real delete lands.
+    var pendingDelete by remember { mutableStateOf<EventEntry?>(null) }
+    fun requestDelete(event: EventEntry) { pendingDelete = event }
+    pendingDelete?.let { doomed ->
+        LaunchedEffect(doomed.id, doomed.timestamp) {
+            val res = snackbarHostState.showSnackbar(
+                message = "Event deleted",
+                actionLabel = "Undo",
+                duration = androidx.compose.material3.SnackbarDuration.Short
+            )
+            if (res == SnackbarResult.ActionPerformed) {
+                pendingDelete = null // Undo — never touched the DB.
+            } else {
+                delay(5_000)
+                // Only delete if the user didn't undo/replace meanwhile.
+                if (pendingDelete?.id == doomed.id) {
+                    pendingDelete = null
+                    viewModel.deleteEvent(doomed)
+                }
+            }
+        }
+    }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
-            uri?.let { viewModel.setAttachedImage(uriToBitmap(context, it)) }
+            // CAL-P2-12: sampled decode on IO (never full-res on Main, never blocks UI).
+            uri?.let { u ->
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val bmp = uriToSampledBitmap(context, u, 1024)
+                    if (bmp != null) viewModel.setAttachedImage(bmp)
+                }
+            }
         }
     )
+
+    // CAL-P1-02.5: clear the AI prompt ONLY on success (syncResults appear).
+    // Failure keeps the text so the user can retry/edit instead of retyping.
+    val syncCount = uiState.syncResults.size
+    LaunchedEffect(syncCount) {
+        if (syncCount > 0) aiPrompt = ""
+    }
 
     val isTodaySelected = isSameDay(uiState.selectedDate, System.currentTimeMillis())
     val scrollBehavior  = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
@@ -415,15 +481,17 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                             },
                             onEventToggle  = viewModel::toggleEventCompletion,
                             onEventEdit    = { editingEvent = it },
-                            onEventDelete  = viewModel::deleteEvent
+                            onEventDelete  = ::requestDelete,
+                            onTaskToggle   = viewModel::toggleTaskCompletion
                         )
                     } else {
                         AgendaView(
                             events        = uiState.events,
                             tasks         = uiState.tasks,
                             onEventToggle = viewModel::toggleEventCompletion,
-                            onDelete      = viewModel::deleteEvent,
+                            onDelete      = ::requestDelete,
                             onEdit        = { editingEvent = it },
+                            onTaskToggle  = viewModel::toggleTaskCompletion,
                             offlineMode   = uiState.offlineModeEnabled
                         )
                     }
@@ -471,12 +539,17 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                 events        = uiState.events.filter { isSameDay(it.timestamp, date) },
                 tasks         = uiState.tasks.filter { it.dueDate?.let { d -> isSameDay(d, date) } ?: false },
                 onDismiss     = { longPressedDate = null },
-                onDeleteEvent = viewModel::deleteEvent,
+                onDeleteEvent = ::requestDelete,
                 onEditEvent   = { editingEvent = it; longPressedDate = null },
-                onToggleEvent = viewModel::toggleEventCompletion
+                onToggleEvent = viewModel::toggleEventCompletion,
+                onTaskToggle  = viewModel::toggleTaskCompletion
             )
         }
 
+        // CAL-P2-10: Back must cancel the sync overlay, not pop nav behind it.
+        BackHandler(enabled = uiState.syncResults.isNotEmpty()) {
+            viewModel.cancelSync()
+        }
         // Sync confirmation overlay
         AnimatedVisibility(
             visible = uiState.syncResults.isNotEmpty(),
@@ -541,16 +614,28 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
                     onRemoveImage    = { viewModel.setAttachedImage(null) },
                     onConfigSelected = viewModel::switchAiConfig,
                     onProcess        = {
+                        // CAL-P1-02.5: keep aiPrompt until success (cleared by syncCount effect).
                         viewModel.processAiPrompt(aiPrompt)
                         showAiSheet = false
-                        aiPrompt = ""
                     }
                 )
             }
         }
 
+        // CAL-P2-05: surface Retry for parse failures, then clear the error.
         uiState.errorMessage?.let { msg ->
-            LaunchedEffect(msg) { snackbarHostState.showSnackbar(msg) }
+            val canRetry = uiState.rawAiFailureResponse != null
+            LaunchedEffect(msg, canRetry) {
+                val res = snackbarHostState.showSnackbar(
+                    message = msg,
+                    actionLabel = if (canRetry) "Retry" else null
+                )
+                if (res == SnackbarResult.ActionPerformed) {
+                    viewModel.retryWithRawJson()
+                } else {
+                    viewModel.clearError()
+                }
+            }
         }
     }
 }
@@ -821,7 +906,21 @@ fun LoadingOverlay() {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
-            .pointerInput(Unit) { /* consume all touch */ },
+            // CAL-P2-01: modal barrier — consume everything so AI can't double-submit.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown().consume()
+                    do {
+                        val event = awaitPointerEvent()
+                        event.changes.forEach { it.consume() }
+                    } while (event.changes.any { it.pressed })
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Surface(
@@ -892,6 +991,7 @@ fun MonthViewSection(
     onEventToggle: (EventEntry) -> Unit,
     onEventEdit: (EventEntry) -> Unit,
     onEventDelete: (EventEntry) -> Unit,
+    onTaskToggle: (TaskEntry) -> Unit = {},
 ) {
     val selectedDayEvents = remember(uiState.events, uiState.selectedDate) {
         uiState.events.filter { isSameDay(it.timestamp, uiState.selectedDate) }
@@ -901,24 +1001,31 @@ fun MonthViewSection(
         uiState.tasks.filter { it.dueDate?.let { d -> isSameDay(d, uiState.selectedDate) } ?: false }
     }
 
+    // CAL-P2-03: stable gesture keys — never restart on every recomposition.
+    val latestLeft by rememberUpdatedState(onSwipeLeft)
+    val latestRight by rememberUpdatedState(onSwipeRight)
+    // CAL-P2-03: dp threshold (80px misfires on hdpi).
+    val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
     var totalDrag by remember { mutableFloatStateOf(0f) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(onSwipeLeft, onSwipeRight) {
+            .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart  = { totalDrag = 0f },
                     onDragEnd    = {
                         when {
-                            totalDrag > 80f  -> onSwipeRight()
-                            totalDrag < -80f -> onSwipeLeft()
+                            totalDrag > swipeThresholdPx  -> latestRight()
+                            totalDrag < -swipeThresholdPx -> latestLeft()
                         }
                         totalDrag = 0f
                     },
                     onDragCancel = { totalDrag = 0f },
-                    onHorizontalDrag = { change, delta ->
-                        change.consume()
+                    // CAL-P2-02: observe WITHOUT consuming — parent consume() kills
+                    // SwipeToDismissBox in the day panel. Child gestures win under
+                    // the threshold; month nav still fires on a full swipe.
+                    onHorizontalDrag = { _, delta ->
                         totalDrag += delta
                     }
                 )
@@ -941,6 +1048,7 @@ fun MonthViewSection(
             onEventToggle = onEventToggle,
             onEventEdit   = onEventEdit,
             onEventDelete = onEventDelete,
+            onTaskToggle  = onTaskToggle,
             modifier      = Modifier.weight(1f)
         )
     }
@@ -963,19 +1071,54 @@ private fun MonthGrid(
     val days = remember(selectedDate) { cal.getActualMaximum(Calendar.DAY_OF_MONTH) }
     val mon  = cal.get(Calendar.MONTH)
     val yr   = cal.get(Calendar.YEAR)
-    val firstDow = remember(selectedDate) {
-        Calendar.getInstance(tz).apply {
+    // CAL-P2-07: locale firstDayOfWeek (FR=Monday) instead of hardcoded Sunday-start.
+    val weekStart = remember { Calendar.getInstance().firstDayOfWeek }
+    val firstDow = remember(selectedDate, weekStart) {
+        val dow = Calendar.getInstance(tz).apply {
             set(Calendar.YEAR, yr)
             set(Calendar.MONTH, mon)
             set(Calendar.DAY_OF_MONTH, 1)
-        }.get(Calendar.DAY_OF_WEEK) - 1
+        }.get(Calendar.DAY_OF_WEEK)
+        (dow - weekStart + 7) % 7
     }
     val numWeeks = (firstDow + days + 6) / 7
+    // CAL-P2-06: group once per event-list change — no O(days*events) filter per cell.
+    val eventsByDay = remember(events) {
+        events.groupBy { e ->
+            Calendar.getInstance(tz).apply {
+                timeInMillis = e.timestamp
+                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+    }
+    val tasksByDay = remember(tasks) {
+        tasks.filter { it.dueDate != null }.groupBy { t ->
+            Calendar.getInstance(tz).apply {
+                timeInMillis = t.dueDate!!
+                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+    }
+    // CAL-P2-07: locale-ordered weekday header (shortWeekdays rotated to weekStart).
+    val dowLabels = remember {
+        val symbols = java.text.DateFormatSymbols.getInstance(Locale.getDefault()).shortWeekdays
+        // shortWeekdays[1..7] = Sun..Sat; rotate to weekStart…weekStart+6.
+        (0..6).map { i ->
+            val dow = ((weekStart - 1 + i) % 7) + 1
+            symbols.getOrNull(dow).orEmpty()
+                .replaceFirstChar { c -> c.uppercase(Locale.getDefault()) }
+                .take(1).ifBlank { "?" }
+        }
+    }
+    // Day cells show dots only; times render in the day panel (cached formatters there).
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
+            .semantics { contentDescription = "Calendar month $mon $yr, $numWeeks weeks" }
     ) {
         // Day-of-week header
         Row(
@@ -983,7 +1126,7 @@ private fun MonthGrid(
                 .fillMaxWidth()
                 .padding(top = 6.dp, bottom = 4.dp)
         ) {
-            listOf("S", "M", "T", "W", "T", "F", "S").forEachIndexed { i, label ->
+            dowLabels.forEachIndexed { i, label ->
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Text(
                         label,
@@ -1024,12 +1167,8 @@ private fun MonthGrid(
                                     set(Calendar.MILLISECOND, 0)
                                 }.timeInMillis
                             }
-                            val dayEvents = remember(events, dateMs) {
-                                events.filter { isSameDay(it.timestamp, dateMs) }
-                            }
-                            val hasTasks  = remember(tasks, dateMs) {
-                                tasks.any { it.dueDate?.let { d -> isSameDay(d, dateMs) } ?: false }
-                            }
+                            val dayEvents = eventsByDay[dateMs].orEmpty()
+                            val hasTasks = tasksByDay[dateMs]?.isNotEmpty() == true
                             DayCell(
                                 day         = day,
                                 isSelected  = isSameDay(dateMs, selectedDate),
@@ -1189,6 +1328,7 @@ private fun DayPreviewPanel(
     onEventToggle: (EventEntry) -> Unit,
     onEventEdit: (EventEntry) -> Unit,
     onEventDelete: (EventEntry) -> Unit,
+    onTaskToggle: (TaskEntry) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1236,7 +1376,7 @@ private fun DayPreviewPanel(
                     ) {
                         Column {
                             Text(
-                                SimpleDateFormat("EEEE", Locale.getDefault()).format(Date(date)).uppercase(),
+                                SimpleDateFormat("EEEE", Locale.getDefault()).format(Date(date)).uppercase(Locale.getDefault()),
                                 style         = MaterialTheme.typography.labelSmall,
                                 fontWeight    = FontWeight.ExtraBold,
                                 color         = MaterialTheme.colorScheme.primary,
@@ -1286,9 +1426,10 @@ private fun DayPreviewPanel(
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(events, key = { it.id }) { event ->
+                            // CAL-P2-06: itemsIndexed index param — no indexOf() in composition.
+                            itemsIndexed(events, key = { _, e -> e.id }) { index, event ->
                                 StaggeredEntrance(
-                                    index = events.indexOf(event),
+                                    index = index,
                                     modifier = Modifier.animateItem()
                                 ) {
                                     CompactEventItem(
@@ -1299,12 +1440,12 @@ private fun DayPreviewPanel(
                                     )
                                 }
                             }
-                            items(tasks, key = { it.id }) { task ->
+                            itemsIndexed(tasks, key = { _, t -> t.id }) { index, task ->
                                 StaggeredEntrance(
-                                    index = events.size + tasks.indexOf(task),
+                                    index = events.size + index,
                                     modifier = Modifier.animateItem()
                                 ) {
-                                    CompactTaskItem(task)
+                                    CompactTaskItem(task, onToggle = onTaskToggle)
                                 }
                             }
                         }
@@ -1325,7 +1466,12 @@ private fun PanelEmptyState() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("📅", style = MaterialTheme.typography.displaySmall)
+            // CAL-P2-11: vector icon, never emoji.
+            Icon(
+                Icons.Rounded.CalendarMonth, null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.outlineVariant
+            )
             Text(
                 stringResource(R.string.st_CalendarScreen_1b2c),
                 style      = MaterialTheme.typography.bodyLarge,
@@ -1455,7 +1601,7 @@ private fun CompactEventItem(
                                 tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                             )
                             Text(
-                                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.timestamp)),
+                                rememberTimeText(event.timestamp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f)
                             )
@@ -1479,6 +1625,7 @@ private fun CompactEventItem(
                         }
                     }
                     // Toggle button
+                    // CAL-P2-04: explicit toggle control — card tap edits (onTap), never toggles.
                     FilledTonalIconButton(
                         onClick = {
                             vibrationManager?.vibrateTick()
@@ -1537,11 +1684,16 @@ private fun CompactEventItem(
 }
 
 @Composable
-private fun CompactTaskItem(task: TaskEntry) {
+private fun CompactTaskItem(
+    task: TaskEntry,
+    onToggle: (TaskEntry) -> Unit = {},
+) {
     Surface(
         color    = MaterialTheme.colorScheme.surfaceContainer,
         shape    = SmallExpressiveShape,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Task ${task.title}" }
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -1569,6 +1721,7 @@ private fun CompactTaskItem(task: TaskEntry) {
                         task.title,
                         style      = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
+                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis
                     )
@@ -1579,6 +1732,15 @@ private fun CompactTaskItem(task: TaskEntry) {
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+                // CAL-P2-11: tasks are toggleable (was read-only).
+                Checkbox(
+                    checked = task.isCompleted,
+                    onCheckedChange = { onToggle(task) },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (task.isCompleted) "Mark task ${task.title} as not done" else "Mark task ${task.title} as done"
+                        role = Role.Checkbox
+                    }
+                )
             }
         }
     }
@@ -1595,11 +1757,21 @@ fun AgendaView(
     onEventToggle: (EventEntry) -> Unit,
     onDelete: (EventEntry) -> Unit,
     onEdit: (EventEntry) -> Unit,
+    onTaskToggle: (TaskEntry) -> Unit = {},
     offlineMode: Boolean = false,
 ) {
-    val itemsByDay = remember(events, tasks) {
-        (events.map { CalendarItem.Event(it) } +
-                tasks.filter { it.dueDate != null }.map { CalendarItem.Task(it) })
+    // CAL-P2-10: never load entire history from oldest — window to last 30d.
+    val windowStart = remember {
+        Calendar.getInstance().apply {
+            timeInMillis = System.currentTimeMillis()
+            add(Calendar.DAY_OF_YEAR, -30)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val itemsByDay = remember(events, tasks, windowStart) {
+        (events.filter { it.timestamp >= windowStart }.map { CalendarItem.Event(it) } +
+                tasks.filter { (it.dueDate ?: 0L) >= windowStart }.map { CalendarItem.Task(it) })
             .sortedBy { it.timestamp }
             .groupBy {
                 Calendar.getInstance().apply {
@@ -1615,12 +1787,31 @@ fun AgendaView(
         return
     }
 
+    // CAL-P2-10: start scrolled at today instead of the oldest day.
+    val dayKeys = itemsByDay.keys.sorted()
+    val todayMidnight = remember(windowStart) {
+        Calendar.getInstance().apply {
+            timeInMillis = System.currentTimeMillis()
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val listState = rememberLazyListState()
+    LaunchedEffect(dayKeys) {
+        val todayIdx = dayKeys.indexOfFirst { it >= todayMidnight }
+        if (todayIdx > 0) {
+            // Each day contributes 1 header + N cards; approximate to header index.
+            var flat = 0
+            for (i in 0 until todayIdx) flat += 1 + (itemsByDay[dayKeys[i]]?.size ?: 0)
+            try { listState.scrollToItem(flat.coerceAtLeast(0)) } catch (_: Exception) { }
+        }
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .fadingEdges(top = 16.dp, bottom = 80.dp),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 120.dp),
-        state = rememberLazyListState(),
+        state = listState,
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         itemsByDay.forEach { (dayMs, dayItems) ->
@@ -1649,7 +1840,7 @@ fun AgendaView(
                             onDelete = { onDelete(item.event) },
                             onEdit   = { onEdit(item.event) }
                         )
-                        is CalendarItem.Task  -> AgendaTaskCard(item.task)
+                        is CalendarItem.Task  -> AgendaTaskCard(item.task, onToggle = onTaskToggle)
                     }
                 }
             }
@@ -1668,7 +1859,12 @@ private fun AgendaEmptyState(offlineMode: Boolean) {
             modifier = Modifier.padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("🗓️", style = MaterialTheme.typography.displayMedium)
+            // CAL-P2-11: vector icon, never emoji.
+            Icon(
+                Icons.AutoMirrored.Rounded.EventNote, null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.outlineVariant
+            )
             Text(
                 stringResource(R.string.st_CalendarScreen_e5f6),
                 style      = MaterialTheme.typography.titleMedium,
@@ -1688,10 +1884,17 @@ private fun AgendaEmptyState(offlineMode: Boolean) {
 @Composable
 private fun AgendaDayHeader(dayMs: Long, isToday: Boolean, count: Int) {
     val isYesterday = remember(dayMs) { isYesterday(dayMs) }
+    // CAL-P2-11: a11y — date + count exposed as a header.
+    val dayLabel = remember(dayMs, count) {
+        try {
+            SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date(dayMs)) + ", $count items"
+        } catch (_: Exception) { "$count items" }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 20.dp, bottom = 10.dp),
+            .padding(top = 20.dp, bottom = 10.dp)
+            .semantics { contentDescription = dayLabel },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1756,12 +1959,16 @@ fun AgendaEventCard(
         label         = "agenda_alpha"
     )
     var showMenu by remember { mutableStateOf(false) }
+    val timeText = rememberTimeText(event.timestamp)
 
     Surface(
-        onClick  = onToggle,
+        // CAL-P2-04: agenda tap EDITS (accidental toggles had no undo); toggle via checkbox/menu.
+        onClick  = onEdit,
         color    = MaterialTheme.colorScheme.surfaceContainerLow,
         shape    = SquircleShape,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "${event.title} $timeText" }
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -1810,7 +2017,7 @@ fun AgendaEventCard(
                             tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                         )
                         Text(
-                            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.timestamp)),
+                            timeText,
                             style      = MaterialTheme.typography.labelMedium,
                             color      = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f),
                             fontWeight = FontWeight.Medium
@@ -1844,6 +2051,18 @@ fun AgendaEventCard(
                         )
                     }
                 }
+                // CAL-P2-04: explicit checkbox toggles (tap on card edits).
+                Checkbox(
+                    checked = event.isCompleted,
+                    onCheckedChange = {
+                        vibrationManager?.vibrateTick()
+                        onToggle()
+                    },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (event.isCompleted) "Mark ${event.title} as not done" else "Mark ${event.title} as done"
+                        role = Role.Checkbox
+                    }
+                )
                 Box {
                     IconButton(onClick = { showMenu = true }, Modifier.size(36.dp)) {
                         Icon(
@@ -1893,11 +2112,16 @@ fun AgendaEventCard(
 }
 
 @Composable
-fun AgendaTaskCard(task: TaskEntry) {
+fun AgendaTaskCard(
+    task: TaskEntry,
+    onToggle: (TaskEntry) -> Unit = {},
+) {
     Surface(
         color    = MaterialTheme.colorScheme.surfaceContainerLow,
         shape    = SquircleShape,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Task ${task.title}" }
     ) {
         Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -1921,7 +2145,12 @@ fun AgendaTaskCard(task: TaskEntry) {
                     Icon(Icons.Rounded.Checklist, null, tint = TaskGreen, modifier = Modifier.size(22.dp))
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(task.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
+                    )
                     Spacer(Modifier.height(2.dp))
                     Surface(color = TaskGreen.copy(0.12f), shape = RoundedCornerShape(4.dp)) {
                         Text(
@@ -1933,6 +2162,15 @@ fun AgendaTaskCard(task: TaskEntry) {
                         )
                     }
                 }
+                // CAL-P2-11: tasks are toggleable (was read-only).
+                Checkbox(
+                    checked = task.isCompleted,
+                    onCheckedChange = { onToggle(task) },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (task.isCompleted) "Mark task ${task.title} as not done" else "Mark task ${task.title} as done"
+                        role = Role.Checkbox
+                    }
+                )
             }
         }
     }
@@ -2019,11 +2257,18 @@ fun SyncConfirmationOverlay(
                         )
                     }
                     Spacer(Modifier.height(10.dp))
+                    // CAL-P2-08: ASK is a real option (was silently mapped to ALWAYS).
+                    // Product default stays ASK = respect per-event value; document if changed.
                     ToolzConnectedButtonGroup(
-                        selectedIndex = listOf("ALWAYS", "YES", "NOPE").indexOf(aiPreference).coerceAtLeast(0),
-                        options       = listOf(stringResource(R.string.st_CalendarScreen_w3x4), stringResource(R.string.st_CalendarScreen_y5z6), stringResource(R.string.st_CalendarScreen_a7b8)),
+                        selectedIndex = listOf("ALWAYS", "YES", "NOPE", "ASK").indexOf(aiPreference).coerceAtLeast(0),
+                        options       = listOf(
+                            stringResource(R.string.st_CalendarScreen_w3x4),
+                            stringResource(R.string.st_CalendarScreen_y5z6),
+                            stringResource(R.string.st_CalendarScreen_a7b8),
+                            "Ask"
+                        ),
                         onOptionSelected = { idx ->
-                            onPreferenceChange(listOf("ALWAYS", "YES", "NOPE")[idx])
+                            onPreferenceChange(listOf("ALWAYS", "YES", "NOPE", "ASK")[idx])
                         }
                     )
                 }
@@ -2031,28 +2276,39 @@ fun SyncConfirmationOverlay(
 
             Spacer(Modifier.height(16.dp))
 
+            // CAL-P2-09: stable keys + edit dialog hoisted by index (no per-row remember).
+            var editingSyncIndex by remember(results.size) { mutableStateOf(-1) }
             LazyColumn(
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding      = PaddingValues(bottom = 8.dp)
             ) {
-                itemsIndexed(results) { index, result ->
-                    val event = when (result) {
-                        is SyncResult.New         -> result.event
-                        is SyncResult.Reschedule  -> result.updated
+                itemsIndexed(
+                    results,
+                    key = { index, result ->
+                        val e = when (result) {
+                            is SyncResult.New -> result.event
+                            is SyncResult.Reschedule -> result.updated
+                        }
+                        "$index:${if (result is SyncResult.Reschedule) "r" else "n"}:${e.title.hashCode()}:${e.timestamp}"
                     }
-                    var showEdit by remember { mutableStateOf(false) }
+                ) { index, result ->
                     StaggeredEntrance(index = index) {
-                        SyncResultCard(result, onClick = { showEdit = true })
-                    }
-                    if (showEdit) {
-                        EditEventDialog(
-                            event     = event,
-                            onDismiss = { showEdit = false },
-                            onConfirm = { updated -> onResultUpdate(index, updated); showEdit = false }
-                        )
+                        SyncResultCard(result, onClick = { editingSyncIndex = index })
                     }
                 }
+            }
+            // Hoisted editor — always binds the CURRENT row at editingSyncIndex.
+            editingSyncIndex.takeIf { it in results.indices }?.let { editIndex ->
+                val editEvent = when (val r = results[editIndex]) {
+                    is SyncResult.New -> r.event
+                    is SyncResult.Reschedule -> r.updated
+                }
+                EditEventDialog(
+                    event = editEvent,
+                    onDismiss = { editingSyncIndex = -1 },
+                    onConfirm = { updated -> onResultUpdate(editIndex, updated); editingSyncIndex = -1 }
+                )
             }
 
             // Bottom actions
@@ -2117,7 +2373,7 @@ fun SyncResultCard(result: SyncResult, onClick: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(event.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    SimpleDateFormat("EEE, MMM d · HH:mm", Locale.getDefault()).format(Date(event.timestamp)),
+                    rememberDateTimeText(event.timestamp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2155,6 +2411,7 @@ fun DayDetailSheet(
     onDeleteEvent: (EventEntry) -> Unit,
     onEditEvent: (EventEntry) -> Unit,
     onToggleEvent: (EventEntry) -> Unit,
+    onTaskToggle: (TaskEntry) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -2244,7 +2501,7 @@ fun DayDetailSheet(
                         )
                     }
                     items(tasks, key = { it.id }) { task ->
-                        AgendaTaskCard(task)
+                        AgendaTaskCard(task, onToggle = onTaskToggle)
                     }
                 }
             }
@@ -2261,9 +2518,11 @@ fun SmallEventItem(
 ) {
     val vibrationManager = LocalVibrationManager.current
     val color = remember(event.subjectColor) { eventColor(event.subjectColor) } ?: MaterialTheme.colorScheme.primary
+    val timeText = rememberTimeText(event.timestamp)
 
     Surface(
-        onClick  = onToggle,
+        // CAL-P2-04: tap edits; toggle lives in the overflow/menu, never on the row.
+        onClick  = onEdit,
         color    = color.copy(alpha = 0.06f),
         shape    = SmallExpressiveShape,
         border   = BorderStroke(1.dp, color.copy(alpha = 0.12f)),
@@ -2288,13 +2547,24 @@ fun SmallEventItem(
                     else MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    "${event.eventType} · ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(event.timestamp))}",
+                    "${event.eventType} · $timeText",
                     style    = MaterialTheme.typography.labelSmall,
                     color    = color,
                     fontWeight = FontWeight.SemiBold
                 )
             }
             Row {
+                IconButton(onClick = {
+                    vibrationManager?.vibrateTick()
+                    onToggle()
+                }, Modifier.size(36.dp)) {
+                    Icon(
+                        if (event.isCompleted) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                        contentDescription = if (event.isCompleted) "Mark as not done" else "Mark as done",
+                        modifier = Modifier.size(17.dp),
+                        tint = if (event.isCompleted) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
+                    )
+                }
                 IconButton(onClick = onEdit, Modifier.size(36.dp)) {
                     Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
                 }
@@ -2589,13 +2859,15 @@ private fun PickerRow(
 @Composable
 private fun ColorPicker(selectedColor: String, onColorSelect: (String) -> Unit) {
     val vibrationManager = LocalVibrationManager.current
+    // CAL-P2-11: normalize invalid/blank colors so the selection ring always lands somewhere.
+    val normalized = if (selectedColor in EventColorPalette) selectedColor else EventColorPalette[5]
     Row(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.horizontalScroll(rememberScrollState())
     ) {
         EventColorPalette.forEach { hex ->
             val color      = remember(hex) { runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrElse { Color.Gray } }
-            val isSelected = selectedColor == hex
+            val isSelected = normalized == hex
             val scale by animateFloatAsState(
                 targetValue   = if (isSelected) 1.25f else 1f,
                 animationSpec = spring(Spring.DampingRatioLowBouncy),
@@ -2644,14 +2916,48 @@ fun AddEventDialog(
     var selectedColor    by rememberSaveable { mutableStateOf(EventColorPalette[5]) }
     var remindersEnabled by rememberSaveable { mutableStateOf(true) }
 
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialDateMillis)
-    val timeState       = rememberTimePickerState()
+    // CAL-P0-01: DatePicker uses UTC-midnight; convert local -> UTC for initial state.
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = remember(initialDateMillis) {
+            com.frerox.toolz.util.CalendarUtils.localTimestampToDatePickerUtc(initialDateMillis)
+        }
+    )
+    // CAL-P2-10: default to next rounded hour instead of silent 00:00 midnight.
+    val timeState = rememberTimePickerState(
+        initialHour = remember {
+            java.util.Calendar.getInstance().let {
+                val h = it.get(java.util.Calendar.HOUR_OF_DAY)
+                val m = it.get(java.util.Calendar.MINUTE)
+                if (m >= 50) (h + 1) % 24 else h
+            }
+        },
+        initialMinute = remember {
+            java.util.Calendar.getInstance().let {
+                val m = it.get(java.util.Calendar.MINUTE)
+                when {
+                    m >= 50 -> 0
+                    else -> ((m + 10) / 15) * 15 % 60
+                }
+            }
+        }
+    )
     var showDatePicker  by remember { mutableStateOf(false) }
     var showTimePicker  by remember { mutableStateOf(false) }
 
     val dateLbl = remember(datePickerState.selectedDateMillis) {
-        datePickerState.selectedDateMillis?.let {
-            SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(Date(it))
+        datePickerState.selectedDateMillis?.let { utc ->
+            // CAL-P0-01: extract Y/M/D in UTC, then format in local tz (no double-shift).
+            val (y, m, d) = com.frerox.toolz.util.CalendarUtils.datePickerUtcToLocalYMD(utc)
+            val local = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.YEAR, y)
+                set(java.util.Calendar.MONTH, m)
+                set(java.util.Calendar.DAY_OF_MONTH, d)
+                set(java.util.Calendar.HOUR_OF_DAY, 12)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.time
+            SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(local)
         } ?: "Select date"
     }
     val timeLbl = String.format(Locale.getDefault(), "%02d:%02d", timeState.hour, timeState.minute)
@@ -2679,13 +2985,10 @@ fun AddEventDialog(
         onDismiss      = onDismiss,
         onConfirm      = {
             val datePart = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
-            val ts = Calendar.getInstance().apply {
-                timeInMillis = datePart
-                set(Calendar.HOUR_OF_DAY, timeState.hour)
-                set(Calendar.MINUTE, timeState.minute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
+            // CAL-P0-01: UTC Y/M/D + local time fields (no timezoneOffset hacks — DST-safe).
+            val ts = com.frerox.toolz.util.CalendarUtils.combineDatePickerUtcWithTime(
+                datePart, timeState.hour, timeState.minute
+            )
             onConfirm(title, description.takeIf { it.isNotBlank() }, ts, selectedType, selectedColor, remindersEnabled)
         }
     )
@@ -2718,15 +3021,30 @@ fun EditEventDialog(
     var selectedColor    by rememberSaveable { mutableStateOf(event.subjectColor.ifBlank { EventColorPalette[5] }) }
     var remindersEnabled by rememberSaveable { mutableStateOf(event.remindersEnabled) }
 
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = event.timestamp)
+    // CAL-P0-01: local event.timestamp -> UTC-midnight for DatePicker initial state.
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = remember(event.timestamp) {
+            com.frerox.toolz.util.CalendarUtils.localTimestampToDatePickerUtc(event.timestamp)
+        }
+    )
     val calInit         = remember { Calendar.getInstance().apply { timeInMillis = event.timestamp } }
     val timeState       = rememberTimePickerState(calInit.get(Calendar.HOUR_OF_DAY), calInit.get(Calendar.MINUTE))
     var showDatePicker  by remember { mutableStateOf(false) }
     var showTimePicker  by remember { mutableStateOf(false) }
 
     val dateLbl = remember(datePickerState.selectedDateMillis) {
-        datePickerState.selectedDateMillis?.let {
-            SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(Date(it))
+        datePickerState.selectedDateMillis?.let { utc ->
+            val (y, m, d) = com.frerox.toolz.util.CalendarUtils.datePickerUtcToLocalYMD(utc)
+            val local = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.YEAR, y)
+                set(java.util.Calendar.MONTH, m)
+                set(java.util.Calendar.DAY_OF_MONTH, d)
+                set(java.util.Calendar.HOUR_OF_DAY, 12)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.time
+            SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault()).format(local)
         } ?: "Select date"
     }
     val timeLbl = String.format(Locale.getDefault(), "%02d:%02d", timeState.hour, timeState.minute)
@@ -2754,12 +3072,15 @@ fun EditEventDialog(
         onDismiss      = onDismiss,
         onConfirm      = {
             val datePart = datePickerState.selectedDateMillis ?: event.timestamp
-            val ts = Calendar.getInstance().apply {
-                timeInMillis = datePart
-                set(Calendar.HOUR_OF_DAY, timeState.hour)
-                set(Calendar.MINUTE, timeState.minute)
-                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
+            // CAL-P0-01: UTC Y/M/D + local time fields (no timezoneOffset hacks — DST-safe).
+            val ts = if (datePickerState.selectedDateMillis != null) {
+                com.frerox.toolz.util.CalendarUtils.combineDatePickerUtcWithTime(
+                    datePart, timeState.hour, timeState.minute
+                )
+            } else {
+                // No date picked (shouldn't happen) — preserve original timestamp.
+                event.timestamp
+            }
             onConfirm(event.copy(
                 title          = title,
                 description    = description.takeIf { it.isNotBlank() },
@@ -3019,11 +3340,15 @@ fun MonthPickerDialog(
     onDateSelected: (Int, Int) -> Unit,
 ) {
     val vibrationManager = LocalVibrationManager.current
-    val cal   = remember { Calendar.getInstance().apply { timeInMillis = currentDate } }
-    var year  by remember { mutableIntStateOf(cal.get(Calendar.YEAR)) }
-    var month by remember { mutableIntStateOf(cal.get(Calendar.MONTH)) }
-    val now   = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    // CAL-P2-07: keyed on currentDate (was remember{} with no key — stale after nav).
+    val cal   = remember(currentDate) { Calendar.getInstance().apply { timeInMillis = currentDate } }
+    var year  by remember(currentDate) { mutableIntStateOf(cal.get(Calendar.YEAR)) }
+    var month by remember(currentDate) { mutableIntStateOf(cal.get(Calendar.MONTH)) }
+    val nowYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
+    // CAL-P2-07: clamp to VM range (past 1y / future 5y) + locale month names.
+    val minYear = nowYear - 1
+    val maxYear = nowYear + 5
+    val months = remember { java.text.DateFormatSymbols.getInstance(Locale.getDefault()).shortMonths.toList() }
 
     BasicAlertDialog(onDismissRequest = onDismiss) {
         Surface(
@@ -3057,7 +3382,8 @@ fun MonthPickerDialog(
                     ) {
                         ExpressiveNavIconButton(Icons.Rounded.ChevronLeft, stringResource(R.string.st_CalendarScreen_u1v3)) {
                             vibrationManager?.vibrateTick()
-                            year--
+                            // CAL-P2-07: clamp year to VM range (was unbounded).
+                            year = (year - 1).coerceAtLeast(minYear)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             AnimatedContent(
@@ -3077,7 +3403,7 @@ fun MonthPickerDialog(
                                     color      = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            if (year == now) {
+                            if (year == nowYear) {
                                 Text(
                                     stringResource(R.string.st_CalendarScreen_w3x5),
                                     style = MaterialTheme.typography.labelSmall,
@@ -3087,7 +3413,8 @@ fun MonthPickerDialog(
                         }
                         ExpressiveNavIconButton(Icons.Rounded.ChevronRight, stringResource(R.string.st_CalendarScreen_y5z7)) {
                             vibrationManager?.vibrateTick()
-                            year++
+                            // CAL-P2-07: clamp year to VM range (was unbounded).
+                            year = (year + 1).coerceAtMost(maxYear)
                         }
                     }
                 }
@@ -3141,9 +3468,24 @@ fun MonthPickerDialog(
 // SECTION 20 ─ Utility
 // ─────────────────────────────────────────────────────────────────────────────
 
-private fun uriToBitmap(context: android.content.Context, uri: Uri): Bitmap? = try {
-    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-} catch (e: Exception) { null }
+// CAL-P2-12: sampled decode capped at [maxDim]px on a background thread.
+// Never decode a 12MP photo at full res on Main or hold it in State.
+private fun uriToSampledBitmap(
+    context: android.content.Context,
+    uri: Uri,
+    maxDim: Int = 1024
+): Bitmap? = try {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    val longest = maxOf(bounds.outWidth, bounds.outHeight)
+    while (longest / sample > maxDim) sample *= 2
+    val opts = BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
+    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+} catch (e: Exception) {
+    android.util.Log.w("CalendarScreen", "Sampled decode failed for $uri", e)
+    null
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION 21 ─ Previews
