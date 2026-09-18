@@ -117,15 +117,27 @@ class TodoViewModel @Inject constructor(
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
 
-        combine(
+        // D-P1-03: sortOrder lives OUTSIDE uiState (nested 2/3-arity combines;
+        // the old `_uiState.map{sortOrder}` fed back into the same combine).
+        // Mirrored into uiState for the sort menu only.
+        val taskFlows = combine(
             repository.activeTasks,
             // D-P1-02: midnight-ticker flow (no stale-until-restart) + history.
             repository.getCompletedTodayAuto(),
-            repository.getCompletedHistory(),
+            repository.getCompletedHistory()
+        ) { active: List<TaskEntry>, completed: List<TaskEntry>, history: List<TaskEntry> ->
+            Triple(active, completed, history)
+        }
+        val prefFlows = combine(
             sortOrder,
             settingsRepository.taskCategories,
             settingsRepository.taskLastCategory
-        ) { active: List<TaskEntry>, completed: List<TaskEntry>, history: List<TaskEntry>, order: TaskSortOrder, cats: Set<String>, lastCat: String ->
+        ) { order: TaskSortOrder, cats: Set<String>, lastCat: String ->
+            Triple(order, cats, lastCat)
+        }
+        combine(taskFlows, prefFlows) { tasks, prefs ->
+            val (active, completed, history) = tasks
+            val (order, cats, lastCat) = prefs
             _uiState.update {
                 it.copy(
                     tasks = sortTasks(active, order),

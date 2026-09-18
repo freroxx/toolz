@@ -49,8 +49,9 @@ object TaskPriority {
     const val LOW = 4
     const val NONE = 5
 
-    /** Hours penalty applied when [dueDate] is null so undated tasks sink below dated ones. */
-    const val NULL_DUE_HOURS = 100L
+    /** Hours penalty applied when [dueDate] is null so undated tasks sink below
+     * dated ones (nullsLast: 10_000h ≈ 416 days — below every realistic due). */
+    const val NULL_DUE_HOURS = 10_000L
 
     fun isValid(p: Int): Boolean = p in CRITICAL..NONE
 
