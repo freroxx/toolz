@@ -118,7 +118,13 @@ fun PomodoroSettingsBottomSheet(
                     activeColor = activeColor
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { onGoalChanged(state.sessionsGoal - 1) }) {
+                        // FIX (user report goal "stuck at 1"): clamp in UI too — no-op
+                        // writes at the bounds left users tapping dead buttons with no
+                        // feedback while the VM silently coerced. Bounds match repo 1..12.
+                        IconButton(
+                            onClick = { onGoalChanged(state.sessionsGoal - 1) },
+                            enabled = state.sessionsGoal > 1
+                        ) {
                             Icon(Icons.Rounded.Remove, null)
                         }
                         Text(
@@ -126,7 +132,10 @@ fun PomodoroSettingsBottomSheet(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        IconButton(onClick = { onGoalChanged(state.sessionsGoal + 1) }) {
+                        IconButton(
+                            onClick = { onGoalChanged(state.sessionsGoal + 1) },
+                            enabled = state.sessionsGoal < 12
+                        ) {
                             Icon(Icons.Rounded.Add, null)
                         }
                     }

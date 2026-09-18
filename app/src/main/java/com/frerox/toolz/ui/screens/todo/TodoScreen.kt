@@ -220,12 +220,29 @@ private val PriorityColors = listOf(
 @StringRes
 private val PriorityLabels: List<Int> = listOf(R.string.st_TodoScreen_priority_critical, R.string.st_TodoScreen_priority_high, R.string.st_TodoScreen_priority_medium, R.string.st_TodoScreen_priority_low, R.string.st_TodoScreen_priority_none)
 
+private fun startOfDayMillis(ts: Long): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = ts
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+/**
+ * FIX: calendar-day difference, not truncated 24h periods. The old
+ * TimeUnit.toDays(ts-now) called 23h-away "Today" and 25h-away "Tomorrow",
+ * flipping around the time of day the task was created. Midnight math matches
+ * isToday/isOverdue and the DatePicker (local midnights).
+ */
+private fun daysFromToday(ts: Long): Long =
+    TimeUnit.MILLISECONDS.toDays(startOfDayMillis(ts) - startOfDayMillis(System.currentTimeMillis()))
+
 private fun formatDueDate(ts: Long): String {
-    val diff = ts - System.currentTimeMillis()
-    val days = TimeUnit.MILLISECONDS.toDays(diff)
+    val days = daysFromToday(ts)
     return when {
-        diff < 0 && days < -1 -> "${abs(days)}d overdue"
-        diff < 0 -> "Overdue"
+        days < -1 -> "${abs(days)}d overdue"
+        days < 0 -> "Overdue"
         days == 0L -> "Today"
         days == 1L -> "Tomorrow"
         days < 7 -> "In ${days}d"
@@ -265,8 +282,8 @@ private fun isOverdue(ts: Long): Boolean = ts < System.currentTimeMillis() && !i
 private fun isUpcoming(ts: Long): Boolean {
     // D-P1-02: 1..14 documented window (was 1..13, excluded today-later via
     // truncation and dropped day-14). Overdue lives in TODAY, not here.
-    val days = TimeUnit.MILLISECONDS.toDays(ts - System.currentTimeMillis())
-    return days in 1..14
+    // FIX: same midnight math as formatDueDate (was raw toDays truncation).
+    return daysFromToday(ts) in 1..14
 }
 
 // D-P2-03: rotation-safe List<SubTask> (rememberSaveable needs a Saver;
@@ -380,6 +397,12 @@ fun TodoScreen(
         }
     }
 
+    // Documented semantic (D-P1-02 audit): denominator = ALL active + completed-today,
+    // so future-dated and undated tasks dilute "today" progress and the fraction
+    // resets at midnight when completedToday rolls over. Kept deliberately: the
+    // subtitle reads "X of Y done today" where Y is the whole backlog, i.e. overall
+    // list burn-down, not due-today completion. Do NOT "fix" to due-today-only
+    // without a product call — it changes the headline metric.
     val totalCount = uiState.tasks.size + uiState.completedToday.size
     val completionFraction by animateFloatAsState(
         targetValue = if (totalCount == 0) 0f else uiState.completedToday.size.toFloat() / totalCount,

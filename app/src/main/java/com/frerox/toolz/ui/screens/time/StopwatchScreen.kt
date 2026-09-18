@@ -336,16 +336,13 @@ private fun StopwatchDial(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    AnimatedContent(
-                        targetState = timeString,
-                        // TalkBack liveRegion=Off (S-P2-04): liveRegion is intentionally
-                        // left UNSET (the property default). The 30ms ticker must never
-                        // spam announcements; the time stays focusable/readable on demand.
-                        transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)).togetherWith(fadeOut()) },
-                        label = "stopwatchTime",
-                    ) { time ->
+                    // FIX (user report): 2 fractional digits, not 3 — centiseconds.
+                    // AnimatedContent ticking every 30ms looks broken (constant
+                    // fade/scale churn), so when ms are shown render plain Text
+                    // with no transition; animate only whole-second changes.
+                    if (showMilliseconds) {
                         Text(
-                            text = time,
+                            text = timeString,
                             style = timeStyle,
                             color = if (isRunning) accent else MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.Center,
@@ -353,6 +350,25 @@ private fun StopwatchDial(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                    } else {
+                        AnimatedContent(
+                            targetState = timeString,
+                            // TalkBack liveRegion=Off (S-P2-04): liveRegion is intentionally
+                            // left UNSET (the property default). The ticker must never
+                            // spam announcements; the time stays focusable/readable on demand.
+                            transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)).togetherWith(fadeOut()) },
+                            label = "stopwatchTime",
+                        ) { time ->
+                            Text(
+                                text = time,
+                                style = timeStyle,
+                                color = if (isRunning) accent else MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
@@ -644,9 +660,10 @@ private fun safeStopwatchLocale(configuration: Configuration = LocalConfiguratio
 }
 
 /**
- * Stopwatch formatter (S-P2-01): >=24h renders as "1d 02:03:04[.567]" so 100h+
- * fits narrow screens; the fractional part is TRUE milliseconds (3 digits),
- * not the centiseconds previously mislabeled as ms.
+ * Stopwatch formatter: >=24h renders as "1d 02:03:04[.67]" so 100h+ fits
+ * narrow screens; the fractional part is CENTISECONDS (2 digits). Three
+ * digits + a 30ms AnimatedContent churned the text animation, so ms mode
+ * renders plain Text (see StopwatchDial) and shows 2 digits.
  */
 private fun formatStopwatchTime(timeMillis: Long, showMilliseconds: Boolean, locale: Locale): String {
     val safe = timeMillis.coerceAtLeast(0L)
@@ -654,19 +671,19 @@ private fun formatStopwatchTime(timeMillis: Long, showMilliseconds: Boolean, loc
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
-    val millis = safe % 1000
+    val centis = (safe % 1000) / 10
     if (hours >= 24) {
         val days = hours / 24
         val h = hours % 24
         return if (showMilliseconds) {
-            String.format(locale, "%dd %02d:%02d:%02d.%03d", days, h, minutes, seconds, millis)
+            String.format(locale, "%dd %02d:%02d:%02d.%02d", days, h, minutes, seconds, centis)
         } else {
             String.format(locale, "%dd %02d:%02d:%02d", days, h, minutes, seconds)
         }
     }
     return when {
-        showMilliseconds && hours > 0 -> String.format(locale, "%d:%02d:%02d.%03d", hours, minutes, seconds, millis)
-        showMilliseconds -> String.format(locale, "%02d:%02d.%03d", minutes, seconds, millis)
+        showMilliseconds && hours > 0 -> String.format(locale, "%d:%02d:%02d.%02d", hours, minutes, seconds, centis)
+        showMilliseconds -> String.format(locale, "%02d:%02d.%02d", minutes, seconds, centis)
         hours > 0 -> String.format(locale, "%d:%02d:%02d", hours, minutes, seconds)
         else -> String.format(locale, "%02d:%02d", minutes, seconds)
     }

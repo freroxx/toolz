@@ -21,6 +21,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -46,6 +47,21 @@ interface EventDao {
     @Query("SELECT * FROM events WHERE timestamp >= :start AND timestamp <= :end")
     fun getEventsForRange(start: Long, end: Long): Flow<List<EventEntry>>
 
+    // FIX (recurrence): templates whose ORIGINAL timestamp lies outside [start,end]
+    // must still load so occurrences inside the range can be expanded. Covers the
+    // new recurringRule enum, the legacy isRecurring flag, and legacy interval strings.
+    @Query("""SELECT * FROM events WHERE
+        (recurringRule IS NOT NULL AND recurringRule != 'NONE')
+        OR (isRecurring = 1)
+        OR (UPPER(recurringInterval) IN ('DAILY','WEEKLY','MONTHLY','YEARLY'))""")
+    fun getRecurringTemplates(): Flow<List<EventEntry>>
+
+    @Query("""SELECT * FROM events WHERE
+        (recurringRule IS NOT NULL AND recurringRule != 'NONE')
+        OR (isRecurring = 1)
+        OR (UPPER(recurringInterval) IN ('DAILY','WEEKLY','MONTHLY','YEARLY'))""")
+    suspend fun getRecurringTemplatesSync(): List<EventEntry>
+
     // CAL-P0-03/P1-03: range query without full-table load.
     @Query("SELECT * FROM events WHERE timestamp >= :start AND timestamp <= :end ORDER BY timestamp ASC")
     suspend fun getEventsForRangeSync(start: Long, end: Long): List<EventEntry>
@@ -56,7 +72,7 @@ interface EventDao {
     @Query("SELECT * FROM events ORDER BY timestamp ASC")
     fun getAllEvents(): Flow<List<EventEntry>>
 
-    @Query("SELECT * FROM events")
+    @Query("SELECT * FROM events ORDER BY timestamp ASC")
     suspend fun getAllEventsSync(): List<EventEntry>
 
     @Query("SELECT * FROM events ORDER BY timestamp ASC")
@@ -73,7 +89,8 @@ interface EventDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEvents(events: List<EventEntry>)
 
-    // CAL-P1-05: bulk insert in one transaction (additive).
+    // FIX: bulk insert must be atomic — was a non-transactional alias of insertEvents.
+    @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEventsTx(events: List<EventEntry>)
 }

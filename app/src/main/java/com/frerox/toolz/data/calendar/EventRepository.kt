@@ -19,7 +19,9 @@ package com.frerox.toolz.data.calendar
 
 import com.frerox.toolz.data.todo.TaskDao
 import com.frerox.toolz.data.todo.TaskEntry
+import com.frerox.toolz.util.CalendarUtils
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.util.Calendar
 import javax.inject.Inject
@@ -30,35 +32,118 @@ class EventRepository @Inject constructor(
     private val eventDao: EventDao,
     private val taskDao: TaskDao
 ) {
-    fun getEventsForRange(start: Long, end: Long): Flow<List<EventEntry>> {
-        // CAL-P1-05: delegate range filtering to the DAO (indexed query) instead of
-        // in-memory full-table filtering, then expand recurring occurrences.
-        return eventDao.getEventsForRange(start, end).map { inRange ->
-            val expanded = inRange.flatMap { event ->
-                val rule = event.recurringRule.takeIf { it != Recurrence.NONE }?.name
-                    ?: event.recurringInterval?.uppercase()?.takeIf {
-                        it in setOf("DAILY", "WEEKLY", "MONTHLY", "YEARLY")
-                    }
-                if (rule != null && rule != "NONE") {
-                    com.frerox.toolz.util.CalendarUtils.generateOccurrences(
-                        eventTimestamp = event.timestamp,
-                        recurringRule = rule,
-                        rangeStart = start,
-                        rangeEnd = end
-                    ).map { occ ->
-                        if (occ == event.timestamp) event
-                        else event.copy(
-                            id = event.id,
-                            timestamp = occ,
-                            endTimestamp = event.endTimestamp?.let { end -> end + (occ - event.timestamp) }
-                        )
-                    }
-                } else listOf(event)
+    companion object {
+        /**
+         * Stable key for rendered rows. Occurrence copies share the template [EventEntry.id],
+         * so lists MUST key by [occurrenceKey] ("id@timestamp"), never by id alone —
+         * otherwise occurrences of one series collapse/duplicate in LazyColumn.
+         */
+        fun occurrenceKey(event: EventEntry): String = "${event.id}@${event.timestamp}"
+
+        /** Single rule-resolution used by every expansion path (never fork). */
+        fun recurrenceRuleOf(event: EventEntry): String? {
+            event.recurringRule.takeIf { it != Recurrence.NONE }?.let { return it.name }
+            return event.recurringInterval?.uppercase()?.takeIf {
+                it in setOf("DAILY", "WEEKLY", "MONTHLY", "YEARLY")
             }
-            // Yearly legacy rows that predate recurringRule but carry isRecurring+YEARLY.
-            val legacyYearly = emptyList<EventEntry>()
-            (expanded + legacyYearly).sortedBy { it.timestamp }
         }
+
+        fun isRecurring(event: EventEntry): Boolean =
+            recurrenceRuleOf(event) != null || event.isRecurring
+
+        /**
+         * UI expansion over a FULL event list (all templates present, so no range-miss).
+         * Non-recurring rows pass through untouched (full history preserved — zero
+         * behavior change for them). Recurring templates gain bounded occurrences:
+         * DAILY/WEEKLY within [now-90d, now+180d], MONTHLY/YEARLY within [now-2y, now+5y]
+         * (generateOccurrences clamps to now+5y regardless). Bounds keep a daily series
+         * from exploding the agenda into thousands of rows.
+         *
+         * Series semantics v1: occurrence copies share the template id — toggling,
+         * editing or deleting an occurrence acts on the WHOLE series (no exdate model).
+         * Lists MUST key rows by [occurrenceKey].
+         */
+        fun expandForUi(
+            all: List<EventEntry>,
+            now: Long = System.currentTimeMillis()
+        ): List<EventEntry> {
+            if (all.isEmpty()) return all
+            val day = 24 * 60 * 60 * 1000L
+            val out = ArrayList<EventEntry>(all.size + 64)
+            val seen = HashSet<String>(all.size + 64)
+            for (event in all) {
+                val rule = recurrenceRuleOf(event)
+                if (rule == null && !event.isRecurring) {
+                    if (seen.add(occurrenceKey(event))) out.add(event)
+                    continue
+                }
+                val (start, end) = when (rule ?: "YEARLY") {
+                    "DAILY", "WEEKLY" -> (now - 90 * day) to (now + 180 * day)
+                    else -> (now - 730 * day) to (now + 5 * 365 * day)
+                }
+                CalendarUtils.generateOccurrences(
+                    eventTimestamp = event.timestamp,
+                    recurringRule = rule ?: "YEARLY",
+                    rangeStart = start,
+                    rangeEnd = end,
+                    now = now
+                ).forEach { occ ->
+                    val row = if (occ == event.timestamp) event
+                    else event.copy(
+                        timestamp = occ,
+                        endTimestamp = event.endTimestamp?.let { e -> e + (occ - event.timestamp) }
+                    )
+                    if (seen.add(occurrenceKey(row))) out.add(row)
+                }
+            }
+            return out.sortedBy { it.timestamp }
+        }
+    }
+
+    fun getEventsForRange(start: Long, end: Long): Flow<List<EventEntry>> {
+        // FIX (recurrence): a YEARLY/DAILY template from a prior year never falls
+        // inside [start,end], so a pure range query can never expand it. Combine the
+        // indexed range rows with the (small) recurring-templates table, expand, dedupe.
+        return combine(
+            eventDao.getEventsForRange(start, end),
+            eventDao.getRecurringTemplates()
+        ) { inRange, templates ->
+            expandWithTemplates(inRange, templates, start, end)
+        }
+    }
+
+    /** Shared expansion used by the Flow and sync variants (single implementation). */
+    private fun expandWithTemplates(
+        inRange: List<EventEntry>,
+        templates: List<EventEntry>,
+        start: Long,
+        end: Long
+    ): List<EventEntry> {
+        val templateIds = templates.map { it.id }.toSet()
+        // Non-recurring rows already in range pass through untouched.
+        val direct = inRange.filter { it.id !in templateIds && !isRecurring(it) }
+        val seen = HashSet<String>(direct.size + 64)
+        direct.forEach { seen.add(occurrenceKey(it)) }
+        val out = direct.toMutableList()
+        // Every template expands over the window (generateOccurrences returns the
+        // original timestamp too when it falls inside, so no special-casing).
+        for (template in templates) {
+            val rule = recurrenceRuleOf(template) ?: "YEARLY"
+            CalendarUtils.generateOccurrences(
+                eventTimestamp = template.timestamp,
+                recurringRule = rule,
+                rangeStart = start,
+                rangeEnd = end
+            ).forEach { occ ->
+                val row = if (occ == template.timestamp) template
+                else template.copy(
+                    timestamp = occ,
+                    endTimestamp = template.endTimestamp?.let { e -> e + (occ - template.timestamp) }
+                )
+                if (seen.add(occurrenceKey(row))) out.add(row)
+            }
+        }
+        return out.sortedBy { it.timestamp }
     }
 
     private fun isEventInYearlyRange(event: EventEntry, start: Long, end: Long): Boolean {
@@ -87,7 +172,11 @@ class EventRepository @Inject constructor(
     suspend fun getUpcomingSync(now: Long): List<EventEntry> = eventDao.getUpcomingSync(now)
 
     suspend fun getEventsForRangeSync(start: Long, end: Long): List<EventEntry> =
-        eventDao.getEventsForRangeSync(start, end)
+        expandWithTemplates(
+            eventDao.getEventsForRangeSync(start, end),
+            eventDao.getRecurringTemplatesSync(),
+            start, end
+        )
 
     fun getTasksWithDueDate(): Flow<List<TaskEntry>> {
         return taskDao.getTasksWithDueDate()

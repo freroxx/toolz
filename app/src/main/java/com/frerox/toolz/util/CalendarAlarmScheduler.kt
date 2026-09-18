@@ -25,6 +25,7 @@ import android.os.Build
 import android.util.Log
 import com.frerox.toolz.data.calendar.EventEntry
 import com.frerox.toolz.service.EventReminderReceiver
+import com.frerox.toolz.ui.screens.calendar.AlarmIntentKeys
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -61,9 +62,11 @@ class CalendarAlarmScheduler @Inject constructor(
         if (triggerTime <= System.currentTimeMillis()) return
 
         val intent = Intent(context, EventReminderReceiver::class.java).apply {
-            putExtra("event_id", event.id)
-            putExtra("reminder_type", type)
-            putExtra("event_time", event.timestamp)
+            // FIX: shared AlarmIntentKeys both sides (was raw literals here while the
+            // receiver/activity used constants — same values today, one contract now).
+            putExtra(AlarmIntentKeys.EVENT_ID, event.id)
+            putExtra(AlarmIntentKeys.REMINDER_TYPE, type)
+            putExtra(AlarmIntentKeys.EVENT_TIME, event.timestamp)
         }
 
         // CAL-P0-08: centralized requestCode scheme (see CalendarUtils).
@@ -113,5 +116,20 @@ class CalendarAlarmScheduler @Inject constructor(
                 pendingIntent.cancel()
             }
         }
+        // FIX (requestCode migration): pre-fix builds used a single base code
+        // (event.id*10, no per-lead suffix). Best-effort cancel so one upgrade
+        // cycle can't double-fire; NO_CREATE keeps it allocation-free.
+        try {
+            val legacy = PendingIntent.getBroadcast(
+                context,
+                event.id * 10,
+                Intent(context, EventReminderReceiver::class.java),
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (legacy != null) {
+                alarmManager.cancel(legacy)
+                legacy.cancel()
+            }
+        } catch (_: Exception) {}
     }
 }

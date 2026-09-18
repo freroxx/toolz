@@ -132,7 +132,10 @@ class CalendarViewModel @Inject constructor(
 
     /** Public immutable state combining DB streams + internal state + config. */
     val uiState: StateFlow<CalendarUiState> = combine(
-        repository.getAllEvents(),
+        // FIX (recurrence): expand occurrence copies so yearly/monthly/daily series
+        // appear outside their template year. Non-recurring rows pass through
+        // untouched; lists key rows by occurrenceKey (see EventRepository).
+        repository.getAllEvents().map { EventRepository.expandForUi(it) },
         repository.getTasksWithDueDate(),
         settingsRepository.offlineModeEnabled,
         _uiState,
@@ -484,6 +487,27 @@ class CalendarViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "deleteEvent failed for ${event.id}", e)
                 _uiState.update { it.copy(errorMessage = "Couldn't delete the event. Please try again.") }
+            }
+        }
+    }
+
+    /**
+     * FIX (user report "can't delete"): restores an event deleted via Undo.
+     * Re-inserts with the ORIGINAL id (DAO is REPLACE, so the row comes back
+     * intact) and reschedules reminders when the event is still future-dated.
+     */
+    fun restoreEvent(event: EventEntry) {
+        viewModelScope.launch {
+            try {
+                repository.insertEvent(event)
+                if (event.remindersEnabled && !event.isCompleted &&
+                    event.timestamp > System.currentTimeMillis()
+                ) {
+                    alarmScheduler.scheduleEventReminders(event)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "restoreEvent failed for ${event.id}", e)
+                _uiState.update { it.copy(errorMessage = "Couldn't restore the event. Please try again.") }
             }
         }
     }

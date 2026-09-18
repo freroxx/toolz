@@ -1269,6 +1269,21 @@ class SettingsRepository @Inject constructor(
     suspend fun setPomodoroKeepScreenOn(enabled: Boolean) { dataStore.edit { it[POMODORO_KEEP_SCREEN_ON] = enabled } }
     suspend fun setPomodoroSessionsGoal(goal: Int) { dataStore.edit { it[POMODORO_SESSIONS_GOAL] = goal.coerceIn(1, 12) } }
     suspend fun setPomodoroSessionsCompleted(completed: Int) { dataStore.edit { it[POMODORO_SESSIONS_COMPLETED] = completed.coerceAtLeast(0).coerceAtMost(999) } }
+    /**
+     * FIX (user report sessions "stuck at 1"): atomic read-modify-write inside ONE
+     * edit transaction (DataStore serializes edits). Takes max(callerSnapshot,
+     * persisted) so a finish racing a slow boot-time load can never clobber a real
+     * count back to 1. Returns the authoritative count. Never blocks the caller.
+     */
+    suspend fun addPomodoroSessionCompleted(callerSnapshot: Int): Int {
+        var next = (callerSnapshot + 1).coerceIn(0, 999)
+        dataStore.edit { prefs ->
+            val persisted = try { prefs[POMODORO_SESSIONS_COMPLETED] ?: 0 } catch (_: Exception) { 0 }
+            next = (maxOf(callerSnapshot, persisted) + 1).coerceIn(0, 999)
+            prefs[POMODORO_SESSIONS_COMPLETED] = next
+        }
+        return next
+    }
     suspend fun setPomodoroRingtoneUri(uri: String) { dataStore.edit { it[POMODORO_RINGTONE_URI] = uri } }
     suspend fun setPomodoroShowQuotes(enabled: Boolean) { dataStore.edit { it[POMODORO_SHOW_QUOTES] = enabled } }
     suspend fun setPomodoroQuotes(quotes: String) { dataStore.edit { it[POMODORO_QUOTES] = quotes } }

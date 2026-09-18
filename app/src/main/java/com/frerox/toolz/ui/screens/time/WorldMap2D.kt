@@ -651,8 +651,12 @@ private fun computeTerminator(now: ZonedDateTime, w: Float, h: Float, steps: Int
 }
 
 // ─── Location dots ────────────────────────────────────────────────────────────
-// W-P1-02: hoisted dp.toPx (once per draw, not per dot), precomputed normalized
-// positions, screen-space culling, single-circle fast path at low zoom.
+// FIX (zoom/fullscreen drift): dots are drawn INSIDE the world-space
+// withTransform (translate pan + scale zoom + centering offset), so they MUST
+// be positioned in MAP-SPACE (nx*w, ny*h) and let the transform place them.
+// Computing screen coords manually here double-applies zoom/pan (dots flew off
+// the map when zooming or in fullscreen). Screen-space math lives ONLY in the
+// tap handler (hit-testing), never in draw.
 private fun DrawScope.drawLocationDots(
     locations: List<WorldClockLocation>,
     dotNorm: List<Pair<Float, Float>>,
@@ -675,6 +679,9 @@ private fun DrawScope.drawLocationDots(
     val rHiGlowExtra = 8.dp.toPx() * sa
     val rDot = 2.1.dp.toPx() * sa
     val rDotHi = 0.85.dp.toPx() * sa
+    val shadowR = 2.5.dp.toPx() * sa
+    val shadowOff = Offset(0.4f * sa, 0.4f * sa)
+    val hiOff = Offset(0.3f * sa, 0.3f * sa)
     val cx = canvasW / 2f; val cy = canvasH / 2f
     val mapOffX = (canvasW - w) / 2f
     val mapOffY = (canvasH - h) / 2f
@@ -683,14 +690,15 @@ private fun DrawScope.drawLocationDots(
     for (i in locations.indices) {
         val loc = locations[i]
         val (nx, ny) = dotNorm[i]
-        // Map-space -> screen-space (mirrors the Canvas transform).
+        // Map-space position — the enclosing withTransform applies
+        // centering + zoom/pivot + pan. Do NOT pre-apply them here.
+        val pos = Offset(nx * w, ny * h)
+        // Cull in screen-space (cheap visibility check only, never for drawing).
         val mapX = nx * w + mapOffX
         val mapY = ny * h + mapOffY
         val screenX = zoom * (mapX - cx) + cx + panX
         val screenY = zoom * (mapY - cy) + cy + panY
-        // Cull to visible rect (+slack for glow).
         if (screenX < -24f || screenX > canvasW + 24f || screenY < -24f || screenY > canvasH + 24f) continue
-        val pos = Offset(screenX, screenY)
         val isSel = selected?.zoneId == loc.zoneId && selected.city == loc.city
         val isHi = highlighted.contains(loc.zoneId)
 
@@ -711,10 +719,10 @@ private fun DrawScope.drawLocationDots(
             }
             else -> {
                 drawCircle(Color.Black.copy(alpha = 0.12f),
-                    2.5.dp.toPx() * sa, pos + Offset(0.4f * sa, 0.4f * sa))
+                    shadowR, pos + shadowOff)
                 drawCircle(colors.dotDefault, rDot, pos)
                 drawCircle(Color.White.copy(alpha = 0.45f),
-                    rDotHi, pos - Offset(0.3f * sa, 0.3f * sa))
+                    rDotHi, pos - hiOff)
             }
         }
     }

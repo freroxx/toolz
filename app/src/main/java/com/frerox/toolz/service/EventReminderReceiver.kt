@@ -52,8 +52,9 @@ class EventReminderReceiver : BroadcastReceiver() {
     lateinit var eventDao: EventDao
 
     override fun onReceive(context: Context, intent: Intent) {
-        val eventId = intent.getIntExtra("event_id", -1)
-        val type = intent.getStringExtra("reminder_type") ?: return // "24H", "12H", "1H"
+        // FIX: shared AlarmIntentKeys (was raw literals — same values, one contract).
+        val eventId = intent.getIntExtra(AlarmIntentKeys.EVENT_ID, -1)
+        val type = intent.getStringExtra(AlarmIntentKeys.REMINDER_TYPE) ?: return // "24H", "12H", "1H"
 
         if (eventId == -1) {
             Log.w(TAG, "Missing event_id, ignoring alarm")
@@ -74,6 +75,13 @@ class EventReminderReceiver : BroadcastReceiver() {
 
                 // Defense if cancel missed: never fire for disabled/completed/past.
                 if (!event.remindersEnabled || event.isCompleted) return@launch
+                // FIX: stale-past recheck — a Doze-delayed or orphaned PendingIntent
+                // (e.g. pre-fix requestCode scheme) must not notify for a long-past
+                // event. Finished long ago = drop silently with a log.
+                if (event.timestamp <= System.currentTimeMillis() - 60_000L) {
+                    Log.i(TAG, "Dropping stale $type alarm for past event $eventId")
+                    return@launch
+                }
 
                 val eventTime = event.timestamp
 

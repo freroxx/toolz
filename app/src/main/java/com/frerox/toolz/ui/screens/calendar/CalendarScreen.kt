@@ -225,6 +225,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.ai.AiConfig
 import com.frerox.toolz.data.calendar.EventEntry
+import com.frerox.toolz.data.calendar.EventRepository
 import com.frerox.toolz.data.calendar.SyncResult
 import com.frerox.toolz.data.todo.TaskEntry
 import com.frerox.toolz.ui.components.BouncyShape
@@ -353,26 +354,27 @@ fun CalendarScreen(viewModel: CalendarViewModel = hiltViewModel()) {
     val vibrationManager  = LocalVibrationManager.current
     val scope             = rememberCoroutineScope()
 
-    // CAL-P2-04: deferred delete — Snackbar Undo 5s before the real delete lands.
-    var pendingDelete by remember { mutableStateOf<EventEntry?>(null) }
-    fun requestDelete(event: EventEntry) { pendingDelete = event }
-    pendingDelete?.let { doomed ->
-        LaunchedEffect(doomed.id, doomed.timestamp) {
+    // FIX (user report "can't delete events"): immediate delete + Snackbar Undo.
+    // The old deferred flow (show Short snackbar, THEN delay 5s, then delete) took
+    // ~9s to take effect and was cancelled entirely when leaving the screen, so
+    // deletes appeared to do nothing. Deleting now is instant; Undo restores.
+    var pendingUndo by remember { mutableStateOf<EventEntry?>(null) }
+    fun requestDelete(event: EventEntry) {
+        // Coalesce rapid deletes: only the latest is undoable (matches Todo).
+        pendingUndo = event
+        viewModel.deleteEvent(event)
+        scope.launch {
             val res = snackbarHostState.showSnackbar(
                 message = "Event deleted",
                 actionLabel = "Undo",
-                duration = androidx.compose.material3.SnackbarDuration.Short
+                duration = androidx.compose.material3.SnackbarDuration.Long
             )
             if (res == SnackbarResult.ActionPerformed) {
-                pendingDelete = null // Undo — never touched the DB.
-            } else {
-                delay(5_000)
-                // Only delete if the user didn't undo/replace meanwhile.
-                if (pendingDelete?.id == doomed.id) {
-                    pendingDelete = null
-                    viewModel.deleteEvent(doomed)
+                pendingUndo?.takeIf { it.id == event.id }?.let {
+                    viewModel.restoreEvent(it)
                 }
             }
+            if (pendingUndo?.id == event.id) pendingUndo = null
         }
     }
 
@@ -1426,8 +1428,10 @@ private fun DayPreviewPanel(
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // FIX (recurrence): rows are occurrence copies sharing the template
+                            // id — key by occurrenceKey or series instances collapse in the list.
                             // CAL-P2-06: itemsIndexed index param — no indexOf() in composition.
-                            itemsIndexed(events, key = { _, e -> e.id }) { index, event ->
+                            itemsIndexed(events, key = { _, e -> EventRepository.occurrenceKey(e) }) { index, event ->
                                 StaggeredEntrance(
                                     index = index,
                                     modifier = Modifier.animateItem()
@@ -1821,7 +1825,8 @@ fun AgendaView(
             }
             itemsIndexed(dayItems, key = { _, item ->
                 when (item) {
-                    is CalendarItem.Event -> "ev_${item.event.id}"
+                    // FIX (recurrence): occurrence copies share template ids.
+                    is CalendarItem.Event -> "ev_${EventRepository.occurrenceKey(item.event)}"
                     is CalendarItem.Task  -> "tk_${item.task.id}"
                 }
             }) { index, item ->
@@ -2492,7 +2497,8 @@ fun DayDetailSheet(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier            = Modifier.heightIn(max = 500.dp)
                 ) {
-                    items(events, key = { it.id }) { event ->
+                    // FIX (recurrence): same occurrenceKey as the other event lists.
+                    items(events, key = { EventRepository.occurrenceKey(it) }) { event ->
                         SmallEventItem(
                             event    = event,
                             onToggle = { onToggleEvent(event) },

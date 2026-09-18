@@ -58,9 +58,12 @@ import java.util.*
 //  and by CalendarAlarmScheduler when building the PendingIntent
 // ─────────────────────────────────────────────────────────────
 object AlarmIntentKeys {
-    const val EVENT_ID    = "event_id"
-    const val EVENT_TITLE = "event_title"
-    const val EVENT_TIME  = "event_time"
+    const val EVENT_ID      = "event_id"
+    const val EVENT_TITLE   = "event_title"
+    const val EVENT_TIME    = "event_time"
+    // FIX: the lead type ("24H"/"12H"/"1H") previously traveled under a raw
+    // "reminder_type" literal on each side. Same value, one contract now.
+    const val REMINDER_TYPE = "reminder_type"
 }
 
 /** Snooze durations available to the user (minutes). */

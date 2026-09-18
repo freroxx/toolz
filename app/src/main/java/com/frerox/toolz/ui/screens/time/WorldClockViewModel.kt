@@ -107,6 +107,7 @@ data class WorldClockUiState(
 @HiltViewModel
 class WorldClockViewModel @Inject constructor(
     private val repository: SettingsRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorldClockUiState())

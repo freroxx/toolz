@@ -2870,6 +2870,14 @@
     <string name="st_WorldClockScreen_e1f2">Track City</string>
     <string name="st_WorldClockScreen_g3h4">Copy Time</string>
     <string name="st_WorldClockScreen_i5j6">My Location</string>
+    <string name="st_WorldClockScreen_k7l8">Local time</string>
+    <string name="st_WorldClockScreen_m9n0">Same as local</string>
+    <string name="st_WorldClockScreen_o1p2">Yesterday</string>
+    <string name="st_WorldClockScreen_q3r4">Tomorrow</string>
+    <string name="st_WorldClockScreen_s5t6">Today</string>
+    <string name="st_WorldClockScreen_u7v8">DST • %1$s</string>
+    <string name="st_WorldClockScreen_w9x0">Saved %1$s</string>
+    <string name="st_WorldClockScreen_y1z2">Copied %1$s</string>
 
     <!-- TodoScreen -->
     <string name="st_TodoScreen_a1b2">My Tasks</string>

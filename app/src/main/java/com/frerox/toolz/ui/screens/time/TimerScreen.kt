@@ -157,6 +157,7 @@ fun TimerScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val timerHistory by viewModel.timerHistory.collectAsState()
+    val lockedSlots by viewModel.lockedSlots.collectAsState()
     val userMessage by viewModel.userMessage.collectAsState()
     val rawAccent = if (state.isFinished || state.isRinging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val accent by animateColorAsState(
@@ -329,10 +330,14 @@ fun TimerScreen(
             }
             
             presetToEdit?.let { index ->
+                // FIX: dialog opens on the LOCKED slot value (slot i edits slot i),
+                // falling back to the displayed preset as a starting suggestion.
+                val slot = lockedSlots.getOrNull(index)
+                val shown = timerHistory.getOrNull(index)
                 LockPresetDialog(
                     presetIndex = index,
-                    initialMinutes = timerHistory.getOrNull(index)?.first ?: 0,
-                    initialSeconds = timerHistory.getOrNull(index)?.second ?: 0,
+                    initialMinutes = slot?.first ?: shown?.first ?: 0,
+                    initialSeconds = slot?.second ?: shown?.second ?: 0,
                     onDismiss = { presetToEdit = null },
                     onConfirm = { m, s ->
                         viewModel.lockPreset(index, m, s)
@@ -739,9 +744,12 @@ private fun LockPresetDialog(
     onConfirm: (Int, Int) -> Unit,
     accent: Color
 ) {
-    // T-P2-03: key remember on index+initial (no stale), reject 0:00, support hours via custom minutes up to 999.
-    var mins by remember(presetIndex, initialMinutes) { mutableStateOf(initialMinutes.coerceIn(0, 999)) }
-    var secs by remember(presetIndex, initialSeconds) { mutableStateOf(initialSeconds.coerceIn(0, 59)) }
+    // FIX (user report "lock preset blocks it"): the old 0..59 infinite wheel
+    // reported settledPage%60 on open, silently clobbering any preset >59min
+    // (e.g. 90m became 30m) and making locks feel broken. Numeric fields
+    // support the full 0..999 range with no clobber, mirroring CustomDurationDialog.
+    var minsText by remember(presetIndex, initialMinutes) { mutableStateOf(if (initialMinutes > 0) initialMinutes.toString() else "") }
+    var secsText by remember(presetIndex, initialSeconds) { mutableStateOf(if (initialSeconds > 0) initialSeconds.toString() else "") }
     var error by remember(presetIndex) { mutableStateOf<String?>(null) }
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
@@ -778,14 +786,37 @@ private fun LockPresetDialog(
                     Icon(Icons.Rounded.Lock, contentDescription = stringResource(R.string.st_TimerScreen_m9n0), tint = accent, modifier = Modifier.size(24.dp))
                 }
 
-                VerticalSmoothDurationPicker(
-                    minutes = mins.coerceIn(0, 59),
-                    seconds = secs,
-                    accent = accent,
-                    enabled = true,
-                    onChange = { m, s -> mins = m; secs = s; error = null },
-                    modifier = Modifier.height(180.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = minsText,
+                        onValueChange = { v ->
+                            minsText = v.filter { it.isDigit() }.take(3)
+                            error = null
+                        },
+                        label = { Text("Mins") },
+                        placeholder = { Text("0–999") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = MediumExpressiveShape,
+                    )
+                    OutlinedTextField(
+                        value = secsText,
+                        onValueChange = { v ->
+                            secsText = v.filter { it.isDigit() }.take(2)
+                            error = null
+                        },
+                        label = { Text("Secs") },
+                        placeholder = { Text("0–59") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = MediumExpressiveShape,
+                    )
+                }
                 if (error != null) {
                     Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                 }
@@ -803,10 +834,12 @@ private fun LockPresetDialog(
                     }
                     ToolzExpressiveButton(
                         onClick = {
-                            if (mins <= 0 && secs <= 0) {
+                            val m = minsText.toIntOrNull()?.coerceIn(0, 999) ?: 0
+                            val s = secsText.toIntOrNull()?.coerceIn(0, 59) ?: 0
+                            if (m <= 0 && s <= 0) {
                                 error = "Pick a duration greater than 0:00"
                             } else {
-                                onConfirm(mins.coerceIn(0, 999), secs.coerceIn(0, 59))
+                                onConfirm(m, s)
                             }
                         },
                         modifier = Modifier.weight(1f).height(56.dp),
@@ -828,9 +861,11 @@ private fun TimerQuickAddRow(onAddTime: (Long) -> Unit, enabled: Boolean = true)
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        QuickAddButton(label = "+10s", millis = 10_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
-        QuickAddButton(label = "+1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
-        QuickAddButton(label = "+5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
+        // FIX (user report): labels carried their own "+" ("+10s") AND the Add
+        // icon — double "+". The icon is the "+", labels stay plain ("10s").
+        QuickAddButton(label = "10s", millis = 10_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
+        QuickAddButton(label = "1m", millis = 60_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
+        QuickAddButton(label = "5m", millis = 300_000L, modifier = Modifier.weight(1f), onAddTime = onAddTime, enabled = enabled)
     }
 }
 

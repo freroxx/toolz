@@ -78,6 +78,11 @@ class TimerViewModel @Inject constructor(
     private val _timerHistory = MutableStateFlow<List<Pair<Int, Int>>>(emptyList())
     val timerHistory: StateFlow<List<Pair<Int, Int>>> = _timerHistory.asStateFlow()
 
+    // Raw locked slots per position (null = unset) — drives the lock-edit dialog
+    // initial values so slot i edits slot i (never the merged display value).
+    private val _lockedSlots = MutableStateFlow<List<Pair<Int, Int>?>>(emptyList())
+    val lockedSlots: StateFlow<List<Pair<Int, Int>?>> = _lockedSlots.asStateFlow()
+
     private var toolService: ToolService? = null
     private var isBound = false
     // T-P1-03: keep Job refs, cancel on re-bind/disconnect. Single combine reducer.
@@ -159,27 +164,43 @@ class TimerViewModel @Inject constructor(
                     Pair(m.coerceIn(0, 999), s.coerceIn(0, 59)) to count
                 }
 
-                val lockedParsed = lockedList.mapNotNull { k ->
-                    if (k.isBlank()) return@mapNotNull null
-                    val parts = k.split(":", limit = 2)
-                    if (parts.size != 2) return@mapNotNull null
-                    val m = parts[0].toIntOrNull() ?: return@mapNotNull null
-                    val s = parts[1].toIntOrNull() ?: return@mapNotNull null
-                    Pair(m.coerceIn(0, 999), s.coerceIn(0, 59))
+                // (Display uses positional parseSlot below; 0:00 entries are dropped
+                // there too — tapping a 0:00 chip stages 0ms and setTimer/toggle
+                // dead-end with "pick a duration", which looks broken.)
+
+                // FIX (user report "lock preset blocks it"): locked slots are POSITIONAL.
+                // Previously blanks were filtered and values compressed to the front,
+                // so locked slot 2 displayed at index 0 — long-pressing index 2 then
+                // edited the wrong slot and presets appeared to "move/block". Slot i
+                // now always renders at index i; blanks fall through to history/defaults.
+                fun parseSlot(raw: String?): Pair<Int, Int>? {
+                    if (raw.isNullOrBlank()) return null
+                    val parts = raw.split(":", limit = 2)
+                    if (parts.size != 2) return null
+                    val m = parts[0].toIntOrNull() ?: return null
+                    val s = parts[1].toIntOrNull() ?: return null
+                    if (m * 60 + s <= 0) return null
+                    return Pair(m.coerceIn(0, 999), s.coerceIn(0, 59))
                 }
 
-                // Construct top 3: prioritize locked, then history
+                // Raw locked slots (nullable per position) for the edit dialog, so the
+                // dialog opens on the LOCKED slot value, not the merged display value.
+                _lockedSlots.value = (0 until 3).map { parseSlot(lockedList.getOrNull(it)) }
+
+                // Construct top 3: locked slot i wins index i, else history, else default.
                 val finalPresets = mutableListOf<Pair<Int, Int>>()
 
-                // Add locked ones first
                 for (i in 0 until 3) {
-                    if (i < lockedParsed.size) {
-                        finalPresets.add(lockedParsed[i])
+                    val lockedAt = parseSlot(lockedList.getOrNull(i))
+                    if (lockedAt != null) {
+                        finalPresets.add(lockedAt)
                     } else {
                         // Fill with history
                         val historyTop = historyParsed
                             .sortedByDescending { it.second }
                             .map { it.first }
+                            // FIX: skip dead 0:00 history entries too.
+                            .filter { (it.first * 60 + it.second) > 0 }
                             .filter { !finalPresets.contains(it) }
                             .firstOrNull()
 
@@ -360,14 +381,31 @@ class TimerViewModel @Inject constructor(
             _userMessage.value = "Timer paused — Reset to pick a new duration"
             return
         }
-        if (toolService == null) {
-            ensureServiceStarted()
-            pendingAction = { setTimer(minutes, seconds, force) }
-            return
-        }
         val safeMin = minutes.coerceIn(0, 999)
         val safeSec = seconds.coerceIn(0, 59)
         val totalMillis = durationMillis(safeMin, safeSec)
+        if (toolService == null) {
+            ensureServiceStarted()
+            pendingAction = { setTimer(minutes, seconds, force) }
+            // FIX: optimistic staging while unbound (was: silent no-op — tapping a
+            // preset on cold start did nothing visible until bind completed).
+            // Mirrors onTimeSelectedChange so the Start button enables instantly.
+            if (totalMillis > 0L) {
+                _uiState.update {
+                    it.copy(
+                        selectedMinutes = safeMin,
+                        selectedSeconds = safeSec,
+                        remainingTime = totalMillis,
+                        initialTime = totalMillis,
+                        isFinished = false,
+                        isRinging = false,
+                        isPaused = true,
+                        isStarted = true,
+                    )
+                }
+            }
+            return
+        }
         if (totalMillis <= 0L) {
             _userMessage.value = "Pick a duration greater than 0:00"
             return
@@ -438,7 +476,9 @@ class TimerViewModel @Inject constructor(
         try {
             if (state.isRunning) {
                 // Re-arm end + watchdog with new remaining (service is truth for end).
-                startServiceAction(ToolService.ACTION_TIMER_TOGGLE)
+                // NOTE: no ACTION_TIMER_TOGGLE here — the toggle intent is async and
+                // would be handled AFTER this direct call, pausing the timer we just
+                // extended. Direct binder call is sufficient (FGS ensured above).
                 toolService?.startTimer(newRemaining, newInitial)
             } else if (state.remainingTime > 0L || state.isStarted) {
                 // Paused: preserve initial.
@@ -456,7 +496,8 @@ class TimerViewModel @Inject constructor(
         ensureServiceStarted()
         val state = _uiState.value
         if (state.isRunning) {
-            startServiceAction(ToolService.ACTION_TIMER_TOGGLE)
+            // Direct pause only. A TOGGLE intent here is redundant (same effect)
+            // and races the direct call; binder is non-null on this path.
             try { toolService?.pauseTimer() } catch (_: Exception) {}
             return
         }
@@ -496,9 +537,12 @@ class TimerViewModel @Inject constructor(
 
         robustStopRingtone()
         // Service as truth: do NOT optimistically set isRunning=true; flows will confirm.
+        // NOTE: no ACTION_TIMER_TOGGLE — it is async and would be handled AFTER the
+        // direct startTimer below, immediately pausing the timer we just started
+        // (the "timer starts then instantly pauses / never runs" bug). FGS was
+        // already ensured at the top of this function.
         _uiState.update { it.copy(isStarted = true, isFinished = false, isRinging = false) }
         try {
-            startServiceAction(ToolService.ACTION_TIMER_TOGGLE)
             toolService?.startTimer(duration, initial)
         } catch (_: Exception) {
             // Revert optimistic started on failure.

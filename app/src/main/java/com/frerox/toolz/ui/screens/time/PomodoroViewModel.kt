@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,6 +162,13 @@ class PomodoroViewModel @Inject constructor(
                     offlineMode = values[9] as Boolean,
                     gradualVolume = values[10] as Boolean
                 )
+            // FIX (user report settings "stuck"): one throwing flow must never kill
+            // this 11-flow combine permanently (frozen goal/durations with no error).
+            // Retry with backoff so transient DataStore/AI-settings failures recover.
+            }.retryWhen { cause, attempt ->
+                android.util.Log.e("PomodoroVM", "observeSettings failed (attempt $attempt)", cause as? Throwable)
+                kotlinx.coroutines.delay((1000L * (attempt + 1)).coerceAtMost(10_000L))
+                true
             }.collect { settings ->
                 _uiState.update { it.copy(
                     workMinutes = settings.workMinutes,

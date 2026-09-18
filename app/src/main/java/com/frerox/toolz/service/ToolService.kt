@@ -1297,10 +1297,19 @@ class ToolService : Service() {
         if (completedMode == "WORK") {
             // P-P0-02: increment in-memory first, then persist that exact value.
             // Never read-then-write blindly from a stale flow.
-            val next = (_pomodoroSessionsDone.value + 1).coerceAtLeast(0).coerceAtMost(999)
-            _pomodoroSessionsDone.value = next
+            // FIX (user report "stuck at 1"): a boot-time expired finish
+            // (restorePomodoroState) can fire BEFORE the onCreate load completes,
+            // computing 0+1 and clobbering a real persisted count back to 1.
+            // Optimistic +1 now; the IO transaction below takes max(in-mem,
+            // persisted) so a late load can never lose sessions (non-blocking —
+            // never runBlocking on this path).
+            val optimistic = (_pomodoroSessionsDone.value + 1).coerceAtLeast(0).coerceAtMost(999)
+            _pomodoroSessionsDone.value = optimistic
             serviceScope.launch(Dispatchers.IO) {
-                try { settingsRepository.setPomodoroSessionsCompleted(next) } catch (_: Exception) {}
+                try {
+                    val authoritative = settingsRepository.addPomodoroSessionCompleted(optimistic)
+                    _pomodoroSessionsDone.value = maxOf(_pomodoroSessionsDone.value, authoritative)
+                } catch (_: Exception) {}
             }
         }
 
