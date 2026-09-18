@@ -249,8 +249,8 @@ class PomodoroViewModel @Inject constructor(
                 // P-P0-04: debounced finished event with explicit values. Service owns
                 // auto-start + sound — VM only raises the banner flag. NEVER call
                 // toggleStartStop() / playRingtone() from stale state here.
+                // (StateFlow already conflates; init seed above prevents reconnect re-fire.)
                 service.pomodoroFinishedCount
-                    .distinctUntilChanged()
                     .collect { count ->
                         if (lastFinishCount >= 0 && count > lastFinishCount) {
                             _uiState.update { it.copy(isFinished = true) }
