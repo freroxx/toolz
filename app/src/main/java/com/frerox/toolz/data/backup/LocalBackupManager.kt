@@ -309,6 +309,8 @@ class LocalBackupManager @Inject constructor(
         }
 
         var restoredEntries = 0
+        // CAL-P3: count of future calendar alarms re-scheduled after restore.
+        var rescheduledCalendarAlarms = 0
 
         ZipFile(stagingFile).use { zipFile ->
             val passphrase = zipFile.getInputStream(zipFile.getEntry("security/sqlcipher_passphrase.txt")).bufferedReader().use { it.readText() }
@@ -328,6 +330,10 @@ class LocalBackupManager @Inject constructor(
                     entry.name.startsWith("data/") -> {
                         if (restoreDatabaseItem(zipFile, entry, itemsToRestore)) {
                             restoredEntries++
+                            // CAL-P3: CALENDAR restore must reschedule (alarms don't survive export).
+                            if (entry.name == "data/events.json") {
+                                rescheduledCalendarAlarms = rescheduleCalendarAlarmsAfterRestore()
+                            }
                         }
                     }
                     entry.name.startsWith("datastore/") && itemsToRestore.contains(BackupItem.SETTINGS) -> {
@@ -366,7 +372,43 @@ class LocalBackupManager @Inject constructor(
         }
 
         stagingFile.delete()
-        BackupImportResult(manifest = manifest, restoredEntries = restoredEntries)
+        BackupImportResult(
+            manifest = manifest,
+            restoredEntries = restoredEntries,
+            rescheduledCalendarAlarms = rescheduledCalendarAlarms
+        )
+    }
+
+    /**
+     * CAL-P3: after a CALENDAR restore, future reminders must be re-scheduled
+     * (exact alarms are not part of the backup payload).
+     * Runs on IO (caller is already `withContext(Dispatchers.IO)`).
+     * Instantiates [CalendarAlarmScheduler] directly to avoid changing this
+     * shared file's @Inject constructor signature (other agents own it too).
+     *
+     * @return number of future events re-scheduled (shown to the user).
+     */
+    private suspend fun rescheduleCalendarAlarmsAfterRestore(): Int {
+        return try {
+            val scheduler = com.frerox.toolz.util.CalendarAlarmScheduler(context)
+            val now = System.currentTimeMillis()
+            val upcoming = database.eventDao().getUpcomingSync(now)
+            var count = 0
+            upcoming.filter { it.timestamp > now && it.remindersEnabled && !it.isCompleted }
+                .forEach {
+                    try {
+                        scheduler.scheduleEventReminders(it)
+                        count++
+                    } catch (e: Exception) {
+                        android.util.Log.w("LocalBackupManager", "Reschedule failed for event ${it.id}", e)
+                    }
+                }
+            android.util.Log.i("LocalBackupManager", "Restore rescheduled $count future event alarms")
+            count
+        } catch (e: Exception) {
+            android.util.Log.e("LocalBackupManager", "Calendar reschedule after restore failed", e)
+            0
+        }
     }
 
     private suspend fun restoreDatabaseItem(

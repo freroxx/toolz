@@ -261,6 +261,28 @@ object DatabaseModule {
         }
     }
 
+    // CAL-P1-05: events gains endTimestamp/durationMinutes/recurringRule + indices.
+    // Purely additive — no existing column touched, no data loss. Room's expected
+    // schema for Recurrence (via CalendarConverters) is TEXT with default 'NONE'.
+    // SHARED-FILE PROTOCOL (§7): Todo agent appends its indices to THIS SAME object
+    // if both land in one release — do NOT create a competing 59->60 or bump to 61.
+    private val MIGRATION_59_60 = object : Migration(59, 60) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE events ADD COLUMN endTimestamp INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE events ADD COLUMN durationMinutes INTEGER NOT NULL DEFAULT 60")
+            db.execSQL("ALTER TABLE events ADD COLUMN recurringRule TEXT NOT NULL DEFAULT 'NONE'")
+            // Backfill recurringRule from legacy isRecurring/recurringInterval.
+            try {
+                db.execSQL(
+                    "UPDATE events SET recurringRule = UPPER(recurringInterval) " +
+                        "WHERE isRecurring = 1 AND recurringInterval IS NOT NULL AND recurringInterval != ''"
+                )
+            } catch (_: Exception) { }
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_events_timestamp` ON `events` (`timestamp`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_events_eventType` ON `events` (`eventType`)")
+        }
+    }
+
     private val MIGRATION_49_50 = object : Migration(49, 50) {
         override fun migrate(db: SupportSQLiteDatabase) {
             // FIX: column name is protocolVersion (camelCase) per @ColumnInfo entity,
@@ -326,7 +348,7 @@ object DatabaseModule {
         .openHelperFactory(factory)
         // V2-FIX (reviewwhisper.md) H-10: explicit migrations only — every version bump
         // must ship one (see AppDatabase comment).
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60)
         .fallbackToDestructiveMigrationOnDowngrade()
         // NOTE: Add explicit Migration objects here when schema changes. Schemas are now
         // EXPORTED to app/schemas (H-10 fix) so diffs are reviewable — never re-introduce
@@ -378,7 +400,7 @@ object DatabaseModule {
                 // Fresh builder avoids leaking the first helper's connection.
                 return Room.databaseBuilder(context, AppDatabase::class.java, dbName)
                     .openHelperFactory(factory)
-        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59)
+        .addMigrations(MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55, MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58, MIGRATION_58_59, MIGRATION_59_60)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()
             }

@@ -17,6 +17,7 @@
 
 package com.frerox.toolz.ui.screens.time
 
+import android.content.res.Configuration
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
 import androidx.compose.animation.AnimatedContent
@@ -47,9 +48,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.progressSemantics
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.DisplaySettings
@@ -69,6 +69,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -77,9 +79,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,7 +97,6 @@ import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveStatePill
-import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
@@ -105,7 +106,6 @@ import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzHorizontalFloatingToolbar
 import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
-import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.screens.time.components.PreferenceRow
 import com.frerox.toolz.ui.screens.time.components.SettingsSection
@@ -128,17 +128,37 @@ fun StopwatchScreen(
         label = "stopwatchAccent",
     )
     val view = LocalView.current
-    var lapFlashAt by remember { mutableLongStateOf(0L) }
-    var showSettings by remember { mutableStateOf(false) }
+    // Saveable so rotation never loses UI flags (S-P1-03).
+    var lapFlashAt by rememberSaveable { mutableStateOf(0L) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val restoredMessage = stringResource(R.string.st_StopwatchScreen_y1z2)
+    val cappedMessage = stringResource(R.string.st_StopwatchScreen_a3b4)
 
     LaunchedEffect(state.lastLapAt) {
         if (state.lastLapAt > 0L) lapFlashAt = state.lastLapAt
     }
+    // Reboot-restore snackbar, shown once (S-P0-01).
+    LaunchedEffect(state.restoredAfterReboot) {
+        if (state.restoredAfterReboot) {
+            snackbarHostState.showSnackbar(restoredMessage)
+            viewModel.consumeRestoreFlag()
+        }
+    }
+    // Lap-cap toast, shown once (S-P1-02: 200 laps blocked, documented).
+    LaunchedEffect(state.lapCapped) {
+        if (state.lapCapped) {
+            snackbarHostState.showSnackbar(cappedMessage)
+            viewModel.consumeLapCapped()
+        }
+    }
 
+    // Capture the previous keepScreenOn ONCE — the old keyed effect re-captured on
+    // every toggle and leaked the value onto the next screen (S-P1-03).
+    val initialKeepScreenOn = remember { view.keepScreenOn }
     DisposableEffect(state.keepScreenOn) {
-        val previous = view.keepScreenOn
         view.keepScreenOn = state.keepScreenOn
-        onDispose { view.keepScreenOn = previous }
+        onDispose { view.keepScreenOn = initialKeepScreenOn }
     }
 
     Scaffold(
@@ -187,6 +207,7 @@ fun StopwatchScreen(
             )
         },
         floatingActionButtonPosition = FabPosition.Center,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent,
     ) { padding ->
         StopwatchContent(
@@ -231,38 +252,73 @@ private fun StopwatchContent(
     contentPadding: PaddingValues,
 ) {
     val performanceMode = LocalPerformanceMode.current
+    // Single scroll container (S-P1-02): no outer verticalScroll fighting the laps
+    // LazyColumn. Dial + stats are fixed; the laps list takes remaining space.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .toolzBackground()
             .padding(top = contentPadding.calculateTopPadding())
             .then(if (performanceMode) Modifier else Modifier.fadingEdges(top = 16.dp, bottom = 28.dp))
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
             .padding(bottom = 116.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         StaggeredEntrance(index = 0) {
-            StopwatchDial(state = state, accent = accent, lapFlashAt = lapFlashAt)
+            StopwatchDial(
+                elapsedTime = state.elapsedTime,
+                isRunning = state.isRunning,
+                showMilliseconds = state.showMilliseconds,
+                lastLapAt = state.lastLapAt,
+                lapFlashAt = lapFlashAt,
+                accent = accent,
+            )
         }
         StaggeredEntrance(index = 1) {
-            StopwatchStatsRow(state = state, accent = accent)
+            StopwatchStatsRow(
+                laps = state.laps,
+                showMilliseconds = state.showMilliseconds,
+                accent = accent,
+            )
         }
-        StaggeredEntrance(index = 2) {
-            StopwatchLapsPanel(state = state, accent = accent)
-        }
+        StopwatchLapsPanel(
+            laps = state.laps,
+            showMilliseconds = state.showMilliseconds,
+            accent = accent,
+            modifier = Modifier.weight(1f, fill = false),
+        )
     }
 }
 
 @Composable
-private fun StopwatchDial(state: StopwatchState, accent: Color, lapFlashAt: Long) {
+private fun StopwatchDial(
+    elapsedTime: Long,
+    isRunning: Boolean,
+    showMilliseconds: Boolean,
+    lastLapAt: Long,
+    lapFlashAt: Long,
+    accent: Color,
+) {
     val lapPulse by animateFloatAsState(
-        targetValue = if (lapFlashAt == state.lastLapAt && lapFlashAt > 0L) 1f else 0f,
+        targetValue = if (lapFlashAt == lastLapAt && lapFlashAt > 0L) 1f else 0f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
         label = "lapPulse",
     )
-    val sweepProgress = ((state.elapsedTime % 60_000L).toFloat() / 60_000f).coerceIn(0f, 1f)
-    val locale = LocalConfiguration.current.locales[0]
+    val sweepProgress = ((elapsedTime % 60_000L).toFloat() / 60_000f).coerceIn(0f, 1f)
+    val locale = safeStopwatchLocale()
+    val timeString = formatStopwatchTime(elapsedTime, showMilliseconds, locale)
+    // Long strings (>24h / ms digits) drop to a smaller style so 100h+ fits (S-P2-01).
+    val timeStyle = if (timeString.length > 11) {
+        MaterialTheme.typography.headlineMedium.copy(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+        )
+    } else {
+        MaterialTheme.typography.displayMedium.copy(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+        )
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         val dialSize = maxWidth.coerceAtMost(330.dp)
@@ -281,32 +337,36 @@ private fun StopwatchDial(state: StopwatchState, accent: Color, lapFlashAt: Long
                     verticalArrangement = Arrangement.Center,
                 ) {
                     AnimatedContent(
-                        targetState = formatStopwatchTime(state.elapsedTime, state.showMilliseconds, locale),
+                        targetState = timeString,
+                        // TalkBack liveRegion=Off (S-P2-04): liveRegion is intentionally
+                        // left UNSET (the property default). The 30ms ticker must never
+                        // spam announcements; the time stays focusable/readable on demand.
                         transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)).togetherWith(fadeOut()) },
                         label = "stopwatchTime",
                     ) { time ->
                         Text(
                             text = time,
-                            style = MaterialTheme.typography.displayMedium.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Black,
-                            ),
-                            color = if (state.isRunning) accent else MaterialTheme.colorScheme.onSurface,
+                            style = timeStyle,
+                            color = if (isRunning) accent else MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.Center,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     ExpressiveStatePill(
-                        text = if (state.isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (state.elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
-                        icon = if (state.isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
+                        text = if (isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
+                        icon = if (isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
                         color = accent,
                     )
                 }
             }
             ToolzWavyCircularProgressIndicator(
                 progress = { sweepProgress },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .progressSemantics(sweepProgress),
                 color = accent,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f + lapPulse * 0.15f),
                 strokeCap = StrokeCap.Round,
@@ -316,22 +376,29 @@ private fun StopwatchDial(state: StopwatchState, accent: Color, lapFlashAt: Long
 }
 
 @Composable
-private fun StopwatchStatsRow(state: StopwatchState, accent: Color) {
-    val lapEntries = remember(state.laps) { state.lapEntries() }
-    val locale = LocalConfiguration.current.locales[0]
+private fun StopwatchStatsRow(
+    laps: List<Long>,
+    showMilliseconds: Boolean,
+    accent: Color,
+) {
+    // Hoisted once per laps change (S-P1-02) — never recomputed per tick/item.
+    val lapEntries = remember(laps) { laps.toLapEntries() }
+    val bestDuration = remember(lapEntries) { lapEntries.minOfOrNull { it.duration } }
+    val locale = safeStopwatchLocale()
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
             label = stringResource(R.string.st_StopwatchScreen_e1f2),
-            value = state.laps.size.toString(),
+            value = laps.size.toString(),
             accent = accent,
         )
         StopwatchMetricCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Speed, contentDescription = null) },
             label = stringResource(R.string.st_StopwatchScreen_g3h4),
-            value = lapEntries.minByOrNull { it.duration }?.duration?.let { formatStopwatchTime(it, false, locale) } ?: "--:--",
+            // S-P2-01: honor the ms setting here too (was hardcoded false).
+            value = bestDuration?.let { formatStopwatchTime(it, showMilliseconds, locale) } ?: "--:--",
             accent = MaterialTheme.colorScheme.secondary,
         )
     }
@@ -354,7 +421,8 @@ private fun StopwatchMetricCard(
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Surface(shape = SmallExpressiveShape, color = accent.copy(alpha = 0.14f), contentColor = accent) {
-                Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                // 48dp touch-target guidance (S-P2-04).
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     icon()
                 }
             }
@@ -365,12 +433,19 @@ private fun StopwatchMetricCard(
 }
 
 @Composable
-private fun StopwatchLapsPanel(state: StopwatchState, accent: Color) {
-    val lapEntries = remember(state.laps) { state.lapEntries() }
-    val locale = LocalConfiguration.current.locales[0]
+private fun StopwatchLapsPanel(
+    laps: List<Long>,
+    showMilliseconds: Boolean,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val lapEntries = remember(laps) { laps.toLapEntries() }
+    val bestDuration = remember(lapEntries) { lapEntries.minOfOrNull { it.duration } }
+    val worstDuration = remember(lapEntries) { lapEntries.maxOfOrNull { it.duration } }
+    val locale = safeStopwatchLocale()
     ExpressiveCard(
         onClick = {},
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = LargeExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
         elevation = 0.dp,
@@ -389,20 +464,39 @@ private fun StopwatchLapsPanel(state: StopwatchState, accent: Color) {
                     }
                 }
             } else {
+                // Virtualized for 200 laps without jank (S-P1-02); fills remaining space.
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((lapEntries.size.coerceAtMost(5) * 86).dp),
+                        .weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    itemsIndexed(lapEntries, key = { _, item -> item.number }) { index, lap ->
-                        StaggeredEntrance(index = index % 5) {
+                    itemsIndexed(
+                        lapEntries,
+                        // Stable across inserts/resets (S-P1-02): totals are unique
+                        // monotonic timestamps, unlike positional numbers.
+                        key = { _, item -> "${item.total}_${item.number}" },
+                    ) { index, lap ->
+                        // Entrance animation only for small lists — never re-animate
+                        // 200 rows on every insert (S-P1-02).
+                        if (lapEntries.size <= 20) {
+                            StaggeredEntrance(index = index % 5) {
+                                StopwatchLapCard(
+                                    lap = lap,
+                                    isBest = lap.duration == bestDuration,
+                                    isSlowest = lap.duration == worstDuration,
+                                    accent = accent,
+                                    showMilliseconds = showMilliseconds,
+                                    locale = locale,
+                                )
+                            }
+                        } else {
                             StopwatchLapCard(
                                 lap = lap,
-                                isBest = lap.duration == lapEntries.minOf { it.duration },
-                                isSlowest = lap.duration == lapEntries.maxOf { it.duration },
+                                isBest = lap.duration == bestDuration,
+                                isSlowest = lap.duration == worstDuration,
                                 accent = accent,
-                                showMilliseconds = state.showMilliseconds,
+                                showMilliseconds = showMilliseconds,
                                 locale = locale,
                             )
                         }
@@ -437,7 +531,7 @@ private fun StopwatchLapCard(
     ) {
         Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = SmallExpressiveShape, color = markerColor.copy(alpha = 0.14f), contentColor = markerColor) {
-                Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                     Text(lap.number.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                 }
             }
@@ -487,17 +581,19 @@ private fun StopwatchControlDock(
         trailingContent = {
             clickableItem(
                 onClick = onLap,
-                icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+                // Explicit description for TalkBack (S-P2-04); gated on running.
+                icon = { Icon(Icons.Rounded.Flag, contentDescription = lapLabel) },
                 label = lapLabel,
-                enabled = state.elapsedTime > 0L,
+                enabled = state.isRunning,
             )
             clickableItem(
                 onClick = onReset,
-                icon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                icon = { Icon(Icons.Rounded.Refresh, contentDescription = resetLabel) },
                 label = resetLabel,
             )
         },
     ) {
+        // Queued in the ViewModel until bound, so never a silent drop (S-P0-01).
         ToolzExpressiveButton(
             onClick = onToggle,
             shape = BouncyShape,
@@ -509,7 +605,7 @@ private fun StopwatchControlDock(
         ) {
             Icon(
                 if (state.isRunning) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = null,
+                contentDescription = if (state.isRunning) pauseLabel else startLabel,
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(8.dp))
@@ -524,26 +620,53 @@ private data class LapEntry(
     val duration: Long,
 )
 
-private fun StopwatchState.lapEntries(): List<LapEntry> {
-    return laps.mapIndexed { index, total ->
-        val previousTotal = laps.getOrNull(index + 1) ?: 0L
+private fun List<Long>.toLapEntries(): List<LapEntry> {
+    return mapIndexed { index, total ->
+        val previousTotal = getOrNull(index + 1) ?: 0L
         LapEntry(
-            number = laps.size - index,
+            number = size - index,
             total = total,
             duration = (total - previousTotal).coerceAtLeast(0L),
         )
     }
 }
 
+/** locales[0] can throw on odd OEM configs — fall back to default (S-P2-01). */
+@Composable
+private fun safeStopwatchLocale(configuration: Configuration = LocalConfiguration.current): Locale {
+    return remember(configuration) {
+        try {
+            configuration.locales.get(0) ?: Locale.getDefault()
+        } catch (_: Exception) {
+            Locale.getDefault()
+        }
+    }
+}
+
+/**
+ * Stopwatch formatter (S-P2-01): >=24h renders as "1d 02:03:04[.567]" so 100h+
+ * fits narrow screens; the fractional part is TRUE milliseconds (3 digits),
+ * not the centiseconds previously mislabeled as ms.
+ */
 private fun formatStopwatchTime(timeMillis: Long, showMilliseconds: Boolean, locale: Locale): String {
-    val totalSeconds = timeMillis / 1000
+    val safe = timeMillis.coerceAtLeast(0L)
+    val totalSeconds = safe / 1000
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60
-    val millis = (timeMillis % 1000) / 10
+    val millis = safe % 1000
+    if (hours >= 24) {
+        val days = hours / 24
+        val h = hours % 24
+        return if (showMilliseconds) {
+            String.format(locale, "%dd %02d:%02d:%02d.%03d", days, h, minutes, seconds, millis)
+        } else {
+            String.format(locale, "%dd %02d:%02d:%02d", days, h, minutes, seconds)
+        }
+    }
     return when {
-        showMilliseconds && hours > 0 -> String.format(locale, "%d:%02d:%02d.%02d", hours, minutes, seconds, millis)
-        showMilliseconds -> String.format(locale, "%02d:%02d.%02d", minutes, seconds, millis)
+        showMilliseconds && hours > 0 -> String.format(locale, "%d:%02d:%02d.%03d", hours, minutes, seconds, millis)
+        showMilliseconds -> String.format(locale, "%02d:%02d.%03d", minutes, seconds, millis)
         hours > 0 -> String.format(locale, "%d:%02d:%02d", hours, minutes, seconds)
         else -> String.format(locale, "%02d:%02d", minutes, seconds)
     }

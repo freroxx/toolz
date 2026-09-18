@@ -190,6 +190,17 @@ object NotificationHelper {
             .setAutoCancel(true)
     }
 
+    /**
+     * CAL-P3 (additive, never changes [baseBuilder] defaults shared by other tools):
+     * alarm builder with monochrome status icon + re-alert on snooze re-fire.
+     */
+    fun alarmBuilder(context: Context, channelId: String): NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_stat_event)
+            .setOnlyAlertOnce(false)
+            .setAutoCancel(true)
+    }
+
     fun showBackupSuccess(context: Context, fileName: String, isScheduled: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Success_Scheduled) 
