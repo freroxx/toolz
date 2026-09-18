@@ -17,7 +17,10 @@
 
 package com.frerox.toolz.data.todo
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,14 +31,39 @@ class TaskRepository @Inject constructor(
 ) {
     val activeTasks: Flow<List<TaskEntry>> = taskDao.getActiveTasks()
 
-    fun getCompletedToday(): Flow<List<TaskEntry>> {
+    fun startOfDayNow(): Long {
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        return taskDao.getCompletedToday(calendar.timeInMillis)
+        return calendar.timeInMillis
+    }
+
+    fun getCompletedToday(): Flow<List<TaskEntry>> = taskDao.getCompletedToday(startOfDayNow())
+
+    /**
+     * D-P1-02 midnight fix: the old `getCompletedToday()` computed startOfDay
+     * ONCE per collection, so after midnight the list went stale until restart
+     * (and progress denominators collapsed). This re-emits at every local
+     * midnight and re-queries, so rollover is correct without restart.
+     */
+    fun getCompletedTodayAuto(): Flow<List<TaskEntry>> = midnightTicks().flatMapLatest { startOfDay ->
+        taskDao.getCompletedToday(startOfDay)
+    }
+
+    /** D-P1-02 orphans: completed-before-today (invisible to both active and today queries). */
+    fun getCompletedHistory(limit: Int = 30): Flow<List<TaskEntry>> =
+        taskDao.getCompletedHistory(limit)
+
+    private fun midnightTicks(): Flow<Long> = flow {
+        while (true) {
+            emit(startOfDayNow())
+            val now = System.currentTimeMillis()
+            val nextMidnight = startOfDayNow() + 24 * 60 * 60 * 1000L
+            delay((nextMidnight - now).coerceAtLeast(60_000L))
+        }
     }
 
     suspend fun addTask(task: TaskEntry) = taskDao.insertTask(task)

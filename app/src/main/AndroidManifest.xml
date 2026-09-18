@@ -452,7 +452,28 @@
         <receiver android:name=".service.TaskReminderReceiver"
             android:exported="false">
             <intent-filter>
+                <action android:name="com.frerox.toolz.action.TASK_REMINDER" />
+                <action android:name="com.frerox.toolz.action.TASK_DONE" />
+                <!-- Legacy pre-namespace DONE (in-flight notifications) — accept, never send. -->
                 <action android:name="ACTION_DONE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- T-P0-03: re-schedule task alarms after reboot/update/timezone change (additive). -->
+        <receiver android:name=".service.TaskBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
             </intent-filter>
         </receiver>
 

@@ -22,11 +22,19 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TaskDao {
+    // T-P0-01 truth: priority 1=Critical..5=None, so ASC puts Critical first.
+    // Matches TaskPriority + TodoScreen colors/labels + VM URGENCY + pill.
     @Query("SELECT * FROM tasks WHERE isCompleted = 0 ORDER BY priority ASC, dueDate ASC")
     fun getActiveTasks(): Flow<List<TaskEntry>>
 
     @Query("SELECT * FROM tasks WHERE isCompleted = 1 AND completedAt >= :startOfDay ORDER BY completedAt DESC")
     fun getCompletedToday(startOfDay: Long): Flow<List<TaskEntry>>
+
+    // D-P1-02 midnight orphans: yesterday-completed satisfies NEITHER the active
+    // query NOR getCompletedToday — without this they vanish forever (still
+    // backed up). History surfaces them instead of auto-purging.
+    @Query("SELECT * FROM tasks WHERE isCompleted = 1 ORDER BY completedAt DESC LIMIT :limit")
+    fun getCompletedHistory(limit: Int = 30): Flow<List<TaskEntry>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntry): Long
@@ -48,4 +56,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks WHERE dueDate IS NOT NULL")
     fun getTasksWithDueDate(): Flow<List<TaskEntry>>
+
+    // T-P0-03 boot/restore reschedule needs a one-shot read (Flow never
+    // completes inside a BootReceiver goAsync block). Wires the dead flow above.
+    @Query("SELECT * FROM tasks WHERE dueDate IS NOT NULL AND isCompleted = 0")
+    suspend fun getTasksWithDueDateSync(): List<TaskEntry>
 }

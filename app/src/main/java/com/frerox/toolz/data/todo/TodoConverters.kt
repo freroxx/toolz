@@ -23,17 +23,37 @@ import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 class TodoConverters {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    private val subTaskListType = Types.newParameterizedType(List::class.java, SubTask::class.java)
-    private val adapter = moshi.adapter<List<SubTask>>(subTaskListType)
-
     @TypeConverter
     fun fromSubTaskList(value: List<SubTask>): String {
-        return adapter.toJson(value)
+        return try {
+            sharedAdapter.toJson(value)
+        } catch (e: Exception) {
+            android.util.Log.e("TodoConverters", "subtask serialize failed, storing []", e)
+            "[]"
+        }
     }
 
     @TypeConverter
-    fun toSubTaskList(value: String): List<SubTask>? {
-        return adapter.fromJson(value)
+    fun toSubTaskList(value: String?): List<SubTask> {
+        // T-P0-04: nullable + throwing (Room null -> NPE at count/isNotEmpty,
+        // corrupt JSON crashed the whole list). Never throw: log + [].
+        if (value.isNullOrBlank()) return emptyList()
+        return try {
+            sharedAdapter.fromJson(value) ?: emptyList()
+        } catch (e: Exception) {
+            android.util.Log.e("TodoConverters", "corrupt subtask JSON, row shows no subtasks", e)
+            emptyList()
+        }
+    }
+
+    companion object {
+        // Singleton adapter (was: new Moshi per converter instance).
+        private val sharedAdapter: com.squareup.moshi.JsonAdapter<List<SubTask>> by lazy(
+            LazyThreadSafetyMode.SYNCHRONIZED
+        ) {
+            val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+            val type = Types.newParameterizedType(List::class.java, SubTask::class.java)
+            moshi.adapter<List<SubTask>>(type)
+        }
     }
 }

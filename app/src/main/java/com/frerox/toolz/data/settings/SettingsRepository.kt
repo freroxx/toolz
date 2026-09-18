@@ -99,6 +99,10 @@ class SettingsRepository @Inject constructor(
     private val FILE_CONVERSION_NOTIFICATIONS = booleanPreferencesKey("file_conversion_notifications")
     private val APP_UPDATE_NOTIFICATIONS = booleanPreferencesKey("app_update_notifications")
     private val TASK_REMINDER_NOTIFICATIONS = booleanPreferencesKey("task_reminder_notifications")
+    // D-P2-02: Todo categories persisted (were RAM-only: addCategory lost on
+    // process death + never backed up). Additive keys — never rename existing.
+    private val TASK_CATEGORIES = stringSetPreferencesKey("task_categories")
+    private val TASK_LAST_CATEGORY = stringPreferencesKey("task_last_category")
     private val EVENT_REMINDER_NOTIFICATIONS = booleanPreferencesKey("event_reminder_notifications")
     private val FLASHLIGHT_NOTIFICATIONS = booleanPreferencesKey("flashlight_notifications")
     private val POMODORO_NOTIFICATIONS = booleanPreferencesKey("pomodoro_notifications")
@@ -707,6 +711,14 @@ class SettingsRepository @Inject constructor(
     val fileConversionNotifications: Flow<Boolean> = dataStore.data.map { it[FILE_CONVERSION_NOTIFICATIONS] ?: true }
     val appUpdateNotifications: Flow<Boolean> = dataStore.data.map { it[APP_UPDATE_NOTIFICATIONS] ?: true }
     val taskReminderNotifications: Flow<Boolean> = dataStore.data.map { it[TASK_REMINDER_NOTIFICATIONS] ?: true }
+    // D-P2-02: persisted Todo categories (defaults mirror TodoUiState) + last used.
+    val taskCategories: Flow<Set<String>> = dataStore.data.map { prefs ->
+        val stored = prefs[TASK_CATEGORIES]
+        if (stored.isNullOrEmpty()) {
+            setOf("Personal", "Dev", "Science", "Shopping", "Fitness", "Work")
+        } else stored
+    }
+    val taskLastCategory: Flow<String> = dataStore.data.map { it[TASK_LAST_CATEGORY] ?: "Personal" }
     val eventReminderNotifications: Flow<Boolean> = dataStore.data.map { it[EVENT_REMINDER_NOTIFICATIONS] ?: true }
     val pomodoroNotifications: Flow<Boolean> = dataStore.data.map { it[POMODORO_NOTIFICATIONS] ?: true }
     val backupNotifications: Flow<Boolean> = dataStore.data.map { it[BACKUP_NOTIFICATIONS] ?: true }
@@ -1074,8 +1086,29 @@ class SettingsRepository @Inject constructor(
     suspend fun setBackgroundGradientEnabled(enabled: Boolean) { dataStore.edit { it[BACKGROUND_GRADIENT_ENABLED] = enabled } }
     suspend fun setShutterSoundEnabled(enabled: Boolean) { dataStore.edit { it[SHUTTER_SOUND_ENABLED] = enabled } }
     suspend fun setShutterSoundUri(uri: String) { dataStore.edit { it[SHUTTER_SOUND_URI] = uri } }
-    suspend fun addWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) + zone } }
+    suspend fun addWorldClockZone(zone: String) {
+        val trimmed = zone.trim()
+        if (trimmed.isEmpty()) return
+        // W-P2-02/03: basic guard — drop blank/unknown, cap 24.
+        // Full canonicalization lives in WorldClockZones (ViewModel sanitizes on collect).
+        val valid = runCatching { java.time.ZoneId.of(trimmed).normalized().id }.getOrNull()
+            ?: return
+        dataStore.edit { prefs ->
+            val current = prefs[WORLD_CLOCK_ZONES] ?: emptySet()
+            if (current.contains(valid)) return@edit
+            if (current.size >= 24) return@edit
+            prefs[WORLD_CLOCK_ZONES] = current + valid
+        }
+    }
     suspend fun removeWorldClockZone(zone: String) { dataStore.edit { it[WORLD_CLOCK_ZONES] = (it[WORLD_CLOCK_ZONES] ?: emptySet()) - zone } }
+    /**
+     * W-P0-01 / W-P2-03 migrator write-back: replace the whole set with a
+     * sanitized (canonical, deduped, capped) set. Additive — key unchanged.
+     */
+    suspend fun replaceWorldClockZones(zones: Set<String>) {
+        val capped = zones.take(24).toSet()
+        dataStore.edit { it[WORLD_CLOCK_ZONES] = capped }
+    }
     
     suspend fun setTimerKeepScreenOn(enabled: Boolean) { dataStore.edit { it[TIMER_KEEP_SCREEN_ON] = enabled } }
     suspend fun setStopwatchKeepScreenOn(enabled: Boolean) { dataStore.edit { it[STOPWATCH_KEEP_SCREEN_ON] = enabled } }
@@ -1164,6 +1197,22 @@ class SettingsRepository @Inject constructor(
     suspend fun setFileConversionNotifications(enabled: Boolean) { dataStore.edit { it[FILE_CONVERSION_NOTIFICATIONS] = enabled } }
     suspend fun setAppUpdateNotifications(enabled: Boolean) { dataStore.edit { it[APP_UPDATE_NOTIFICATIONS] = enabled } }
     suspend fun setTaskReminderNotifications(enabled: Boolean) { dataStore.edit { it[TASK_REMINDER_NOTIFICATIONS] = enabled } }
+    // D-P2-02: persist Todo categories (cap 24, trimmed, non-blank) + last used.
+    suspend fun addTaskCategory(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        dataStore.edit { prefs ->
+            val current = prefs[TASK_CATEGORIES]
+                ?: setOf("Personal", "Dev", "Science", "Shopping", "Fitness", "Work")
+            if (current.contains(trimmed) || current.size >= 24) return@edit
+            prefs[TASK_CATEGORIES] = current + trimmed
+        }
+    }
+    suspend fun setTaskLastCategory(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        dataStore.edit { it[TASK_LAST_CATEGORY] = trimmed }
+    }
     suspend fun setEventReminderNotifications(enabled: Boolean) { dataStore.edit { it[EVENT_REMINDER_NOTIFICATIONS] = enabled } }
     suspend fun setPomodoroNotifications(enabled: Boolean) { dataStore.edit { it[POMODORO_NOTIFICATIONS] = enabled } }
     suspend fun setBackupNotifications(enabled: Boolean) { dataStore.edit { it[BACKUP_NOTIFICATIONS] = enabled } }

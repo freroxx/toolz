@@ -232,9 +232,10 @@ class ToolService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Persist timer so swipe-away/process-death can resume (like StepCounter/Music/Caffeinate).
+        // Persist timer + pomodoro so swipe-away/process-death can resume.
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
+            try { persistPomodoroState() } catch (_: Exception) {}
         }
         super.onTaskRemoved(rootIntent)
     }
@@ -1639,6 +1640,10 @@ class ToolService : Service() {
 
     // --- Todo Session Logic ---
     fun startTodoSession(taskId: Int, title: String) {
+        // D-P1-03: switching tasks must NOT carry the old elapsed time.
+        if (_todoTaskId.value != taskId) {
+            _todoSessionTime.value = 0L
+        }
         _todoTaskId.value = taskId
         _todoTaskTitle.value = title
         _isTodoSessionActive.value = true
@@ -1659,7 +1664,9 @@ class ToolService : Service() {
         _todoSessionTime.value = 0L
         _todoTaskId.value = null
         _todoTaskTitle.value = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        // Shared-file protocol: NEVER stopForeground(REMOVE) unconditionally —
+        // that kills Timer/Stopwatch/Pomodoro. Demote only when all idle.
+        stopForegroundIfIdle()
     }
 
     // --- Alarm Logic (P-P1-01: mutex + focus + IO ramp + coerce, no Main prepare) ---

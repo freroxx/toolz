@@ -101,26 +101,37 @@ class WidgetUpdateManager @Inject constructor(
 
     suspend fun updatePomodoroWidget(
         mode: String,
-        remainingMs: Float,
-        totalMs: Float,
+        remainingMs: Long,
+        totalMs: Long,
         isRunning: Boolean,
         sessionsDone: Int? = null,
         sessionsGoal: Int? = null
     ) {
-        val glanceIds = GlanceAppWidgetManager(context).getGlanceIds(PomodoroGlanceWidget::class.java)
+        // P-P1-03: guard getGlanceIds (throws when host not ready, e.g. after reboot).
+        val glanceIds = try {
+            GlanceAppWidgetManager(context).getGlanceIds(PomodoroGlanceWidget::class.java)
+        } catch (e: Exception) {
+            android.util.Log.w("WidgetUpdateMgr", "getGlanceIds failed (non-fatal)", e)
+            return
+        }
+        if (glanceIds.isEmpty()) return
         glanceIds.forEach { glanceId ->
-            updateAppWidgetState(context, PomodoroWidgetStateDefinition, glanceId) { prefs ->
-                prefs.toMutablePreferences().apply {
-                    this[PomodoroWidgetState.KEY_MODE] = mode
-                    this[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs
-                    this[PomodoroWidgetState.KEY_TOTAL_MS] = totalMs
-                    this[PomodoroWidgetState.KEY_IS_RUNNING] = isRunning
-                    sessionsDone?.let { this[PomodoroWidgetState.KEY_SESSIONS_DONE] = it }
-                    sessionsGoal?.let { this[PomodoroWidgetState.KEY_SESSIONS_GOAL] = it }
+            try {
+                updateAppWidgetState(context, PomodoroWidgetStateDefinition, glanceId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[PomodoroWidgetState.KEY_MODE] = mode
+                        this[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
+                        this[PomodoroWidgetState.KEY_TOTAL_MS] = totalMs.coerceAtLeast(1L)
+                        this[PomodoroWidgetState.KEY_IS_RUNNING] = isRunning
+                        sessionsDone?.let { this[PomodoroWidgetState.KEY_SESSIONS_DONE] = it.coerceAtLeast(0) }
+                        sessionsGoal?.let { this[PomodoroWidgetState.KEY_SESSIONS_GOAL] = it.coerceIn(1, 12) }
+                    }
                 }
+                PomodoroGlanceWidget().update(context, glanceId)
+            } catch (e: Exception) {
+                android.util.Log.w("WidgetUpdateMgr", "updatePomodoroWidget failed for $glanceId", e)
             }
         }
-        PomodoroGlanceWidget().updateAll(context)
     }
 
     suspend fun updateSearchBarWidget() {

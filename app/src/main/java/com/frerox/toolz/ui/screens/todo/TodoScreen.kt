@@ -154,6 +154,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.frerox.toolz.data.todo.SubTask
 import com.frerox.toolz.data.todo.TaskEntry
+import com.frerox.toolz.util.CalendarUtils
 import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
@@ -189,16 +190,18 @@ import kotlin.math.roundToInt
 
 private enum class TaskFilter(@StringRes val label: Int) { ALL(R.string.st_TodoScreen_filter_all), TODAY(R.string.st_TodoScreen_filter_today), UPCOMING(R.string.st_TodoScreen_filter_next) }
 
+// T-P0-01 truth: 1=Critical .. 5=None (matches DAO ASC + TaskPriority).
+// Index = priority - 1. DO NOT reorder one side only.
 private val PriorityColors = listOf(
-    Color(0xFF9E9E9E), // 1 · None
-    Color(0xFF4CAF50), // 2 · Low
+    Color(0xFFF44336), // 1 · Critical
+    Color(0xFFFF9800), // 2 · High
     Color(0xFF2196F3), // 3 · Medium
-    Color(0xFFFF9800), // 4 · High
-    Color(0xFFF44336), // 5 · Critical
+    Color(0xFF4CAF50), // 4 · Low
+    Color(0xFF9E9E9E), // 5 · None
 )
 
 @StringRes
-private val PriorityLabels: List<Int> = listOf(R.string.st_TodoScreen_priority_none, R.string.st_TodoScreen_priority_low, R.string.st_TodoScreen_priority_medium, R.string.st_TodoScreen_priority_high, R.string.st_TodoScreen_priority_critical)
+private val PriorityLabels: List<Int> = listOf(R.string.st_TodoScreen_priority_critical, R.string.st_TodoScreen_priority_high, R.string.st_TodoScreen_priority_medium, R.string.st_TodoScreen_priority_low, R.string.st_TodoScreen_priority_none)
 
 private fun formatDueDate(ts: Long): String {
     val diff = ts - System.currentTimeMillis()
@@ -230,16 +233,17 @@ private fun formatSessionTime(millis: Long): String {
     return if (h > 0) "%02d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
 }
 
-private fun isToday(ts: Long): Boolean {
-    val t = Calendar.getInstance().apply { timeInMillis = ts }
-    val n = Calendar.getInstance()
-    return t.get(Calendar.YEAR) == n.get(Calendar.YEAR) &&
-            t.get(Calendar.DAY_OF_YEAR) == n.get(Calendar.DAY_OF_YEAR)
-}
+private fun isToday(ts: Long): Boolean =
+    // T-P0-02/D-P1-02: single shared impl (don't fork local Calendar math).
+    CalendarUtils.isSameDay(ts, System.currentTimeMillis())
+
+private fun isOverdue(ts: Long): Boolean = ts < System.currentTimeMillis() && !isToday(ts)
 
 private fun isUpcoming(ts: Long): Boolean {
+    // D-P1-02: 1..14 documented window (was 1..13, excluded today-later via
+    // truncation and dropped day-14). Overdue lives in TODAY, not here.
     val days = TimeUnit.MILLISECONDS.toDays(ts - System.currentTimeMillis())
-    return days in 1..13
+    return days in 1..14
 }
 
 private val bouncySpring = spring<Float>(
@@ -275,7 +279,11 @@ fun TodoScreen(
         derivedStateOf {
             when (selectedFilter) {
                 TaskFilter.ALL -> uiState.tasks
-                TaskFilter.TODAY -> uiState.tasks.filter { it.dueDate?.let(::isToday) == true }
+                // D-P1-02: overdue stays visible in TODAY (previously only
+                // isToday -> overdue non-today tasks vanished from every filter).
+                TaskFilter.TODAY -> uiState.tasks.filter {
+                    it.dueDate?.let { due -> isToday(due) || isOverdue(due) } == true
+                }
                 TaskFilter.UPCOMING -> uiState.tasks.filter { it.dueDate?.let(::isUpcoming) == true }
             }
         }
@@ -1567,15 +1575,23 @@ private fun QuickAddBar(
     }
 
     // Date picker dialog
+    // T-P0-02: DatePicker returns UTC-midnight — NEVER store it directly
+    // (GMT-4 pick Sep19 -> Sep18 20:00 local -> isToday miss + prior-day
+    // 23:45 reminder). Reuse CalendarUtils (don't fork): UTC Y/M/D -> local
+    // at 09:00 default (midnight would already be past -> silent-drop P0-03).
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = selectedDueDate ?: System.currentTimeMillis()
+            initialSelectedDateMillis = selectedDueDate?.let {
+                CalendarUtils.localTimestampToDatePickerUtc(it)
+            } ?: CalendarUtils.localTimestampToDatePickerUtc(System.currentTimeMillis())
         )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    selectedDueDate = datePickerState.selectedDateMillis
+                    selectedDueDate = datePickerState.selectedDateMillis?.let {
+                        CalendarUtils.combineDatePickerUtcWithTime(it, 9, 0)
+                    }
                     showDatePicker = false
                 }) { Text(stringResource(R.string.st_TodoScreen_u7v8)) }
             },
@@ -2018,11 +2034,21 @@ private fun TaskDetailSheet(
     }
 
     if (showDatePicker) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = editDueDate ?: System.currentTimeMillis())
+        // T-P0-02: same UTC-midnight -> local 09:00 normalization as QuickAdd.
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = editDueDate?.let {
+                CalendarUtils.localTimestampToDatePickerUtc(it)
+            } ?: CalendarUtils.localTimestampToDatePickerUtc(System.currentTimeMillis())
+        )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
-                TextButton(onClick = { editDueDate = state.selectedDateMillis; showDatePicker = false }) {
+                TextButton(onClick = {
+                    editDueDate = state.selectedDateMillis?.let {
+                        CalendarUtils.combineDatePickerUtcWithTime(it, 9, 0)
+                    }
+                    showDatePicker = false
+                }) {
                     Text(stringResource(R.string.st_TodoScreen_u7v8))
                 }
             },
