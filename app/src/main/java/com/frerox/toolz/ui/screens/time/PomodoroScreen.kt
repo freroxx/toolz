@@ -84,6 +84,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -138,14 +139,18 @@ fun PomodoroScreen(
     )
     val view = LocalView.current
     var showSettings by remember { mutableStateOf(false) }
-    var showConfetti by remember { mutableStateOf(false) }
+    var showConfetti by rememberSaveable { mutableStateOf(false) }
+    // P-P2-04: consumed-flag so lowering goal below completed still celebrates once,
+    // 9/8 celebrates, and rotation keeps state. Trigger is >=, not ==.
+    var confettiConsumedFor by rememberSaveable { mutableIntStateOf(-1) }
 
-    var lastCompleted by remember { mutableIntStateOf(state.sessionsCompleted) }
-    LaunchedEffect(state.sessionsCompleted) {
-        if (state.sessionsCompleted > lastCompleted && state.sessionsCompleted == state.sessionsGoal) {
+    LaunchedEffect(state.sessionsCompleted, state.sessionsGoal) {
+        val done = state.sessionsCompleted
+        val goal = state.sessionsGoal.coerceAtLeast(1)
+        if (done >= goal && done > 0 && confettiConsumedFor != done) {
+            confettiConsumedFor = done
             showConfetti = true
         }
-        lastCompleted = state.sessionsCompleted
     }
 
     DisposableEffect(state.keepScreenOn) {
@@ -215,7 +220,13 @@ fun PomodoroScreen(
             )
             
             if (showConfetti) {
-                PomodoroSuccessConfetti(onFinished = { showConfetti = false })
+                // P-P2-04: skip heavy particles on low-end (performance mode).
+                val performanceMode = LocalPerformanceMode.current
+                if (!performanceMode) {
+                    PomodoroSuccessConfetti(onFinished = { showConfetti = false })
+                } else {
+                    showConfetti = false
+                }
             }
         }
 
@@ -235,7 +246,9 @@ fun PomodoroScreen(
                 onAiFormat = viewModel::formatQuotesWithAi,
                 onResetQuotes = viewModel::resetQuotes,
                 onResetGoal = viewModel::resetGoal,
-                onGradualVolumeChanged = viewModel::setGradualVolume
+                onGradualVolumeChanged = viewModel::setGradualVolume,
+                onRingtoneChanged = viewModel::setRingtoneUri,
+                onClearQuoteError = viewModel::clearQuoteError,
             )
         }
     }
@@ -291,7 +304,10 @@ private fun PomodoroContent(
 
 @Composable
 private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
-    val rawProgress = 1f - (state.remainingTime.toFloat() / state.totalTime.toFloat())
+    // P-P2-05: guard total<=0 (legacy 0) — never divide by zero / Inf.
+    val safeTotal = state.totalTime.coerceAtLeast(1L)
+    val safeRemaining = state.remainingTime.coerceIn(0L, safeTotal)
+    val rawProgress = 1f - (safeRemaining.toFloat() / safeTotal.toFloat())
     val animatedProgress by animateFloatAsState(
         targetValue = rawProgress.coerceIn(0f, 1f),
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
@@ -377,13 +393,18 @@ private fun PomodoroStatsRow(state: PomodoroState, activeColor: Color) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // P-P2-05: display "+N over" + "Goal reached" instead of hiding overflow at 100%.
+        val goal = state.sessionsGoal.coerceAtLeast(1)
+        val done = state.sessionsCompleted.coerceAtLeast(0)
+        val over = (done - goal).coerceAtLeast(0)
+        val sessionValue = if (over > 0) "${done}/${goal} (+${over} over)" else "${done}/${goal}"
         StatCard(
             modifier = Modifier.weight(1f),
             icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-            label = stringResource(R.string.st_PomodoroScreen_f7g8),
-            value = "${state.sessionsCompleted}/${state.sessionsGoal}",
+            label = if (done >= goal && done > 0) "Goal reached 🎉" else stringResource(R.string.st_PomodoroScreen_f7g8),
+            value = sessionValue,
             accent = activeColor,
-            progress = (state.sessionsCompleted.toFloat() / state.sessionsGoal.toFloat()).coerceIn(0f, 1f)
+            progress = (done.toFloat() / goal.toFloat()).coerceIn(0f, 1f)
         )
         StatCard(
             modifier = Modifier.weight(1f),
@@ -553,7 +574,8 @@ private fun phaseMessage(state: PomodoroState): String = when {
 @Composable
 private fun nextPhaseLabel(state: PomodoroState): String = when {
     state.mode != PomodoroMode.WORK -> stringResource(R.string.st_PomodoroScreen_g3h4)
-    (state.sessionsCompleted + 1) % 4 == 0 -> stringResource(R.string.st_PomodoroScreen_i5j6)
+    // P-P0-01: single phase truth shared with Service — never a second %4 formula.
+    nextPhaseIsLongBreak(state.sessionsCompleted) -> stringResource(R.string.st_PomodoroScreen_i5j6)
     else -> stringResource(R.string.st_PomodoroScreen_k7l8)
 }
 

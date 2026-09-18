@@ -18,7 +18,7 @@
 package com.frerox.toolz.widget.glance
 
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.state.GlanceStateDefinition
@@ -26,7 +26,7 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 
 // ---------------------------------------------------------------------------
 //  Pomodoro Widget — shared state keys (written by ToolService, read by
-//  PomodoroGlanceWidget).
+//  PomodoroGlanceWidget). P-P1-03: Long millis (no Float rounding).
 // ---------------------------------------------------------------------------
 
 object PomodoroWidgetStateDefinition : GlanceStateDefinition<androidx.datastore.preferences.core.Preferences>
@@ -35,8 +35,12 @@ by PreferencesGlanceStateDefinition
 object PomodoroWidgetState {
     // "WORK" | "SHORT_BREAK" | "LONG_BREAK"
     val KEY_MODE          = stringPreferencesKey("pw_mode")
-    val KEY_REMAINING_MS  = floatPreferencesKey("pw_remaining_ms")
-    val KEY_TOTAL_MS      = floatPreferencesKey("pw_total_ms")
+    val KEY_REMAINING_MS  = longPreferencesKey("pw_remaining_ms")
+    val KEY_TOTAL_MS      = longPreferencesKey("pw_total_ms")
+    // Legacy Float keys (pre-P1-03) — read as fallback for widgets written
+    // before the Long migration, then overwritten with Long on next push.
+    val KEY_REMAINING_MS_LEGACY  = androidx.datastore.preferences.core.floatPreferencesKey("pw_remaining_ms")
+    val KEY_TOTAL_MS_LEGACY      = androidx.datastore.preferences.core.floatPreferencesKey("pw_total_ms")
     val KEY_IS_RUNNING    = booleanPreferencesKey("pw_is_running")
     // Sessions completed today
     val KEY_SESSIONS_DONE = intPreferencesKey("pw_sessions_done")

@@ -5,19 +5,13 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.frerox.toolz.ui.screens.time.components
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -26,26 +20,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlin.random.Random
 
+/**
+ * P-P2-04: single-shot confetti (never InfiniteTransition). Animates 0->1 once
+ * over 3s, then calls onFinished exactly once. No loop, no race.
+ */
 @Composable
 fun PomodoroSuccessConfetti(
     onFinished: () -> Unit
 ) {
-    val duration = 3000L
+    val duration = 3000
     val particleCount = 100
-    
-    val infiniteTransition = rememberInfiniteTransition(label = "confetti")
-    val progress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(duration.toInt(), easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "progress"
-    )
+
+    val progressAnim = remember { Animatable(0f) }
+    var finished by remember { mutableStateOf(false) }
 
     val particles = remember {
         List(particleCount) {
@@ -69,9 +58,19 @@ fun PomodoroSuccessConfetti(
     }
 
     LaunchedEffect(Unit) {
-        delay(duration)
-        onFinished()
+        try {
+            progressAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(duration, easing = LinearEasing),
+            )
+        } catch (_: Exception) {}
+        if (!finished) {
+            finished = true
+            onFinished()
+        }
     }
+
+    val progress = progressAnim.value
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val width = size.width

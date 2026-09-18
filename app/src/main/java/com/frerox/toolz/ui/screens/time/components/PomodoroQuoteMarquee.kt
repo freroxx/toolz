@@ -42,22 +42,27 @@ fun PomodoroQuoteMarquee(
     modifier: Modifier = Modifier
 ) {
     val quotes = remember(quotesText) {
-        quotesText.split("\n").filter { it.isNotBlank() }
+        quotesText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
     }
-    
+
     if (quotes.isEmpty()) return
 
-    var currentQuoteIndex by remember { mutableIntStateOf(0) }
+    // P-P2-03: key index on quotes so shrink 6->1 resets instead of OOB.
+    var currentQuoteIndex by remember(quotes) { mutableIntStateOf(0) }
     var isPaused by remember { mutableStateOf(false) }
-    val currentQuote = quotes[currentQuoteIndex]
-    
+    val safeIndex = currentQuoteIndex.coerceIn(0, quotes.size - 1)
+    if (currentQuoteIndex != safeIndex) currentQuoteIndex = safeIndex
+    val currentQuote = quotes[safeIndex]
+
     var showDetails by remember { mutableStateOf(false) }
-    
-    // Smooth transition between quotes
+
+    // P-P2-03: while(true) + paused-guard (no tight spin, no stuck coroutine).
     LaunchedEffect(quotes, isPaused) {
-        while (!isPaused) {
-            delay(12000L) // Show each quote for 12 seconds
-            currentQuoteIndex = (currentQuoteIndex + 1) % quotes.size
+        while (true) {
+            delay(12_000L)
+            if (!isPaused && quotes.isNotEmpty()) {
+                currentQuoteIndex = (currentQuoteIndex + 1) % quotes.size
+            }
         }
     }
 
@@ -68,6 +73,8 @@ fun PomodoroQuoteMarquee(
             .fillMaxWidth()
             .pointerInput(Unit) {
                 detectTapGestures(
+                    // P-P2-03: onTap present so tap doesn't fight basicMarquee scrolling.
+                    onTap = { },
                     onDoubleTap = { isPaused = !isPaused },
                     onLongPress = { showDetails = true }
                 )
@@ -108,15 +115,10 @@ fun PomodoroQuoteMarquee(
     }
 
     if (showDetails) {
+        // P-P2-03: strict regex with fallback — naive lastIndexOf('(') breaks on
+        // quotes containing '(' (e.g. Camus). Fallback keeps full text.
         val parts = remember(currentQuote) {
-            val lastParen = currentQuote.lastIndexOf('(')
-            if (lastParen != -1) {
-                val quote = currentQuote.substring(0, lastParen).trim().removeSurrounding("\"")
-                val source = currentQuote.substring(lastParen + 1).trim().removeSuffix(")")
-                quote to source
-            } else {
-                currentQuote to ""
-            }
+            parseQuote(currentQuote)
         }
 
         AlertDialog(
@@ -142,8 +144,8 @@ fun PomodoroQuoteMarquee(
                     )
                     if (parts.second.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "— ${parts.second}",
+                    Text(
+                        text = "— ${parts.second}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -152,4 +154,22 @@ fun PomodoroQuoteMarquee(
             }
         )
     }
+}
+
+/**
+ * P-P2-03: strict `"quote" (source)` parse with full-text fallback.
+ * Handles inner parens (Camus `(` case) by anchoring to the trailing group.
+ */
+private val QUOTE_REGEX = Regex("^\"(.*)\"\\s*\\((.*)\\)\\s*$")
+
+internal fun parseQuote(raw: String): Pair<String, String> {
+    val trimmed = raw.trim()
+    val match = QUOTE_REGEX.find(trimmed)
+    if (match != null) {
+        val quote = match.groupValues[1].trim()
+        val source = match.groupValues[2].trim()
+        return quote to source
+    }
+    // Fallback: keep full text, no crash, no mangling.
+    return trimmed.removeSurrounding("\"") to ""
 }

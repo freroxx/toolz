@@ -83,13 +83,23 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, PomodoroWidgetStateDefinition, id)
         val mode = prefs[PomodoroWidgetState.KEY_MODE] ?: "WORK"
-        val remainingMs = prefs[PomodoroWidgetState.KEY_REMAINING_MS] ?: 25 * 60 * 1000f
-        val totalMs = prefs[PomodoroWidgetState.KEY_TOTAL_MS]?.takeIf { it > 0f } ?: 25 * 60 * 1000f
-        val isRunning = prefs[PomodoroWidgetState.KEY_IS_RUNNING] ?: false
-        val sessionsDone = prefs[PomodoroWidgetState.KEY_SESSIONS_DONE] ?: 0
-        val sessionsGoal = prefs[PomodoroWidgetState.KEY_SESSIONS_GOAL] ?: 8
-        val elapsedProgress = (1f - remainingMs / totalMs).coerceIn(0f, 1f)
-        val goalProgress = (sessionsDone.toFloat() / sessionsGoal.coerceAtLeast(1)).coerceIn(0f, 1f)
+        // P-P1-03: Long millis (no Float rounding) with legacy Float fallback.
+        val remainingMs: Long = try {
+            prefs[PomodoroWidgetState.KEY_REMAINING_MS] ?: legacyRemaining(prefs)
+        } catch (_: ClassCastException) {
+            legacyRemaining(prefs)
+        }
+        val totalMs: Long = try {
+            (prefs[PomodoroWidgetState.KEY_TOTAL_MS] ?: legacyTotal(prefs)).takeIf { it > 0L }
+                ?: 25 * 60 * 1000L
+        } catch (_: ClassCastException) {
+            legacyTotal(prefs).takeIf { it > 0L } ?: 25 * 60 * 1000L
+        }
+        val isRunning = try { prefs[PomodoroWidgetState.KEY_IS_RUNNING] ?: false } catch (_: Exception) { false }
+        val sessionsDone = try { (prefs[PomodoroWidgetState.KEY_SESSIONS_DONE] ?: 0).coerceAtLeast(0) } catch (_: Exception) { 0 }
+        val sessionsGoal = try { (prefs[PomodoroWidgetState.KEY_SESSIONS_GOAL] ?: 8).coerceIn(1, 12) } catch (_: Exception) { 8 }
+        val elapsedProgress = (1f - remainingMs.toFloat() / totalMs.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+        val goalProgress = (sessionsDone.toFloat() / sessionsGoal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
 
         val palette = PomodoroWidgetPalette.resolve(context, mode)
         val ringBitmap = buildProgressBitmap(
@@ -120,7 +130,7 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                 // Chronometer setup
                 val remoteViews = RemoteViews(context.packageName, R.layout.widget_chronometer)
                 val base = if (isRunning) {
-                    SystemClock.elapsedRealtime() + remainingMs.toLong()
+                    SystemClock.elapsedRealtime() + remainingMs
                 } else {
                     SystemClock.elapsedRealtime()
                 }
@@ -146,7 +156,7 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                             ringBitmap = ringBitmap,
                             goalBitmap = goalBitmap,
                             chronometerView = remoteViews,
-                            remainingMs = remainingMs.toLong()
+                            remainingMs = remainingMs
                         )
                     } else {
                         CompactPomodoroContent(
@@ -154,7 +164,7 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                             isRunning = isRunning,
                             ringBitmap = ringBitmap,
                             chronometerView = remoteViews,
-                            remainingMs = remainingMs.toLong()
+                            remainingMs = remainingMs
                         )
                     }
                 }
@@ -496,6 +506,23 @@ private fun modeLabel(mode: String) = when (mode) {
     "SHORT_BREAK" -> "SHORT"
     "LONG_BREAK" -> "LONG"
     else -> "FOCUS"
+}
+
+/** Legacy Float fallback for widgets written before the P-P1-03 Long migration. */
+private fun legacyRemaining(prefs: Preferences): Long {
+    return try {
+        prefs[PomodoroWidgetState.KEY_REMAINING_MS_LEGACY]?.toLong() ?: 25 * 60 * 1000L
+    } catch (_: Exception) {
+        25 * 60 * 1000L
+    }
+}
+
+private fun legacyTotal(prefs: Preferences): Long {
+    return try {
+        prefs[PomodoroWidgetState.KEY_TOTAL_MS_LEGACY]?.toLong() ?: 25 * 60 * 1000L
+    } catch (_: Exception) {
+        25 * 60 * 1000L
+    }
 }
 
 const val POMODORO_ACTION_TOGGLE = "com.frerox.toolz.WIDGET_POMO_TOGGLE"

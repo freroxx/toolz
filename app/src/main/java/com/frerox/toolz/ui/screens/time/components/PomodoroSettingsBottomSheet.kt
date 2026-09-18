@@ -27,9 +27,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.frerox.toolz.ui.components.*
 import com.frerox.toolz.ui.screens.time.PomodoroState
 import kotlin.math.roundToInt
@@ -52,6 +55,8 @@ fun PomodoroSettingsBottomSheet(
     onResetQuotes: () -> Unit,
     onResetGoal: () -> Unit,
     onGradualVolumeChanged: (Boolean) -> Unit,
+    onRingtoneChanged: ((String) -> Unit)? = null,
+    onClearQuoteError: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -145,6 +150,16 @@ fun PomodoroSettingsBottomSheet(
                     onCheckedChange = onGradualVolumeChanged
                 )
 
+                // P-P1-02: custom ringtone picker with persistable grant. Wired only
+                // when the host passes onRingtoneChanged; otherwise hidden (no dead UI).
+                if (onRingtoneChanged != null) {
+                    RingtonePickerRow(
+                        currentUri = state.ringtoneUri,
+                        activeColor = activeColor,
+                        onRingtoneChanged = onRingtoneChanged,
+                    )
+                }
+
                 ToolzOutlinedExpressiveButton(
                     onClick = onResetGoal,
                     modifier = Modifier.fillMaxWidth(),
@@ -165,15 +180,34 @@ fun PomodoroSettingsBottomSheet(
 
                 if (state.showQuotes) {
                     var editingQuotes by remember(state.quotes) { mutableStateOf(state.quotes) }
-                    
+
                     OutlinedTextField(
                         value = editingQuotes,
-                        onValueChange = { editingQuotes = it },
+                        onValueChange = { editingQuotes = it.take(8000) },
                         modifier = Modifier.fillMaxWidth().height(150.dp),
                         textStyle = MaterialTheme.typography.bodySmall,
                         label = { Text("Custom Quotes") },
                         shape = SmallExpressiveShape
                     )
+
+                    // P-P2-06: surface AI/timeout errors instead of silent failure.
+                    if (state.quoteError != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = state.quoteError,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (onClearQuoteError != null) {
+                                TextButton(onClick = onClearQuoteError) { Text("Dismiss") }
+                            }
+                        }
+                    }
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -250,6 +284,8 @@ private fun DurationSlider(
     range: ClosedFloatingPointRange<Float>,
     activeColor: Color
 ) {
+    // P-P2-06: local slider state — commit once on release, never per-pixel DataStore.edit.
+    var sliderValue by remember(value) { mutableFloatStateOf(value.toFloat()) }
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -257,11 +293,12 @@ private fun DurationSlider(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-            Text("${value}m", style = MaterialTheme.typography.bodySmall, color = activeColor, fontWeight = FontWeight.Black)
+            Text("${sliderValue.roundToInt()}m", style = MaterialTheme.typography.bodySmall, color = activeColor, fontWeight = FontWeight.Black)
         }
         ExpressiveSlider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange(it.roundToInt()) },
+            value = sliderValue,
+            onValueChange = { sliderValue = it },
+            onValueChangeFinished = { onValueChange(sliderValue.roundToInt()) },
             valueRange = range,
             colors = SliderDefaults.colors(
                 thumbColor = activeColor,
@@ -269,6 +306,51 @@ private fun DurationSlider(
                 inactiveTrackColor = activeColor.copy(alpha = 0.2f)
             )
         )
+    }
+}
+
+/**
+ * P-P1-02: ringtone picker — ACTION_OPEN_DOCUMENT + persistable read grant.
+ * Validates via openFileDescriptor in the VM before save; service falls back
+ * to the default alarm sound when the grant is revoked.
+ */
+@Composable
+private fun RingtonePickerRow(
+    currentUri: String?,
+    activeColor: Color,
+    onRingtoneChanged: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: Exception) {}
+            onRingtoneChanged(uri.toString())
+        }
+    }
+    PreferenceRow(
+        title = "Alarm sound",
+        subtitle = if (currentUri.isNullOrBlank()) "System default" else "Custom sound",
+        icon = Icons.Rounded.MusicNote,
+        activeColor = activeColor,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!currentUri.isNullOrBlank()) {
+                TextButton(onClick = { onRingtoneChanged("") }) { Text("Default") }
+            }
+            ToolzOutlinedExpressiveButton(
+                onClick = { launcher.launch(arrayOf("audio/*")) },
+                shape = SmallExpressiveShape,
+            ) {
+                Text("Pick sound")
+            }
+        }
     }
 }
 

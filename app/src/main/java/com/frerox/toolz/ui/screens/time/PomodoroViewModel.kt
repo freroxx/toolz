@@ -21,11 +21,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.IBinder
-import android.provider.Settings
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -36,17 +33,22 @@ import com.frerox.toolz.data.ai.OpenAiRequest
 import com.frerox.toolz.data.ai.OpenAiService
 import com.frerox.toolz.data.settings.SettingsRepository
 import com.frerox.toolz.service.ToolService
+import com.frerox.toolz.service.nextModeAfterWork
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 enum class PomodoroMode(val label: String, val supportingLabel: String) {
@@ -76,7 +78,12 @@ data class PomodoroState(
     val isFormattingQuotes: Boolean = false,
     val offlineMode: Boolean = false,
     val gradualVolume: Boolean = false,
+    val quoteError: String? = null,
 )
+
+/** P-P0-01: UI shares the ONE phase-truth function with Service (never a second %4). */
+fun nextPhaseIsLongBreak(persistedCompleted: Int): Boolean =
+    nextModeAfterWork(persistedCompleted) == "LONG_BREAK"
 
 @HiltViewModel
 class PomodoroViewModel @Inject constructor(
@@ -91,8 +98,9 @@ class PomodoroViewModel @Inject constructor(
 
     private var toolService: ToolService? = null
     private var isBound = false
-    private var mediaPlayer: MediaPlayer? = null
-    private var lastFinishCount = 0
+    // P-P0-04: keep Jobs, cancel before re-collect. No delay-hacks, no stale reads.
+    private var pomodoroJobs: List<Job> = emptyList()
+    private var lastFinishCount = -1
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -109,6 +117,16 @@ class PomodoroViewModel @Inject constructor(
     }
 
     init {
+        // P-P0-03: startService() before bind so the service survives UI death
+        // (bind-only dies with the activity; started service survives Doze/kill).
+        try {
+            val startIntent = Intent(context, ToolService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(startIntent)
+            } else {
+                context.startService(startIntent)
+            }
+        } catch (_: Exception) {}
         Intent(context, ToolService::class.java).also { intent ->
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
@@ -176,50 +194,71 @@ class PomodoroViewModel @Inject constructor(
     )
 
     private fun bindPomodoroFlows(service: ToolService) {
-        viewModelScope.launch {
-            service.pomodoroRemaining.collect { remaining ->
-                _uiState.update { it.copy(remainingTime = remaining.coerceAtLeast(0L)) }
-            }
-        }
-        viewModelScope.launch {
-            service.pomodoroTotalMs.collect { total ->
-                _uiState.update { it.copy(totalTime = total.coerceAtLeast(1L)) }
-            }
-        }
-        viewModelScope.launch {
-            service.pomodoroModeState.collect { mode ->
-                _uiState.update {
-                    it.copy(
-                        mode = mode.toPomodoroMode(),
-                        isFinished = if (it.isRunning) false else it.isFinished,
-                    )
-                }
-            }
-        }
-        viewModelScope.launch {
-            service.isPomodoroRunning.collect { running ->
-                _uiState.update { it.copy(isRunning = running, isFinished = if (running) false else it.isFinished) }
-            }
-        }
-        viewModelScope.launch {
-            service.pomodoroSessionsDone.collect { sessions ->
-                _uiState.update { it.copy(sessionsCompleted = sessions.coerceAtLeast(0)) }
-            }
-        }
-        viewModelScope.launch {
-            service.pomodoroFinishedCount.collect { count ->
-                if (count > lastFinishCount) {
-                    lastFinishCount = count
-                    _uiState.update { it.copy(isFinished = true) }
-                    playRingtone()
-                    if (_uiState.value.autoStartNext) {
-                        toggleStartStop()
+        // P-P0-04: cancel previous collectors before re-collect (reconnect must not
+        // double-fire). P-P2-01: flows are the sole truth — VM never computes durations.
+        pomodoroJobs.forEach { try { it.cancel() } catch (_: Exception) {} }
+        // Seed lastFinishCount from current service value so a reconnect does NOT
+        // re-fire isFinished + sound (no double sound on reconnect).
+        lastFinishCount = try { service.pomodoroFinishedCount.value } catch (_: Exception) { 0 }
+        if (lastFinishCount < 0) lastFinishCount = 0
+        pomodoroJobs = listOf(
+            viewModelScope.launch {
+                service.pomodoroRemaining
+                    .map { it.coerceAtLeast(0L) }
+                    .distinctUntilChanged()
+                    .collect { remaining ->
+                        _uiState.update { it.copy(remainingTime = remaining) }
                     }
-                } else {
-                    lastFinishCount = count
-                }
-            }
-        }
+            },
+            viewModelScope.launch {
+                service.pomodoroTotalMs
+                    .map { it.coerceAtLeast(1L) }
+                    .distinctUntilChanged()
+                    .collect { total ->
+                        _uiState.update { it.copy(totalTime = total) }
+                    }
+            },
+            viewModelScope.launch {
+                service.pomodoroModeState
+                    .collect { mode ->
+                        _uiState.update {
+                            it.copy(
+                                mode = mode.toPomodoroMode(),
+                                // Clear stale finished flag only when mode actually settles;
+                                // running collector below also clears on start.
+                                isFinished = if (it.isRunning) false else it.isFinished,
+                            )
+                        }
+                    }
+            },
+            viewModelScope.launch {
+                service.isPomodoroRunning
+                    .collect { running ->
+                        _uiState.update { it.copy(isRunning = running, isFinished = if (running) false else it.isFinished) }
+                    }
+            },
+            viewModelScope.launch {
+                service.pomodoroSessionsDone
+                    .map { it.coerceAtLeast(0) }
+                    .distinctUntilChanged()
+                    .collect { sessions ->
+                        _uiState.update { it.copy(sessionsCompleted = sessions) }
+                    }
+            },
+            viewModelScope.launch {
+                // P-P0-04: debounced finished event with explicit values. Service owns
+                // auto-start + sound — VM only raises the banner flag. NEVER call
+                // toggleStartStop() / playRingtone() from stale state here.
+                service.pomodoroFinishedCount
+                    .distinctUntilChanged()
+                    .collect { count ->
+                        if (lastFinishCount >= 0 && count > lastFinishCount) {
+                            _uiState.update { it.copy(isFinished = true) }
+                        }
+                        lastFinishCount = count
+                    }
+            },
+        )
     }
 
     fun toggleStartStop() {
@@ -227,29 +266,22 @@ class PomodoroViewModel @Inject constructor(
         if (state.isRunning) {
             toolService?.pausePomodoro()
         } else {
-            stopRingtone()
+            // P-P1-03: stopAlarm() cancels both alarm IDs — safe even when not ringing.
+            toolService?.stopAlarm()
+            // Service is the sole duration truth; pass remaining as-is (service falls
+            // back to durationForMode when <= 0). Never compute here.
             toolService?.startPomodoro(state.remainingTime, state.mode.name)
             _uiState.update { it.copy(isFinished = false) }
         }
     }
 
     fun selectMode(mode: PomodoroMode) {
+        // P-P2-01: VM calls service only — flows echo the truth. No optimistic
+        // duration math from laggy settings cache (flicker source).
         if (_uiState.value.isRunning) return
-        stopRingtone()
+        toolService?.stopAlarm()
         toolService?.setPomodoroMode(mode.name)
-        val minutes = when(mode) {
-            PomodoroMode.WORK -> _uiState.value.workMinutes
-            PomodoroMode.SHORT_BREAK -> _uiState.value.shortBreakMinutes
-            PomodoroMode.LONG_BREAK -> _uiState.value.longBreakMinutes
-        }
-        _uiState.update {
-            it.copy(
-                mode = mode,
-                remainingTime = minutes * 60 * 1000L,
-                totalTime = minutes * 60 * 1000L,
-                isFinished = false,
-            )
-        }
+        _uiState.update { it.copy(isFinished = false) }
     }
 
     fun setWorkMinutes(minutes: Int) {
@@ -281,7 +313,48 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun setRingtoneUri(uri: String) {
-        viewModelScope.launch { settingsRepository.setPomodoroRingtoneUri(uri) }
+        // P-P1-02: validate grant before persisting. Revoked/blank URIs fall back
+        // to the system default (service also falls back — never crashes).
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val trimmed = uri.trim()
+                if (trimmed.isBlank()) {
+                    settingsRepository.setPomodoroRingtoneUri("")
+                    return@launch
+                }
+                val parsed = runCatching { Uri.parse(trimmed) }.getOrNull()
+                if (parsed == null) {
+                    _uiState.update { it.copy(quoteError = null) }
+                    return@launch
+                }
+                val readable = try {
+                    context.contentResolver.openFileDescriptor(parsed, "r")?.close()
+                    true
+                } catch (_: SecurityException) {
+                    false
+                } catch (_: Exception) {
+                    // Non-content schemes (file/default) — let service try + fall back.
+                    true
+                }
+                if (readable) {
+                    try {
+                        // Persist grant for reboot survival when possible.
+                        if (parsed.scheme == "content") {
+                            try {
+                                context.contentResolver.takePersistableUriPermission(
+                                    parsed,
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
+                    settingsRepository.setPomodoroRingtoneUri(trimmed)
+                } else {
+                    // No grant — store blank so service uses the default alarm sound.
+                    settingsRepository.setPomodoroRingtoneUri("")
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     fun setShowQuotes(enabled: Boolean) {
@@ -299,12 +372,13 @@ class PomodoroViewModel @Inject constructor(
     fun formatQuotesWithAi() {
         if (_uiState.value.offlineMode) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isFormattingQuotes = true) }
-            val currentQuotes = _uiState.value.quotes
+            _uiState.update { it.copy(isFormattingQuotes = true, quoteError = null) }
+            // P-P2-06: truncate unbounded input before the prompt (blowup guard).
+            val currentQuotes = _uiState.value.quotes.take(4000)
             val groqKey = aiSettingsManager.getApiKey("Groq").ifBlank { aiSettingsManager.getApiKey() }
-            
+
             if (groqKey.isBlank()) {
-                _uiState.update { it.copy(isFormattingQuotes = false) }
+                _uiState.update { it.copy(isFormattingQuotes = false, quoteError = "No API key configured") }
                 return@launch
             }
 
@@ -318,38 +392,55 @@ class PomodoroViewModel @Inject constructor(
             """.trimIndent()
 
             val models = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b")
+            var lastError: String? = null
             for (modelName in models) {
                 try {
-                    val resp = withContext(Dispatchers.IO) {
-                        openAiService.getChatCompletion(
-                            url = "https://api.groq.com/openai/v1/chat/completions",
-                            authHeader = "Bearer $groqKey",
-                            request = OpenAiRequest(
-                                model = modelName,
-                                messages = listOf(
-                                    OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that formats quotes. Reply with ONLY the formatted quotes, one per line.")),
-                                    OpenAiMessage("user", MessageContent.Text(prompt)),
-                                ),
-                                maxTokens = 2000,
+                    // P-P2-06: bounded timeout + IO dispatcher so offline hangs surface.
+                    val resp = withTimeoutOrNull(30_000L) {
+                        withContext(Dispatchers.IO) {
+                            openAiService.getChatCompletion(
+                                url = "https://api.groq.com/openai/v1/chat/completions",
+                                authHeader = "Bearer $groqKey",
+                                request = OpenAiRequest(
+                                    model = modelName,
+                                    messages = listOf(
+                                        OpenAiMessage("system", MessageContent.Text("You are a helpful assistant that formats quotes. Reply with ONLY the formatted quotes, one per line.")),
+                                        OpenAiMessage("user", MessageContent.Text(prompt)),
+                                    ),
+                                    maxTokens = 2000,
+                                )
                             )
-                        )
+                        }
+                    }
+                    if (resp == null) {
+                        lastError = "Request timed out ($modelName)"
+                        continue
                     }
                     val formatted = resp.choices.firstOrNull()?.message?.content?.trim()
                     if (!formatted.isNullOrBlank()) {
-                        settingsRepository.setPomodoroQuotes(formatted)
+                        settingsRepository.setPomodoroQuotes(formatted.take(8000))
+                        lastError = null
                         break
+                    } else {
+                        lastError = "Empty response ($modelName)"
                     }
                 } catch (e: Exception) {
                     Log.e("PomodoroVM", "AI format failed with $modelName: ${e.message}")
+                    lastError = e.message ?: "Request failed ($modelName)"
                 }
             }
-            
-            _uiState.update { it.copy(isFormattingQuotes = false) }
+
+            _uiState.update { it.copy(isFormattingQuotes = false, quoteError = lastError) }
         }
     }
 
+    fun clearQuoteError() {
+        _uiState.update { it.copy(quoteError = null) }
+    }
+
     fun playRingtone() {
-        // Handled by ToolService
+        // P-P2-01: dead stub removed from call sites — Service owns sound. Kept for
+        // binary compat; does nothing by design.
     }
 
     fun stopRingtone() {
@@ -358,20 +449,11 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun reset() {
+        // P-P2-01: service is truth — no optimistic duration math. Flows echo.
+        toolService?.stopAlarm()
         toolService?.resetPomodoro()
-        stopRingtone()
-        val minutes = when(_uiState.value.mode) {
-            PomodoroMode.WORK -> _uiState.value.workMinutes
-            PomodoroMode.SHORT_BREAK -> _uiState.value.shortBreakMinutes
-            PomodoroMode.LONG_BREAK -> _uiState.value.longBreakMinutes
-        }
         _uiState.update {
-            it.copy(
-                remainingTime = minutes * 60 * 1000L,
-                totalTime = minutes * 60 * 1000L,
-                isRunning = false,
-                isFinished = false,
-            )
+            it.copy(isRunning = false, isFinished = false)
         }
     }
 
@@ -380,16 +462,20 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun skip() {
+        // Skip never counts as work (P-P2-02) — service cycles silently, no alarm.
+        toolService?.stopAlarm()
         toolService?.skipPomodoro()
-        stopRingtone()
+        _uiState.update { it.copy(isFinished = false) }
     }
 
     override fun onCleared() {
         super.onCleared()
+        pomodoroJobs.forEach { try { it.cancel() } catch (_: Exception) {} }
+        pomodoroJobs = emptyList()
         if (isBound) {
-            context.unbindService(connection)
+            try { context.unbindService(connection) } catch (_: Exception) {}
+            isBound = false
         }
-        mediaPlayer?.release()
     }
 }
 
