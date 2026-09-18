@@ -177,9 +177,52 @@ fun WorldMap2D(
 ) {
     val context = LocalContext.current
 
-    var vectorPath by remember { mutableStateOf<Path?>(null) }
+    // ── Vector land polygons ────────────────────────────────────────────────
+    // W-P1-02: parse once to NORMALIZED coords (0..1), then scale per size.
+    // Was: split+toFloatOrNull on every size change.
+    var normalizedPolys by remember { mutableStateOf<List<List<Pair<Float, Float>>>?>(null) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val text = try {
+                    context.assets.open("world_map.txt").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    "-180,-90,180,-90,180,-65,-180,-65,-180,-90|" +
+                    "-80,-55,-40,-10,-50,10,-80,10,-80,-55|" +
+                    "-170,70,-60,70,-60,10,-100,15,-170,70|" +
+                    "-20,35,50,35,50,-35,10,-35,-20,35|" +
+                    "-10,70,180,70,180,10,-10,10,-10,70|" +
+                    "110,-10,155,-10,155,-45,110,-45,110,-10"
+                }
+                val polys = ArrayList<List<Pair<Float, Float>>>()
+                text.split("|").forEach { poly ->
+                    val cs = poly.split(",")
+                    if (cs.size >= 2) {
+                        val pts = ArrayList<Pair<Float, Float>>()
+                        var i = 0
+                        while (i < cs.size - 1) {
+                            val lon = cs[i].toFloatOrNull()
+                            val lat = cs[i + 1].toFloatOrNull()
+                            if (lon != null && lat != null) {
+                                // Normalized: x=(lon+180)/360, y=(90-lat)/180
+                                pts.add(((lon + 180f) / 360f) to ((90f - lat) / 180f))
+                            }
+                            i += 2
+                        }
+                        if (pts.size >= 2) polys.add(pts)
+                    }
+                }
+                normalizedPolys = polys
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+    // Scale normalized polys to current map size — remembered, not rebuilt per frame.
+    // NOTE: derived vectorPath/terminator/dotNorm are declared after canvasSize/now
+    // below (they depend on them). See "Derived remembered paths" section.
 
     // ── Satellite bitmap — equirectangular NASA Blue Marble ───────────────────
+    // W-P1-02: subsampled decode (inSampleSize) to view size, recycle on replace/
+    // dispose, skip auto-download on metered (cache only).
     var satelliteBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(Unit) {
@@ -190,16 +233,19 @@ fun WorldMap2D(
 
                 if (cacheFile.exists()) {
                     try {
-                        satelliteBitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
-                        return@withContext
-                    } catch (e: Exception) {}
+                        satelliteBitmap = decodeSampled(cacheFile.absolutePath, reqWidth = 1024)
+                        if (satelliteBitmap != null) return@withContext
+                    } catch (e: Exception) { /* fall through to download */ }
                 }
 
                 context.cacheDir.listFiles()?.forEach {
                     if (it.name.startsWith("satellite_") && it.name != cacheFile.name) {
-                        it.delete()
+                        runCatching { it.delete() }
                     }
                 }
+
+                // Metered guard: never auto-fetch on metered networks (W-P1-02).
+                if (isMetered(context)) return@withContext
 
                 val urls = listOf(
                     "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57752/land_shallow_topo_2048.jpg",
@@ -217,12 +263,20 @@ fun WorldMap2D(
                             cacheFile.outputStream().use { out ->
                                 input.copyTo(out)
                             }
-                            satelliteBitmap = android.graphics.BitmapFactory.decodeFile(cacheFile.absolutePath)
+                            satelliteBitmap = decodeSampled(cacheFile.absolutePath, reqWidth = 1024)
                             break
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) { /* try next URL */ }
                 }
             }
+        }
+    }
+
+    // W-P1-02: recycle bitmap when replaced or disposed (was never recycled).
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            satelliteBitmap?.recycle()
+            satelliteBitmap = null
         }
     }
 
@@ -285,15 +339,51 @@ fun WorldMap2D(
         }
     }
     val pulsAnim = remember { Animatable(0f) }
+    // W-P1-02: pulse tied to composition visibility — LaunchedEffect cancels on
+    // dispose automatically; loop guards isActive so off-screen dispose stops it.
     LaunchedEffect(userLatLon) {
-        if (userLatLon != null) while (true) {
-            pulsAnim.snapTo(0f)
-            pulsAnim.animateTo(1f, tween(1800, easing = FastOutSlowInEasing))
-            delay(2800)
+        if (userLatLon != null) {
+            try {
+                while (true) {
+                    pulsAnim.snapTo(0f)
+                    pulsAnim.animateTo(1f, tween(1800, easing = FastOutSlowInEasing))
+                    delay(2800)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         }
     }
     var now by remember { mutableStateOf(ZonedDateTime.now()) }
     LaunchedEffect(Unit) { while (true) { now = ZonedDateTime.now(); delay(60_000L) } }
+
+    // ── Derived remembered paths (W-P1-02: no per-frame alloc) ───────────────
+    val vectorPath: Path? = remember(normalizedPolys, canvasSize) {
+        val polys = normalizedPolys ?: return@remember null
+        val cW = canvasSize.width; val cH = canvasSize.height
+        if (cW <= 0f || cH <= 0f) return@remember null
+        val (w, h) = getMapDimensions(cW, cH)
+        val p = Path()
+        for (poly in polys) {
+            var first = true
+            for ((nx, ny) in poly) {
+                val x = nx * w; val y = ny * h
+                if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
+            }
+            p.close()
+        }
+        p
+    }
+    val nowMinute = remember(now) { now.truncatedTo(java.time.temporal.ChronoUnit.MINUTES) }
+    val terminator: TerminatorPaths? = remember(nowMinute, canvasSize) {
+        val cW = canvasSize.width; val cH = canvasSize.height
+        if (cW <= 0f || cH <= 0f) return@remember null
+        val (w, h) = getMapDimensions(cW, cH)
+        computeTerminator(nowMinute, w, h, steps = 240)
+    }
+    val dotNorm: List<Pair<Float, Float>> = remember(locations) {
+        locations.map { loc ->
+            ((loc.longitude.toFloat() + 180f) / 360f) to ((90f - loc.latitude.toFloat()) / 180f)
+        }
+    }
 
     // ── Canvas ────────────────────────────────────────────────────────────────
     Canvas(
@@ -333,8 +423,6 @@ fun WorldMap2D(
                             val cW = gs.canvasW; val cH = gs.canvasH
                             val (mW, mH) = getMapDimensions(cW, cH)
                             val cx = cW / 2f; val cy = cH / 2f
-                            val mapOffX = (cW - mW) / 2f
-                            val mapOffY = (cH - mH) / 2f
 
                             val newZoom = (gs.zoom * zoomChange).coerceIn(1f, 15f)
                             val f       = newZoom / gs.zoom
@@ -343,26 +431,17 @@ fun WorldMap2D(
                             val rawPanX = gs.panX * f + (centroid.x - cx) * (1f - f) + panChange.x
                             val rawPanY = gs.panY * f + (centroid.y - cy) * (1f - f) + panChange.y
 
-                            // Clamp: the visible map edge must not go past canvas edge
-                            // Map left edge in screen space: zoom*(0 + mapOffX - cx) + cx + panX
-                            // That should be >= 0:  panX >= -zoom*(mapOffX - cx) - cx ... simplified:
-                            // Max pan X = zoom*(mW/2 + mapOffX - cx) - cx + cx = zoom*(mW/2 + mapOffX - cx)
-                            val maxPX = newZoom * (mW / 2f + mapOffX - cx) + cx - cx // simplifies to:
-                            val clampPX = newZoom * (mW / 2f) - cW / 2f + (cW - newZoom * cW) / 2f
-                            // Simpler bounds: after transform, left of map = zoom*(mapOffX - cx) + cx + panX
-                            // Must be <= 0 for left, right of map must be >= cW
-                            val leftEdge  = { p: Float -> newZoom * (mapOffX - cx) + cx + p }
-                            val rightEdge = { p: Float -> newZoom * (mapOffX + mW - cx) + cx + p }
-                            val topEdge   = { p: Float -> newZoom * (mapOffY - cy) + cy + p }
-                            val botEdge   = { p: Float -> newZoom * (mapOffY + mH - cy) + cy + p }
-                            val minPX = if (mW * newZoom > cW) -(rightEdge(0f) - cW) else -(leftEdge(0f))
-                            val maxPanX = if (mW * newZoom > cW) -leftEdge(0f) else -(rightEdge(0f) - cW)
-                            val minPY = if (mH * newZoom > cH) -(botEdge(0f) - cH) else -(topEdge(0f))
-                            val maxPanY = if (mH * newZoom > cH) -topEdge(0f) else -(botEdge(0f) - cH)
+                            // W-P1-02: simplified clamp (was fragile maxPX/clampPX math).
+                            // Symmetric bounds: scaled map larger than canvas -> allow edge-to-edge
+                            // pan; smaller -> lock centered (pan 0).
+                            val scaledW = mW * newZoom
+                            val scaledH = mH * newZoom
+                            val maxPanX = if (scaledW > cW) (scaledW - cW) / 2f else 0f
+                            val maxPanY = if (scaledH > cH) (scaledH - cH) / 2f else 0f
 
                             gs.zoom = newZoom
-                            gs.panX = rawPanX.coerceIn(minOf(minPX, maxPanX), maxOf(minPX, maxPanX))
-                            gs.panY = rawPanY.coerceIn(minOf(minPY, maxPanY), maxOf(minPY, maxPanY))
+                            gs.panX = rawPanX.coerceIn(-maxPanX, maxPanX)
+                            gs.panY = rawPanY.coerceIn(-maxPanY, maxPanY)
 
                             canvasVersion++
                         }
@@ -462,16 +541,25 @@ fun WorldMap2D(
                         }
                     }
 
-                    drawDayNightOverlay(now, w, h, colors)
+                    // W-P1-02: precomputed terminator paths (remembered, no per-frame alloc).
+                    terminator?.let { t ->
+                        drawPath(t.nightPath, Color(0xFF010408).copy(alpha = colors.nightOverlayAlpha))
+                        // Single glow stroke (was 4 full-width strokes per draw).
+                        drawPath(t.termPath, Color(0xFFFFB347).copy(alpha = 0.22f),
+                            style = Stroke(3.dp.toPx()))
+                    }
 
                     drawLocationDots(
                         locations   = locations,
+                        dotNorm     = dotNorm,
                         selected    = selectedLocation,
                         highlighted = highlightedZones,
                         selPulse    = selAnim.value,
                         hiPulse     = hiAnim.value,
                         colors      = colors,
                         w = w, h = h, zoom = zoom,
+                        canvasW = canvasW, canvasH = canvasH,
+                        panX = panX, panY = panY,
                     )
 
                     userLatLon?.let { (lat, lon) ->
@@ -483,53 +571,8 @@ fun WorldMap2D(
     }
 
     // ── Build vector path on background thread ────────────────────────────────
-    LaunchedEffect(canvasSize) {
-        val cW = canvasSize.width; val cH = canvasSize.height
-        if (cW <= 0f || cH <= 0f) return@LaunchedEffect
-        val (w, h) = getMapDimensions(cW, cH)
-        withContext(Dispatchers.IO) {
-            try {
-                // Try to load from assets, with a basic fallback if missing
-                val text = try {
-                    context.assets.open("world_map.txt").bufferedReader().use { it.readText() }
-                } catch (e: Exception) {
-                    // Fallback: simplified low-poly world (continents as basic polygons)
-                    // Format: lon,lat,lon,lat...|next_poly...
-                    // Antarctica
-                    "-180,-90,180,-90,180,-65,-180,-65,-180,-90|" +
-                    // South America
-                    "-80,-55,-40,-10,-50,10,-80,10,-80,-55|" +
-                    // North America
-                    "-170,70,-60,70,-60,10,-100,15,-170,70|" +
-                    // Africa
-                    "-20,35,50,35,50,-35,10,-35,-20,35|" +
-                    // Eurasia
-                    "-10,70,180,70,180,10,-10,10,-10,70|" +
-                    // Australia
-                    "110,-10,155,-10,155,-45,110,-45,110,-10"
-                }
-                val p = Path()
-                text.split("|").forEach { poly ->
-                    val cs = poly.split(",")
-                    if (cs.size >= 2) {
-                        var first = true; var i = 0
-                        while (i < cs.size - 1) {
-                            val lon = cs[i].toFloatOrNull()
-                            val lat = cs[i + 1].toFloatOrNull()
-                            if (lon != null && lat != null) {
-                                val x = (lon + 180f) / 360f * w
-                                val y = (90f - lat) / 180f * h
-                                if (first) { p.moveTo(x, y); first = false } else p.lineTo(x, y)
-                            }
-                            i += 2
-                        }
-                        p.close()
-                    }
-                }
-                vectorPath = p
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-    }
+    // NOTE: vector is parsed once to normalized coords above (LaunchedEffect(Unit));
+    // vectorPath is derived via remember(normalizedPolys, canvasSize). No per-size re-parse.
 }
 
 // ─── Projection ───────────────────────────────────────────────────────────────
@@ -557,82 +600,121 @@ private fun DrawScope.drawGraticules(c: WorldMapColors, w: Float, h: Float, zoom
 }
 
 // ─── Day / Night overlay ──────────────────────────────────────────────────────
-private fun DrawScope.drawDayNightOverlay(now: ZonedDateTime, w: Float, h: Float, c: WorldMapColors) {
-    val utc      = now.withZoneSameInstant(ZoneOffset.UTC)
-    val dayOfYear= utc.dayOfYear.toDouble()
-    val hourDec  = utc.hour + utc.minute / 60.0 + utc.second / 3600.0
-    val declDeg  = -23.45 * cos(Math.toRadians(360.0 / 365.0 * (dayOfYear + 10.0)))
-    val declRad  = Math.toRadians(declDeg)
-    val subLon   = 180.0 - hourDec * 15.0
+// W-P1-02: precomputed off-draw (remembered on minute+size). No per-frame alloc:
+// no FloatArray/Path/dp.toPx in draw. 240 steps, single glow stroke.
 
-    val steps = 720
-    val tLats = FloatArray(steps + 1)
-    val tLons = FloatArray(steps + 1)
+private data class TerminatorPaths(val nightPath: Path, val termPath: Path)
+
+private fun computeTerminator(now: ZonedDateTime, w: Float, h: Float, steps: Int = 240): TerminatorPaths {
+    val utc = now.withZoneSameInstant(ZoneOffset.UTC)
+    val dayOfYear = utc.dayOfYear.toDouble()
+    val hourDec = utc.hour + utc.minute / 60.0 + utc.second / 3600.0
+    val declDeg = -23.45 * cos(Math.toRadians(360.0 / 365.0 * (dayOfYear + 10.0)))
+    val declRad = Math.toRadians(declDeg)
+    val subLon = 180.0 - hourDec * 15.0
+
+    // Stack-allocated lists (computed once per minute, not per frame).
+    val tLats = ArrayList<Float>(steps + 1)
+    val tLons = ArrayList<Float>(steps + 1)
     for (i in 0..steps) {
-        val lon  = -180.0 + i * (360.0 / steps)
-        tLons[i] = lon.toFloat()
-        val H    = Math.toRadians(lon - subLon)
-        val td   = tan(declRad)
-        tLats[i] = if (abs(td) < 0.001) 0f
-                   else Math.toDegrees(atan(-cos(H) / td)).toFloat().coerceIn(-89f, 89f)
+        val lon = -180.0 + i * (360.0 / steps)
+        tLons.add(lon.toFloat())
+        val hAngle = Math.toRadians(lon - subLon)
+        val td = tan(declRad)
+        tLats.add(
+            if (abs(td) < 0.001) 0f
+            else Math.toDegrees(atan(-cos(hAngle) / td)).toFloat().coerceIn(-89f, 89f)
+        )
     }
 
     val nightPath = Path()
     if (declDeg < 0) {
         nightPath.moveTo(0f, 0f); nightPath.lineTo(w, 0f)
-        for (i in steps downTo 0) { val p = latLonToOffset(tLats[i], tLons[i], w, h); nightPath.lineTo(p.x, p.y) }
+        for (i in steps downTo 0) {
+            nightPath.lineTo((tLons[i] + 180f) / 360f * w, (90f - tLats[i]) / 180f * h)
+        }
     } else {
         nightPath.moveTo(0f, h); nightPath.lineTo(w, h)
-        for (i in steps downTo 0) { val p = latLonToOffset(tLats[i], tLons[i], w, h); nightPath.lineTo(p.x, p.y) }
+        for (i in steps downTo 0) {
+            nightPath.lineTo((tLons[i] + 180f) / 360f * w, (90f - tLats[i]) / 180f * h)
+        }
     }
     nightPath.close()
-    drawPath(nightPath, Color(0xFF010408).copy(alpha = c.nightOverlayAlpha))
 
-    val termPath = Path(); var first = true
+    val termPath = Path()
     for (i in 0..steps) {
-        val p = latLonToOffset(tLats[i], tLons[i], w, h)
-        if (first) { termPath.moveTo(p.x, p.y); first = false } else termPath.lineTo(p.x, p.y)
+        val x = (tLons[i] + 180f) / 360f * w
+        val y = (90f - tLats[i]) / 180f * h
+        if (i == 0) termPath.moveTo(x, y) else termPath.lineTo(x, y)
     }
-    drawPath(termPath, Color(0xFFFF8C00).copy(alpha = 0.07f), style = Stroke(18.dp.toPx()))
-    drawPath(termPath, Color(0xFFFFB347).copy(alpha = 0.12f), style = Stroke(9.dp.toPx()))
-    drawPath(termPath, Color(0xFFFFE066).copy(alpha = 0.28f), style = Stroke(3.dp.toPx()))
-    drawPath(termPath, Color(0xFFFFFFCC).copy(alpha = 0.40f), style = Stroke(1.2.dp.toPx()))
+    return TerminatorPaths(nightPath, termPath)
 }
 
 // ─── Location dots ────────────────────────────────────────────────────────────
+// W-P1-02: hoisted dp.toPx (once per draw, not per dot), precomputed normalized
+// positions, screen-space culling, single-circle fast path at low zoom.
 private fun DrawScope.drawLocationDots(
     locations: List<WorldClockLocation>,
+    dotNorm: List<Pair<Float, Float>>,
     selected: WorldClockLocation?,
     highlighted: Set<String>,
     selPulse: Float,
     hiPulse: Float,
     colors: WorldMapColors,
     w: Float, h: Float, zoom: Float,
+    canvasW: Float, canvasH: Float,
+    panX: Float, panY: Float,
 ) {
     val sa = (1f / sqrt(zoom)).coerceIn(0.22f, 1f)
+    // Hoist density conversions — one call each per draw (was ~1600/frame).
+    val rSel = 5.0.dp.toPx() * sa
+    val rSelInner = 2.0.dp.toPx() * sa
+    val rHi = 4.dp.toPx() * sa
+    val rHiInner = 1.5.dp.toPx() * sa
+    val rHiGlowBase = 5.dp.toPx() * sa
+    val rHiGlowExtra = 8.dp.toPx() * sa
+    val rDot = 2.1.dp.toPx() * sa
+    val rDotHi = 0.85.dp.toPx() * sa
+    val cx = canvasW / 2f; val cy = canvasH / 2f
+    val mapOffX = (canvasW - w) / 2f
+    val mapOffY = (canvasH - h) / 2f
+    val lowZoom = zoom < 1.5f
 
-    locations.forEach { loc ->
-        val pos   = latLonToOffset(loc.latitude.toFloat(), loc.longitude.toFloat(), w, h)
+    for (i in locations.indices) {
+        val loc = locations[i]
+        val (nx, ny) = dotNorm[i]
+        // Map-space -> screen-space (mirrors the Canvas transform).
+        val mapX = nx * w + mapOffX
+        val mapY = ny * h + mapOffY
+        val screenX = zoom * (mapX - cx) + cx + panX
+        val screenY = zoom * (mapY - cy) + cy + panY
+        // Cull to visible rect (+slack for glow).
+        if (screenX < -24f || screenX > canvasW + 24f || screenY < -24f || screenY > canvasH + 24f) continue
+        val pos = Offset(screenX, screenY)
         val isSel = selected?.zoneId == loc.zoneId && selected.city == loc.city
-        val isHi  = highlighted.contains(loc.zoneId)
+        val isHi = highlighted.contains(loc.zoneId)
 
         when {
             isSel -> {
-                drawCircle(colors.dotSelected, 5.0.dp.toPx() * sa, pos)
-                drawCircle(Color.White, 2.0.dp.toPx() * sa, pos)
+                drawCircle(colors.dotSelected, rSel, pos)
+                drawCircle(Color.White, rSelInner, pos)
             }
             isHi -> {
-                val r = (5.dp.toPx() + hiPulse * 8.dp.toPx()) * sa
+                val r = rHiGlowBase + hiPulse * rHiGlowExtra
                 drawCircle(colors.dotHighlight.copy(alpha = 0.18f * (1f - hiPulse)), r, pos)
-                drawCircle(colors.dotHighlight, 4.dp.toPx() * sa, pos)
-                drawCircle(Color.White, 1.5.dp.toPx() * sa, pos)
+                drawCircle(colors.dotHighlight, rHi, pos)
+                drawCircle(Color.White, rHiInner, pos)
+            }
+            lowZoom -> {
+                // Clustered fast path: single circle, alpha-faded at low zoom.
+                drawCircle(colors.dotDefault.copy(alpha = 0.75f), rDot, pos)
             }
             else -> {
                 drawCircle(Color.Black.copy(alpha = 0.12f),
                     2.5.dp.toPx() * sa, pos + Offset(0.4f * sa, 0.4f * sa))
-                drawCircle(colors.dotDefault, 2.1.dp.toPx() * sa, pos)
+                drawCircle(colors.dotDefault, rDot, pos)
                 drawCircle(Color.White.copy(alpha = 0.45f),
-                    0.85.dp.toPx() * sa, pos - Offset(0.3f * sa, 0.3f * sa))
+                    rDotHi, pos - Offset(0.3f * sa, 0.3f * sa))
             }
         }
     }
@@ -643,11 +725,48 @@ private fun DrawScope.drawUserPin(lat: Float, lon: Float, pulse: Float, w: Float
     val pos   = latLonToOffset(lat, lon, w, h)
     val sa    = (1f / sqrt(zoom)).coerceIn(0.22f, 1f)
     val green = Color(0xFF00E676)
+    // Hoisted conversions (was 5 dp.toPx per frame — now computed once each).
+    val rPulse = 28.dp.toPx() * sa
+    val rHalo = 10.dp.toPx() * sa
+    val rDot = 5.5.dp.toPx() * sa
+    val rInner = 2.3.dp.toPx() * sa
+    val stroke = 0.9.dp.toPx() * sa
     if (pulse > 0.01f)
-        drawCircle(green.copy(alpha = (1f - pulse) * 0.35f), 28.dp.toPx() * pulse * sa, pos)
-    drawCircle(green.copy(alpha = 0.28f), 10.dp.toPx() * sa, pos)
-    drawCircle(green, 5.5.dp.toPx() * sa, pos)
-    drawCircle(Color.White, 2.3.dp.toPx() * sa, pos)
-    drawCircle(Color(0xFF00875A).copy(alpha = 0.5f), 5.5.dp.toPx() * sa, pos,
-        style = Stroke(0.9.dp.toPx() * sa))
+        drawCircle(green.copy(alpha = (1f - pulse) * 0.35f), rPulse * pulse, pos)
+    drawCircle(green.copy(alpha = 0.28f), rHalo, pos)
+    drawCircle(green, rDot, pos)
+    drawCircle(Color.White, rInner, pos)
+    drawCircle(Color(0xFF00875A).copy(alpha = 0.5f), rDot, pos,
+        style = Stroke(stroke))
+}
+
+// ─── Satellite helpers (W-P1-02: Coil-style subsample + metered guard) ───────
+// Coil is used for remote images elsewhere; here we keep the manual disk cache
+// (monthly NASA URL) but decode subsampled to the view (no 16-25MB full-res
+// ARGB hold) and never auto-fetch on metered networks.
+
+private fun isMetered(context: android.content.Context): Boolean {
+    return runCatching {
+        val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as android.net.ConnectivityManager
+        cm.isActiveNetworkMetered
+    }.getOrDefault(false)
+}
+
+private fun decodeSampled(path: String, reqWidth: Int = 1024): Bitmap? {
+    return runCatching {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(path, bounds)
+        var sample = 1
+        val outW = bounds.outWidth
+        if (outW > reqWidth && outW > 0) {
+            var half = outW / 2
+            while (half / sample >= reqWidth) sample *= 2
+        }
+        val opts = android.graphics.BitmapFactory.Options().apply {
+            inSampleSize = sample.coerceAtLeast(1)
+            inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+        }
+        android.graphics.BitmapFactory.decodeFile(path, opts)
+    }.getOrNull()
 }

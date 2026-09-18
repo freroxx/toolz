@@ -2918,6 +2918,16 @@
     <string name="st_TodoScreen_i7j8">Urgency</string>
     <string name="st_TodoScreen_k9l0">Date Added</string>
     <string name="st_TodoScreen_m1n2">Due Date</string>
+    <!-- T-P0-03/P1/P2 Todo fixes (additive — never rename existing keys). -->
+    <string name="st_TodoScreen_dueSoonNote">Due soon — reminder set for due time</string>
+    <string name="st_TodoScreen_undo">Undo</string>
+    <string name="st_TodoScreen_taskDeleted">Task deleted</string>
+    <string name="st_TodoScreen_calendarAdded">Added to calendar</string>
+    <string name="st_TodoScreen_exactTitle">Exact alarms off — reminders may be late</string>
+    <string name="st_TodoScreen_exactDesc">Allow exact alarms so task reminders fire on time.</string>
+    <string name="st_TodoScreen_exactAction">Allow</string>
+    <string name="st_TodoScreen_searchHint">Search tasks…</string>
+    <string name="st_TodoScreen_history">History</string>
 
     <!-- BatteryInfoScreen -->
     <string name="st_BatteryInfoScreen_a1b2">POWER ANALYTICS</string>

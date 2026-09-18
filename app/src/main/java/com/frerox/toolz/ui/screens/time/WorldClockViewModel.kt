@@ -21,17 +21,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.time.Duration
+import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.abs
@@ -49,6 +51,8 @@ data class WorldClockLocation(
 ) {
     val label: String = "$city, $country"
     val searchable: String = "$city $country $zoneId".lowercase(Locale.ROOT)
+    // Cached for search comparator (W-P2-01: avoid per-keystroke lowercase alloc).
+    val cityLower: String = city.lowercase(Locale.ROOT)
 }
 
 data class WorldClockItem(
@@ -66,6 +70,11 @@ data class WorldClockItem(
     val progressOfDay: Float,
     val latitude: Double?,
     val longitude: Double?,
+    // W-P2-04/05: DST badge + day-boundary sort key. Defaults keep call-sites compiling.
+    val dayDelta: Long = 0,
+    val offsetSeconds: Int = 0,
+    val isDst: Boolean = false,
+    val zoneAbbreviation: String? = null,
 )
 
 data class WorldClockSelection(
@@ -79,6 +88,9 @@ data class WorldClockSelection(
     val isNight: Boolean,
     val progressOfDay: Float,
     val saved: Boolean,
+    val dayDelta: Long = 0,
+    val isDst: Boolean = false,
+    val zoneAbbreviation: String? = null,
 )
 
 data class WorldClockUiState(
@@ -103,38 +115,96 @@ class WorldClockViewModel @Inject constructor(
     val locations: List<WorldClockLocation> = worldClockLocations
     val availableZones: List<String> = locations.map { it.zoneId }.distinct().sorted()
 
+    // W-P1-01: cache to avoid linear scan per zone per tick (was O(S·L)/tick).
+    // First occurrence wins (table is deduped; aliases purged).
+    val locationsByZoneId: Map<String, WorldClockLocation> by lazy {
+        val map = LinkedHashMap<String, WorldClockLocation>()
+        for (loc in locations) map.putIfAbsent(loc.zoneId, loc)
+        map
+    }
+
     private var savedZones: Set<String> = emptySet()
-    private var tick: ZonedDateTime = ZonedDateTime.now()
+    private var is24HourFormat: Boolean = true
+    private var tickerJob: Job? = null
+    private var searchJob: Job? = null
+    private var sanitizedOnce: Boolean = false
 
     init {
         _uiState.update { it.copy(searchResults = locations.sortedByDescending(WorldClockLocation::priority).take(8)) }
         viewModelScope.launch {
-            repository.worldClockZones.collectLatest { zones ->
-                savedZones = zones
-                while (true) {
-                    tick = ZonedDateTime.now()
-                    refreshState()
-                    delay(1000)
+            repository.worldClockZones.collect { zones ->
+                // W-P0-01 / W-P2-03: sanitize on collect — drop unknowns,
+                // canonicalize aliases, dedupe, cap 24, one-time write-back.
+                val cleaned = WorldClockZones.sanitizeSavedZones(zones)
+                savedZones = cleaned
+                if (!sanitizedOnce) {
+                    sanitizedOnce = true
+                    if (cleaned != zones) {
+                        launch { runCatching { repository.replaceWorldClockZones(cleaned) } }
+                    }
                 }
+                refreshState()
             }
         }
     }
 
+    // ── Lifecycle ticker (W-P1-01) ──────────────────────────────────────
+    // Never run 1s ticker when screen not RESUMED. The Screen calls
+    // onScreenResumed/onScreenPaused via LifecycleEventObserver.
+    // Aligned to wall-clock second: delay(1000 - now%1000).
+    fun onScreenResumed() {
+        if (tickerJob?.isActive == true) return
+        tickerJob = viewModelScope.launch {
+            while (true) {
+                refreshState()
+                val nowMs = System.currentTimeMillis()
+                delay((1000L - (nowMs % 1000L)).coerceIn(50L, 1000L))
+            }
+        }
+    }
+
+    fun onScreenPaused() {
+        tickerJob?.cancel()
+        tickerJob = null
+    }
+
+    override fun onCleared() {
+        tickerJob?.cancel()
+        searchJob?.cancel()
+        super.onCleared()
+    }
+
+    fun setIs24HourFormat(is24: Boolean) {
+        if (is24HourFormat == is24) return
+        is24HourFormat = is24
+        viewModelScope.launch { refreshState() }
+    }
+
     fun setSearchQuery(query: String) {
-        _uiState.update { current ->
-            val results = searchLocations(query)
-            current.copy(
-                searchQuery = query,
-                searchResults = results,
-                highlightedZones = results.map { it.zoneId }.toSet(),
-            )
+        // Update text field immediately; debounce expensive filter (W-P2-01).
+        _uiState.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(WorldClockZones.SEARCH_DEBOUNCE_MS)
+            val results = withContext(Dispatchers.Default) { searchLocations(query) }
+            _uiState.update { current ->
+                // Drop stale results if query changed while filtering.
+                if (current.searchQuery != query) return@update current
+                current.copy(
+                    searchResults = results,
+                    highlightedZones = results.map { it.zoneId }.toSet(),
+                )
+            }
         }
     }
 
     fun selectLocation(location: WorldClockLocation) {
-        _uiState.update { 
+        // W-P0-01: never throw on bad zone — createSelection uses safeZoneId().
+        val selection = runCatching { createSelection(location, WorldClockZones.nowInstant()) }.getOrNull()
+            ?: return
+        _uiState.update {
             it.copy(
-                selected = createSelection(location),
+                selected = selection,
                 highlightedZones = setOf(location.zoneId)
             )
         }
@@ -149,14 +219,28 @@ class WorldClockViewModel @Inject constructor(
     }
 
     fun addZone(zoneId: String) {
+        // W-P2-02/03: normalize on add, reject aliases already saved (canonical),
+        // enforce cap 24. Never persist raw unknown ids.
+        val canonical = WorldClockZones.canonicalZoneId(zoneId) ?: return
+        if (canonical != WorldClockZones.FALLBACK_ZONE_ID && !canonical.contains("/")) return
+        val current = savedZones
+        if (current.contains(canonical)) return
+        if (current.size >= WorldClockZones.MAX_SAVED_ZONES) return
         viewModelScope.launch {
-            repository.addWorldClockZone(zoneId)
+            runCatching { repository.addWorldClockZone(canonical) }
         }
     }
 
     fun removeZone(zoneId: String) {
         viewModelScope.launch {
-            repository.removeWorldClockZone(zoneId)
+            runCatching {
+                // Remove both raw and canonical form (handles legacy alias rows).
+                val canonical = WorldClockZones.canonicalZoneId(zoneId)
+                repository.removeWorldClockZone(zoneId)
+                if (canonical != null && canonical != zoneId) {
+                    repository.removeWorldClockZone(canonical)
+                }
+            }
         }
     }
 
@@ -180,63 +264,91 @@ class WorldClockViewModel @Inject constructor(
     }
 
     private fun refreshState() {
+        val instant = WorldClockZones.nowInstant()
         _uiState.update { current ->
             val selectedLocation = current.selected?.location
             current.copy(
-                clocks = buildClockItems(),
-                selected = selectedLocation?.let(::createSelection),
+                clocks = buildClockItems(instant),
+                selected = selectedLocation?.let {
+                    runCatching { createSelection(it, instant) }.getOrNull()
+                        ?: current.selected
+                },
             )
         }
     }
 
-    private fun buildClockItems(): List<WorldClockItem> {
+    private fun buildClockItems(instant: Instant = WorldClockZones.nowInstant()): List<WorldClockItem> {
+        val locale = Locale.getDefault()
+        val timeFmt = WorldClockZones.timeFormatter(is24HourFormat, locale)
+        val dateFmt = WorldClockZones.dateFormatter(locale)
         val localZone = ZoneId.systemDefault()
-        val localLocation = locations.firstOrNull { it.zoneId == localZone.id }
-        val localNow = ZonedDateTime.now(localZone)
+        val localZoned = WorldClockZones.zoned(instant, localZone)
+        val localLocation = locationsByZoneId[localZone.id]
         val localItem = createClockItem(
             city = "Current location",
             country = localZone.id,
             zoneId = localZone.id,
-            dateTime = localNow,
+            dateTime = localZoned,
+            instant = instant,
             isLocal = true,
             latitude = localLocation?.latitude,
             longitude = localLocation?.longitude,
+            timeFmt = timeFmt,
+            dateFmt = dateFmt,
+            locale = locale,
         )
 
         val savedItems = savedZones
             .filter { it != localZone.id }
             .mapNotNull { zoneId ->
-                val location = locations.firstOrNull { it.zoneId == zoneId }
-                runCatching {
-                    val now = ZonedDateTime.now(ZoneId.of(zoneId))
-                    createClockItem(
-                        city = location?.city ?: zoneId.substringAfter("/").replace("_", " "),
-                        country = location?.country ?: zoneId.substringBefore("/", ""),
-                        zoneId = zoneId,
-                        dateTime = now,
-                        isLocal = false,
-                        latitude = location?.latitude,
-                        longitude = location?.longitude,
-                    )
-                }.getOrNull()
+                val zone = WorldClockZones.safeZoneIdOrNull(zoneId) ?: return@mapNotNull null
+                val location = locationsByZoneId[zoneId]
+                val now = WorldClockZones.zoned(instant, zone)
+                createClockItem(
+                    city = location?.city ?: zoneId.substringAfter("/").replace("_", " "),
+                    country = location?.country ?: zoneId.substringBefore("/", ""),
+                    zoneId = zoneId,
+                    dateTime = now,
+                    instant = instant,
+                    isLocal = false,
+                    latitude = location?.latitude,
+                    longitude = location?.longitude,
+                    timeFmt = timeFmt,
+                    dateFmt = dateFmt,
+                    locale = locale,
+                )
             }
 
-        return listOf(localItem) + savedItems.sortedBy { it.cityName }
+        // W-P2-05: sort (dayDelta, utcOffset, Collator.compare(city)); local pinned first.
+        val comparator = WorldClockZones.clockComparator(locale)
+        return listOf(localItem) + savedItems.sortedWith(comparator)
     }
 
-    private fun createSelection(location: WorldClockLocation): WorldClockSelection {
-        val dateTime = ZonedDateTime.now(ZoneId.of(location.zoneId))
+    private fun createSelection(
+        location: WorldClockLocation,
+        instant: Instant = WorldClockZones.nowInstant(),
+    ): WorldClockSelection {
+        // W-P0-01: central safeZoneId — never ZoneId.of() raw, never throw.
+        val zone = WorldClockZones.safeZoneId(location.zoneId)
+        val dateTime = WorldClockZones.zoned(instant, zone)
+        val locale = Locale.getDefault()
+        val timeFmt = WorldClockZones.timeFormatter(is24HourFormat, locale)
+        val dateFmt = WorldClockZones.dateFormatter(locale)
+        val localZoned = WorldClockZones.zoned(instant, ZoneId.systemDefault())
         return WorldClockSelection(
             location = location,
-            time = timeFormatter.format(dateTime),
-            seconds = secondsFormatter.format(dateTime),
-            date = dateFormatter.format(dateTime),
-            offset = relativeOffset(dateTime, false),
+            time = timeFmt.format(dateTime),
+            seconds = WorldClockZones.secondsFormatter.format(dateTime),
+            date = dateFmt.format(dateTime),
+            offset = relativeOffset(dateTime, localZoned, false),
             utcOffset = utcOffset(dateTime),
-            timeShift = timeShift(dateTime),
+            timeShift = timeShift(dateTime, localZoned),
             isNight = dateTime.hour < 6 || dateTime.hour >= 18,
             progressOfDay = progressOfDay(dateTime),
-            saved = savedZones.contains(location.zoneId),
+            saved = savedZones.contains(WorldClockZones.canonicalZoneId(location.zoneId) ?: location.zoneId),
+            dayDelta = WorldClockZones.dayDelta(localZoned.toLocalDate(), dateTime.toLocalDate()),
+            isDst = WorldClockZones.isDst(zone, instant),
+            zoneAbbreviation = WorldClockZones.shortName(zone, instant, locale),
         )
     }
 
@@ -245,26 +357,36 @@ class WorldClockViewModel @Inject constructor(
         country: String,
         zoneId: String,
         dateTime: ZonedDateTime,
+        instant: Instant,
         isLocal: Boolean,
         latitude: Double?,
         longitude: Double?,
+        timeFmt: java.time.format.DateTimeFormatter,
+        dateFmt: java.time.format.DateTimeFormatter,
+        locale: Locale,
     ): WorldClockItem {
         val night = dateTime.hour < 6 || dateTime.hour >= 18
+        val localZoned = WorldClockZones.zoned(instant, ZoneId.systemDefault())
+        val zone = WorldClockZones.safeZoneId(zoneId)
         return WorldClockItem(
             cityName = city,
             country = country,
             zoneId = zoneId,
-            currentTime = timeFormatter.format(dateTime),
-            seconds = secondsFormatter.format(dateTime),
-            date = dateFormatter.format(dateTime),
+            currentTime = timeFmt.format(dateTime),
+            seconds = WorldClockZones.secondsFormatter.format(dateTime),
+            date = dateFmt.format(dateTime),
             isLocal = isLocal,
-            offset = relativeOffset(dateTime, isLocal),
+            offset = relativeOffset(dateTime, localZoned, isLocal),
             utcOffset = utcOffset(dateTime),
-            timeShift = timeShift(dateTime),
+            timeShift = timeShift(dateTime, localZoned),
             isNight = night,
             progressOfDay = progressOfDay(dateTime),
             latitude = latitude,
             longitude = longitude,
+            dayDelta = WorldClockZones.dayDelta(localZoned.toLocalDate(), dateTime.toLocalDate()),
+            offsetSeconds = dateTime.offset.totalSeconds,
+            isDst = WorldClockZones.isDst(zone, instant),
+            zoneAbbreviation = WorldClockZones.shortName(zone, instant, locale),
         )
     }
 
@@ -272,14 +394,18 @@ class WorldClockViewModel @Inject constructor(
         val cleaned = query.trim().lowercase(Locale.ROOT)
         if (cleaned.isEmpty()) return locations.sortedByDescending(WorldClockLocation::priority).take(8)
 
+        // W-P2-01: filter -> take(18) -> sort small N; cached cityLower, no per-item alloc.
         return locations
             .asSequence()
             .filter { it.searchable.contains(cleaned) }
-            .sortedWith(compareByDescending<WorldClockLocation> {
-                it.city.lowercase(Locale.ROOT).startsWith(cleaned)
-            }.thenByDescending { it.priority }.thenBy { it.city })
-            .take(18)
+            .take(60)
             .toList()
+            .sortedWith(
+                compareByDescending<WorldClockLocation> { it.cityLower.startsWith(cleaned) }
+                    .thenByDescending { it.priority }
+                    .thenBy { it.cityLower }
+            )
+            .take(WorldClockZones.SEARCH_TAKE)
     }
 
     private fun nearestLocation(latitude: Double, longitude: Double): WorldClockLocation {
@@ -291,10 +417,10 @@ class WorldClockViewModel @Inject constructor(
         }
     }
 
-    private fun relativeOffset(dateTime: ZonedDateTime, isLocal: Boolean): String {
+    private fun relativeOffset(dateTime: ZonedDateTime, localZoned: ZonedDateTime, isLocal: Boolean): String {
         if (isLocal) return "Local time"
-        val localOffset = ZonedDateTime.now(ZoneId.systemDefault()).offset.totalSeconds
-        val secondsDiff = dateTime.offset.totalSeconds - localOffset
+        // Single Instant sample (caller passes both zoned times) — no sequential now() straddle.
+        val secondsDiff = dateTime.offset.totalSeconds - localZoned.offset.totalSeconds
         if (secondsDiff == 0) return "Same as local"
 
         val sign = if (secondsDiff >= 0) "+" else "-"
@@ -313,10 +439,9 @@ class WorldClockViewModel @Inject constructor(
         return "UTC$sign%02d:%02d".format(hours, minutes)
     }
 
-    private fun timeShift(dateTime: ZonedDateTime): String {
-        val localDate = ZonedDateTime.now(ZoneId.systemDefault()).toLocalDate()
-        val date = dateTime.toLocalDate()
-        val days = Duration.between(localDate.atStartOfDay(), date.atStartOfDay()).toDays()
+    private fun timeShift(dateTime: ZonedDateTime, localZoned: ZonedDateTime): String {
+        // W-P2-05: ChronoUnit.DAYS between local dates (DST-safe, readable).
+        val days = WorldClockZones.dayDelta(localZoned.toLocalDate(), dateTime.toLocalDate())
         return when {
             days < 0 -> "Yesterday"
             days > 0 -> "Tomorrow"
@@ -335,11 +460,8 @@ class WorldClockViewModel @Inject constructor(
     }
 
     companion object {
-        private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-        private val secondsFormatter = DateTimeFormatter.ofPattern("ss")
-        private val dateFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
-
-        private val worldClockLocations = listOf(
+        // Exposed for unit test (table validation: ZoneId.of green, no dup zoneIds).
+        internal val worldClockLocations = listOf(
             WorldClockLocation("UTC", "Universal", "UTC", 0.0, 0.0, 100),
             WorldClockLocation("Andorra", java.util.Locale("", "AD").displayCountry, "Europe/Andorra", 42.5000, 1.5167, 30),
             WorldClockLocation("Dubai", java.util.Locale("", "AE").displayCountry, "Asia/Dubai", 25.3000, 55.3000, 30),
@@ -481,7 +603,7 @@ class WorldClockViewModel @Inject constructor(
             WorldClockLocation("Makassar", java.util.Locale("", "ID").displayCountry, "Asia/Makassar", -5.1167, 119.4000, 30),
             WorldClockLocation("Jayapura", java.util.Locale("", "ID").displayCountry, "Asia/Jayapura", -2.5333, 140.7000, 30),
             WorldClockLocation("Dublin", java.util.Locale("", "IE").displayCountry, "Europe/Dublin", 53.3333, -6.2500, 30),
-            WorldClockLocation("Jerusalem", java.util.Locale("", "IL").displayCountry, "Asia/Jerusalem", 31.7806, 35.2239, 30),
+            WorldClockLocation("Jerusalem", java.util.Locale("", "PS").displayCountry, "Asia/Jerusalem", 31.7806, 35.2239, 30),
             WorldClockLocation("Kolkata", java.util.Locale("", "IN").displayCountry, "Asia/Kolkata", 22.5333, 88.3667, 30),
             WorldClockLocation("Chagos", java.util.Locale("", "IO").displayCountry, "Indian/Chagos", -7.3333, 72.4167, 30),
             WorldClockLocation("Baghdad", java.util.Locale("", "IQ").displayCountry, "Asia/Baghdad", 33.3500, 44.4167, 30),
@@ -653,87 +775,6 @@ class WorldClockViewModel @Inject constructor(
             WorldClockLocation("Efate", java.util.Locale("", "VU").displayCountry, "Pacific/Efate", -17.6667, 168.4167, 30),
             WorldClockLocation("Apia", java.util.Locale("", "WS").displayCountry, "Pacific/Apia", -13.8333, -171.7333, 30),
             WorldClockLocation("Johannesburg", java.util.Locale("", "ZA").displayCountry, "Africa/Johannesburg", -26.2500, 28.0000, 30),
-            WorldClockLocation("ACT", java.util.Locale("", "AU").displayCountry, "Australia/ACT", -33.8667, 151.2167, 30),
-            WorldClockLocation("LHI", java.util.Locale("", "AU").displayCountry, "Australia/LHI", -31.5500, 159.0833, 30),
-            WorldClockLocation("NSW", java.util.Locale("", "AU").displayCountry, "Australia/NSW", -33.8667, 151.2167, 30),
-            WorldClockLocation("North", java.util.Locale("", "AU").displayCountry, "Australia/North", -12.4667, 130.8333, 30),
-            WorldClockLocation("Queensland", java.util.Locale("", "AU").displayCountry, "Australia/Queensland", -27.4667, 153.0333, 30),
-            WorldClockLocation("South", java.util.Locale("", "AU").displayCountry, "Australia/South", -34.9167, 138.5833, 30),
-            WorldClockLocation("Tasmania", java.util.Locale("", "AU").displayCountry, "Australia/Tasmania", -42.8833, 147.3167, 30),
-            WorldClockLocation("Victoria", java.util.Locale("", "AU").displayCountry, "Australia/Victoria", -37.8167, 144.9667, 30),
-            WorldClockLocation("West", java.util.Locale("", "AU").displayCountry, "Australia/West", -31.9500, 115.8500, 30),
-            WorldClockLocation("Yancowinna", java.util.Locale("", "AU").displayCountry, "Australia/Yancowinna", -31.9500, 141.4500, 30),
-            WorldClockLocation("Acre", java.util.Locale("", "BR").displayCountry, "Brazil/Acre", -9.9667, -67.8000, 30),
-            WorldClockLocation("DeNoronha", java.util.Locale("", "BR").displayCountry, "Brazil/DeNoronha", -3.8500, -32.4167, 30),
-            WorldClockLocation("East", java.util.Locale("", "BR").displayCountry, "Brazil/East", -23.5333, -46.6167, 30),
-            WorldClockLocation("West", java.util.Locale("", "BR").displayCountry, "Brazil/West", -3.1333, -60.0167, 30),
-            WorldClockLocation("CET", java.util.Locale("", "BE").displayCountry, "CET", 50.8333, 4.3333, 30),
-            WorldClockLocation("CST6CDT", java.util.Locale("", "US").displayCountry, "CST6CDT", 41.8500, -87.6500, 30),
-            WorldClockLocation("Atlantic", java.util.Locale("", "CA").displayCountry, "Canada/Atlantic", 44.6500, -63.6000, 30),
-            WorldClockLocation("Central", java.util.Locale("", "CA").displayCountry, "Canada/Central", 49.8833, -97.1500, 30),
-            WorldClockLocation("Eastern", java.util.Locale("", "CA").displayCountry, "Canada/Eastern", 43.6500, -79.3833, 30),
-            WorldClockLocation("Mountain", java.util.Locale("", "CA").displayCountry, "Canada/Mountain", 53.5500, -113.4667, 30),
-            WorldClockLocation("Newfoundland", java.util.Locale("", "CA").displayCountry, "Canada/Newfoundland", 47.5667, -52.7167, 30),
-            WorldClockLocation("Pacific", java.util.Locale("", "CA").displayCountry, "Canada/Pacific", 49.2667, -123.1167, 30),
-            WorldClockLocation("Saskatchewan", java.util.Locale("", "CA").displayCountry, "Canada/Saskatchewan", 50.4000, -104.6500, 30),
-            WorldClockLocation("Yukon", java.util.Locale("", "CA").displayCountry, "Canada/Yukon", 60.7167, -135.0500, 30),
-            WorldClockLocation("Continental", java.util.Locale("", "CL").displayCountry, "Chile/Continental", -33.4500, -70.6667, 30),
-            WorldClockLocation("EasterIsland", java.util.Locale("", "CL").displayCountry, "Chile/EasterIsland", -27.1500, -109.4333, 30),
-            WorldClockLocation("Cuba", java.util.Locale("", "CU").displayCountry, "Cuba", 23.1333, -82.3667, 30),
-            WorldClockLocation("EET", java.util.Locale("", "GR").displayCountry, "EET", 37.9667, 23.7167, 30),
-            WorldClockLocation("EST", java.util.Locale("", "PA").displayCountry, "EST", 8.9667, -79.5333, 30),
-            WorldClockLocation("EST5EDT", java.util.Locale("", "US").displayCountry, "EST5EDT", 40.7142, -74.0064, 30),
-            WorldClockLocation("Egypt", java.util.Locale("", "EG").displayCountry, "Egypt", 30.0500, 31.2500, 30),
-            WorldClockLocation("Eire", java.util.Locale("", "IE").displayCountry, "Eire", 53.3333, -6.2500, 30),
-            WorldClockLocation("GB", java.util.Locale("", "GB").displayCountry, "GB", 51.5083, -0.1253, 30),
-            WorldClockLocation("GB-Eire", java.util.Locale("", "GB").displayCountry, "GB-Eire", 51.5083, -0.1253, 30),
-            WorldClockLocation("Hongkong", java.util.Locale("", "HK").displayCountry, "Hongkong", 22.2833, 114.1500, 30),
-            WorldClockLocation("Iceland", java.util.Locale("", "CI").displayCountry, "Iceland", 5.3167, -4.0333, 30),
-            WorldClockLocation("Iran", java.util.Locale("", "IR").displayCountry, "Iran", 35.6667, 51.4333, 30),
-            WorldClockLocation("Israel", java.util.Locale("", "IL").displayCountry, "Israel", 31.7806, 35.2239, 30),
-            WorldClockLocation("Jamaica", java.util.Locale("", "JM").displayCountry, "Jamaica", 17.9681, -76.7933, 30),
-            WorldClockLocation("Japan", java.util.Locale("", "JP").displayCountry, "Japan", 35.6544, 139.7447, 30),
-            WorldClockLocation("Kwajalein", java.util.Locale("", "MH").displayCountry, "Kwajalein", 9.0833, 167.3333, 30),
-            WorldClockLocation("Libya", java.util.Locale("", "LY").displayCountry, "Libya", 32.9000, 13.1833, 30),
-            WorldClockLocation("MET", java.util.Locale("", "BE").displayCountry, "MET", 50.8333, 4.3333, 30),
-            WorldClockLocation("MST", java.util.Locale("", "US").displayCountry, "MST", 33.4483, -112.0733, 30),
-            WorldClockLocation("MST7MDT", java.util.Locale("", "US").displayCountry, "MST7MDT", 39.7392, -104.9842, 30),
-            WorldClockLocation("BajaNorte", java.util.Locale("", "MX").displayCountry, "Mexico/BajaNorte", 32.5333, -117.0167, 30),
-            WorldClockLocation("BajaSur", java.util.Locale("", "MX").displayCountry, "Mexico/BajaSur", 23.2167, -106.4167, 30),
-            WorldClockLocation("General", java.util.Locale("", "MX").displayCountry, "Mexico/General", 19.4000, -99.1500, 30),
-            WorldClockLocation("NZ", java.util.Locale("", "NZ").displayCountry, "NZ", -36.8667, 174.7667, 30),
-            WorldClockLocation("NZ-CHAT", java.util.Locale("", "NZ").displayCountry, "NZ-CHAT", -43.9500, -176.5500, 30),
-            WorldClockLocation("Navajo", java.util.Locale("", "US").displayCountry, "Navajo", 39.7392, -104.9842, 30),
-            WorldClockLocation("PRC", java.util.Locale("", "CN").displayCountry, "PRC", 31.2333, 121.4667, 30),
-            WorldClockLocation("Poland", java.util.Locale("", "PL").displayCountry, "Poland", 52.2500, 21.0000, 30),
-            WorldClockLocation("Portugal", java.util.Locale("", "PT").displayCountry, "Portugal", 38.7167, -9.1333, 30),
-            WorldClockLocation("ROC", java.util.Locale("", "TW").displayCountry, "ROC", 25.0500, 121.5000, 30),
-            WorldClockLocation("ROK", java.util.Locale("", "KR").displayCountry, "ROK", 37.5500, 126.9667, 30),
-            WorldClockLocation("Singapore", java.util.Locale("", "SG").displayCountry, "Singapore", 1.2833, 103.8500, 30),
-            WorldClockLocation("Turkey", java.util.Locale("", "TR").displayCountry, "Turkey", 41.0167, 28.9667, 30),
-            WorldClockLocation("Alaska", java.util.Locale("", "US").displayCountry, "US/Alaska", 61.2181, -149.9003, 30),
-            WorldClockLocation("Aleutian", java.util.Locale("", "US").displayCountry, "US/Aleutian", 51.8800, -176.6581, 30),
-            WorldClockLocation("Arizona", java.util.Locale("", "US").displayCountry, "US/Arizona", 33.4483, -112.0733, 30),
-            WorldClockLocation("Central", java.util.Locale("", "US").displayCountry, "US/Central", 41.8500, -87.6500, 30),
-            WorldClockLocation("East-Indiana", java.util.Locale("", "US").displayCountry, "US/East-Indiana", 39.7683, -86.1581, 30),
-            WorldClockLocation("Eastern", java.util.Locale("", "US").displayCountry, "US/Eastern", 40.7142, -74.0064, 30),
-            WorldClockLocation("Hawaii", java.util.Locale("", "US").displayCountry, "US/Hawaii", 21.3069, -157.8583, 30),
-            WorldClockLocation("Indiana-Starke", java.util.Locale("", "US").displayCountry, "US/Indiana-Starke", 41.2958, -86.6250, 30),
-            WorldClockLocation("Michigan", java.util.Locale("", "US").displayCountry, "US/Michigan", 42.3314, -83.0458, 30),
-            WorldClockLocation("Mountain", java.util.Locale("", "US").displayCountry, "US/Mountain", 39.7392, -104.9842, 30),
-            WorldClockLocation("Pacific", java.util.Locale("", "US").displayCountry, "US/Pacific", 34.0522, -118.2428, 30),
-            WorldClockLocation("Samoa", java.util.Locale("", "AS").displayCountry, "US/Samoa", -14.2667, -170.7000, 30),
-            WorldClockLocation("W-SU", java.util.Locale("", "RU").displayCountry, "W-SU", 55.7558, 37.6178, 30),
-            WorldClockLocation("Buenos Aires", java.util.Locale("", "AR").displayCountry, "America/Buenos_Aires", -34.6000, -58.4500, 30),
-            WorldClockLocation("Catamarca", java.util.Locale("", "AR").displayCountry, "America/Catamarca", -28.4667, -65.7833, 30),
-            WorldClockLocation("Cordoba", java.util.Locale("", "AR").displayCountry, "America/Cordoba", -31.4000, -64.1833, 30),
-            WorldClockLocation("Indianapolis", java.util.Locale("", "US").displayCountry, "America/Indianapolis", 39.7683, -86.1581, 30),
-            WorldClockLocation("Jujuy", java.util.Locale("", "AR").displayCountry, "America/Jujuy", -24.1833, -65.3000, 30),
-            WorldClockLocation("Knox IN", java.util.Locale("", "US").displayCountry, "America/Knox_IN", 41.2958, -86.6250, 30),
-            WorldClockLocation("Louisville", java.util.Locale("", "US").displayCountry, "America/Louisville", 38.2542, -85.7594, 30),
-            WorldClockLocation("Mendoza", java.util.Locale("", "AR").displayCountry, "America/Mendoza", -32.8833, -68.8167, 30),
-            WorldClockLocation("Virgin", java.util.Locale("", "PR").displayCountry, "America/Virgin", 18.4683, -66.1061, 30),
-            WorldClockLocation("Samoa", java.util.Locale("", "AS").displayCountry, "Pacific/Samoa", -14.2667, -170.7000, 30),
             WorldClockLocation("Accra", java.util.Locale("", "CI").displayCountry, "Africa/Accra", 5.3167, -4.0333, 30),
             WorldClockLocation("Addis Ababa", java.util.Locale("", "KE").displayCountry, "Africa/Addis_Ababa", -1.2833, 36.8167, 30),
             WorldClockLocation("Asmara", java.util.Locale("", "KE").displayCountry, "Africa/Asmara", -1.2833, 36.8167, 30),
@@ -840,60 +881,6 @@ class WorldClockViewModel @Inject constructor(
             WorldClockLocation("Saipan", java.util.Locale("", "GU").displayCountry, "Pacific/Saipan", 13.4667, 144.7500, 30),
             WorldClockLocation("Wake", java.util.Locale("", "KI").displayCountry, "Pacific/Wake", 1.4167, 173.0000, 30),
             WorldClockLocation("Wallis", java.util.Locale("", "KI").displayCountry, "Pacific/Wallis", 1.4167, 173.0000, 30),
-            WorldClockLocation("Timbuktu", java.util.Locale("", "CI").displayCountry, "Africa/Timbuktu", 5.3167, -4.0333, 30),
-            WorldClockLocation("ComodRivadavia", java.util.Locale("", "AR").displayCountry, "America/Argentina/ComodRivadavia", -28.4667, -65.7833, 30),
-            WorldClockLocation("Atka", java.util.Locale("", "US").displayCountry, "America/Atka", 51.8800, -176.6581, 30),
-            WorldClockLocation("Coral Harbour", java.util.Locale("", "PA").displayCountry, "America/Coral_Harbour", 8.9667, -79.5333, 30),
-            WorldClockLocation("Ensenada", java.util.Locale("", "MX").displayCountry, "America/Ensenada", 32.5333, -117.0167, 30),
-            WorldClockLocation("Fort Wayne", java.util.Locale("", "US").displayCountry, "America/Fort_Wayne", 39.7683, -86.1581, 30),
-            WorldClockLocation("Montreal", java.util.Locale("", "CA").displayCountry, "America/Montreal", 43.6500, -79.3833, 30),
-            WorldClockLocation("Nipigon", java.util.Locale("", "CA").displayCountry, "America/Nipigon", 43.6500, -79.3833, 30),
-            WorldClockLocation("Pangnirtung", java.util.Locale("", "CA").displayCountry, "America/Pangnirtung", 63.7333, -68.4667, 30),
-            WorldClockLocation("Porto Acre", java.util.Locale("", "BR").displayCountry, "America/Porto_Acre", -9.9667, -67.8000, 30),
-            WorldClockLocation("Rainy River", java.util.Locale("", "CA").displayCountry, "America/Rainy_River", 49.8833, -97.1500, 30),
-            WorldClockLocation("Rosario", java.util.Locale("", "AR").displayCountry, "America/Rosario", -31.4000, -64.1833, 30),
-            WorldClockLocation("Santa Isabel", java.util.Locale("", "MX").displayCountry, "America/Santa_Isabel", 32.5333, -117.0167, 30),
-            WorldClockLocation("Shiprock", java.util.Locale("", "US").displayCountry, "America/Shiprock", 39.7392, -104.9842, 30),
-            WorldClockLocation("Thunder Bay", java.util.Locale("", "CA").displayCountry, "America/Thunder_Bay", 43.6500, -79.3833, 30),
-            WorldClockLocation("Yellowknife", java.util.Locale("", "CA").displayCountry, "America/Yellowknife", 53.5500, -113.4667, 30),
-            WorldClockLocation("South Pole", java.util.Locale("", "NZ").displayCountry, "Antarctica/South_Pole", -36.8667, 174.7667, 30),
-            WorldClockLocation("Choibalsan", java.util.Locale("", "MN").displayCountry, "Asia/Choibalsan", 47.9167, 106.8833, 30),
-            WorldClockLocation("Chongqing", java.util.Locale("", "CN").displayCountry, "Asia/Chongqing", 31.2333, 121.4667, 30),
-            WorldClockLocation("Harbin", java.util.Locale("", "CN").displayCountry, "Asia/Harbin", 31.2333, 121.4667, 30),
-            WorldClockLocation("Kashgar", java.util.Locale("", "CN").displayCountry, "Asia/Kashgar", 43.8000, 87.5833, 30),
-            WorldClockLocation("Tel Aviv", java.util.Locale("", "IL").displayCountry, "Asia/Tel_Aviv", 31.7806, 35.2239, 30),
-            WorldClockLocation("Jan Mayen", java.util.Locale("", "DE").displayCountry, "Atlantic/Jan_Mayen", 52.5000, 13.3667, 30),
-            WorldClockLocation("Canberra", java.util.Locale("", "AU").displayCountry, "Australia/Canberra", -33.8667, 151.2167, 30),
-            WorldClockLocation("Currie", java.util.Locale("", "AU").displayCountry, "Australia/Currie", -42.8833, 147.3167, 30),
-            WorldClockLocation("Belfast", java.util.Locale("", "GB").displayCountry, "Europe/Belfast", 51.5083, -0.1253, 30),
-            WorldClockLocation("Tiraspol", java.util.Locale("", "MD").displayCountry, "Europe/Tiraspol", 47.0000, 28.8333, 30),
-            WorldClockLocation("Uzhgorod", java.util.Locale("", "UA").displayCountry, "Europe/Uzhgorod", 50.4333, 30.5167, 30),
-            WorldClockLocation("Zaporozhye", java.util.Locale("", "UA").displayCountry, "Europe/Zaporozhye", 50.4333, 30.5167, 30),
-            WorldClockLocation("Enderbury", java.util.Locale("", "KI").displayCountry, "Pacific/Enderbury", -2.7833, -171.7167, 30),
-            WorldClockLocation("Johnston", java.util.Locale("", "US").displayCountry, "Pacific/Johnston", 21.3069, -157.8583, 30),
-            WorldClockLocation("Yap", java.util.Locale("", "PG").displayCountry, "Pacific/Yap", -9.5000, 147.1667, 30),
-            WorldClockLocation("WET", java.util.Locale("", "PT").displayCountry, "WET", 38.7167, -9.1333, 30),
-            WorldClockLocation("Asmera", java.util.Locale("", "KE").displayCountry, "Africa/Asmera", -1.2833, 36.8167, 30),
-            WorldClockLocation("Godthab", java.util.Locale("", "GL").displayCountry, "America/Godthab", 64.1833, -51.7333, 30),
-            WorldClockLocation("Ashkhabad", java.util.Locale("", "TM").displayCountry, "Asia/Ashkhabad", 37.9500, 58.3833, 30),
-            WorldClockLocation("Calcutta", java.util.Locale("", "IN").displayCountry, "Asia/Calcutta", 22.5333, 88.3667, 30),
-            WorldClockLocation("Chungking", java.util.Locale("", "CN").displayCountry, "Asia/Chungking", 31.2333, 121.4667, 30),
-            WorldClockLocation("Dacca", java.util.Locale("", "BD").displayCountry, "Asia/Dacca", 23.7167, 90.4167, 30),
-            WorldClockLocation("Istanbul", java.util.Locale("", "TR").displayCountry, "Asia/Istanbul", 41.0167, 28.9667, 30),
-            WorldClockLocation("Katmandu", java.util.Locale("", "NP").displayCountry, "Asia/Katmandu", 27.7167, 85.3167, 30),
-            WorldClockLocation("Macao", java.util.Locale("", "MO").displayCountry, "Asia/Macao", 22.1972, 113.5417, 30),
-            WorldClockLocation("Rangoon", java.util.Locale("", "MM").displayCountry, "Asia/Rangoon", 16.7833, 96.1667, 30),
-            WorldClockLocation("Saigon", java.util.Locale("", "VN").displayCountry, "Asia/Saigon", 10.7500, 106.6667, 30),
-            WorldClockLocation("Thimbu", java.util.Locale("", "BT").displayCountry, "Asia/Thimbu", 27.4667, 89.6500, 30),
-            WorldClockLocation("Ujung Pandang", java.util.Locale("", "ID").displayCountry, "Asia/Ujung_Pandang", -5.1167, 119.4000, 30),
-            WorldClockLocation("Ulan Bator", java.util.Locale("", "MN").displayCountry, "Asia/Ulan_Bator", 47.9167, 106.8833, 30),
-            WorldClockLocation("Faeroe", java.util.Locale("", "FO").displayCountry, "Atlantic/Faeroe", 62.0167, -6.7667, 30),
-            WorldClockLocation("Kiev", java.util.Locale("", "UA").displayCountry, "Europe/Kiev", 50.4333, 30.5167, 30),
-            WorldClockLocation("Nicosia", java.util.Locale("", "CY").displayCountry, "Europe/Nicosia", 35.1667, 33.3667, 30),
-            WorldClockLocation("HST", java.util.Locale("", "US").displayCountry, "HST", 21.3069, -157.8583, 30),
-            WorldClockLocation("PST8PDT", java.util.Locale("", "US").displayCountry, "PST8PDT", 34.0522, -118.2428, 30),
-            WorldClockLocation("Ponape", java.util.Locale("", "SB").displayCountry, "Pacific/Ponape", -9.5333, 160.2000, 30),
-            WorldClockLocation("Truk", java.util.Locale("", "PG").displayCountry, "Pacific/Truk", -9.5000, 147.1667, 30)
         )
     }
 }

@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -80,6 +81,29 @@ fun WorldClockScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val vibrationManager = LocalVibrationManager.current
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+
+    // W-P1-01: lifecycle ticker only when RESUMED — background stops ticking.
+    // W-P2-04: observe system 12/24h setting and push to ViewModel once.
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> viewModel.onScreenResumed()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> viewModel.onScreenPaused()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        // In case we are already resumed when composed.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            viewModel.onScreenResumed()
+        }
+        viewModel.setIs24HourFormat(android.text.format.DateFormat.is24HourFormat(context))
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.onScreenPaused()
+        }
+    }
 
     @SuppressLint("MissingPermission")
     fun requestLocationUpdate() {
@@ -318,19 +342,26 @@ fun WorldClockScreen(
                                 EmptyClockDeck(onPick = { viewModel.selectLocation(viewModel.locations.first()) })
                             }
                         } else {
-                            items(uiState.clocks, key = { "${it.zoneId}-${it.isLocal}" }) { clock ->
-                                StaggeredEntrance(index = uiState.clocks.indexOf(clock)) {
-                                    SavedClockCard(
-                                        clock = clock,
-                                        onDelete = { viewModel.removeZone(clock.zoneId) },
-                                        onCopy = {
-                                            vibrationManager?.vibrateClick()
-                                            clipboard.setText(
-                                                AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
-                                            )
-                                            scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
-                                        },
-                                    )
+                            // W-P1-01: stable key + pass index directly (was indexOf O(N²)/sec
+                            // + unstable entrance restarting every second).
+                            itemsIndexed(
+                                uiState.clocks,
+                                key = { _, clock -> "${clock.zoneId}-${clock.cityName}-${clock.isLocal}" },
+                            ) { index, clock ->
+                                androidx.compose.runtime.key(clock.zoneId, clock.cityName) {
+                                    StaggeredEntrance(index = index) {
+                                        SavedClockCard(
+                                            clock = clock,
+                                            onDelete = { viewModel.removeZone(clock.zoneId) },
+                                            onCopy = {
+                                                vibrationManager?.vibrateClick()
+                                                clipboard.setText(
+                                                    AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
+                                                )
+                                                scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -454,19 +485,24 @@ fun WorldClockScreen(
                             EmptyClockDeck(onPick = { viewModel.selectLocation(viewModel.locations.first()) })
                         }
                     } else {
-                        items(uiState.clocks, key = { "${it.zoneId}-${it.isLocal}" }) { clock ->
-                            StaggeredEntrance(index = uiState.clocks.indexOf(clock)) {
-                                SavedClockCard(
-                                    clock = clock,
-                                    onDelete = { viewModel.removeZone(clock.zoneId) },
-                                    onCopy = {
-                                        vibrationManager?.vibrateClick()
-                                        clipboard.setText(
-                                            AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
-                                        )
-                                        scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
-                                    },
-                                )
+                        itemsIndexed(
+                            uiState.clocks,
+                            key = { _, clock -> "${clock.zoneId}-${clock.cityName}-${clock.isLocal}" },
+                        ) { index, clock ->
+                            androidx.compose.runtime.key(clock.zoneId, clock.cityName) {
+                                StaggeredEntrance(index = index) {
+                                    SavedClockCard(
+                                        clock = clock,
+                                        onDelete = { viewModel.removeZone(clock.zoneId) },
+                                        onCopy = {
+                                            vibrationManager?.vibrateClick()
+                                            clipboard.setText(
+                                                AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
+                                            )
+                                            scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -832,10 +868,21 @@ private fun SelectedTimePanel(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "${selected.location.country.uppercase()} • ${selected.date}",
+                        // W-P2-04: locale-aware uppercase (Turkish-i bug fix).
+                        text = "${selected.location.country.uppercase(java.util.Locale.getDefault())} • ${selected.date}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // W-P2-04: DST badge (zone.rules.isDaylightSavings + SHORT display name).
+                    if (selected.isDst && selected.zoneAbbreviation != null) {
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "DST • ${selected.zoneAbbreviation}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
                 
                 Row(
@@ -986,10 +1033,18 @@ private fun SavedClockCard(
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "${clock.country.uppercase()} • ${clock.offset} • ${clock.date}",
+                    text = "${clock.country.uppercase(java.util.Locale.getDefault())} • ${clock.offset} • ${clock.date}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (clock.isDst && clock.zoneAbbreviation != null && !clock.isLocal) {
+                    Text(
+                        text = "DST • ${clock.zoneAbbreviation}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
 
             Row(

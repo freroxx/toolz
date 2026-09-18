@@ -1089,10 +1089,12 @@ class SettingsRepository @Inject constructor(
     suspend fun addWorldClockZone(zone: String) {
         val trimmed = zone.trim()
         if (trimmed.isEmpty()) return
-        // W-P2-02/03: basic guard — drop blank/unknown, cap 24.
+        // W-P2-02/03: basic guard — drop blank/unknown, drop single-component
+        // legacy links (except UTC), cap 24.
         // Full canonicalization lives in WorldClockZones (ViewModel sanitizes on collect).
         val valid = runCatching { java.time.ZoneId.of(trimmed).normalized().id }.getOrNull()
             ?: return
+        if (valid != "UTC" && !valid.contains("/")) return
         dataStore.edit { prefs ->
             val current = prefs[WORLD_CLOCK_ZONES] ?: emptySet()
             if (current.contains(valid)) return@edit
