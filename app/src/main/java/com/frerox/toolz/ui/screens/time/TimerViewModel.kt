@@ -78,11 +78,6 @@ class TimerViewModel @Inject constructor(
     private val _timerHistory = MutableStateFlow<List<Pair<Int, Int>>>(emptyList())
     val timerHistory: StateFlow<List<Pair<Int, Int>>> = _timerHistory.asStateFlow()
 
-    // Raw locked slots per position (null = unset) — drives the lock-edit dialog
-    // initial values so slot i edits slot i (never the merged display value).
-    private val _lockedSlots = MutableStateFlow<List<Pair<Int, Int>?>>(emptyList())
-    val lockedSlots: StateFlow<List<Pair<Int, Int>?>> = _lockedSlots.asStateFlow()
-
     private var toolService: ToolService? = null
     private var isBound = false
     // T-P1-03: keep Job refs, cancel on re-bind/disconnect. Single combine reducer.
@@ -183,9 +178,8 @@ class TimerViewModel @Inject constructor(
                     return Pair(m.coerceIn(0, 999), s.coerceIn(0, 59))
                 }
 
-                // Raw locked slots (nullable per position) for the edit dialog, so the
-                // dialog opens on the LOCKED slot value, not the merged display value.
-                _lockedSlots.value = (0 until 3).map { parseSlot(lockedList.getOrNull(it)) }
+                // Raw locked slots are positional (slot i renders at index i);
+                // blanks fall through to history/defaults below.
 
                 // Construct top 3: locked slot i wins index i, else history, else default.
                 val finalPresets = mutableListOf<Pair<Int, Int>>()
@@ -244,6 +238,34 @@ class TimerViewModel @Inject constructor(
                 settingsRepository.updateLockedTimerPreset(index, minutes.coerceIn(0, 999), seconds.coerceIn(0, 59))
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * Lock the CURRENT countdown into a preset slot — the only lock path (no dialog).
+     * Called from preset long-press, which the UI only wires while the timer is
+     * running. Locks the started total (initialTime), falling back to remaining.
+     * Shows a confirmation snackbar; never a popup.
+     */
+    fun lockRunningAsPreset(index: Int) {
+        val cur = _uiState.value
+        if (!cur.isRunning) return // UI gates this; belt-and-braces.
+        val totalMs = cur.initialTime.takeIf { it > 0L } ?: cur.remainingTime
+        if (totalMs <= 0L) {
+            _userMessage.value = "Nothing to lock yet"
+            return
+        }
+        val mins = (totalMs / 60000L).toInt().coerceIn(0, 999)
+        val secs = ((totalMs % 60000L) / 1000L).toInt().coerceIn(0, 59)
+        if (mins <= 0 && secs <= 0) {
+            _userMessage.value = "Nothing to lock yet"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                settingsRepository.updateLockedTimerPreset(index, mins, secs)
+            } catch (_: Exception) {}
+        }
+        _userMessage.value = "Preset locked to $mins:${secs.toString().padStart(2, '0')}"
     }
 
     private fun ensureServiceStarted() {
@@ -348,11 +370,11 @@ class TimerViewModel @Inject constructor(
             return
         }
 
-        // Robust stop of ringing via service action (works even if binder dies next).
+        // Direct-only stop (never the async DISMISS intent — it would land after
+        // setTimerInitial below and wipe the staged duration; see stopRingtoneDirect).
+        // Binder is non-null on this path; when it dies next, flows reconcile.
         if (cur.isRinging || cur.isFinished) {
-            startServiceAction(ToolService.ACTION_DISMISS_ALARM) {
-                it.putExtra(ToolService.EXTRA_NOTIFICATION_ID, NotificationHelper.ID_TIMER_ALARM)
-            }
+            try { toolService?.dismissTimerAlarm() } catch (_: Exception) {}
         }
 
         _uiState.update {
@@ -410,7 +432,7 @@ class TimerViewModel @Inject constructor(
             _userMessage.value = "Pick a duration greater than 0:00"
             return
         }
-        robustStopRingtone()
+        stopRingtoneDirect()
         _uiState.update {
             it.copy(
                 selectedMinutes = safeMin,
@@ -463,7 +485,7 @@ class TimerViewModel @Inject constructor(
         // T-P1-03: keep initial immutable unless idle; track added via remaining only.
         val idle = !state.isStarted && !state.isRunning && state.remainingTime <= 0L && state.initialTime <= 0L
         val newInitial = if (idle) newRemaining else state.initialTime.takeIf { it > 0L } ?: newRemaining
-        robustStopRingtone()
+        stopRingtoneDirect()
         _uiState.update {
             it.copy(
                 remainingTime = newRemaining,
@@ -535,7 +557,7 @@ class TimerViewModel @Inject constructor(
             return
         }
 
-        robustStopRingtone()
+        stopRingtoneDirect()
         // Service as truth: do NOT optimistically set isRunning=true; flows will confirm.
         // NOTE: no ACTION_TIMER_TOGGLE — it is async and would be handled AFTER the
         // direct startTimer below, immediately pausing the timer we just started
@@ -596,7 +618,29 @@ class TimerViewModel @Inject constructor(
         // Handled by ToolService
     }
 
+    /**
+     * Synchronous binder-only stop for staging/starting paths (setTimer, addTime,
+     * toggle-start, resetToInitial). Never sends the async DISMISS intent: an intent
+     * queued now would be handled AFTER the state writes below and dismissTimerAlarm()
+     * would cancel the fresh job + watchdog and zero persisted state. When unbound
+     * there is nothing running to stop (flows prove it), so no intent is needed.
+     */
+    private fun stopRingtoneDirect() {
+        val s = _uiState.value
+        if (!s.isRinging && !s.isFinished) return
+        try { toolService?.dismissTimerAlarm() } catch (_: Exception) {}
+    }
+
     private fun robustStopRingtone() {
+        // FIX ("timer not working at all"): this helper sends an ASYNC
+        // ACTION_DISMISS_ALARM intent + a direct dismissTimerAlarm() that cancels
+        // the countdown job, the watchdog AND zeroes persisted state. Firing it
+        // unconditionally before startTimer()/addTime() meant the intent landed
+        // AFTER the fresh start and killed it every time. Only act when actually
+        // ringing/finishing — callers staging or starting an idle timer skip it.
+        // (stopRingtone() calls this while flags are still true, so it passes.)
+        val s = _uiState.value
+        if (!s.isRinging && !s.isFinished) return
         // Robust stop via startService (works when toolService==null) + binder timer-only path.
         startServiceAction(ToolService.ACTION_DISMISS_ALARM) {
             it.putExtra(ToolService.EXTRA_NOTIFICATION_ID, NotificationHelper.ID_TIMER_ALARM)
@@ -650,7 +694,7 @@ class TimerViewModel @Inject constructor(
             return
         }
         try { toolService?.setTimerInitial(initial) } catch (_: Exception) {}
-        robustStopRingtone()
+        stopRingtoneDirect()
         _uiState.update {
             it.copy(
                 remainingTime = initial,

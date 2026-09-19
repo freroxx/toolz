@@ -67,7 +67,11 @@ object WorldClockZones {
         if (trimmed.isEmpty()) return null
         ALIAS_TO_CANONICAL[trimmed]?.let { return it }
         val zone = safeZoneIdOrNull(trimmed) ?: return null
-        return zone.normalized().id
+        // FIX: ZoneId.normalized() maps UTC/UT/Z all to "Z", but the zone table,
+        // persistence and tests standardize on "UTC" — map it back so canonical
+        // ids are stable (was: canonicalZoneId("UTC")=="Z", breaking dedupe/tests).
+        val norm = zone.normalized().id
+        return if (norm == "Z") "UTC" else norm
     }
 
     /**

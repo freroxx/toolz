@@ -55,6 +55,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Alarm
 import androidx.compose.material.icons.rounded.HourglassEmpty
 import androidx.compose.material.icons.rounded.Notifications
@@ -70,6 +71,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -116,7 +118,6 @@ import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveStatePill
 import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
-import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.StaggeredEntrance
@@ -132,14 +133,12 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.TextButton
 import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.SquircleShape
-import com.frerox.toolz.ui.components.VerticalSmoothDurationPicker
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.FinishedOverlay
 import com.frerox.toolz.ui.screens.time.components.PomodoroSuccessConfetti
@@ -157,7 +156,6 @@ fun TimerScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val timerHistory by viewModel.timerHistory.collectAsState()
-    val lockedSlots by viewModel.lockedSlots.collectAsState()
     val userMessage by viewModel.userMessage.collectAsState()
     val rawAccent = if (state.isFinished || state.isRinging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val accent by animateColorAsState(
@@ -169,7 +167,6 @@ fun TimerScreen(
     // T-P2-05: rememberSaveable (survives rotation even without configChanges).
     var showConfetti by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
-    var presetToEdit by rememberSaveable { mutableStateOf<Int?>(null) }
     var pendingPreset by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingStaging by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -276,7 +273,12 @@ fun TimerScreen(
                         viewModel.setTimer(mins, secs)
                     }
                 },
-                onPresetLongClick = { index -> presetToEdit = index },
+                onPresetLongClick = { index ->
+                    // Preset locking exists ONLY while counting down: hold a preset
+                    // to store the current countdown there. Anywhere else the
+                    // long-press is ignored (deliberately no popup/dialog).
+                    if (state.isRunning) viewModel.lockRunningAsPreset(index)
+                },
                 onAddTime = viewModel::addTime,
                 onDismissAlarm = {
                     viewModel.stopRingtone()
@@ -326,24 +328,6 @@ fun TimerScreen(
                     dismissButton = {
                         TextButton(onClick = { pendingStaging = null }) { Text(stringResource(R.string.st_TimerScreen_q3r4)) }
                     },
-                )
-            }
-            
-            presetToEdit?.let { index ->
-                // FIX: dialog opens on the LOCKED slot value (slot i edits slot i),
-                // falling back to the displayed preset as a starting suggestion.
-                val slot = lockedSlots.getOrNull(index)
-                val shown = timerHistory.getOrNull(index)
-                LockPresetDialog(
-                    presetIndex = index,
-                    initialMinutes = slot?.first ?: shown?.first ?: 0,
-                    initialSeconds = slot?.second ?: shown?.second ?: 0,
-                    onDismiss = { presetToEdit = null },
-                    onConfirm = { m, s ->
-                        viewModel.lockPreset(index, m, s)
-                        presetToEdit = null
-                    },
-                    accent = accent
                 )
             }
         }
@@ -428,6 +412,9 @@ private fun TimerContent(
         StaggeredEntrance(index = 2) {
             TimerPresets(
                 enabled = !state.isRunning && !state.isRinging,
+                // Locking only exists while counting down (hold a preset to
+                // store the running countdown there — no dialog, no popup).
+                lockEnabled = state.isRunning,
                 onPresetSelected = onPresetSelected,
                 onPresetLongClick = onPresetLongClick,
                 timerHistory = timerHistory,
@@ -592,36 +579,127 @@ private fun TimerWheelPicker(
                 )
             }
             
-            if (state.selectedMinutes > 59) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 40.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        "${state.selectedMinutes}m : ${String.format(Locale.getDefault(), "%02d", state.selectedSeconds)}s",
-                        style = MaterialTheme.typography.displayLarge,
-                        fontWeight = FontWeight.Black,
-                        color = accent
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    TextButton(
-                        // T-P2-02: >59 fallback caps at 59, never zeroes hours.
-                        onClick = { onTimeSelected(59, state.selectedSeconds.coerceIn(0, 59)) },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ) {
-                        Text(stringResource(R.string.st_TimerScreen_g3h4), fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                VerticalSmoothDurationPicker(
-                    minutes = state.selectedMinutes,
-                    seconds = state.selectedSeconds,
-                    accent = accent,
-                    enabled = !state.isRunning && !state.isRinging && !(state.remainingTime > 0L && state.isStarted),
-                    onChange = onTimeSelected,
-                )
+            // Simple M3 expressive steppers (replaces the infinite pager wheel):
+            // no scroll state, no LaunchedEffect sync loops, no %60 clobber —
+            // mins 0..999 natively. Tap the card for direct entry (custom dialog).
+            SimpleDurationStepper(
+                minutes = state.selectedMinutes,
+                seconds = state.selectedSeconds,
+                enabled = pickerEnabled,
+                accent = accent,
+                onChange = onTimeSelected,
+            )
+        }
+    }
+}
+
+/**
+ * Simple M3 expressive duration stepper: [-] value [+] per unit, bounded and
+ * stateless (all state hoisted). Deliberately boring: buttons can't drift,
+ * overscroll, or desync like the old infinite pager could.
+ */
+@Composable
+private fun SimpleDurationStepper(
+    minutes: Int,
+    seconds: Int,
+    enabled: Boolean,
+    accent: Color,
+    onChange: (mins: Int, secs: Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DurationStepperGroup(
+            label = "Mins",
+            value = minutes.formatMins(),
+            canMinus = enabled && minutes > 0,
+            canPlus = enabled && minutes < 999,
+            onMinus = { onChange((minutes - 1).coerceAtLeast(0), seconds) },
+            onPlus = { onChange((minutes + 1).coerceAtMost(999), seconds) },
+            accent = accent,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = ":",
+            style = MaterialTheme.typography.displayMedium,
+            fontWeight = FontWeight.Black,
+            color = accent,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        DurationStepperGroup(
+            label = "Secs",
+            value = String.format(Locale.getDefault(), "%02d", seconds),
+            canMinus = enabled && seconds > 0,
+            canPlus = enabled && seconds < 59,
+            onMinus = { onChange(minutes, (seconds - 1).coerceAtLeast(0)) },
+            onPlus = { onChange(minutes, (seconds + 1).coerceAtMost(59)) },
+            accent = accent,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private fun Int.formatMins(): String = this.toString()
+
+@Composable
+private fun DurationStepperGroup(
+    label: String,
+    value: String,
+    canMinus: Boolean,
+    canPlus: Boolean,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = label.uppercase(Locale.getDefault()),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            letterSpacing = 1.sp,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onMinus,
+                enabled = canMinus,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = accent,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f),
+                ),
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(Icons.Rounded.Remove, contentDescription = "Decrease $label")
+            }
+            IconButton(
+                onClick = onPlus,
+                enabled = canPlus,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = accent,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f),
+                ),
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "Increase $label")
             }
         }
     }
@@ -630,6 +708,7 @@ private fun TimerWheelPicker(
 @Composable
 private fun TimerPresets(
     enabled: Boolean,
+    lockEnabled: Boolean,
     onPresetSelected: (Int, Int) -> Unit,
     onPresetLongClick: (Int) -> Unit,
     timerHistory: List<Pair<Int, Int>>,
@@ -669,7 +748,8 @@ private fun TimerPresets(
                 PresetCard(
                     minutes = minutes,
                     seconds = seconds,
-                    enabled = enabled,
+                    tapEnabled = enabled,
+                    lockEnabled = lockEnabled,
                     modifier = Modifier.weight(1f),
                     onPresetSelected = onPresetSelected,
                     onLongClick = { onPresetLongClick(index) },
@@ -685,7 +765,8 @@ private fun TimerPresets(
 private fun PresetCard(
     minutes: Int,
     seconds: Int,
-    enabled: Boolean,
+    tapEnabled: Boolean,
+    lockEnabled: Boolean,
     modifier: Modifier,
     onPresetSelected: (Int, Int) -> Unit,
     onLongClick: () -> Unit,
@@ -700,15 +781,20 @@ private fun PresetCard(
     val unitLabel = if (minutes > 0 && seconds == 0) stringResource(R.string.st_TimerScreen_k7l8) else ""
 
     ExpressiveCard(
-        onClick = { onPresetSelected(minutes, seconds) },
+        // Tap applies the preset (idle only); long-press LOCKS the running
+        // countdown here (running only). Gestures stay attached while either
+        // is allowed — combinedClickable would suppress both when disabled.
+        onClick = { if (tapEnabled) onPresetSelected(minutes, seconds) },
         onLongClick = {
-            vibrationManager?.vibrateLongClick()
-            onLongClick()
+            if (lockEnabled) {
+                vibrationManager?.vibrateLongClick()
+                onLongClick()
+            }
         },
-        enabled = enabled,
+        enabled = tapEnabled || lockEnabled,
         modifier = modifier.height(84.dp),
         shape = MediumExpressiveShape,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (enabled) 0.6f else 0.3f),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (tapEnabled) 0.6f else 0.3f),
         elevation = 0.dp,
         border = BorderStroke(1.dp, accent.copy(alpha = 0.12f))
     ) {
@@ -721,7 +807,7 @@ private fun PresetCard(
                 text = durationLabel,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                color = if (tapEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
             )
             if (unitLabel.isNotEmpty()) {
                 Text(
@@ -730,125 +816,6 @@ private fun PresetCard(
                     fontWeight = FontWeight.Black,
                     color = accent.copy(alpha = 0.6f)
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LockPresetDialog(
-    presetIndex: Int,
-    initialMinutes: Int,
-    initialSeconds: Int,
-    onDismiss: () -> Unit,
-    onConfirm: (Int, Int) -> Unit,
-    accent: Color
-) {
-    // FIX (user report "lock preset blocks it"): the old 0..59 infinite wheel
-    // reported settledPage%60 on open, silently clobbering any preset >59min
-    // (e.g. 90m became 30m) and making locks feel broken. Numeric fields
-    // support the full 0..999 range with no clobber, mirroring CustomDurationDialog.
-    var minsText by remember(presetIndex, initialMinutes) { mutableStateOf(if (initialMinutes > 0) initialMinutes.toString() else "") }
-    var secsText by remember(presetIndex, initialSeconds) { mutableStateOf(if (initialSeconds > 0) initialSeconds.toString() else "") }
-    var error by remember(presetIndex) { mutableStateOf<String?>(null) }
-
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
-        ExpressiveCard(
-            onClick = {},
-            enabled = false,
-            shape = LargeExpressiveShape,
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.surface,
-            elevation = 8.dp
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            stringResource(R.string.st_TimerScreen_m9n0),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            stringResource(R.string.st_TimerScreen_o1p2),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(Icons.Rounded.Lock, contentDescription = stringResource(R.string.st_TimerScreen_m9n0), tint = accent, modifier = Modifier.size(24.dp))
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = minsText,
-                        onValueChange = { v ->
-                            minsText = v.filter { it.isDigit() }.take(3)
-                            error = null
-                        },
-                        label = { Text("Mins") },
-                        placeholder = { Text("0–999") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = MediumExpressiveShape,
-                    )
-                    OutlinedTextField(
-                        value = secsText,
-                        onValueChange = { v ->
-                            secsText = v.filter { it.isDigit() }.take(2)
-                            error = null
-                        },
-                        label = { Text("Secs") },
-                        placeholder = { Text("0–59") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = MediumExpressiveShape,
-                    )
-                }
-                if (error != null) {
-                    Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    TextButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f).height(56.dp),
-                        shape = MediumExpressiveShape
-                    ) {
-                        Text(stringResource(R.string.st_TimerScreen_q3r4), fontWeight = FontWeight.Bold)
-                    }
-                    ToolzExpressiveButton(
-                        onClick = {
-                            val m = minsText.toIntOrNull()?.coerceIn(0, 999) ?: 0
-                            val s = secsText.toIntOrNull()?.coerceIn(0, 59) ?: 0
-                            if (m <= 0 && s <= 0) {
-                                error = "Pick a duration greater than 0:00"
-                            } else {
-                                onConfirm(m, s)
-                            }
-                        },
-                        modifier = Modifier.weight(1f).height(56.dp),
-                        shape = MediumExpressiveShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = accent)
-                    ) {
-                        Text(stringResource(R.string.st_TimerScreen_s5t6), fontWeight = FontWeight.Black)
-                    }
-                }
             }
         }
     }

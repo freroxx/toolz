@@ -19,6 +19,7 @@ package com.frerox.toolz.ui.screens.time
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -419,10 +420,10 @@ class WorldClockViewModel @Inject constructor(
     }
 
     private fun relativeOffset(dateTime: ZonedDateTime, localZoned: ZonedDateTime, isLocal: Boolean): String {
-        if (isLocal) return "Local time"
+        if (isLocal) return context.getString(R.string.st_WorldClockScreen_k7l8)
         // Single Instant sample (caller passes both zoned times) — no sequential now() straddle.
         val secondsDiff = dateTime.offset.totalSeconds - localZoned.offset.totalSeconds
-        if (secondsDiff == 0) return "Same as local"
+        if (secondsDiff == 0) return context.getString(R.string.st_WorldClockScreen_m9n0)
 
         val sign = if (secondsDiff >= 0) "+" else "-"
         val absolute = abs(secondsDiff)
@@ -444,9 +445,9 @@ class WorldClockViewModel @Inject constructor(
         // W-P2-05: ChronoUnit.DAYS between local dates (DST-safe, readable).
         val days = WorldClockZones.dayDelta(localZoned.toLocalDate(), dateTime.toLocalDate())
         return when {
-            days < 0 -> "Yesterday"
-            days > 0 -> "Tomorrow"
-            else -> "Today"
+            days < 0 -> context.getString(R.string.st_WorldClockScreen_o1p2)
+            days > 0 -> context.getString(R.string.st_WorldClockScreen_q3r4)
+            else -> context.getString(R.string.st_WorldClockScreen_s5t6)
         }
     }
 

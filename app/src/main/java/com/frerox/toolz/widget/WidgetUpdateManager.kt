@@ -117,17 +117,19 @@ class WidgetUpdateManager @Inject constructor(
         if (glanceIds.isEmpty()) return
         glanceIds.forEach { glanceId ->
             try {
-                // FIX: mutate prefs directly. The previous
-                // prefs.toMutablePreferences().apply{} mutated a COPY, so when
-                // Glance passes MutablePreferences the writes were lost and the
-                // widget went stale (e.g. goal/count never updating).
+                // NOTE: with a custom StateDefinition the lambda receives immutable
+                // Preferences and must RETURN the updated instance — so building via
+                // prefs.toMutablePreferences().apply{} is correct here (unlike the
+                // no-definition overload where prefs is already mutable).
                 updateAppWidgetState(context, PomodoroWidgetStateDefinition, glanceId) { prefs ->
-                    prefs[PomodoroWidgetState.KEY_MODE] = mode
-                    prefs[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
-                    prefs[PomodoroWidgetState.KEY_TOTAL_MS] = totalMs.coerceAtLeast(1L)
-                    prefs[PomodoroWidgetState.KEY_IS_RUNNING] = isRunning
-                    sessionsDone?.let { prefs[PomodoroWidgetState.KEY_SESSIONS_DONE] = it.coerceAtLeast(0) }
-                    sessionsGoal?.let { prefs[PomodoroWidgetState.KEY_SESSIONS_GOAL] = it.coerceIn(1, 12) }
+                    prefs.toMutablePreferences().apply {
+                        this[PomodoroWidgetState.KEY_MODE] = mode
+                        this[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
+                        this[PomodoroWidgetState.KEY_TOTAL_MS] = totalMs.coerceAtLeast(1L)
+                        this[PomodoroWidgetState.KEY_IS_RUNNING] = isRunning
+                        sessionsDone?.let { this[PomodoroWidgetState.KEY_SESSIONS_DONE] = it.coerceAtLeast(0) }
+                        sessionsGoal?.let { this[PomodoroWidgetState.KEY_SESSIONS_GOAL] = it.coerceIn(1, 12) }
+                    }
                 }
                 PomodoroGlanceWidget().update(context, glanceId)
             } catch (e: Exception) {

@@ -188,14 +188,14 @@ fun WorldClockScreen(
                     vibrationManager?.vibrateClick()
                     viewModel.addSelectedZone()
                     scope.launch {
-                        snackbarHostState.showSnackbar("Saved ${uiState.selected?.location?.city}")
+                        snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_w9x0, uiState.selected?.location?.city.orEmpty()))
                     }
                 },
                 onCopy = {
                     vibrationManager?.vibrateClick()
                     val s = uiState.selected ?: return@WorldClockFloatingActions
                     clipboard.setText(AnnotatedString("${s.location.label} – ${s.time}:${s.seconds} ${s.utcOffset}"))
-                    scope.launch { snackbarHostState.showSnackbar("Copied ${s.location.city}") }
+                    scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, s.location.city)) }
                 },
                 onLocate = { locateMe() },
             )
@@ -285,7 +285,7 @@ fun WorldClockScreen(
                             onCopySelection = { selection ->
                                 vibrationManager?.vibrateClick()
                                 clipboard.setText(AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}"))
-                                scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, selection.location.city)) }
                             },
                             modifier = Modifier.weight(1f),
                             mapModifier = Modifier.fillMaxWidth().weight(1f)
@@ -317,7 +317,7 @@ fun WorldClockScreen(
                                             clipboard.setText(
                                                 AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}")
                                             )
-                                            scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                            scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, selection.location.city)) }
                                         },
                                     )
                                 }
@@ -358,7 +358,7 @@ fun WorldClockScreen(
                                                 clipboard.setText(
                                                     AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
                                                 )
-                                                scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, clock.cityName)) }
                                             },
                                         )
                                     }
@@ -438,7 +438,7 @@ fun WorldClockScreen(
                             onCopySelection = { selection ->
                                 vibrationManager?.vibrateClick()
                                 clipboard.setText(AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}"))
-                                scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, selection.location.city)) }
                             },
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
@@ -460,7 +460,7 @@ fun WorldClockScreen(
                                         clipboard.setText(
                                             AnnotatedString("${selection.location.label} – ${selection.time}:${selection.seconds} ${selection.utcOffset}")
                                         )
-                                        scope.launch { snackbarHostState.showSnackbar("Copied ${selection.location.city}") }
+                                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, selection.location.city)) }
                                     },
                                 )
                             }
@@ -499,7 +499,7 @@ fun WorldClockScreen(
                                             clipboard.setText(
                                                 AnnotatedString("${clock.cityName} – ${clock.currentTime}:${clock.seconds} ${clock.utcOffset}")
                                             )
-                                            scope.launch { snackbarHostState.showSnackbar("Copied ${clock.cityName}") }
+                                            scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.st_WorldClockScreen_y1z2, clock.cityName)) }
                                         },
                                     )
                                 }
@@ -877,7 +877,7 @@ private fun SelectedTimePanel(
                     if (selected.isDst && selected.zoneAbbreviation != null) {
                         androidx.compose.foundation.layout.Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "DST • ${selected.zoneAbbreviation}",
+                            text = stringResource(R.string.st_WorldClockScreen_u7v8, selected.zoneAbbreviation!!),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.tertiary,
@@ -1039,7 +1039,7 @@ private fun SavedClockCard(
                 )
                 if (clock.isDst && clock.zoneAbbreviation != null && !clock.isLocal) {
                     Text(
-                        text = "DST • ${clock.zoneAbbreviation}",
+                        text = stringResource(R.string.st_WorldClockScreen_u7v8, clock.zoneAbbreviation!!),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.tertiary,

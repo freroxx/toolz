@@ -7,9 +7,14 @@
     android:focusable="true"
     android:keepScreenOn="true">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="40dp">
@@ -65,6 +70,19 @@
             android:textSize="14sp"
             android:letterSpacing="0.1" />
 
+        <Button
+            android:id="@+id/btn_dismiss"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#212121"
+            android:textColor="#9E9E9E"
+            android:text="EXIT TO HOME"
+            android:textStyle="bold"
+            android:textSize="12sp"
+            android:letterSpacing="0.1" />
+
     </LinearLayout>
+    </ScrollView>
 
 </FrameLayout>
