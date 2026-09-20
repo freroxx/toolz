@@ -250,15 +250,16 @@ fun TimerScreen(
                 accent = accent,
                 contentPadding = padding,
                 onTimeSelected = { h, m, s ->
-                    // T-P1-03: staging while paused requires confirm, never silent loss.
-                    if (!state.isRunning && state.remainingTime > 0L && state.isStarted && !state.isRinging) {
+                    // T-P1-03: replacing a paused-after-run timer requires
+                    // confirm (dialog); merely staged durations edit freely.
+                    if (!state.isRunning && state.remainingTime > 0L && state.hasRun && !state.isRinging) {
                         pendingStaging = "$h:$m:$s"
                     } else {
                         viewModel.onTimeSelectedChange(h, m, s)
                     }
                 },
                 onPresetSelected = { h, mins, secs ->
-                    if (!state.isRunning && state.remainingTime > 0L && state.isStarted && !state.isRinging) {
+                    if (!state.isRunning && state.remainingTime > 0L && state.hasRun && !state.isRinging) {
                         pendingPreset = "$h:$mins:$secs"
                     } else {
                         viewModel.setTimer(h, mins, secs)
@@ -505,8 +506,9 @@ private fun TimerWheelPicker(
     onTimeSelected: (Int, Int, Int) -> Unit,
 ) {
     var showCustomDurationDialog by rememberSaveable { mutableStateOf(false) }
-    // T-P2-02: wheel disabled while paused (remaining>0) — staging needs confirm, never silent loss.
-    val pickerEnabled = !state.isRunning && !state.isRinging && !(state.remainingTime > 0L && state.isStarted)
+    // T-P2-02: wheel disabled while paused-after-run (replacing it needs the
+    // "Start a new timer?" confirm) — never while merely staging a duration.
+    val pickerEnabled = !state.isRunning && !state.isRinging && !(state.remainingTime > 0L && state.hasRun)
 
     if (showCustomDurationDialog) {
         CustomDurationDialog(

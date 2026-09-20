@@ -96,16 +96,25 @@ private fun nearestPage(current: Int, cycle: Int, value: Int): Int {
 // normalization this project's graphics-shapes version produces. Don't
 // redeclare it here.
 
-// Two 4-vertex squircles: soft/round at rest, tighter corner radius while a
-// column is actively being dragged — the documented "morph on interaction"
-// pattern, wired to pager scroll state instead of a press interaction.
+// Two 4-vertex squircles built via the plain numVertices constructor (the
+// call that's confirmed to compile against this project's resolved
+// graphics-shapes artifact — RoundedPolygon.rectangle() is not resolving
+// here despite being documented, so it's avoided rather than guessed at
+// again). Same call shape for both endpoints, differing only in `rounding`,
+// so vertex count/order should correspond directly between them for Morph.
 private val RestPillPolygon = RoundedPolygon(
     numVertices = 4,
-    rounding = CornerRounding(radius = 0.62f, smoothing = 0.6f),
+    radius = 1f,
+    centerX = 0f,
+    centerY = 0f,
+    rounding = CornerRounding(radius = 0.6f, smoothing = 0.3f),
 )
 private val ActivePillPolygon = RoundedPolygon(
     numVertices = 4,
-    rounding = CornerRounding(radius = 0.32f, smoothing = 0.4f),
+    radius = 1f,
+    centerX = 0f,
+    centerY = 0f,
+    rounding = CornerRounding(radius = 0.35f, smoothing = 0.2f),
 )
 
 /**
@@ -277,11 +286,19 @@ private fun InfiniteWheelColumn(
     modifier: Modifier = Modifier,
 ) {
     val morph = remember { Morph(RestPillPolygon, ActivePillPolygon) }
-    val morphProgress by animateFloatAsState(
+    val morphProgressRaw by animateFloatAsState(
         targetValue = if (pagerState.isScrollInProgress) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 340f),
         label = "pillMorph",
     )
+    // Clamp away from the exact 0f/1f endpoints. At rest this pill is
+    // otherwise invisible — MorphPolygonShape fits the outline's own
+    // measured bounds to the container size, and at progress==0 or ==1 that
+    // measurement degenerates (likely a zero-width/height bounds box for
+    // this project's graphics-shapes build), collapsing the clip to nothing.
+    // A hair off either endpoint keeps the shape in a valid interpolated
+    // state while staying visually indistinguishable from true rest/active.
+    val morphProgress = morphProgressRaw.coerceIn(0.001f, 0.999f)
     val pillShape = remember(morph) { MorphPolygonShape(morph) { morphProgress } }
 
     Column(
@@ -294,6 +311,20 @@ private fun InfiniteWheelColumn(
                 .height(WheelSlot * WheelViewportRows - WheelRowGap),
             contentAlignment = Alignment.Center,
         ) {
+            // Fallback flat pill: guarantees a visible focus indicator even
+            // if the polygon morph above renders as zero-area for some
+            // progress value we haven't caught. Same tonal color, drawn
+            // first so the morphed shape (if it renders) sits on top and
+            // looks identical to the morph alone.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(WheelRowHeight)
+                    .padding(horizontal = if (hero) 3.dp else 5.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+            )
+
             // Real morphed-squircle focus pill: clipped shape + tonal fill +
             // an actual elevation shadow, not a stroke-only chip.
             Box(
@@ -325,7 +356,7 @@ private fun InfiniteWheelColumn(
                 val scale = 1f - 0.36f * norm
                 val textAlpha = (1f - 0.82f * norm).coerceIn(0.2f, 1f)
 
-                val text = String.format("%02d", value)
+                val text = String.format(java.util.Locale.US, "%02d", value)
 
                 Box(
                     modifier = Modifier

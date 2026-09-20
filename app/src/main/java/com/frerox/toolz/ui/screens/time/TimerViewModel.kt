@@ -50,6 +50,10 @@ data class TimerState(
     val isRinging: Boolean = false,
     val isPaused: Boolean = false,
     val isStarted: Boolean = false,
+    // True once the countdown has actually run. Staging a duration (wheel /
+    // preset, never started) leaves this false, so further edits stay free —
+    // the replace-confirm + guards below only kick in after a real run.
+    val hasRun: Boolean = false,
     val selectedMinutes: Int = 0,
     val selectedSeconds: Int = 0,
     val selectedHours: Int = 0,
@@ -260,6 +264,9 @@ class TimerViewModel @Inject constructor(
                             isFinished = snap.ringing,
                             isPaused = paused,
                             isStarted = started,
+                            // Latch: once the service reports running, this
+                            // timer counts as "has run" until reset/re-staged.
+                            hasRun = cur.hasRun || snap.running,
                         )
                     }
                 }
@@ -279,10 +286,11 @@ class TimerViewModel @Inject constructor(
         val safeSeconds = sec.coerceIn(0, 59)
         val duration = durationMillis(safeHours, safeMinutes, safeSeconds)
         val cur = _uiState.value
-        // T-P1-03: block staging while running; paused remaining>0 requires confirm (force).
+        // T-P1-03: block staging while running; paused-after-run requires confirm (force).
+        // Merely staged (never ran) durations edit freely.
         if (cur.isRunning) return
-        if (!force && cur.remainingTime > 0L && cur.isStarted && !cur.isRunning && !cur.isRinging) {
-            _userMessage.value = "Timer paused — Reset to pick a new duration"
+        if (!force && cur.remainingTime > 0L && cur.hasRun && !cur.isRunning && !cur.isRinging) {
+            _userMessage.value = "Timer paused — Start a new timer or Reset"
             return
         }
         if (cur.isRinging && !force) return
@@ -303,6 +311,8 @@ class TimerViewModel @Inject constructor(
                     isRinging = false,
                     isPaused = duration > 0L,
                     isStarted = duration > 0L,
+                    // Fresh staging counts as never-run: edits stay free.
+                    hasRun = false,
                 )
             }
             return
@@ -326,6 +336,8 @@ class TimerViewModel @Inject constructor(
                 isRinging = false,
                 isPaused = duration > 0L,
                 isStarted = duration > 0L,
+                // Fresh staging counts as never-run: edits stay free.
+                hasRun = false,
             )
         }
         try { toolService?.setTimerInitial(duration) } catch (_: Exception) {}
@@ -343,8 +355,8 @@ class TimerViewModel @Inject constructor(
     fun setTimer(hours: Int, minutes: Int, seconds: Int, force: Boolean = false) {
         val cur = _uiState.value
         if (cur.isRunning) return
-        if (!force && cur.remainingTime > 0L && cur.isStarted && !cur.isRunning && !cur.isRinging) {
-            _userMessage.value = "Timer paused — Reset to pick a new duration"
+        if (!force && cur.remainingTime > 0L && cur.hasRun && !cur.isRunning && !cur.isRinging) {
+            _userMessage.value = "Timer paused — Start a new timer or Reset"
             return
         }
         val safeHr = hours.coerceIn(0, 99)
@@ -369,6 +381,8 @@ class TimerViewModel @Inject constructor(
                         isRinging = false,
                         isPaused = true,
                         isStarted = true,
+                        // Fresh staging counts as never-run: edits stay free.
+                        hasRun = false,
                     )
                 }
             }
@@ -390,6 +404,8 @@ class TimerViewModel @Inject constructor(
                 isRinging = false,
                 isPaused = true,
                 isStarted = true,
+                // Fresh staging counts as never-run: edits stay free.
+                hasRun = false,
             )
         }
         try { toolService?.setTimerInitial(totalMillis) } catch (_: Exception) {}
@@ -511,12 +527,12 @@ class TimerViewModel @Inject constructor(
         // direct startTimer below, immediately pausing the timer we just started
         // (the "timer starts then instantly pauses / never runs" bug). FGS was
         // already ensured at the top of this function.
-        _uiState.update { it.copy(isStarted = true, isFinished = false, isRinging = false) }
+        _uiState.update { it.copy(isStarted = true, isFinished = false, isRinging = false, hasRun = true) }
         try {
             toolService?.startTimer(duration, initial)
         } catch (_: Exception) {
             // Revert optimistic started on failure.
-            _uiState.update { it.copy(isStarted = state.isStarted) }
+            _uiState.update { it.copy(isStarted = state.isStarted, hasRun = state.hasRun) }
             _userMessage.value = "Couldn't start timer — try again"
             return
         }
@@ -610,6 +626,9 @@ class TimerViewModel @Inject constructor(
                 initialTime = if (repeat) it.initialTime else 0L,
                 isPaused = repeat && it.initialTime > 0L,
                 isStarted = repeat && it.initialTime > 0L,
+                // Dismissed without repeat = fresh timer; with repeat the
+                // staged duration keeps its ran history (edits need confirm).
+                hasRun = if (repeat) it.hasRun else false,
             )
         }
     }
@@ -628,6 +647,7 @@ class TimerViewModel @Inject constructor(
                 isRinging = false,
                 isPaused = false,
                 isStarted = false,
+                hasRun = false,
             )
         }
     }
