@@ -466,11 +466,23 @@ class PomodoroViewModel @Inject constructor(
     }
 
     fun resetGoal() {
-        toolService?.resetPomodoroGoal()
+        // Reset session progress back to 0/goal. Optimistic UI update first so
+        // the settings row + stats clear instantly, then service (truth) or
+        // direct repo fallback when unbound (service null = silent no-op before).
+        _uiState.update { it.copy(sessionsCompleted = 0) }
+        val svc = toolService
+        if (svc != null) {
+            svc.resetPomodoroGoal()
+        } else {
+            viewModelScope.launch {
+                try { settingsRepository.setPomodoroSessionsCompleted(0) } catch (_: Exception) {}
+            }
+        }
     }
 
     fun skip() {
-        // Skip never counts as work (P-P2-02) — service cycles silently, no alarm.
+        // Skipping WORK counts as completed (service increments); skipping a
+        // break never counts. Service cycles silently, no alarm.
         toolService?.stopAlarm()
         toolService?.skipPomodoro()
         _uiState.update { it.copy(isFinished = false) }

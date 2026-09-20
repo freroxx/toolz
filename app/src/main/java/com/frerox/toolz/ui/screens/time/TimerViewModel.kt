@@ -52,6 +52,7 @@ data class TimerState(
     val isStarted: Boolean = false,
     val selectedMinutes: Int = 0,
     val selectedSeconds: Int = 0,
+    val selectedHours: Int = 0,
     val repeatLastDuration: Boolean = false,
     val keepScreenOn: Boolean = true,
     val gradualVolume: Boolean = false,
@@ -75,8 +76,8 @@ class TimerViewModel @Inject constructor(
     val hapticEnabled: StateFlow<Boolean> = settingsRepository.hapticFeedback
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
-    private val _timerHistory = MutableStateFlow<List<Pair<Int, Int>>>(emptyList())
-    val timerHistory: StateFlow<List<Pair<Int, Int>>> = _timerHistory.asStateFlow()
+    private val _timerHistory = MutableStateFlow<List<Triple<Int, Int, Int>>>(emptyList())
+    val timerHistory: StateFlow<List<Triple<Int, Int, Int>>> = _timerHistory.asStateFlow()
 
     private var toolService: ToolService? = null
     private var isBound = false
@@ -117,21 +118,27 @@ class TimerViewModel @Inject constructor(
         // staging/remaining while running/paused — only selectedMinutes/Seconds when idle.
         // 5-flow typed combine (coroutines typed overload) + separate repeat collect.
         viewModelScope.launch {
-            combine(
+            // 6-flow typed combine has no overload here — nest 3 (h/m/s) + 4.
+            val hmsFlow = combine(
+                settingsRepository.lastTimerHours,
                 settingsRepository.lastTimerMinutes,
                 settingsRepository.lastTimerSeconds,
+            ) { hr: Int, min: Int, sec: Int -> Triple(hr, min, sec) }
+            combine(
+                hmsFlow,
                 settingsRepository.timerKeepScreenOn,
                 settingsRepository.timerGradualVolume,
                 settingsRepository.timerNotifications,
-            ) { min: Int, sec: Int, kso: Boolean, gv: Boolean, alarms: Boolean ->
-                TimerBasicSettings(min, sec, kso, gv, alarms)
+            ) { hms: Triple<Int, Int, Int>, kso: Boolean, gv: Boolean, alarms: Boolean ->
+                TimerBasicSettings(hms.first, hms.second, hms.third, kso, gv, alarms)
             }
                 .distinctUntilChanged()
                 .collect { snap ->
                     _uiState.update { cur ->
                         val idle = !cur.isRunning && !cur.isRinging && cur.remainingTime <= 0L && !cur.isStarted
                         cur.copy(
-                            selectedMinutes = if (idle) snap.min.coerceIn(0, 999) else cur.selectedMinutes,
+                            selectedHours = if (idle) snap.hr.coerceIn(0, 99) else cur.selectedHours,
+                            selectedMinutes = if (idle) snap.min.coerceIn(0, 59) else cur.selectedMinutes,
                             selectedSeconds = if (idle) snap.sec.coerceIn(0, 59) else cur.selectedSeconds,
                             keepScreenOn = snap.keepScreenOn,
                             gradualVolume = snap.gradual,
@@ -151,12 +158,27 @@ class TimerViewModel @Inject constructor(
                 settingsRepository.timerHistory,
                 settingsRepository.lockedTimerPresets
             ) { historyMap, lockedList ->
+                // Keys are "h:min:sec"; legacy "min:sec" entries (pre-hours) still parse with h=0.
+                fun parseHms(key: String): Triple<Int, Int, Int>? {
+                    val parts = key.split(":")
+                    return when (parts.size) {
+                        3 -> {
+                            val h = parts[0].toIntOrNull() ?: return null
+                            val m = parts[1].toIntOrNull() ?: return null
+                            val s = parts[2].toIntOrNull() ?: return null
+                            Triple(h.coerceIn(0, 99), m.coerceIn(0, 59), s.coerceIn(0, 59))
+                        }
+                        2 -> {
+                            val m = parts[0].toIntOrNull() ?: return null
+                            val s = parts[1].toIntOrNull() ?: return null
+                            Triple(0, m.coerceIn(0, 59), s.coerceIn(0, 59))
+                        }
+                        else -> null
+                    }
+                }
                 val historyParsed = historyMap.entries.mapNotNull { (k, count) ->
-                    val parts = k.split(":", limit = 2)
-                    if (parts.size != 2) return@mapNotNull null
-                    val m = parts[0].toIntOrNull() ?: return@mapNotNull null
-                    val s = parts[1].toIntOrNull() ?: return@mapNotNull null
-                    Pair(m.coerceIn(0, 999), s.coerceIn(0, 59)) to count
+                    val t = parseHms(k) ?: return@mapNotNull null
+                    t to count
                 }
 
                 // (Display uses positional parseSlot below; 0:00 entries are dropped
@@ -168,21 +190,32 @@ class TimerViewModel @Inject constructor(
                 // so locked slot 2 displayed at index 0 — long-pressing index 2 then
                 // edited the wrong slot and presets appeared to "move/block". Slot i
                 // now always renders at index i; blanks fall through to history/defaults.
-                fun parseSlot(raw: String?): Pair<Int, Int>? {
+                fun parseSlot(raw: String?): Triple<Int, Int, Int>? {
                     if (raw.isNullOrBlank()) return null
-                    val parts = raw.split(":", limit = 2)
-                    if (parts.size != 2) return null
-                    val m = parts[0].toIntOrNull() ?: return null
-                    val s = parts[1].toIntOrNull() ?: return null
-                    if (m * 60 + s <= 0) return null
-                    return Pair(m.coerceIn(0, 999), s.coerceIn(0, 59))
+                    val parts = raw.split(":")
+                    val t = when (parts.size) {
+                        3 -> Triple(
+                            parts[0].toIntOrNull() ?: return null,
+                            parts[1].toIntOrNull() ?: return null,
+                            parts[2].toIntOrNull() ?: return null,
+                        )
+                        // Legacy "min:sec" locks (pre-hours).
+                        2 -> Triple(
+                            0,
+                            parts[0].toIntOrNull() ?: return null,
+                            parts[1].toIntOrNull() ?: return null,
+                        )
+                        else -> return null
+                    }
+                    if (t.first * 3600 + t.second * 60 + t.third <= 0) return null
+                    return Triple(t.first.coerceIn(0, 99), t.second.coerceIn(0, 59), t.third.coerceIn(0, 59))
                 }
 
                 // Raw locked slots are positional (slot i renders at index i);
                 // blanks fall through to history/defaults below.
 
                 // Construct top 3: locked slot i wins index i, else history, else default.
-                val finalPresets = mutableListOf<Pair<Int, Int>>()
+                val finalPresets = mutableListOf<Triple<Int, Int, Int>>()
 
                 for (i in 0 until 3) {
                     val lockedAt = parseSlot(lockedList.getOrNull(i))
@@ -193,8 +226,8 @@ class TimerViewModel @Inject constructor(
                         val historyTop = historyParsed
                             .sortedByDescending { it.second }
                             .map { it.first }
-                            // FIX: skip dead 0:00 history entries too.
-                            .filter { (it.first * 60 + it.second) > 0 }
+                            // FIX: skip dead 0:00:00 history entries too.
+                            .filter { (it.first * 3600 + it.second * 60 + it.third) > 0 }
                             .filter { !finalPresets.contains(it) }
                             .firstOrNull()
 
@@ -203,9 +236,9 @@ class TimerViewModel @Inject constructor(
                         } else {
                             // Defaults
                             val default = when(finalPresets.size) {
-                                0 -> 5 to 0
-                                1 -> 15 to 0
-                                else -> 30 to 0
+                                0 -> Triple(0, 5, 0)
+                                1 -> Triple(0, 15, 0)
+                                else -> Triple(0, 30, 0)
                             }
                             if (!finalPresets.contains(default)) finalPresets.add(default)
                         }
@@ -220,25 +253,13 @@ class TimerViewModel @Inject constructor(
     }
 
     private data class TimerBasicSettings(
+        val hr: Int,
         val min: Int,
         val sec: Int,
         val keepScreenOn: Boolean,
         val gradual: Boolean,
         val alarms: Boolean,
     )
-
-    fun lockPreset(index: Int, minutes: Int, seconds: Int) {
-        // T-P2-03: reject 0:00 with error, never dead chip.
-        if (minutes <= 0 && seconds <= 0) {
-            _userMessage.value = "Pick a duration greater than 0:00"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                settingsRepository.updateLockedTimerPreset(index, minutes.coerceIn(0, 999), seconds.coerceIn(0, 59))
-            } catch (_: Exception) {}
-        }
-    }
 
     /**
      * Lock the CURRENT countdown into a preset slot — the only lock path (no dialog).
@@ -254,18 +275,24 @@ class TimerViewModel @Inject constructor(
             _userMessage.value = "Nothing to lock yet"
             return
         }
-        val mins = (totalMs / 60000L).toInt().coerceIn(0, 999)
-        val secs = ((totalMs % 60000L) / 1000L).toInt().coerceIn(0, 59)
-        if (mins <= 0 && secs <= 0) {
+        val totalSec = (totalMs / 1000L).toInt()
+        val hrs = (totalSec / 3600).coerceIn(0, 99)
+        val mins = ((totalSec % 3600) / 60).coerceIn(0, 59)
+        val secs = (totalSec % 60).coerceIn(0, 59)
+        if (hrs <= 0 && mins <= 0 && secs <= 0) {
             _userMessage.value = "Nothing to lock yet"
             return
         }
         viewModelScope.launch {
             try {
-                settingsRepository.updateLockedTimerPreset(index, mins, secs)
+                settingsRepository.updateLockedTimerPreset(index, hrs, mins, secs)
             } catch (_: Exception) {}
         }
-        _userMessage.value = "Preset locked to $mins:${secs.toString().padStart(2, '0')}"
+        _userMessage.value = if (hrs > 0) {
+            "Preset locked to $hrs:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}"
+        } else {
+            "Preset locked to $mins:${secs.toString().padStart(2, '0')}"
+        }
     }
 
     private fun ensureServiceStarted() {
@@ -337,10 +364,11 @@ class TimerViewModel @Inject constructor(
         val ringing: Boolean,
     )
 
-    fun onTimeSelectedChange(min: Int, sec: Int, force: Boolean = false) {
-        val safeMinutes = min.coerceIn(0, 999)
+    fun onTimeSelectedChange(hours: Int, min: Int, sec: Int, force: Boolean = false) {
+        val safeHours = hours.coerceIn(0, 99)
+        val safeMinutes = min.coerceIn(0, 59)
         val safeSeconds = sec.coerceIn(0, 59)
-        val duration = durationMillis(safeMinutes, safeSeconds)
+        val duration = durationMillis(safeHours, safeMinutes, safeSeconds)
         val cur = _uiState.value
         // T-P1-03: block staging while running; paused remaining>0 requires confirm (force).
         if (cur.isRunning) return
@@ -353,10 +381,11 @@ class TimerViewModel @Inject constructor(
         if (toolService == null) {
             // Queue until bound (never silent drop).
             ensureServiceStarted()
-            pendingAction = { onTimeSelectedChange(min, sec, force) }
+            pendingAction = { onTimeSelectedChange(hours, min, sec, force) }
             // Optimistic staging for responsiveness.
             _uiState.update {
                 it.copy(
+                    selectedHours = safeHours,
                     selectedMinutes = safeMinutes,
                     selectedSeconds = safeSeconds,
                     remainingTime = duration,
@@ -379,6 +408,7 @@ class TimerViewModel @Inject constructor(
 
         _uiState.update {
             it.copy(
+                selectedHours = safeHours,
                 selectedMinutes = safeMinutes,
                 selectedSeconds = safeSeconds,
                 remainingTime = duration,
@@ -392,29 +422,36 @@ class TimerViewModel @Inject constructor(
         try { toolService?.setTimerInitial(duration) } catch (_: Exception) {}
 
         viewModelScope.launch {
-            try { settingsRepository.setLastTimerDuration(safeMinutes, safeSeconds) } catch (_: Exception) {}
+            try { settingsRepository.setLastTimerDuration(safeHours, safeMinutes, safeSeconds) } catch (_: Exception) {}
         }
     }
 
-    fun setTimer(minutes: Int, seconds: Int, force: Boolean = false) {
+    /** Compat: legacy min/sec callers (hours = 0). */
+    fun onTimeSelectedChange(min: Int, sec: Int, force: Boolean = false) {
+        onTimeSelectedChange(0, min, sec, force)
+    }
+
+    fun setTimer(hours: Int, minutes: Int, seconds: Int, force: Boolean = false) {
         val cur = _uiState.value
         if (cur.isRunning) return
         if (!force && cur.remainingTime > 0L && cur.isStarted && !cur.isRunning && !cur.isRinging) {
             _userMessage.value = "Timer paused — Reset to pick a new duration"
             return
         }
-        val safeMin = minutes.coerceIn(0, 999)
+        val safeHr = hours.coerceIn(0, 99)
+        val safeMin = minutes.coerceIn(0, 59)
         val safeSec = seconds.coerceIn(0, 59)
-        val totalMillis = durationMillis(safeMin, safeSec)
+        val totalMillis = durationMillis(safeHr, safeMin, safeSec)
         if (toolService == null) {
             ensureServiceStarted()
-            pendingAction = { setTimer(minutes, seconds, force) }
+            pendingAction = { setTimer(hours, minutes, seconds, force) }
             // FIX: optimistic staging while unbound (was: silent no-op — tapping a
             // preset on cold start did nothing visible until bind completed).
             // Mirrors onTimeSelectedChange so the Start button enables instantly.
             if (totalMillis > 0L) {
                 _uiState.update {
                     it.copy(
+                        selectedHours = safeHr,
                         selectedMinutes = safeMin,
                         selectedSeconds = safeSec,
                         remainingTime = totalMillis,
@@ -435,6 +472,7 @@ class TimerViewModel @Inject constructor(
         stopRingtoneDirect()
         _uiState.update {
             it.copy(
+                selectedHours = safeHr,
                 selectedMinutes = safeMin,
                 selectedSeconds = safeSec,
                 remainingTime = totalMillis,
@@ -448,13 +486,14 @@ class TimerViewModel @Inject constructor(
         try { toolService?.setTimerInitial(totalMillis) } catch (_: Exception) {}
 
         viewModelScope.launch {
-            try { settingsRepository.setLastTimerDuration(safeMin, safeSec) } catch (_: Exception) {}
+            try { settingsRepository.setLastTimerDuration(safeHr, safeMin, safeSec) } catch (_: Exception) {}
         }
     }
 
-    // Keep old 2-arg overload for existing callers (delegates with force=false).
-    // Note: new 3-arg overload above is the primary; this alias preserves binary compat
-    // for function references like viewModel::setTimer used in TimerScreen.
+    /** Compat: legacy min/sec callers (hours = 0). */
+    fun setTimer(minutes: Int, seconds: Int, force: Boolean = false) {
+        setTimer(0, minutes, seconds, force)
+    }
 
     fun addTime(millis: Long) {
         val state = _uiState.value
@@ -467,7 +506,7 @@ class TimerViewModel @Inject constructor(
         val base = if (state.remainingTime > 0L) {
             state.remainingTime
         } else {
-            durationMillis(state.selectedMinutes, state.selectedSeconds)
+            durationMillis(state.selectedHours, state.selectedMinutes, state.selectedSeconds)
         }
         if (base <= 0L && !state.isRunning) {
             _userMessage.value = "Pick a duration first"
@@ -476,7 +515,7 @@ class TimerViewModel @Inject constructor(
         val capped = base + millis > MAX_TIMER_MILLIS
         val newRemaining = (base + millis).coerceIn(0L, MAX_TIMER_MILLIS)
         if (capped) {
-            _userMessage.value = "Timer capped at 999:59"
+            _userMessage.value = "Timer capped at 99:59:59"
         }
         if (newRemaining <= 0L) {
             _userMessage.value = "Pick a duration greater than 0:00"
@@ -536,7 +575,7 @@ class TimerViewModel @Inject constructor(
 
         val duration = when {
             state.remainingTime > 0L -> state.remainingTime
-            else -> durationMillis(state.selectedMinutes, state.selectedSeconds)
+            else -> durationMillis(state.selectedHours, state.selectedMinutes, state.selectedSeconds)
         }
         // T-P1-02: validate >0 else notify user (never silent, never dead button).
         if (duration <= 0L) {
@@ -575,9 +614,11 @@ class TimerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Record ACTUAL duration/initial, not selected (T-P1-03).
-                val mins = (duration / 60000L).toInt().coerceIn(0, 999)
-                val secs = ((duration % 60000L) / 1000L).toInt().coerceIn(0, 59)
-                settingsRepository.recordTimerUsage(mins, secs)
+                val totalSec = (duration / 1000L).toInt()
+                val hrs = (totalSec / 3600).coerceIn(0, 99)
+                val mins = ((totalSec % 3600) / 60).coerceIn(0, 59)
+                val secs = (totalSec % 60).coerceIn(0, 59)
+                settingsRepository.recordTimerUsage(hrs, mins, secs)
             } catch (_: Exception) {}
         }
     }
@@ -717,12 +758,19 @@ class TimerViewModel @Inject constructor(
         } catch (_: Exception) {}
     }
 
-    private fun durationMillis(minutes: Int, seconds: Int): Long {
-        val totalSeconds = minutes.coerceIn(0, 999) * 60L + seconds.coerceIn(0, 59)
+    private fun durationMillis(hours: Int, minutes: Int, seconds: Int): Long {
+        val totalSeconds = hours.coerceIn(0, 99) * 3600L +
+            minutes.coerceIn(0, 59) * 60L +
+            seconds.coerceIn(0, 59)
         return (totalSeconds * 1000L).coerceIn(0L, MAX_TIMER_MILLIS)
     }
 
+    /** Compat: legacy min/sec callers (hours = 0). */
+    private fun durationMillis(minutes: Int, seconds: Int): Long {
+        return durationMillis(0, minutes, seconds)
+    }
+
     private companion object {
-        const val MAX_TIMER_MILLIS = 999L * 60L * 1000L + 59L * 1000L
+        const val MAX_TIMER_MILLIS = 99L * 3600L * 1000L + 59L * 60L * 1000L + 59L * 1000L
     }
 }

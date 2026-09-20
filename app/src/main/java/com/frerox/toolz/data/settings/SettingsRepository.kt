@@ -543,10 +543,11 @@ class SettingsRepository @Inject constructor(
     private val MUSIC_DOWNLOADED_ONLY_FILTER = booleanPreferencesKey("music_downloaded_only_filter")
 
     // Timer Duration Persistence
+    private val LAST_TIMER_HOURS = intPreferencesKey("last_timer_hours")
     private val LAST_TIMER_MINUTES = intPreferencesKey("last_timer_minutes")
     private val LAST_TIMER_SECONDS = intPreferencesKey("last_timer_seconds")
-    private val TIMER_HISTORY = stringPreferencesKey("timer_history")  // JSON: "min:sec" -> count
-    private val LOCKED_TIMER_PRESETS = stringPreferencesKey("locked_timer_presets") // JSON: List of "min:sec"
+    private val TIMER_HISTORY = stringPreferencesKey("timer_history")  // JSON: "h:min:sec" -> count (legacy "min:sec" still parsed)
+    private val LOCKED_TIMER_PRESETS = stringPreferencesKey("locked_timer_presets") // JSON: List of "h:min:sec" (legacy "min:sec" still parsed)
 
     // Timer survival (elapsedRealtime, never wall-clock) — T-P0-01 / T-P1-04
     private val TIMER_END_ELAPSED = longPreferencesKey("timer_end_elapsed")
@@ -951,6 +952,13 @@ class SettingsRepository @Inject constructor(
     val musicCacheSizeMb: Flow<Int> = dataStore.data.map { it[MUSIC_CACHE_SIZE_MB] ?: 150 }
     val musicDownloadedOnlyFilter: Flow<Boolean> = dataStore.data.map { it[MUSIC_DOWNLOADED_ONLY_FILTER] ?: false }
 
+    val lastTimerHours: Flow<Int> = dataStore.data.map {
+        try {
+            it[LAST_TIMER_HOURS] ?: 0
+        } catch (e: ClassCastException) {
+            (it[stringPreferencesKey("last_timer_hours")]?.toIntOrNull()) ?: 0
+        }
+    }
     val lastTimerMinutes: Flow<Int> = dataStore.data.map { 
         try {
             it[LAST_TIMER_MINUTES] ?: 0
@@ -1270,16 +1278,23 @@ class SettingsRepository @Inject constructor(
     suspend fun setPomodoroSessionsGoal(goal: Int) { dataStore.edit { it[POMODORO_SESSIONS_GOAL] = goal.coerceIn(1, 12) } }
     suspend fun setPomodoroSessionsCompleted(completed: Int) { dataStore.edit { it[POMODORO_SESSIONS_COMPLETED] = completed.coerceAtLeast(0).coerceAtMost(999) } }
     /**
-     * FIX (user report sessions "stuck at 1"): atomic read-modify-write inside ONE
-     * edit transaction (DataStore serializes edits). Takes max(callerSnapshot,
-     * persisted) so a finish racing a slow boot-time load can never clobber a real
-     * count back to 1. Returns the authoritative count. Never blocks the caller.
+     * Atomic WORK-session increment. [baseCount] MUST be the count BEFORE this
+     * finish (pre-increment value, NOT the optimistic +1). Inside ONE edit
+     * transaction takes max(baseCount, persisted) + 1 so a finish racing a slow
+     * boot-time load can never clobber a real count back to 1. Returns the
+     * authoritative count. Never blocks the caller.
      */
-    suspend fun addPomodoroSessionCompleted(callerSnapshot: Int): Int {
-        var next = (callerSnapshot + 1).coerceIn(0, 999)
+    suspend fun addPomodoroSessionCompleted(baseCount: Int): Int {
+        val safeBase = baseCount.coerceIn(0, 999)
+        var next = (safeBase + 1).coerceIn(0, 999)
         dataStore.edit { prefs ->
-            val persisted = try { prefs[POMODORO_SESSIONS_COMPLETED] ?: 0 } catch (_: Exception) { 0 }
-            next = (maxOf(callerSnapshot, persisted) + 1).coerceIn(0, 999)
+            val persisted = try {
+                prefs[POMODORO_SESSIONS_COMPLETED] ?: 0
+            } catch (_: ClassCastException) {
+                // Legacy string payload — never drop it, migrate forward.
+                (prefs[stringPreferencesKey("pomodoro_sessions_completed")]?.toIntOrNull()) ?: 0
+            } catch (_: Exception) { 0 }
+            next = (maxOf(safeBase, persisted) + 1).coerceIn(0, 999)
             prefs[POMODORO_SESSIONS_COMPLETED] = next
         }
         return next
@@ -1428,15 +1443,21 @@ class SettingsRepository @Inject constructor(
     suspend fun setMusicCacheSizeMb(mb: Int) { dataStore.edit { it[MUSIC_CACHE_SIZE_MB] = mb.coerceIn(0, 500) } }
     suspend fun setMusicDownloadedOnlyFilter(enabled: Boolean) { dataStore.edit { it[MUSIC_DOWNLOADED_ONLY_FILTER] = enabled } }
 
-    suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
+    suspend fun setLastTimerDuration(hours: Int, minutes: Int, seconds: Int) {
         dataStore.edit {
-            it[LAST_TIMER_MINUTES] = minutes
-            it[LAST_TIMER_SECONDS] = seconds
+            it[LAST_TIMER_HOURS] = hours.coerceIn(0, 99)
+            it[LAST_TIMER_MINUTES] = minutes.coerceIn(0, 59)
+            it[LAST_TIMER_SECONDS] = seconds.coerceIn(0, 59)
         }
     }
 
-    suspend fun recordTimerUsage(minutes: Int, seconds: Int) {
-        val key = "$minutes:$seconds"
+    /** Compat: legacy min/sec callers (hours = 0). */
+    suspend fun setLastTimerDuration(minutes: Int, seconds: Int) {
+        setLastTimerDuration(0, minutes, seconds)
+    }
+
+    suspend fun recordTimerUsage(hours: Int, minutes: Int, seconds: Int) {
+        val key = "${hours.coerceIn(0, 99)}:${minutes.coerceIn(0, 59)}:${seconds.coerceIn(0, 59)}"
         dataStore.edit { prefs ->
             val json = prefs[TIMER_HISTORY] ?: "{}"
             val history = parseTimerHistoryJson(json).toMutableMap()
@@ -1448,7 +1469,12 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun updateLockedTimerPreset(index: Int, minutes: Int, seconds: Int) {
+    /** Compat: legacy min/sec callers (hours = 0). */
+    suspend fun recordTimerUsage(minutes: Int, seconds: Int) {
+        recordTimerUsage(0, minutes, seconds)
+    }
+
+    suspend fun updateLockedTimerPreset(index: Int, hours: Int, minutes: Int, seconds: Int) {
         dataStore.edit { prefs ->
             val json = prefs[LOCKED_TIMER_PRESETS] ?: "[]"
             val locked = parseLockedPresetsJson(json).toMutableList()
@@ -1458,9 +1484,14 @@ class SettingsRepository @Inject constructor(
                 locked.add("")
             }
             
-            locked[index] = "$minutes:$seconds"
+            locked[index] = "${hours.coerceIn(0, 99)}:${minutes.coerceIn(0, 59)}:${seconds.coerceIn(0, 59)}"
             prefs[LOCKED_TIMER_PRESETS] = serializeLockedPresetsJson(locked)
         }
+    }
+
+    /** Compat: legacy min/sec callers (hours = 0). */
+    suspend fun updateLockedTimerPreset(index: Int, minutes: Int, seconds: Int) {
+        updateLockedTimerPreset(index, 0, minutes, seconds)
     }
 
     /** Atomic persist: endElapsedRealtime + initial + running + repeat. Never persist remaining alone. */
@@ -1523,10 +1554,12 @@ class SettingsRepository @Inject constructor(
             val entries = trimmed.removePrefix("{").removeSuffix("}")
             if (entries.isBlank()) return emptyMap()
             entries.split(",").forEach { entry ->
-                val parts = entry.split(":")
-                if (parts.size == 2) {
-                    val k = parts[0].trim().removeSurrounding("\"")
-                    val v = parts[1].trim().removeSuffix("}").toIntOrNull() ?: 0
+                // Keys contain colons ("h:min:sec"), so split on the LAST colon:
+                // everything before it is the key, everything after is the count.
+                val idx = entry.lastIndexOf(":")
+                if (idx > 0) {
+                    val k = entry.substring(0, idx).trim().removeSurrounding("\"")
+                    val v = entry.substring(idx + 1).trim().removeSuffix("}").toIntOrNull() ?: 0
                     map[k] = v
                 }
             }

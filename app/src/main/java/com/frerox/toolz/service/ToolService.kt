@@ -1294,20 +1294,25 @@ class ToolService : Service() {
     private fun onPomodoroFinished() {
         val completedMode = _pomodoroMode.value
         cancelPomodoroWatchdog()
+        // completedBefore is the count BEFORE this finish — nextModeAfterWork()
+        // expects the pre-finish count (see PomodoroPhaseTest: 3 -> LONG means
+        // the 4th session just finished). Never pass the post-increment value.
+        val completedBefore = _pomodoroSessionsDone.value.coerceAtLeast(0).coerceAtMost(999)
         if (completedMode == "WORK") {
             // P-P0-02: increment in-memory first, then persist that exact value.
             // Never read-then-write blindly from a stale flow.
             // FIX (user report "stuck at 1"): a boot-time expired finish
             // (restorePomodoroState) can fire BEFORE the onCreate load completes,
             // computing 0+1 and clobbering a real persisted count back to 1.
-            // Optimistic +1 now; the IO transaction below takes max(in-mem,
-            // persisted) so a late load can never lose sessions (non-blocking —
-            // never runBlocking on this path).
-            val optimistic = (_pomodoroSessionsDone.value + 1).coerceAtLeast(0).coerceAtMost(999)
+            // Optimistic +1 now; the IO transaction below takes max(base,
+            // persisted) + 1 so a late load can never lose sessions (non-blocking —
+            // never runBlocking on this path). Pass BASE (pre-increment), never
+            // the optimistic value, or every finish double-counts (+2).
+            val optimistic = (completedBefore + 1).coerceAtLeast(0).coerceAtMost(999)
             _pomodoroSessionsDone.value = optimistic
             serviceScope.launch(Dispatchers.IO) {
                 try {
-                    val authoritative = settingsRepository.addPomodoroSessionCompleted(optimistic)
+                    val authoritative = settingsRepository.addPomodoroSessionCompleted(completedBefore)
                     _pomodoroSessionsDone.value = maxOf(_pomodoroSessionsDone.value, authoritative)
                 } catch (_: Exception) {}
             }
@@ -1326,8 +1331,10 @@ class ToolService : Service() {
         }
         _pomodoroFinishedCount.value++
 
-        // P-P0-01: single phase truth — cycle from PERSISTED count.
-        cyclePomodoroMode()
+        // P-P0-01: single phase truth — cycle from PRE-finish count.
+        // nextModeAfterWork() expects the count BEFORE the just-finished session
+        // (3 -> LONG = 4th done). For breaks completedBefore == current.
+        cyclePomodoroMode(completedBefore)
 
         serviceScope.launch(Dispatchers.IO) {
             try { settingsRepository.clearPomodoroRunState() } catch (_: Exception) {}
@@ -1354,9 +1361,14 @@ class ToolService : Service() {
         }
     }
 
-    private fun cyclePomodoroMode() {
-        // P-P0-01: ONE formula shared Service/VM/UI — derive from persisted count.
-        val nextMode = nextPomodoroMode(_pomodoroMode.value, _pomodoroSessionsDone.value)
+    private fun cyclePomodoroMode(completedBefore: Int? = null) {
+        // P-P0-01: ONE formula shared Service/VM/UI — derive from PRE-finish count.
+        // nextModeAfterWork(old) with old = sessions done BEFORE the just-finished
+        // WORK (0->1st => SHORT, 3->4th => LONG). Passing the post-increment value
+        // shifts LONG one session late (and with +2 double-count, never).
+        // Skip passes the current count (no increment yet) which IS the "before".
+        val basis = (completedBefore ?: _pomodoroSessionsDone.value).coerceAtLeast(0).coerceAtMost(999)
+        val nextMode = nextPomodoroMode(_pomodoroMode.value, basis)
         _pomodoroMode.value = nextMode
         _pomodoroTotalMs.value = durationForMode(nextMode)
         _pomodoroRemaining.value = _pomodoroTotalMs.value
@@ -1407,15 +1419,29 @@ class ToolService : Service() {
     }
 
     /**
-     * Skip current phase WITHOUT counting work (P-P2-02).
-     * 4 skips must never grant LONG — only real finishes advance cadence.
+     * Skip current phase. Skipping WORK counts as a completed session (user
+     * finished early / moved on) so the goal adds up; skipping a BREAK never
+     * counts. Cycle uses the PRE-skip count so cadence matches normal finishes.
      */
     fun skipPomodoro() {
+        val skippedMode = _pomodoroMode.value
+        val completedBefore = _pomodoroSessionsDone.value.coerceAtLeast(0).coerceAtMost(999)
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
         cancelPomodoroWatchdog()
 
-        cyclePomodoroMode()
+        if (skippedMode == "WORK") {
+            val optimistic = (completedBefore + 1).coerceAtLeast(0).coerceAtMost(999)
+            _pomodoroSessionsDone.value = optimistic
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val authoritative = settingsRepository.addPomodoroSessionCompleted(completedBefore)
+                    _pomodoroSessionsDone.value = maxOf(_pomodoroSessionsDone.value, authoritative)
+                } catch (_: Exception) {}
+            }
+        }
+
+        cyclePomodoroMode(completedBefore)
 
         serviceScope.launch(Dispatchers.IO) {
             try { settingsRepository.clearPomodoroRunState() } catch (_: Exception) {}

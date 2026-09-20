@@ -39,10 +39,10 @@ import java.util.Locale
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TimerPresetChips(
-    timerHistory: List<Pair<Int, Int>>,
+    timerHistory: List<Triple<Int, Int, Int>>,
     enabled: Boolean,
     accent: androidx.compose.ui.graphics.Color,
-    onPresetSelected: (minutes: Int, seconds: Int) -> Unit,
+    onPresetSelected: (hours: Int, minutes: Int, seconds: Int) -> Unit,
     onPresetLongClick: ((index: Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -62,13 +62,15 @@ fun TimerPresetChips(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             val presets = if (timerHistory.isNotEmpty()) {
-                timerHistory.filter { (m, s) -> m > 0 || s > 0 }.take(3)
+                timerHistory.filter { (h, m, s) -> h > 0 || m > 0 || s > 0 }.take(3)
             } else {
-                listOf(Pair(5, 0), Pair(15, 0), Pair(30, 0))
-            }.ifEmpty { listOf(Pair(5, 0), Pair(15, 0), Pair(30, 0)) }
+                listOf(Triple(0, 5, 0), Triple(0, 15, 0), Triple(0, 30, 0))
+            }.ifEmpty { listOf(Triple(0, 5, 0), Triple(0, 15, 0), Triple(0, 30, 0)) }
 
-            presets.forEachIndexed { index, (mins, secs) ->
-                val label = if (secs > 0) {
+            presets.forEachIndexed { index, (hrs, mins, secs) ->
+                val label = if (hrs > 0) {
+                    String.format(Locale.getDefault(), "%d:%02d:%02d", hrs, mins, secs)
+                } else if (secs > 0) {
                     if (mins > 0) {
                         String.format(Locale.getDefault(), "%d:%02d", mins, secs)
                     } else {
@@ -83,7 +85,7 @@ fun TimerPresetChips(
                         .clip(MaterialTheme.shapes.small)
                         .combinedClickable(
                             enabled = enabled,
-                            onClick = { onPresetSelected(mins, secs) },
+                            onClick = { onPresetSelected(hrs, mins, secs) },
                             onLongClick = onPresetLongClick?.let { cb -> { cb(index) } },
                         )
                         .semantics {
@@ -110,4 +112,25 @@ fun TimerPresetChips(
             }
         }
     }
+}
+
+/** Compat: legacy min/sec callers (hours = 0). */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TimerPresetChips(
+    timerHistory: List<Pair<Int, Int>>,
+    enabled: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    onPresetSelected: (minutes: Int, seconds: Int) -> Unit,
+    onPresetLongClick: ((index: Int) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    TimerPresetChips(
+        timerHistory = timerHistory.map { (m, s) -> Triple(0, m, s) },
+        enabled = enabled,
+        accent = accent,
+        onPresetSelected = { _, m, s -> onPresetSelected(m, s) },
+        onPresetLongClick = onPresetLongClick,
+        modifier = modifier,
+    )
 }

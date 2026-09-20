@@ -96,11 +96,13 @@ fun FocusFlowScreen(
     val blockedApps       by viewModel.blockedApps.collectAsState()
     val offlineModeEnabled by viewModel.offlineModeEnabled.collectAsState(initial = false)
     val focusSession       by viewModel.focusSession.collectAsState()
+    val sessionError       by viewModel.sessionError.collectAsState()
 
     val performanceMode   = LocalPerformanceMode.current
     val haptic            = rememberToolzHapticFeedback()
     val context           = LocalContext.current
     val scope             = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var canDrawOverlays         by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var isAccessibilityEnabled  by remember { mutableStateOf(checkAccessibilityEnabled(context)) }
@@ -126,7 +128,21 @@ fun FocusFlowScreen(
         }
     }
 
+    LaunchedEffect(sessionError) {
+        when (sessionError) {
+            "usage_required" -> {
+                snackbarHostState.showSnackbar("Usage access is required — blocking needs it for secure apps and gesture nav.")
+                viewModel.consumeSessionError()
+            }
+            "service_not_ready" -> {
+                snackbarHostState.showSnackbar("Timer service isn't ready yet — try again in a moment.")
+                viewModel.consumeSessionError()
+            }
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_FocusFlowScreen_8f1a),

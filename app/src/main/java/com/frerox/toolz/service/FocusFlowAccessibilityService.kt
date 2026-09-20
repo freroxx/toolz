@@ -39,6 +39,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.ui.navigation.Screen
@@ -98,6 +99,15 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     // changed while they were doing IO — this stops the "tap button, overlay
     // instantly reappears" stuck loop.
     private var dismissEpoch: Long = 0L
+    // When the overlay was successfully added. Used to bound
+    // shouldKeepOverlayVisibleOnHome() so Home always escapes after a timeout
+    // instead of looking permanently stuck.
+    private var overlayShownAtMs: Long = 0L
+    // When the current focus session became active (service memory). Backs the
+    // stale-session watchdog that clears a flag orphaned by process death.
+    private var sessionActiveSinceMs: Long = 0L
+    // Resolved app-label cache so showOverlay never does PM IPC on Main.
+    private val labelCache = ConcurrentHashMap<String, String>()
 
     // Full-coverage session blocklist: ALL installed distraction apps, not just
     // today's used ones. Warmed async; single-app fallback covers uncached pkgs.
@@ -122,6 +132,14 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         private const val CAFFEINATE_EXIT_GRACE_MS = 2500L
         private const val CAFFEINATE_START_DEBOUNCE_MS = 300L
         private const val DISMISS_GRACE_PERIOD_MS = 8000L
+        // Anti-bypass keep-alive is bounded: after this long on Home the
+        // overlay auto-hides so the user can never be permanently stuck.
+        private const val HOME_KEEP_OVERLAY_MS = 3000L
+        // Stale focus-session watchdog: a flag orphaned by process death /
+        // failed timer start must never block forever.
+        private const val MAX_SESSION_ACTIVE_MS = 8 * 60 * 60 * 1000L
+        private const val PREFS_SESSION = "focus_session_blocklist"
+        private const val KEY_BLOCKLIST = "blocklist_set"
         private val SYSTEM_UI_PACKAGES = setOf(
             "com.android.systemui",
             "android",
@@ -240,6 +258,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         Log.d(TAG, "FocusFlowAccessibilityService created")
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         refreshHomePackage()
+        loadPersistedBlocklist()
         startPeriodicValidation()
         observeSettings()
 
@@ -259,8 +278,16 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         serviceScope.launch {
             settingsRepository.focusFlowSessionActive.collect { active ->
                 Log.d(TAG, "Settings: focusFlowSessionActive = $active")
+                val wasActive = isFocusSessionActive
                 isFocusSessionActive = active
-                if (active) scheduleSessionBlocklistRefresh(force = true)
+                if (active && !wasActive) {
+                    if (sessionActiveSinceMs == 0L) sessionActiveSinceMs = System.currentTimeMillis()
+                    scheduleSessionBlocklistRefresh(force = true)
+                }
+                if (!active) {
+                    sessionActiveSinceMs = 0L
+                    if (isOverlayShowing) hideOverlay()
+                }
                 currentPackage?.let { validateAndLock(it) }
             }
         }
@@ -352,7 +379,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                     return
                 }
 
-                if (SYSTEM_UI_PACKAGES.contains(packageName)) {
+                if (isSystemUi(packageName)) {
                     return
                 }
 
@@ -366,19 +393,26 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 // Gesture nav often emits ONLY this (no STATE_CHANGED): track it
                 // or currentPackage goes stale and the blocker either misses the
                 // new app or re-locks a ghost of the old one (stuck loop).
+                // Uses the combined detector (not a11y-only) so secure windows
+                // and gesture-nav transitions stay accurate.
                 try {
-                    val detected = getDetectedForegroundPackage()
+                    val detected = getCombinedForegroundPackage()
                     if (detected != null && detected != currentPackage) {
                         Log.d(TAG, "WINDOWS_CHANGED: foreground now $detected (was $currentPackage)")
                         currentPackage = detected
                         currentPackageResumedTime = System.currentTimeMillis()
                         if (!isHomePackage(detected) && detected != toolzPackage &&
-                            !SYSTEM_UI_PACKAGES.contains(detected)
+                            !isSystemUi(detected)
                         ) {
                             validateAndLock(detected)
                         } else if (isHomePackage(detected) && !shouldKeepOverlayVisibleOnHome()) {
                             hideOverlay()
+                        } else if (detected == toolzPackage) {
+                            // Returning to our own UI always clears a stale blocker.
+                            if (!shouldKeepOverlayVisibleOnHome()) hideOverlay()
                         }
+                    } else if (detected != null && isHomePackage(detected) && !shouldKeepOverlayVisibleOnHome()) {
+                        if (isOverlayShowing) hideOverlay()
                     }
                 } catch (_: Exception) {}
             }
@@ -434,6 +468,20 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         validationJob = serviceScope.launch(Dispatchers.Default) {
             while (isActive) {
                 delay(1000)
+                // Stale-session watchdog: a persisted active flag orphaned by
+                // process death or a failed timer start must never block forever.
+                if (isFocusSessionActive && sessionActiveSinceMs == 0L) {
+                    sessionActiveSinceMs = System.currentTimeMillis()
+                }
+                if (isFocusSessionActive && sessionActiveSinceMs > 0L &&
+                    System.currentTimeMillis() - sessionActiveSinceMs > MAX_SESSION_ACTIVE_MS
+                ) {
+                    Log.w(TAG, "Stale focus session (>8h), auto-clearing")
+                    try { settingsRepository.setFocusFlowSessionActive(false) } catch (_: Exception) {}
+                    sessionActiveSinceMs = 0L
+                    withContext(Dispatchers.Main) { hideOverlay() }
+                    continue
+                }
                 // Combined detector: usage-events truth keeps currentPackage
                 // honest when a11y goes blind (secure windows) or events are
                 // missing (gesture nav) — the stale-relock stuck loop lived here.
@@ -445,8 +493,11 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                     currentPackageResumedTime = System.currentTimeMillis()
                 }
 
-                if (pkg != null && !isHomePackage(pkg) && pkg != toolzPackage && !SYSTEM_UI_PACKAGES.contains(pkg)) {
+                if (pkg != null && !isHomePackage(pkg) && pkg != toolzPackage && !isSystemUi(pkg)) {
                     validateAndLock(pkg)
+                } else if (pkg != null && isHomePackage(pkg) && !shouldKeepOverlayVisibleOnHome()) {
+                    // Bounded anti-bypass: Home always escapes after HOME_KEEP_OVERLAY_MS.
+                    if (isOverlayShowing) withContext(Dispatchers.Main) { hideOverlay() }
                 }
 
                 // Auto-Caffeinate watchdog:
@@ -512,7 +563,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                         if (isInGrace(packageName)) return@launch
                         val fg1 = try { getCombinedForegroundPackage() } catch (_: Exception) { null } ?: currentPackage
                         if (fg1 != packageName) return@launch
-                        if (fg1 == toolzPackage || isHomePackage(fg1!!) || SYSTEM_UI_PACKAGES.contains(fg1)) return@launch
+                        if (fg1 == toolzPackage || isHomePackage(fg1!!) || isSystemUi(fg1)) return@launch
                         sessionDistr = resolved
                         if (resolved) {
                             Log.d(TAG, "validateAndLock: Blocking $packageName due to focus session")
@@ -534,7 +585,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             if (isInGrace(packageName)) return@launch
             val foreground = try { getCombinedForegroundPackage() } catch (_: Exception) { null } ?: currentPackage
             if (foreground != packageName) return@launch
-            if (foreground == toolzPackage || isHomePackage(foreground!!) || SYSTEM_UI_PACKAGES.contains(foreground)) {
+            if (foreground == toolzPackage || isHomePackage(foreground!!) || isSystemUi(foreground)) {
                 if (isOverlayShowing && overlayShowingForPackage == packageName) hideOverlay()
                 return@launch
             }
@@ -652,21 +703,47 @@ class FocusFlowAccessibilityService : AccessibilityService() {
                 // Skip launchers / system UI early (cheap set checks, no PM calls).
                 if (homePackages.contains(pkg) || SYSTEM_UI_PACKAGES.contains(pkg)) continue
                 if (isSystemUi(pkg)) continue
-                if (pm.getLaunchIntentForPackage(pkg) == null) continue
+                if (pm.getLaunchIntentForPackage(pkg) == null) {
+                    // Still consider obvious distractions with no launcher entry
+                    // (work profile / disabled activity); skip everything else.
+                    if (!isLikelyDistraction(pkg)) continue
+                }
                 if (isSessionDistraction(pkg, app)) result.add(pkg)
             } catch (_: Exception) { }
         }
         sessionDistractionSet = result
         lastBlocklistRefreshMs = System.currentTimeMillis()
+        persistBlocklist(result)
         Log.d(TAG, "Session blocklist refreshed: ${result.size} distraction apps")
     }
 
+    private fun persistBlocklist(set: Set<String>) {
+        try {
+            getSharedPreferences(PREFS_SESSION, Context.MODE_PRIVATE)
+                .edit().putStringSet(KEY_BLOCKLIST, HashSet(set)).apply()
+        } catch (_: Exception) {}
+    }
+
+    private fun loadPersistedBlocklist() {
+        try {
+            val saved = getSharedPreferences(PREFS_SESSION, Context.MODE_PRIVATE)
+                .getStringSet(KEY_BLOCKLIST, null) ?: return
+            if (saved.isNotEmpty()) {
+                sessionDistractionSet = HashSet(saved)
+                Log.d(TAG, "Loaded persisted blocklist: ${saved.size} apps")
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun isSessionDistraction(packageName: String, appInfo: android.content.pm.ApplicationInfo?): Boolean {
-        categoryMappings[packageName]?.let { return it == "Distraction" }
-        aiCategoryMappings[packageName]?.let { return it == "DISTRACTION" }
-        // Productive overrides (user or AI) never blocked by heuristics below.
-        if (categoryMappings[packageName] == "Productive") return false
-        // AI cache stores TOOLZ for productive.
+        categoryMappings[packageName]?.let { return it.equals("Distraction", ignoreCase = true) }
+        aiCategoryMappings[packageName]?.let { ai ->
+            if (ai.equals("DISTRACTION", ignoreCase = true)) return true
+            // AI productive verdicts (TOOLZ/productive) exempt from heuristics.
+            if (ai.equals("TOOLZ", ignoreCase = true) || ai.equals("productive", ignoreCase = true)) return false
+        }
+        // Productive overrides (user) never blocked by heuristics below.
+        if (categoryMappings[packageName].equals("Productive", ignoreCase = true)) return false
         try {
             val pm = packageManager
             val info = appInfo ?: pm.getApplicationInfo(packageName, 0)
@@ -674,8 +751,22 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             if (cat == android.content.pm.ApplicationInfo.CATEGORY_GAME ||
                 cat == android.content.pm.ApplicationInfo.CATEGORY_SOCIAL
             ) return true
-            // ENTERTAINMENT / VIDEO handled via keywords+label to avoid
-            // false-positives on camera/gallery.
+            // VIDEO / AUDIO: block only with keyword/label evidence
+            // to avoid false-positives on camera/gallery/dialer.
+            if (cat == android.content.pm.ApplicationInfo.CATEGORY_VIDEO ||
+                cat == android.content.pm.ApplicationInfo.CATEGORY_AUDIO
+            ) {
+                val label = try { pm.getApplicationLabel(info).toString() } catch (_: Exception) { "" }
+                if (isLikelyDistraction(packageName) || isLikelyDistractionLabel(label) || isLikelyBrowserLabel(label)) return true
+                // Bare VIDEO/AUDIO with a media-like label is still a
+                // distraction vector (streaming apps with novel package names).
+                val t = label.lowercase()
+                if (t.contains("video") || t.contains("stream") || t.contains("play") ||
+                    t.contains("tv") || t.contains("movie") || t.contains("music") ||
+                    t.contains("tube") || t.contains("reel") || t.contains("short")
+                ) return true
+                return false
+            }
             val label = try { pm.getApplicationLabel(info).toString() } catch (_: Exception) { "" }
             if (isLikelyDistraction(packageName) || isLikelyDistractionLabel(label) || isLikelyBrowserLabel(label)) return true
         } catch (_: Exception) {
@@ -687,8 +778,13 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     /** Single-app fallback used when the warmed blocklist hasn't covered [pkg] yet. */
     private fun isUnknownAppDistraction(packageName: String): Boolean {
         if (packageName == toolzPackage) return false
-        // Non-launchable entries (keyboards, live wallpapers) are never session-blocked.
-        if (!isLaunchableApp(packageName)) return false
+        if (isHomePackage(packageName) || isSystemUi(packageName)) return false
+        // Keyboards / non-launchable system entries are excluded via isSystemUi
+        // above. For anything else, fall through to heuristics even when
+        // getLaunchIntentForPackage() is null (work profile, disabled launcher
+        // activity, instant app) — otherwise obvious distractions silently
+        // escape the session block.
+        if (!isLaunchableApp(packageName) && !isLikelyDistraction(packageName)) return false
         return try {
             val pm = packageManager
             val info = pm.getApplicationInfo(packageName, 0)
@@ -882,9 +978,12 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun isSystemUi(packageName: String): Boolean {
-        return SYSTEM_UI_PACKAGES.contains(packageName) ||
-                packageName == "android" ||
-                packageName.startsWith("com.android.systemui") ||
+        if (SYSTEM_UI_PACKAGES.contains(packageName)) return true
+        if (packageName == "android") return true
+        val lower = packageName.lowercase()
+        // Keyboards / IMEs are transient system windows, never block targets.
+        if (lower.contains("inputmethod") || lower.contains("keyboard") || lower.contains("swiftkey")) return true
+        return packageName.startsWith("com.android.systemui") ||
                 packageName.startsWith("com.google.android.permissioncontroller") ||
                 packageName.startsWith("com.android.permissioncontroller") ||
                 packageName.startsWith("com.samsung.android.app.aodservice") ||
@@ -964,11 +1063,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
 
     /**
      * Combined foreground: accessibility (real-time) reconciled with
-     * UsageEvents (blind-spot-proof). When they disagree, UsageEvents wins —
-     * it is the OS-reported foreground; the a11y root is often a keyboard,
-     * shade, or null (secure windows).
-     * @param allowPm false on Main thread: skips the launchable tiebreak
-     * (binder IPC) and lets usage truth win any disagreement.
+     * UsageEvents (blind-spot-proof). UsageEvents is OS-reported truth and
+     * covers FLAG_SECURE windows + gesture-nav transitions that a11y misses;
+     * the a11y root is often a keyboard, shade, or PiP remnant when they differ.
      */
     private fun getCombinedForegroundPackage(): String? {
         val a11y = getDetectedForegroundPackage()
@@ -978,12 +1075,35 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         if (usage == null) return a11y ?: currentPackage
         if (a11y == null) return usage
         if (a11y == usage) return a11y
-        // a11y blind spots (secure windows → null handled above; keyboard /
-        // shade / transient system) defer to usage truth…
-        if (isSystemUi(a11y) || SYSTEM_UI_PACKAGES.contains(a11y)) return usage
-        // …but for app-vs-app disagreement the live window (a11y) is fresher
-        // than the usage log, which can lag a second behind fast switches.
-        return a11y
+        // Transient system (keyboard / shade / permission controller) defers to usage truth.
+        if (isSystemUi(a11y)) return usage
+        if (isSystemUi(usage)) {
+            // Usage log lagging on a transient system entry while the live
+            // window already shows the real app — trust the live window.
+            return a11y
+        }
+        // Home/launcher truth wins: leaving to Home must never re-lock a ghost.
+        if (isHomePackage(usage) && !isHomePackage(a11y)) {
+            // a11y can briefly still report the old app during the transition;
+            // usage already observed HOME, so go Home.
+            return usage
+        }
+        if (isHomePackage(a11y) && !isHomePackage(usage)) return a11y
+        // Our own UI wins when either side reports it (prevents relock loop
+        // while RETURN/EXIT is bringing Toolz/Home forward).
+        if (a11y == toolzPackage || usage == toolzPackage) {
+            // Prefer the live window unless it is a transient system entry
+            // (handled above). If a11y is a real app and usage says Toolz, the
+            // Toolz launch landed — report Toolz so validate aborts.
+            return if (isSystemUi(a11y)) usage else a11y
+        }
+        // App-vs-app: prefer OS usage truth. The usage log can lag ~1s behind
+        // fast switches, but trusting a stale a11y window blocks the wrong app
+        // (or misses PiP / split-screen foreground), which is worse.
+        // Exception: if usage still equals the previously tracked package and
+        // a11y reports a *different launchable* app, the live window is fresher.
+        if (usage == currentPackage && a11y != currentPackage) return a11y
+        return usage
     }
 
     private fun getActiveForegroundPackage(): String? {
@@ -1120,31 +1240,45 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun getTodayUsage(packageName: String): Long {
+        // Aggregate query already includes foreground time up to now; adding a
+        // manual session delta double-counts and fires limits early.
         return try {
-            var usage = usageRepository.queryPackageUsageToday(packageName)
-            // Add current session if it's the package we're checking
-            if (packageName == currentPackage && currentPackageResumedTime > 0) {
-                val sessionDuration = System.currentTimeMillis() - currentPackageResumedTime
-                if (sessionDuration > 0) {
-                    usage += sessionDuration
-                }
-            }
-            usage
+            usageRepository.queryPackageUsageToday(packageName)
         } catch (e: Exception) {
             Log.e(TAG, "Error querying usage stats", e)
             0L
         }
     }
 
+    private fun resolveAppLabel(packageName: String): String {
+        labelCache[packageName]?.let { return it }
+        val label = try {
+            val ai = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(ai).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+        if (label.isNotBlank()) labelCache[packageName] = label
+        return label
+    }
+
     private fun showOverlay(packageName: String, isSessionBlock: Boolean = false) {
-        // All callers are already on Main (accessibility callbacks + Main-scoped
-        // validate). If somehow called off-thread, hop to Main and re-enter —
-        // this keeps WindowManager adds single-threaded, so duplicate async
-        // adds can never leak a second view that hideOverlay can't remove.
+        // Resolve the label off-Main (PM binder IPC janks overlay buttons),
+        // then add the view single-threaded on Main.
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            serviceScope.launch(Dispatchers.Main) { showOverlay(packageName, isSessionBlock) }
+            serviceScope.launch(Dispatchers.IO) {
+                val label = resolveAppLabel(packageName)
+                withContext(Dispatchers.Main) { showOverlayInternal(packageName, isSessionBlock, label) }
+            }
             return
         }
+        serviceScope.launch(Dispatchers.IO) {
+            val label = resolveAppLabel(packageName)
+            withContext(Dispatchers.Main) { showOverlayInternal(packageName, isSessionBlock, label) }
+        }
+    }
+
+    private fun showOverlayInternal(packageName: String, isSessionBlock: Boolean, appName: String) {
         // Single-flight sync guard — no async gap, so no leaked duplicates.
         if (isOverlayShowing && overlayShowingForPackage == packageName && overlayView?.isAttachedToWindow == true) {
             Log.d(TAG, "showOverlay: Already showing for $packageName")
@@ -1177,12 +1311,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             val inflater = LayoutInflater.from(this@FocusFlowAccessibilityService)
             val view = inflater.inflate(R.layout.layout_focus_lock, null)
 
-            val appName = try {
-                val ai = packageManager.getApplicationInfo(packageName, 0)
-                packageManager.getApplicationLabel(ai).toString()
-            } catch (e: Exception) {
-                packageName
-            }
             val message = if (isSessionBlock) {
                 "Focus session in progress. $appName is restricted."
             } else {
@@ -1216,6 +1344,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             overlayView = view
             isOverlayShowing = true
             overlayShowingForPackage = packageName
+            overlayShownAtMs = System.currentTimeMillis()
             Log.d(TAG, "Overlay successfully added for $packageName")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add window overlay", e)
@@ -1235,7 +1364,6 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         markDismissed(blockedPackage)
         dismissEpoch++
         val clickEpoch = dismissEpoch
-        currentPackage = toolzPackage
         hideOverlay()
         // HOME first: guaranteed exit from the blocked app even if the Toolz
         // launch below is silently denied by background-activity (BAL) rules,
@@ -1243,6 +1371,17 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         try {
             performGlobalAction(GLOBAL_ACTION_HOME)
         } catch (_: Exception) {}
+        // Re-sync tracking from the detector instead of hard-coding Toolz:
+        // hard-coding left currentPackage stale and caused ghost re-locks.
+        serviceScope.launch(Dispatchers.Default) {
+            delay(300)
+            try {
+                getCombinedForegroundPackage()?.let {
+                    currentPackage = it
+                    currentPackageResumedTime = System.currentTimeMillis()
+                }
+            } catch (_: Exception) {}
+        }
         fun launchToolz(): Boolean {
             return try {
                 val intent = Intent(this@FocusFlowAccessibilityService, MainActivity::class.java).apply {
@@ -1270,10 +1409,31 @@ class FocusFlowAccessibilityService : AccessibilityService() {
             delay(1500)
             if (clickEpoch != dismissEpoch) return@launch
             try {
-                val fg = getCombinedForegroundPackage() ?: currentPackage
+                val fg = withContext(Dispatchers.Default) { getCombinedForegroundPackage() } ?: currentPackage
                 if (fg == blockedPackage) {
                     Log.w(TAG, "Return watchdog: still in $blockedPackage, forcing HOME")
                     performGlobalAction(GLOBAL_ACTION_HOME)
+                    withContext(Dispatchers.Main) {
+                        try {
+                            Toast.makeText(
+                                this@FocusFlowAccessibilityService,
+                                "Couldn't open Toolz automatically — use EXIT TO HOME, then open Toolz manually.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } catch (_: Exception) {}
+                    }
+                    // Re-sync so the next tick doesn't ghost-relock.
+                    withContext(Dispatchers.Default) {
+                        try {
+                            getCombinedForegroundPackage()?.let {
+                                currentPackage = it
+                                currentPackageResumedTime = System.currentTimeMillis()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                } else if (fg != null) {
+                    currentPackage = fg
+                    currentPackageResumedTime = System.currentTimeMillis()
                 }
             } catch (_: Exception) {}
         }
@@ -1286,15 +1446,21 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     private fun onExitToHomeClicked(blockedPackage: String) {
         markDismissed(blockedPackage)
         dismissEpoch++
-        currentPackage = toolzPackage
         hideOverlay()
         try {
             performGlobalAction(GLOBAL_ACTION_HOME)
         } catch (e: Exception) {
             Log.w(TAG, "Exit-to-Home global action failed", e)
         }
-        serviceScope.launch {
-            delay(500)
+        serviceScope.launch(Dispatchers.Default) {
+            delay(300)
+            try {
+                getCombinedForegroundPackage()?.let {
+                    currentPackage = it
+                    currentPackageResumedTime = System.currentTimeMillis()
+                }
+            } catch (_: Exception) {}
+            delay(200)
             stopLockedAppInBackground(blockedPackage)
         }
     }
@@ -1312,6 +1478,7 @@ class FocusFlowAccessibilityService : AccessibilityService() {
         removeOverlayInternal()
         isOverlayShowing = false
         overlayShowingForPackage = null
+        overlayShownAtMs = 0L
         clearBlockEnforcement()
     }
 
@@ -1344,9 +1511,13 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun shouldKeepOverlayVisibleOnHome(): Boolean {
-        return isOverlayShowing &&
-            overlayShowingForPackage != null &&
-            blockedPackagePendingDismissal == overlayShowingForPackage
+        if (!isOverlayShowing) return false
+        if (overlayShowingForPackage == null) return false
+        if (blockedPackagePendingDismissal != overlayShowingForPackage) return false
+        // Bounded anti-bypass: Home always escapes after HOME_KEEP_OVERLAY_MS
+        // so the user can never be permanently stuck on the blocker.
+        if (System.currentTimeMillis() - overlayShownAtMs > HOME_KEEP_OVERLAY_MS) return false
+        return true
     }
 
     private fun muteLockedAppAudio(packageName: String) {
@@ -1374,6 +1545,9 @@ class FocusFlowAccessibilityService : AccessibilityService() {
     }
 
     private fun stopLockedAppInBackground(packageName: String) {
+        // Best-effort only: killBackgroundProcesses is a no-op for the current
+        // foreground app on modern Android. The real enforcement is the overlay
+        // + GLOBAL_ACTION_HOME above; never rely on this to close the app.
         try {
             val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             activityManager.killBackgroundProcesses(packageName)

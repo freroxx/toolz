@@ -113,11 +113,19 @@ fun PomodoroSettingsBottomSheet(
             PomodoroSettingsSection(title = "Options", icon = Icons.Rounded.Settings, activeColor = activeColor) {
                 PreferenceRow(
                     title = "Sessions Goal",
-                    subtitle = "${state.sessionsGoal} focus sessions",
+                    subtitle = "${state.sessionsCompleted}/${state.sessionsGoal} completed",
                     icon = Icons.Rounded.Flag,
                     activeColor = activeColor
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Reset session progress back to 0 — enabled whenever any
+                        // session is done, so the goal can always go back to 0/goal.
+                        IconButton(
+                            onClick = onResetGoal,
+                            enabled = state.sessionsCompleted > 0
+                        ) {
+                            Icon(Icons.Rounded.Refresh, "Reset session progress")
+                        }
                         // FIX (user report goal "stuck at 1"): clamp in UI too — no-op
                         // writes at the bounds left users tapping dead buttons with no
                         // feedback while the VM silently coerced. Bounds match repo 1..12.
@@ -171,11 +179,12 @@ fun PomodoroSettingsBottomSheet(
 
                 ToolzOutlinedExpressiveButton(
                     onClick = onResetGoal,
+                    enabled = state.sessionsCompleted > 0,
                     modifier = Modifier.fillMaxWidth(),
                     shape = SmallExpressiveShape,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Reset Daily Goal Progress")
+                    Text("Reset Daily Goal Progress (${state.sessionsCompleted}/${state.sessionsGoal})")
                 }
             }
 

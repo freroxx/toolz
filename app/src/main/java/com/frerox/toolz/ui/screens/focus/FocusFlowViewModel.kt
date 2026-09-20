@@ -163,8 +163,15 @@ class FocusFlowViewModel @Inject constructor(
     private val _focusSession = MutableStateFlow(FocusSessionUiState())
     val focusSession: StateFlow<FocusSessionUiState> = _focusSession.asStateFlow()
 
+    // User-visible session start errors (missing permission, service not ready).
+    // Consumed by the screen via snackbar.
+    private val _sessionError = MutableStateFlow<String?>(null)
+    val sessionError: StateFlow<String?> = _sessionError.asStateFlow()
+    fun consumeSessionError() { _sessionError.value = null }
+
     private var toolService: ToolService? = null
     private var isBound = false
+    private var pendingSessionMinutes: Int? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -172,6 +179,12 @@ class FocusFlowViewModel @Inject constructor(
             toolService = binder.getService()
             isBound = true
             bindPomodoroFlows(binder.getService())
+            // A start requested before bind completed must not orphan the
+            // session flag (active=true with no timer = infinite block).
+            pendingSessionMinutes?.let { minutes ->
+                pendingSessionMinutes = null
+                startFocusSession(minutes)
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -211,18 +224,41 @@ class FocusFlowViewModel @Inject constructor(
     fun startFocusSession(minutes: Int) {
         val totalMs = minutes * 60_000L
         viewModelScope.launch {
+            // Secure-window + gesture-nav blocking depends on UsageEvents.
+            // Starting a session without it silently blocks nothing.
+            if (!usageRepository.hasUsageStatsPermission()) {
+                _sessionError.value = "usage_required"
+                return@launch
+            }
+            val svc = toolService
+            if (svc == null) {
+                // Defer: set the flag only once the timer can actually start,
+                // otherwise active=true with no timer blocks forever.
+                pendingSessionMinutes = minutes
+                _sessionError.value = "service_not_ready"
+                return@launch
+            }
+            try {
+                svc.startPomodoro(totalMs, "WORK")
+            } catch (_: Exception) {
+                _sessionError.value = "service_not_ready"
+                return@launch
+            }
             settingsRepository.setFocusFlowSessionActive(true)
-            toolService?.startPomodoro(totalMs, "WORK")
         }
     }
 
     fun togglePauseFocusSession() {
-        toolService?.let { service ->
-            if (service.isPomodoroRunning.value) {
-                service.pausePomodoro()
-            } else {
-                service.startPomodoro(_focusSession.value.remainingMillis, "WORK")
-            }
+        val service = toolService
+        if (service == null) {
+            _sessionError.value = "service_not_ready"
+            return
+        }
+        if (service.isPomodoroRunning.value) {
+            service.pausePomodoro()
+        } else {
+            val remaining = _focusSession.value.remainingMillis.coerceAtLeast(60_000L)
+            service.startPomodoro(remaining, "WORK")
         }
     }
 
@@ -319,7 +355,10 @@ class FocusFlowViewModel @Inject constructor(
     }.combine(_focusSession) { stats, session ->
         stats.map { stat ->
             val isOverLimit = stat.limitMillis != null && stat.limitMillis > 0 && stat.todayUsageTimeMillis >= stat.limitMillis
-            val isSessionBlocked = session.state == FocusSessionState.RUNNING && stat.category == AppCategory.DISTRACTION
+            // Service keeps enforcing while paused; UI must match or the
+            // Restricted-apps card shows 0 during a pause that still blocks.
+            val isSessionBlocked = (session.state == FocusSessionState.RUNNING ||
+                session.state == FocusSessionState.PAUSED) && stat.category == AppCategory.DISTRACTION
 
             stat.copy(isBlocked = isOverLimit || isSessionBlocked)
         }.sortedByDescending { it.usageTimeMillis }
@@ -829,7 +868,10 @@ class FocusFlowViewModel @Inject constructor(
 
 private val PRODUCTIVE_KEYWORDS = setOf(
     "calculator", "notes", "note", "pdf", "office", "docs", "studio",
-    "calendar", "chrome", "browser", "learn", "translate", "dictionary",
+    // Browsers are session-blocked as distractions unless the user explicitly
+    // marks them Productive — keep them out of the productive heuristic so the
+    // UI category matches the service block decision.
+    "calendar", "learn", "translate", "dictionary",
     "finance", "bank", "maps", "navigation", "email", "gmail", "drive",
     "sheets", "slides", "keep", "tasks", "clock", "weather", "camera",
     "gallery", "health", "fitness", "workout", "meditation", "reading",

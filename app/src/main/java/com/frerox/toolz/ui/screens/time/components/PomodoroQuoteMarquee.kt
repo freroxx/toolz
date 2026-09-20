@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.frerox.toolz.ui.components.horizontalFadingEdges
 import kotlinx.coroutines.delay
 
 @Composable
@@ -90,26 +91,53 @@ fun PomodoroQuoteMarquee(
             },
             label = "quoteTransition"
         ) { quote ->
+            // Same marquee + fading-edges pattern as the music full player's
+            // song title: long quotes loop horizontally inside a viewport Box
+            // with smooth fade at left/right edges (points A/B). Fading edges
+            // must be on the viewport, not the Text, so text softly fades
+            // out/in at the container edges on every loop. Short quotes stay
+            // static and centered.
+            val isLongQuote = quote.length > 22
             Box(
                 modifier = Modifier
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .fillMaxWidth(),
-                contentAlignment = Alignment.Center
+                contentAlignment = if (isLongQuote) Alignment.CenterStart else Alignment.Center
             ) {
-                Text(
-                    text = quote,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.5.sp
-                    ),
-                    color = activeColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Visible,
-                    modifier = Modifier.basicMarquee(
-                        iterations = Int.MAX_VALUE,
-                        velocity = if (isPaused) 0.dp else 45.dp
+                if (isLongQuote) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalFadingEdges(left = 28.dp, right = 28.dp)
+                    ) {
+                        Text(
+                            text = quote,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = activeColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                velocity = if (isPaused) 0.dp else 30.dp
+                            )
+                        )
+                    }
+                } else {
+                    Text(
+                        text = quote,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = activeColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
                     )
-                )
+                }
             }
         }
     }

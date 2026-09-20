@@ -24,7 +24,8 @@
             android:layout_width="120dp"
             android:layout_height="120dp"
             android:src="@android:drawable/ic_lock_lock"
-            android:contentDescription="Locked"
+            android:contentDescription="@null"
+            android:importantForAccessibility="no"
             android:tint="#D32F2F" />
 
         <TextView
@@ -68,19 +69,24 @@
             android:text="RETURN TO FOCUS FLOW"
             android:textStyle="bold"
             android:textSize="14sp"
-            android:letterSpacing="0.1" />
+            android:letterSpacing="0.1"
+            android:contentDescription="Return to Focus Flow"
+            android:nextFocusDown="@+id/btn_dismiss" />
 
         <Button
             android:id="@+id/btn_dismiss"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
+            android:minWidth="200dp"
             android:layout_marginTop="12dp"
             android:backgroundTint="#212121"
             android:textColor="#9E9E9E"
             android:text="EXIT TO HOME"
             android:textStyle="bold"
             android:textSize="12sp"
-            android:letterSpacing="0.1" />
+            android:letterSpacing="0.1"
+            android:contentDescription="Exit blocked app to Home"
+            android:nextFocusUp="@+id/btn_exit" />
 
     </LinearLayout>
     </ScrollView>
