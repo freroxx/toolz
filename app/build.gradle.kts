@@ -300,4 +300,7 @@ dependencies {
     implementation(libs.supabase.realtime.kt)
     implementation(libs.supabase.storage.kt)
     implementation(libs.ktor.client.okhttp)
+
+    // Shapes and stuff - Used by the Timer thingy
+    implementation("androidx.graphics:graphics-shapes:1.1.0")
 }

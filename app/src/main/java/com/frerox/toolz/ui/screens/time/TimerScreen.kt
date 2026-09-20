@@ -120,11 +120,9 @@ import com.frerox.toolz.ui.components.ToolzWavyCircularProgressIndicator
 import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NotificationsOff
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.TextButton
 import com.frerox.toolz.ui.components.BouncyShape
 import com.frerox.toolz.ui.components.ExpressiveCard
@@ -266,12 +264,6 @@ fun TimerScreen(
                         viewModel.setTimer(h, mins, secs)
                     }
                 },
-                onPresetLongClick = { index ->
-                    // Preset locking exists ONLY while counting down: hold a preset
-                    // to store the current countdown there. Anywhere else the
-                    // long-press is ignored (deliberately no popup/dialog).
-                    if (state.isRunning) viewModel.lockRunningAsPreset(index)
-                },
                 onAddTime = viewModel::addTime,
                 onDismissAlarm = {
                     viewModel.stopRingtone()
@@ -284,18 +276,20 @@ fun TimerScreen(
                 PomodoroSuccessConfetti(onFinished = { showConfetti = false })
             }
 
-            // Confirm dialog for staging/preset while paused (T-P1-03).
+            // "Start a new timer?" confirm for staging/preset while paused (T-P1-03).
+            // Cancel/dismiss just drops the proposal — the paused timer is
+            // untouched (rollback), since nothing is staged until confirm.
             pendingPreset?.let { encoded ->
                 val (ph, pm, ps) = decodeHms(encoded)
                 AlertDialog(
                     onDismissRequest = { pendingPreset = null },
-                    title = { Text(stringResource(R.string.st_TimerScreen_m9n0)) },
-                    text = { Text("A timer is paused. Replace it with ${formatHms(ph, pm, ps)}?") },
+                    title = { Text("Start a new timer?") },
+                    text = { Text("A timer is paused at ${formatTimerTime(state.remainingTime)}. Start a new ${formatHms(ph, pm, ps)} timer instead?") },
                     confirmButton = {
                         TextButton(onClick = {
                             viewModel.setTimer(ph, pm, ps, true)
                             pendingPreset = null
-                        }) { Text(stringResource(R.string.st_TimerScreen_s5t6)) }
+                        }) { Text("Start") }
                     },
                     dismissButton = {
                         TextButton(onClick = { pendingPreset = null }) { Text(stringResource(R.string.st_TimerScreen_q3r4)) }
@@ -306,13 +300,13 @@ fun TimerScreen(
                 val (sh, sm, ss) = decodeHms(encoded)
                 AlertDialog(
                     onDismissRequest = { pendingStaging = null },
-                    title = { Text(stringResource(R.string.st_TimerScreen_m9n0)) },
-                    text = { Text("A timer is paused. Replace it with ${formatHms(sh, sm, ss)}?") },
+                    title = { Text("Start a new timer?") },
+                    text = { Text("A timer is paused at ${formatTimerTime(state.remainingTime)}. Start a new ${formatHms(sh, sm, ss)} timer instead?") },
                     confirmButton = {
                         TextButton(onClick = {
                             viewModel.onTimeSelectedChange(sh, sm, ss, true)
                             pendingStaging = null
-                        }) { Text(stringResource(R.string.st_TimerScreen_s5t6)) }
+                        }) { Text("Start") }
                     },
                     dismissButton = {
                         TextButton(onClick = { pendingStaging = null }) { Text(stringResource(R.string.st_TimerScreen_q3r4)) }
@@ -361,7 +355,6 @@ private fun TimerContent(
     contentPadding: PaddingValues,
     onTimeSelected: (Int, Int, Int) -> Unit,
     onPresetSelected: (Int, Int, Int) -> Unit,
-    onPresetLongClick: (Int) -> Unit,
     onAddTime: (Long) -> Unit,
     onDismissAlarm: () -> Unit,
     timerHistory: List<Triple<Int, Int, Int>> = emptyList(),
@@ -400,12 +393,11 @@ private fun TimerContent(
         }
         StaggeredEntrance(index = 2) {
             TimerPresets(
+                // Wheel + presets are disabled while counting down or ringing:
+                // a running timer can't be modified. Tapping a preset while
+                // paused routes through the "Start a new timer?" confirm.
                 enabled = !state.isRunning && !state.isRinging,
-                // Locking only exists while counting down (hold a preset to
-                // store the running countdown there — no dialog, no popup).
-                lockEnabled = state.isRunning,
                 onPresetSelected = onPresetSelected,
-                onPresetLongClick = onPresetLongClick,
                 timerHistory = timerHistory,
                 accent = accent,
             )
@@ -586,9 +578,7 @@ private fun TimerWheelPicker(
 @Composable
 private fun TimerPresets(
     enabled: Boolean,
-    lockEnabled: Boolean,
     onPresetSelected: (Int, Int, Int) -> Unit,
-    onPresetLongClick: (Int) -> Unit,
     timerHistory: List<Triple<Int, Int, Int>>,
     accent: Color,
 ) {
@@ -622,16 +612,14 @@ private fun TimerPresets(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            presets.forEachIndexed { index, (hours, minutes, seconds) ->
+            presets.forEach { (hours, minutes, seconds) ->
                 PresetCard(
                     hours = hours,
                     minutes = minutes,
                     seconds = seconds,
                     tapEnabled = enabled,
-                    lockEnabled = lockEnabled,
                     modifier = Modifier.weight(1f),
                     onPresetSelected = onPresetSelected,
-                    onLongClick = { onPresetLongClick(index) },
                     accent = accent,
                 )
             }
@@ -639,20 +627,16 @@ private fun TimerPresets(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PresetCard(
     hours: Int,
     minutes: Int,
     seconds: Int,
     tapEnabled: Boolean,
-    lockEnabled: Boolean,
     modifier: Modifier,
     onPresetSelected: (Int, Int, Int) -> Unit,
-    onLongClick: () -> Unit,
     accent: Color,
 ) {
-    val vibrationManager = com.frerox.toolz.ui.theme.LocalVibrationManager.current
     val durationLabel = formatHms(hours, minutes, seconds)
     val unitLabel = when {
         hours > 0 -> ""
@@ -661,17 +645,10 @@ private fun PresetCard(
     }
 
     ExpressiveCard(
-        // Tap applies the preset (idle only); long-press LOCKS the running
-        // countdown here (running only). Gestures stay attached while either
-        // is allowed — combinedClickable would suppress both when disabled.
+        // Tap applies the preset. Disabled (dimmed) while the timer is
+        // counting down or ringing — a running timer can't be modified.
         onClick = { if (tapEnabled) onPresetSelected(hours, minutes, seconds) },
-        onLongClick = {
-            if (lockEnabled) {
-                vibrationManager?.vibrateLongClick()
-                onLongClick()
-            }
-        },
-        enabled = tapEnabled || lockEnabled,
+        enabled = tapEnabled,
         modifier = modifier.height(84.dp),
         shape = MediumExpressiveShape,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (tapEnabled) 0.6f else 0.3f),

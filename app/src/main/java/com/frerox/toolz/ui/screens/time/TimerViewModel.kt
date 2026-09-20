@@ -154,10 +154,10 @@ class TimerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            combine(
-                settingsRepository.timerHistory,
-                settingsRepository.lockedTimerPresets
-            ) { historyMap, lockedList ->
+            // Presets = most-used history first, then defaults. (Lock-preset
+            // feature removed: nothing writes locked slots anymore, so they
+            // are no longer consulted here.)
+            settingsRepository.timerHistory.collect { historyMap ->
                 // Keys are "h:min:sec"; legacy "min:sec" entries (pre-hours) still parse with h=0.
                 fun parseHms(key: String): Triple<Int, Int, Int>? {
                     val parts = key.split(":")
@@ -176,78 +176,21 @@ class TimerViewModel @Inject constructor(
                         else -> null
                     }
                 }
-                val historyParsed = historyMap.entries.mapNotNull { (k, count) ->
-                    val t = parseHms(k) ?: return@mapNotNull null
-                    t to count
+                val finalPresets = historyMap.entries
+                    .mapNotNull { (k, count) -> (parseHms(k) ?: return@mapNotNull null) to count }
+                    .sortedByDescending { it.second }
+                    .map { it.first }
+                    // Skip dead 0:00:00 entries — tapping one would stage 0ms
+                    // and dead-end Start with "pick a duration".
+                    .filter { (it.first * 3600 + it.second * 60 + it.third) > 0 }
+                    .distinct()
+                    .take(3)
+                    .toMutableList()
+                // Defaults fill any gaps.
+                listOf(Triple(0, 5, 0), Triple(0, 15, 0), Triple(0, 30, 0)).forEach { default ->
+                    if (finalPresets.size < 3 && !finalPresets.contains(default)) finalPresets.add(default)
                 }
-
-                // (Display uses positional parseSlot below; 0:00 entries are dropped
-                // there too — tapping a 0:00 chip stages 0ms and setTimer/toggle
-                // dead-end with "pick a duration", which looks broken.)
-
-                // FIX (user report "lock preset blocks it"): locked slots are POSITIONAL.
-                // Previously blanks were filtered and values compressed to the front,
-                // so locked slot 2 displayed at index 0 — long-pressing index 2 then
-                // edited the wrong slot and presets appeared to "move/block". Slot i
-                // now always renders at index i; blanks fall through to history/defaults.
-                fun parseSlot(raw: String?): Triple<Int, Int, Int>? {
-                    if (raw.isNullOrBlank()) return null
-                    val parts = raw.split(":")
-                    val t = when (parts.size) {
-                        3 -> Triple(
-                            parts[0].toIntOrNull() ?: return null,
-                            parts[1].toIntOrNull() ?: return null,
-                            parts[2].toIntOrNull() ?: return null,
-                        )
-                        // Legacy "min:sec" locks (pre-hours).
-                        2 -> Triple(
-                            0,
-                            parts[0].toIntOrNull() ?: return null,
-                            parts[1].toIntOrNull() ?: return null,
-                        )
-                        else -> return null
-                    }
-                    if (t.first * 3600 + t.second * 60 + t.third <= 0) return null
-                    return Triple(t.first.coerceIn(0, 99), t.second.coerceIn(0, 59), t.third.coerceIn(0, 59))
-                }
-
-                // Raw locked slots are positional (slot i renders at index i);
-                // blanks fall through to history/defaults below.
-
-                // Construct top 3: locked slot i wins index i, else history, else default.
-                val finalPresets = mutableListOf<Triple<Int, Int, Int>>()
-
-                for (i in 0 until 3) {
-                    val lockedAt = parseSlot(lockedList.getOrNull(i))
-                    if (lockedAt != null) {
-                        finalPresets.add(lockedAt)
-                    } else {
-                        // Fill with history
-                        val historyTop = historyParsed
-                            .sortedByDescending { it.second }
-                            .map { it.first }
-                            // FIX: skip dead 0:00:00 history entries too.
-                            .filter { (it.first * 3600 + it.second * 60 + it.third) > 0 }
-                            .filter { !finalPresets.contains(it) }
-                            .firstOrNull()
-
-                        if (historyTop != null) {
-                            finalPresets.add(historyTop)
-                        } else {
-                            // Defaults
-                            val default = when(finalPresets.size) {
-                                0 -> Triple(0, 5, 0)
-                                1 -> Triple(0, 15, 0)
-                                else -> Triple(0, 30, 0)
-                            }
-                            if (!finalPresets.contains(default)) finalPresets.add(default)
-                        }
-                    }
-                }
-
-                finalPresets.take(3)
-            }.collect { top3 ->
-                _timerHistory.value = top3
+                _timerHistory.value = finalPresets.take(3)
             }
         }
     }
@@ -260,40 +203,6 @@ class TimerViewModel @Inject constructor(
         val gradual: Boolean,
         val alarms: Boolean,
     )
-
-    /**
-     * Lock the CURRENT countdown into a preset slot — the only lock path (no dialog).
-     * Called from preset long-press, which the UI only wires while the timer is
-     * running. Locks the started total (initialTime), falling back to remaining.
-     * Shows a confirmation snackbar; never a popup.
-     */
-    fun lockRunningAsPreset(index: Int) {
-        val cur = _uiState.value
-        if (!cur.isRunning) return // UI gates this; belt-and-braces.
-        val totalMs = cur.initialTime.takeIf { it > 0L } ?: cur.remainingTime
-        if (totalMs <= 0L) {
-            _userMessage.value = "Nothing to lock yet"
-            return
-        }
-        val totalSec = (totalMs / 1000L).toInt()
-        val hrs = (totalSec / 3600).coerceIn(0, 99)
-        val mins = ((totalSec % 3600) / 60).coerceIn(0, 59)
-        val secs = (totalSec % 60).coerceIn(0, 59)
-        if (hrs <= 0 && mins <= 0 && secs <= 0) {
-            _userMessage.value = "Nothing to lock yet"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                settingsRepository.updateLockedTimerPreset(index, hrs, mins, secs)
-            } catch (_: Exception) {}
-        }
-        _userMessage.value = if (hrs > 0) {
-            "Preset locked to $hrs:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}"
-        } else {
-            "Preset locked to $mins:${secs.toString().padStart(2, '0')}"
-        }
-    }
 
     private fun ensureServiceStarted() {
         try {
