@@ -96,26 +96,12 @@ private fun nearestPage(current: Int, cycle: Int, value: Int): Int {
 // normalization this project's graphics-shapes version produces. Don't
 // redeclare it here.
 
-// Two 4-vertex squircles built via the plain numVertices constructor (the
-// call that's confirmed to compile against this project's resolved
-// graphics-shapes artifact — RoundedPolygon.rectangle() is not resolving
-// here despite being documented, so it's avoided rather than guessed at
-// again). Same call shape for both endpoints, differing only in `rounding`,
-// so vertex count/order should correspond directly between them for Morph.
-private val RestPillPolygon = RoundedPolygon(
-    numVertices = 4,
-    radius = 1f,
-    centerX = 0f,
-    centerY = 0f,
-    rounding = CornerRounding(radius = 0.6f, smoothing = 0.3f),
-)
-private val ActivePillPolygon = RoundedPolygon(
-    numVertices = 4,
-    radius = 1f,
-    centerX = 0f,
-    centerY = 0f,
-    rounding = CornerRounding(radius = 0.35f, smoothing = 0.2f),
-)
+// Shape-morph on the focus pill (androidx.graphics.shapes RoundedPolygon +
+// Morph + this package's MorphPolygonShape) was attempted and removed: it
+// rendered as zero-area at rest against this project's resolved
+// graphics-shapes artifact. The pill below uses a plain RoundedCornerShape
+// instead. Revisit shape-morph separately if wanted — needs on-device
+// debugging of MorphPolygonShape.createOutline, not further blind guesses.
 
 /**
  * Infinite duration wheel (H / M / S) — M3 Expressive, iOS-style loop feel.
@@ -285,22 +271,6 @@ private fun InfiniteWheelColumn(
     hero: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val morph = remember { Morph(RestPillPolygon, ActivePillPolygon) }
-    val morphProgressRaw by animateFloatAsState(
-        targetValue = if (pagerState.isScrollInProgress) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.62f, stiffness = 340f),
-        label = "pillMorph",
-    )
-    // Clamp away from the exact 0f/1f endpoints. At rest this pill is
-    // otherwise invisible — MorphPolygonShape fits the outline's own
-    // measured bounds to the container size, and at progress==0 or ==1 that
-    // measurement degenerates (likely a zero-width/height bounds box for
-    // this project's graphics-shapes build), collapsing the clip to nothing.
-    // A hair off either endpoint keeps the shape in a valid interpolated
-    // state while staying visually indistinguishable from true rest/active.
-    val morphProgress = morphProgressRaw.coerceIn(0.001f, 0.999f)
-    val pillShape = remember(morph) { MorphPolygonShape(morph) { morphProgress } }
-
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -311,22 +281,13 @@ private fun InfiniteWheelColumn(
                 .height(WheelSlot * WheelViewportRows - WheelRowGap),
             contentAlignment = Alignment.Center,
         ) {
-            // Fallback flat pill: guarantees a visible focus indicator even
-            // if the polygon morph above renders as zero-area for some
-            // progress value we haven't caught. Same tonal color, drawn
-            // first so the morphed shape (if it renders) sits on top and
-            // looks identical to the morph alone.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(WheelRowHeight)
-                    .padding(horizontal = if (hero) 3.dp else 5.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
-            )
-
-            // Real morphed-squircle focus pill: clipped shape + tonal fill +
-            // an actual elevation shadow, not a stroke-only chip.
+            // Focus pill: tonal container with real elevation. (A polygon
+            // shape-morph version was attempted here using this project's
+            // MorphPolygonShape + androidx.graphics.shapes, but it rendered
+            // as zero-area at rest against this graphics-shapes build — see
+            // project notes. Shipping the plain rounded pill rather than
+            // carrying dead/invisible code; shape-morph can be revisited
+            // separately with on-device debugging of MorphPolygonShape.)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -334,7 +295,7 @@ private fun InfiniteWheelColumn(
                     .padding(horizontal = if (hero) 3.dp else 5.dp)
                     .graphicsLayer {
                         shadowElevation = 3.dp.toPx()
-                        shape = pillShape
+                        shape = RoundedCornerShape(16.dp)
                         clip = true
                     }
                     .background(MaterialTheme.colorScheme.secondaryContainer),
