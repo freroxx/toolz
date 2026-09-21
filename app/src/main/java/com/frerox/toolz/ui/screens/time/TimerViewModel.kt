@@ -265,7 +265,12 @@ class TimerViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { snap ->
                     _uiState.update { cur ->
-                        val started = cur.isStarted || snap.running || snap.ringing || snap.remaining > 0L
+                        // Started latches on, but a fully-zero snapshot is
+                        // authoritative: without the snap.initial clause the
+                        // flag re-latched true from intermediate emissions and
+                        // reset could never return to true idle.
+                        val started = snap.running || snap.ringing || snap.remaining > 0L ||
+                            (cur.isStarted && snap.initial > 0L)
                         // T-P1-03: derive isPaused = !running && remaining>0 && started (never-started => Ready).
                         val paused = !snap.running && !snap.ringing && snap.remaining > 0L && started
                         cur.copy(
@@ -660,8 +665,15 @@ class TimerViewModel @Inject constructor(
         startServiceAction(ToolService.ACTION_TIMER_STOP)
         try { toolService?.resetTimer() } catch (_: Exception) {}
         try { toolService?.dismissTimerAlarm() } catch (_: Exception) {}
+        // A queued staging/start must not resurrect the timer after reset.
+        pendingAction = null
         _uiState.update {
             it.copy(
+                // Full clear: the dial reads 00:00 AND the wheels return to
+                // 00:00:00, so staged state can't disagree with the readout.
+                selectedHours = 0,
+                selectedMinutes = 0,
+                selectedSeconds = 0,
                 remainingTime = 0L,
                 initialTime = 0L,
                 isRunning = false,

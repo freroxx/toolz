@@ -759,6 +759,7 @@ class ToolService : Service() {
 
     fun resetTimer() {
         _isTimerRunning.value = false
+        _isTimerRinging.value = false
         timerJob?.cancel()
         _timerRemaining.value = 0L
         _timerInitial.value = 0L
