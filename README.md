@@ -117,7 +117,7 @@ The short version: you sign in with a username + password or a random 64-charact
 
 ### Key features
 
-- **End-to-end encryption (hybrid, honest scope)** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); if the handshake can't complete the message still delivers via the self-healing multi-key envelope fallback (static ECDH, no FS) — a message is never blocked by session problems. Keys rotate every 30 days; verify fingerprints in person via QR
+- **End-to-end encryption** — P-256 identity + signing keys in AndroidKeyStore, X25519 sessions via X3DH → Double Ratchet, all sealed with AES-256-GCM (direction-bound AAD). New chats try the ratchet first (per-message forward secrecy); if the handshake can't complete the message still delivers via the self-healing multi-key envelope fallback (static ECDH, no FS) — a message is never blocked by session problems. Keys rotate every 30 days; verify fingerprints in person via QR
 - **No-email sign-in** — two ways in: username + password (≥10 chars, auto-saved to the Toolz Vault), or a random 64-char hex token (`SHA-256(token)@whisper.toolz.app`, hashed server-side). Save your token — lose it, lose the account
 - **Friend-gated chats** — no messaging until the friend request is accepted; blocks are enforced client + DB-level, both sides know when they're blocked
 - **Realtime delivery** — messages, reactions, typing (8 s fresh), and presence arrive over broadcast channels, with postgres-change polling as the reliable fallback; FCM data-only wake pings (senderId/messageId, no content) cover killed apps
@@ -130,7 +130,7 @@ The short version: you sign in with a username + password or a random 64-charact
 - **Mute & block** — silence a conversation or block a user entirely
 - **In-app notifications** — grouped per conversation, deduplicated across realtime+FCM, suppressed while you're inside that chat or when muted/hidden
 
-Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full truth.
+Whisper is early-access software: expect rough edges. It is centralized — the server can see *who* talks to *whom* (usernames/IDs, timestamps, ciphertext blobs) but never plaintext. See [`WHISPER.md`](WHISPER.md) + [`PRIVACY.md`](PRIVACY.md) for the full info.
 
 ---
 
