@@ -562,12 +562,12 @@ fun ExpressiveStatePill(
 }
 
 /**
- * Status pill with smooth width morph + icon crossfade.
+ * Status pill with a calm width morph.
  *
- * Text swaps via AnimatedContent with SizeTransform so the pill stretches/
- * shrinks instead of snapping. The outgoing layer briefly stretches
- * horizontally (scaleX) at reduced alpha — a cheap motion-blur illusion.
- * Static crossfade fallback under performance mode.
+ * Single AnimatedContent + SizeTransform so the pill stretches/shrinks instead
+ * of snapping. No squash-stretch, no nested icon animation, no uppercase —
+ * labelLarge SemiBold, icon crossfades with the text in one motion.
+ * Static row under performance mode.
  */
 @Composable
 fun MorphingStatusPill(
@@ -592,88 +592,55 @@ fun MorphingStatusPill(
         animationSpec = tween(300),
         label = "pillFg",
     )
-    // Squash-stretch pulse on every state change: brief horizontal stretch
-    // that settles with a spring — reads as motion blur during the morph.
-    val squash = remember { androidx.compose.animation.core.Animatable(1f) }
-    LaunchedEffect(text, icon) {
-        squash.snapTo(1.14f)
-        squash.animateTo(
-            1f,
-            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        )
-    }
 
     Surface(
-        modifier = modifier.graphicsLayer {
-            val s = if (performanceMode) 1f else squash.value
-            scaleX = s
-            scaleY = 1f - (s - 1f) * 0.5f
-        },
+        modifier = modifier,
         shape = androidx.compose.foundation.shape.CircleShape,
         color = animatedBackground,
         contentColor = animatedContent,
         border = if (isFilled) null else androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
         if (performanceMode) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(icon, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = text.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp
-                )
-            }
+            PillRow(text = text, icon = icon)
             return@Surface
         }
         androidx.compose.animation.AnimatedContent(
             targetState = text to icon,
             transitionSpec = {
-                (fadeIn(tween(220)) + scaleIn(initialScale = 0.92f)).togetherWith(
-                    fadeOut(tween(160))
+                (fadeIn(tween(220, easing = FastOutSlowInEasing))).togetherWith(
+                    fadeOut(tween(160, easing = FastOutSlowInEasing))
                 ).using(
                     androidx.compose.animation.SizeTransform(clip = false) { _, _ ->
-                        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+                        tween(260, easing = FastOutSlowInEasing)
                     }
                 )
             },
             label = "pillMorph",
         ) { (label, image) ->
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                androidx.compose.animation.AnimatedContent(
-                    targetState = image,
-                    transitionSpec = {
-                        (fadeIn(tween(200)) + scaleIn(initialScale = 0.7f)).togetherWith(
-                            fadeOut(tween(140))
-                        )
-                    },
-                    label = "pillIcon",
-                ) { iv ->
-                    Icon(
-                        iv, null,
-                        modifier = Modifier
-                            .size(16.dp)
-                            .graphicsLayer { rotationZ = 0f },
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = label.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp
-                )
-            }
+            PillRow(text = label, icon = image)
         }
+    }
+}
+
+@Composable
+private fun PillRow(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
+    Row(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(icon, null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.1.sp,
+            maxLines = 1,
+        )
     }
 }
 

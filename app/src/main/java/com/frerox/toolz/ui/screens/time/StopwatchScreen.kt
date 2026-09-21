@@ -313,17 +313,18 @@ private fun StopwatchDial(
         label = "lapPulse",
     )
     val sweepProgress = ((elapsedTime % 60_000L).toFloat() / 60_000f).coerceIn(0f, 1f)
-    // Long strings (>24h / ms digits) drop to a smaller style so 100h+ fits (S-P2-01).
-    val longForm = showMilliseconds || elapsedTime >= 3_600_000L
-    val timeStyle = if (longForm) {
-        MaterialTheme.typography.headlineMedium.copy(
-            fontFamily = FontFamily.Monospace,
+    // Hours widen the string — step down one type size so H:MM:SS still fits.
+    // Toggling ms must NOT resize the whole (fraction is inline at ~0.5x).
+    val hasHours = elapsedTime >= 3_600_000L
+    val timeStyle = if (hasHours) {
+        MaterialTheme.typography.displaySmall.copy(
             fontWeight = FontWeight.Black,
+            fontFeatureSettings = "tnum",
         )
     } else {
         MaterialTheme.typography.displayMedium.copy(
-            fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
+            fontFeatureSettings = "tnum",
         )
     }
 
@@ -350,8 +351,8 @@ private fun StopwatchDial(
                         accent = accent,
                         style = timeStyle,
                         fractionStyle = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontFeatureSettings = "tnum",
                         ),
                         ceilSeconds = false,
                         modifier = Modifier.fillMaxWidth(),

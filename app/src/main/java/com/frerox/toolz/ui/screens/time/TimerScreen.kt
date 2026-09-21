@@ -96,7 +96,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -465,14 +464,14 @@ private fun TimerDial(state: TimerState, accent: Color) {
                     val hasHours = display >= 3_600_000L
                     val mainStyle = if (hasHours) {
                         MaterialTheme.typography.displaySmall.copy(
-                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
+                            fontFeatureSettings = "tnum",
                             letterSpacing = 0.sp,
                         )
                     } else {
                         MaterialTheme.typography.displayMedium.copy(
-                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
+                            fontFeatureSettings = "tnum",
                             letterSpacing = 0.sp,
                         )
                     }
@@ -483,8 +482,8 @@ private fun TimerDial(state: TimerState, accent: Color) {
                         accent = accent,
                         style = mainStyle,
                         fractionStyle = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontFeatureSettings = "tnum",
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     )
