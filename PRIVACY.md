@@ -10,7 +10,7 @@ Rule for everything below: **network happens only when you tap the feature**.
 Idle app makes no network calls except Whisper realtime/push (only if you signed
 into Whisper) and periodic update checks (only if enabled in Settings).
 
-## What runs 100% on-device (no network)
+## What runs 100% on-device (locally)
 
 - **Background Remover** — ONNX Runtime Mobile 1.29.0 inference on your photos.
   Models download once from GitHub Releases (see `BR-MODELS.md`), then inference,
