@@ -33,7 +33,7 @@ class YahooEngine @Inject constructor(private val fetcher: JsoupFetcher): Search
             if(cleanUrl.contains("yahoo.com/search")) continue
             val title=h3.text().trim().ifBlank{continue}
             val parent=h3.parents().firstOrNull{it.tagName().equals("li", true) || it.hasClass("algo")}
-            val desc=parent?.select(".compText, .fz-m, p").firstOrNull()?.text()?.trim()?:""
+            val desc=parent?.select(".compText, .fz-m, p")?.firstOrNull()?.text()?.trim()?:""
             val (date, snippet)=fetcher.extractDateFromSnippet(desc)
             results+=SearchResult(title, snippet, cleanUrl, fetcher.safeHost(cleanUrl), "Yahoo", date, null, null, rank++)
         }

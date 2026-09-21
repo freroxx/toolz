@@ -21,11 +21,11 @@ import android.content.Context
 import com.frerox.toolz.data.cleaner.CleanCategory
 import com.frerox.toolz.data.cleaner.CleanItem
 import com.frerox.toolz.data.cleaner.FileEntry
-import com.frerox.toolz.data.cleaner.engine.CleanScanConfig
+import com.frerox.toolz.data.cleaner.engine.FileIndex
+import com.frerox.toolz.data.cleaner.engine.ScanCtx
 import com.frerox.toolz.data.cleaner.engine.CleanerAnalyzer
 import com.frerox.toolz.data.cleaner.util.FileUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,46 +39,28 @@ class ThumbnailCacheAnalyzer @Inject constructor(
     override val description = "Cached thumbnails that can be regenerated"
     override val isSafeToClean = true
 
-    override suspend fun analyze(
-        root: File,
-        installedPackages: Set<String>,
-        progress: (String) -> Unit,
-        exclusions: Set<String>,
-        isActive: () -> Boolean,
-        config: CleanScanConfig
-    ): CleanCategory {
+    override suspend fun analyze(index: FileIndex, ctx: ScanCtx): CleanCategory {
+        // Index-only: files living under a .thumbnails dir or the Photos cache.
         val candidates = mutableListOf<FileEntry>()
-        val thumbDirs = listOf(
-            File(root, "DCIM/.thumbnails"),
-            File(root, "Pictures/.thumbnails"),
-            File(root, ".thumbnails"),
-            File(root, "Android/data/com.google.android.apps.photos/cache")
-        ) + root.walkTopDown().maxDepth(4).filter { it.isDirectory && it.name == ".thumbnails" }.toList()
-
-        for (dir in thumbDirs.distinctBy { it.absolutePath }) {
-            if (!isActive()) break
-            if (!dir.exists() || !dir.isDirectory) continue
-            if (exclusions.any { dir.absolutePath.contains(it) }) continue
-            progress("Thumbnails — ${dir.name}")
-            dir.walkTopDown().forEach { f ->
-                if (!isActive()) return@forEach
-                if (exclusions.any { f.absolutePath.contains(it) }) return@forEach
-                if (f.isFile) {
-                    candidates.add(f.toEntry(true))
-                    if (candidates.size > 400) return@forEach
-                }
-            }
+        for (f in index.files) {
+            if (!ctx.isActive()) break
+            if (candidates.size >= 400) break
+            val lp = f.path.lowercase()
+            val inThumbDir = "/.thumbnails/" in lp || lp.endsWith("/.thumbnails") ||
+                "com.google.android.apps.photos/cache" in lp
+            if (!inThumbDir) continue
+            if (FileUtils.isExcluded(f.path, ctx.exclusions)) continue
+            candidates.add(
+                FileEntry(f.name, f.path, f.size, f.lastModified, f.ext, true,
+                    FileUtils.getMediaStoreUri(context, f.path, f.ext))
+            )
         }
-        // also generic cache thumb files by name pattern
-        // we already covered main, keep sorted by size
+        // keep sorted by size
         val top = candidates.sortedByDescending { it.sizeBytes }.take(300)
         val items = top.map { CleanItem.GenericFile(it) }
         val total = top.sumOf { it.sizeBytes }
-        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, total, isSafeToClean, description = description)
-    }
-
-    private fun File.toEntry(sel: Boolean): FileEntry {
-        val ext = extension.lowercase()
-        return FileEntry(name, absolutePath, length(), lastModified(), ext, sel, FileUtils.getMediaStoreUri(context, absolutePath, ext))
+        return CleanCategory(categoryId, categoryName, categoryIcon, items, total, total, isSafeToClean,
+            description = description,
+            emptyHint = if (top.isEmpty()) "No thumbnail cache found" else null)
     }
 }

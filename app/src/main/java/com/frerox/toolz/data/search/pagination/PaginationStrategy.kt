@@ -45,9 +45,14 @@ object OffsetBasedPagination : PaginationStrategy {
                 // Qwant slot now resolves to Brave Search HTML (Qwant's own API is
                 // DataDome-walled) — Brave paginates with a plain offset param.
                 EngineId.QWANT -> "&offset=$offset"
+                EngineId.BRAVE -> "&offset=$offset"
+                EngineId.MOJEEK -> "&s=$offset"
                 EngineId.MARGINALIA -> "&page=${offset / 10 + 1}"
+                EngineId.PRESEARCH -> "&page=${offset / 10 + 1}"
                 EngineId.DUCKDUCKGO -> "&s=$offset"
                 EngineId.META -> "" // META has no single offset — see NoPagination
+                // No parser implementation yet (engineFor returns null) — no pagination.
+                EngineId.ECOSIA, EngineId.SWISSCOWS, EngineId.STARTPAGE, EngineId.CUSTOM -> ""
             }
     }
 

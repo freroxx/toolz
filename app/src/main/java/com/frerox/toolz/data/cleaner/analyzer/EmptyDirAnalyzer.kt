@@ -20,9 +20,10 @@ package com.frerox.toolz.data.cleaner.analyzer
 import com.frerox.toolz.data.cleaner.CleanCategory
 import com.frerox.toolz.data.cleaner.CleanItem
 import com.frerox.toolz.data.cleaner.EmptyDirEntry
-import com.frerox.toolz.data.cleaner.engine.CleanScanConfig
+import com.frerox.toolz.data.cleaner.engine.FileIndex
+import com.frerox.toolz.data.cleaner.engine.ScanCtx
 import com.frerox.toolz.data.cleaner.engine.CleanerAnalyzer
-import java.io.File
+import com.frerox.toolz.data.cleaner.util.FileUtils
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,37 +35,22 @@ class EmptyDirAnalyzer @Inject constructor() : CleanerAnalyzer {
     override val description = "Empty directories safe to remove"
     override val isSafeToClean = true
 
-    override suspend fun analyze(
-        root: File,
-        installedPackages: Set<String>,
-        progress: (String) -> Unit,
-        exclusions: Set<String>,
-        isActive: () -> Boolean,
-        config: CleanScanConfig
-    ): CleanCategory {
+    override suspend fun analyze(index: FileIndex, ctx: ScanCtx): CleanCategory {
+        // Truly-empty dirs come from the shared crawl — no walks.
         val entries = mutableListOf<EmptyDirEntry>()
-        var scanned = 0
-        root.walkTopDown()
-            .onEnter { dir ->
-                if (!isActive()) return@onEnter false
-                if (dir.name.startsWith(".") && !config.includeHidden) return@onEnter false
-                true
-            }
-            .forEach { f ->
-                if (!isActive()) return@forEach
-                scanned++
-                if (scanned % 5000 == 0) progress("Empty folders — $scanned")
-                if (exclusions.any { f.absolutePath.contains(it) }) return@forEach
-                if (f.isDirectory && f != root) {
-                    val list = f.list()
-                    if (list != null && list.isEmpty()) {
-                        entries.add(EmptyDirEntry(f.absolutePath, f.name, isSelected = true))
-                        if (entries.size >= config.maxEmptyDirs) return@forEach
-                    }
-                }
-            }
-        val items = entries.take(config.maxEmptyDirs).map { CleanItem.EmptyDir(it) }
+        for (dir in index.emptyDirs) {
+            if (!ctx.isActive()) break
+            if (!dir.startsWith(index.root)) continue
+            val name = dir.substringAfterLast('/').trimEnd('/')
+            if (name.startsWith(".") && !ctx.config.includeHidden) continue
+            if (FileUtils.isExcluded(dir, ctx.exclusions)) continue
+            entries.add(EmptyDirEntry(dir, name.ifEmpty { dir }, isSelected = true))
+            if (entries.size >= ctx.config.maxEmptyDirs) break
+        }
+        val items = entries.map { CleanItem.EmptyDir(it) }
         // empty dirs have 0 size but we show count; size 0
-        return CleanCategory(categoryId, categoryName, categoryIcon, items, 0L, 0L, isSafeToClean, description = description)
+        return CleanCategory(categoryId, categoryName, categoryIcon, items, 0L, 0L, isSafeToClean,
+            description = description,
+            emptyHint = if (entries.isEmpty()) "No empty folders — storage is tidy" else null)
     }
 }
