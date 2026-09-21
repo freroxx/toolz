@@ -80,6 +80,7 @@ data class PomodoroState(
     val offlineMode: Boolean = false,
     val gradualVolume: Boolean = false,
     val quoteError: String? = null,
+    val showStatusPill: Boolean = true,
 )
 
 /** P-P0-01: UI shares the ONE phase-truth function with Service (never a second %4). */
@@ -147,7 +148,8 @@ class PomodoroViewModel @Inject constructor(
                 settingsRepository.pomodoroShowQuotes,
                 settingsRepository.pomodoroQuotes,
                 settingsRepository.offlineModeEnabled,
-                settingsRepository.pomodoroGradualVolume
+                settingsRepository.pomodoroGradualVolume,
+                settingsRepository.pomodoroShowStatusPill
             ) { values ->
                 PomodoroSettings(
                     workMinutes = values[0] as Int,
@@ -160,7 +162,8 @@ class PomodoroViewModel @Inject constructor(
                     showQuotes = values[7] as Boolean,
                     quotes = values[8] as String,
                     offlineMode = values[9] as Boolean,
-                    gradualVolume = values[10] as Boolean
+                    gradualVolume = values[10] as Boolean,
+                    showStatusPill = values[11] as Boolean
                 )
             // FIX (user report settings "stuck"): one throwing flow must never kill
             // this 11-flow combine permanently (frozen goal/durations with no error).
@@ -182,6 +185,7 @@ class PomodoroViewModel @Inject constructor(
                     quotes = settings.quotes,
                     offlineMode = settings.offlineMode,
                     gradualVolume = settings.gradualVolume,
+                    showStatusPill = settings.showStatusPill,
                 ) }
             }
         }
@@ -198,7 +202,8 @@ class PomodoroViewModel @Inject constructor(
         val showQuotes: Boolean,
         val quotes: String,
         val offlineMode: Boolean,
-        val gradualVolume: Boolean
+        val gradualVolume: Boolean,
+        val showStatusPill: Boolean
     )
 
     private fun bindPomodoroFlows(service: ToolService) {
@@ -318,6 +323,10 @@ class PomodoroViewModel @Inject constructor(
 
     fun setGradualVolume(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setPomodoroGradualVolume(enabled) }
+    }
+
+    fun setShowStatusPill(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setPomodoroShowStatusPill(enabled) }
     }
 
     fun setRingtoneUri(uri: String) {

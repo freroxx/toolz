@@ -247,6 +247,7 @@ fun PomodoroScreen(
                 onResetQuotes = viewModel::resetQuotes,
                 onResetGoal = viewModel::resetGoal,
                 onGradualVolumeChanged = viewModel::setGradualVolume,
+                onShowStatusPillChanged = viewModel::setShowStatusPill,
                 onRingtoneChanged = viewModel::setRingtoneUri,
                 onClearQuoteError = viewModel::clearQuoteError,
             )
@@ -354,11 +355,17 @@ private fun PomodoroTimerDial(state: PomodoroState, activeColor: Color) {
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    ExpressiveStatePill(
-                        text = if (state.isRunning) state.mode.label else stringResource(R.string.st_PomodoroScreen_d5e6),
-                        icon = if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
-                        color = activeColor,
-                    )
+                    AnimatedVisibility(
+                        visible = state.showStatusPill,
+                        enter = fadeIn() + scaleIn(),
+                        exit = fadeOut() + scaleOut(),
+                    ) {
+                        ExpressiveStatePill(
+                            text = if (state.isRunning) state.mode.label else stringResource(R.string.st_PomodoroScreen_d5e6),
+                            icon = if (state.mode == PomodoroMode.WORK) Icons.Rounded.CenterFocusStrong else Icons.Rounded.Coffee,
+                            color = activeColor,
+                        )
+                    }
                 }
             }
             ToolzWavyCircularProgressIndicator(

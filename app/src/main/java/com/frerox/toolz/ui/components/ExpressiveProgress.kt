@@ -545,31 +545,127 @@ fun ExpressiveStatePill(
     modifier: Modifier = Modifier,
     isFilled: Boolean = false,
 ) {
+    MorphingStatusPill(
+        text = text,
+        icon = icon,
+        color = color,
+        modifier = modifier,
+        isFilled = isFilled,
+    )
+}
+
+/**
+ * Status pill with smooth width morph + icon crossfade.
+ *
+ * Text swaps via AnimatedContent with SizeTransform so the pill stretches/
+ * shrinks instead of snapping. The outgoing layer briefly stretches
+ * horizontally (scaleX) at reduced alpha — a cheap motion-blur illusion.
+ * Static crossfade fallback under performance mode.
+ */
+@Composable
+fun MorphingStatusPill(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier,
+    isFilled: Boolean = false,
+) {
+    val performanceMode = LocalPerformanceMode.current
     val backgroundColor = if (isFilled) color else color.copy(alpha = 0.12f)
     val contentColor = if (isFilled) {
         if (color.luminance() > 0.5f) Color.Black else Color.White
     } else color
+    val animatedBackground by androidx.compose.animation.animateColorAsState(
+        targetValue = backgroundColor,
+        animationSpec = tween(300),
+        label = "pillBg",
+    )
+    val animatedContent by androidx.compose.animation.animateColorAsState(
+        targetValue = contentColor,
+        animationSpec = tween(300),
+        label = "pillFg",
+    )
+    // Squash-stretch pulse on every state change: brief horizontal stretch
+    // that settles with a spring — reads as motion blur during the morph.
+    val squash = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(text, icon) {
+        squash.snapTo(1.14f)
+        squash.animateTo(
+            1f,
+            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        )
+    }
 
     Surface(
-        modifier = modifier,
+        modifier = modifier.graphicsLayer {
+            val s = if (performanceMode) 1f else squash.value
+            scaleX = s
+            scaleY = 1f - (s - 1f) * 0.5f
+        },
         shape = androidx.compose.foundation.shape.CircleShape,
-        color = backgroundColor,
-        contentColor = contentColor,
+        color = animatedBackground,
+        contentColor = animatedContent,
         border = if (isFilled) null else androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f))
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(icon, null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = text.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 0.5.sp
-            )
+        if (performanceMode) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(icon, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = text.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+            return@Surface
+        }
+        androidx.compose.animation.AnimatedContent(
+            targetState = text to icon,
+            transitionSpec = {
+                (fadeIn(tween(220)) + scaleIn(initialScale = 0.92f)).togetherWith(
+                    fadeOut(tween(160))
+                ).using(
+                    androidx.compose.animation.SizeTransform(clip = false) { _, _ ->
+                        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+                    }
+                )
+            },
+            label = "pillMorph",
+        ) { (label, image) ->
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = image,
+                    transitionSpec = {
+                        (fadeIn(tween(200)) + scaleIn(initialScale = 0.7f)).togetherWith(
+                            fadeOut(tween(140))
+                        )
+                    },
+                    label = "pillIcon",
+                ) { iv ->
+                    Icon(
+                        iv, null,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .graphicsLayer { rotationZ = 0f },
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = label.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
         }
     }
 }

@@ -44,6 +44,7 @@ data class StopwatchState(
     val laps: List<Long> = emptyList(),
     val keepScreenOn: Boolean = true,
     val showMilliseconds: Boolean = true,
+    val showStatusPill: Boolean = true,
     val lastLapAt: Long = 0L,
     /** True once bound to the service; Start is disabled until then (S-P0-01). */
     val isBound: Boolean = false,
@@ -102,6 +103,11 @@ class StopwatchViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.stopwatchShowMs.collect { enabled ->
                 _uiState.update { it.copy(showMilliseconds = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.stopwatchShowStatusPill.collect { enabled ->
+                _uiState.update { it.copy(showStatusPill = enabled) }
             }
         }
         // Preload persisted session so first composition shows restored values
@@ -233,6 +239,10 @@ class StopwatchViewModel @Inject constructor(
 
     fun setShowMilliseconds(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setStopwatchShowMs(enabled) }
+    }
+
+    fun setShowStatusPill(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setStopwatchShowStatusPill(enabled) }
     }
 
     override fun onCleared() {

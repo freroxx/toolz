@@ -107,6 +107,7 @@ class ToolService : Service() {
     val isTimerRinging: StateFlow<Boolean> = _isTimerRinging
     private var timerJob: Job? = null
     private var timerEndTimestamp: Long = 0L
+    private var timerShowMsCached = false
 
     // Timer survival (T-P0-01): single source is timerEndTimestamp (elapsedRealtime).
     // Persisted atomically: endElapsed + initial + running + repeat. Never persist remaining alone.
@@ -372,6 +373,10 @@ class ToolService : Service() {
         // Stopwatch: adaptive ticker cadence follows the ms-display setting (S-P1-01).
         serviceScope.launch {
             settingsRepository.stopwatchShowMs.collect { stopwatchShowMsCached = it }
+        }
+        // Timer: same adaptive cadence — 50ms while ms digits shown, 250ms otherwise.
+        serviceScope.launch {
+            settingsRepository.timerShowMs.collect { timerShowMsCached = it }
         }
         // Stopwatch: restore persisted session (kill/reboot survival, S-P0-01).
         serviceScope.launch { restoreStopwatchState() }
@@ -715,7 +720,7 @@ class ToolService : Service() {
         timerJob = serviceScope.launch {
             while (_timerRemaining.value > 0 && _isTimerRunning.value) {
                 _timerRemaining.value = (timerEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0)
-                delay(250)
+                delay(if (timerShowMsCached) 50L else 250L)
             }
             if (_timerRemaining.value == 0L && _isTimerRunning.value) {
                 _isTimerRunning.value = false

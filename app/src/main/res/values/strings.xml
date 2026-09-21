@@ -2809,6 +2809,8 @@
     <string name="st_StopwatchScreen_w9x0">Pause</string>
     <string name="st_StopwatchScreen_y1z2">Session restored after restart</string>
     <string name="st_StopwatchScreen_a3b4">Lap limit reached (200 laps)</string>
+    <string name="st_StopwatchScreen_b2c3">Show status pill</string>
+    <string name="st_StopwatchScreen_d4e5">Running / Paused badge under the dial</string>
 
     <!-- TimerScreen -->
     <string name="st_TimerScreen_a1b2">Timer</string>
@@ -2850,6 +2852,10 @@
     <string name="st_TimerScreen_u3v4">Minutes</string>
     <string name="st_TimerScreen_w5x6">Confirm</string>
     <string name="st_TimerScreen_y7z8">Cancel</string>
+    <string name="st_TimerScreen_b2c3">Show milliseconds</string>
+    <string name="st_TimerScreen_d4e5">Live centisecond counter while running</string>
+    <string name="st_TimerScreen_f6g7">Show status pill</string>
+    <string name="st_TimerScreen_h8i9">Ready / Counting down badge under the dial</string>
 
     <!-- WorldClockScreen -->
     <string name="st_WorldClockScreen_a1b2">WORLD CLOCK</string>

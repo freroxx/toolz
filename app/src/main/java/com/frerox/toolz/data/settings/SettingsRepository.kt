@@ -74,6 +74,10 @@ class SettingsRepository @Inject constructor(
     private val STOPWATCH_RUNNING = booleanPreferencesKey("stopwatch_running")
     private val STOPWATCH_LAPS_JSON = stringPreferencesKey("stopwatch_laps_json")
     private val STOPWATCH_SHOW_MS = booleanPreferencesKey("stopwatch_show_ms")
+    private val TIMER_SHOW_MS = booleanPreferencesKey("timer_show_ms")
+    private val TIMER_SHOW_STATUS_PILL = booleanPreferencesKey("timer_show_status_pill")
+    private val POMODORO_SHOW_STATUS_PILL = booleanPreferencesKey("pomodoro_show_status_pill")
+    private val STOPWATCH_SHOW_STATUS_PILL = booleanPreferencesKey("stopwatch_show_status_pill")
     private val TIMER_GRADUAL_VOLUME = booleanPreferencesKey("timer_gradual_volume")
     private val POMODORO_GRADUAL_VOLUME = booleanPreferencesKey("pomodoro_gradual_volume")
     
@@ -678,6 +682,10 @@ class SettingsRepository @Inject constructor(
     val stopwatchRunning: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_RUNNING] ?: false }
     val stopwatchLapsJson: Flow<String> = dataStore.data.map { it[STOPWATCH_LAPS_JSON] ?: "" }
     val stopwatchShowMs: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_SHOW_MS] ?: true }
+    val timerShowMs: Flow<Boolean> = dataStore.data.map { it[TIMER_SHOW_MS] ?: false }
+    val timerShowStatusPill: Flow<Boolean> = dataStore.data.map { it[TIMER_SHOW_STATUS_PILL] ?: true }
+    val pomodoroShowStatusPill: Flow<Boolean> = dataStore.data.map { it[POMODORO_SHOW_STATUS_PILL] ?: true }
+    val stopwatchShowStatusPill: Flow<Boolean> = dataStore.data.map { it[STOPWATCH_SHOW_STATUS_PILL] ?: true }
     val timerGradualVolume: Flow<Boolean> = dataStore.data.map { it[TIMER_GRADUAL_VOLUME] ?: false }
     val pomodoroGradualVolume: Flow<Boolean> = dataStore.data.map { it[POMODORO_GRADUAL_VOLUME] ?: false }
 
@@ -1123,6 +1131,10 @@ class SettingsRepository @Inject constructor(
     suspend fun setTimerKeepScreenOn(enabled: Boolean) { dataStore.edit { it[TIMER_KEEP_SCREEN_ON] = enabled } }
     suspend fun setStopwatchKeepScreenOn(enabled: Boolean) { dataStore.edit { it[STOPWATCH_KEEP_SCREEN_ON] = enabled } }
     suspend fun setStopwatchShowMs(enabled: Boolean) { dataStore.edit { it[STOPWATCH_SHOW_MS] = enabled } }
+    suspend fun setTimerShowMs(enabled: Boolean) { dataStore.edit { it[TIMER_SHOW_MS] = enabled } }
+    suspend fun setTimerShowStatusPill(enabled: Boolean) { dataStore.edit { it[TIMER_SHOW_STATUS_PILL] = enabled } }
+    suspend fun setPomodoroShowStatusPill(enabled: Boolean) { dataStore.edit { it[POMODORO_SHOW_STATUS_PILL] = enabled } }
+    suspend fun setStopwatchShowStatusPill(enabled: Boolean) { dataStore.edit { it[STOPWATCH_SHOW_STATUS_PILL] = enabled } }
 
     /**
      * Persist stopwatch survival state (S-P0-01). [lapsJson] must already be capped

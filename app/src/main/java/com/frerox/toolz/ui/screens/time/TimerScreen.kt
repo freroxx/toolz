@@ -19,7 +19,6 @@ package com.frerox.toolz.ui.screens.time
 
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -30,7 +29,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -100,7 +98,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,6 +126,7 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.SquircleShape
+import com.frerox.toolz.ui.components.PrecisionTimerText
 import com.frerox.toolz.ui.components.VerticalSmoothDurationPicker
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.FinishedOverlay
@@ -324,6 +322,18 @@ fun TimerScreen(
             ) {
                 SettingsSection(title = stringResource(R.string.st_TimerScreen_i9j0), icon = Icons.Rounded.Settings, accent = accent) {
                     PreferenceRow(
+                        title = stringResource(R.string.st_TimerScreen_b2c3),
+                        subtitle = stringResource(R.string.st_TimerScreen_d4e5),
+                        checked = state.showMilliseconds,
+                        onCheckedChange = viewModel::setShowMilliseconds,
+                    )
+                    PreferenceRow(
+                        title = stringResource(R.string.st_TimerScreen_f6g7),
+                        subtitle = stringResource(R.string.st_TimerScreen_h8i9),
+                        checked = state.showStatusPill,
+                        onCheckedChange = viewModel::setShowStatusPill,
+                    )
+                    PreferenceRow(
                         title = stringResource(R.string.st_TimerScreen_k1l2),
                         subtitle = stringResource(R.string.st_TimerScreen_m3n4),
                         checked = state.repeatLastDuration,
@@ -453,39 +463,43 @@ private fun TimerDial(state: TimerState, accent: Color) {
                 ) {
                     val display = displayMillis(state)
                     val hasHours = display >= 3_600_000L
-                    AnimatedContent(
-                        targetState = formatTimerTime(display),
-                        transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.96f)).togetherWith(fadeOut()) },
-                        label = "TimerTime",
-                    ) { time: String ->
-                        Text(
-                            text = time,
-                            // T-P1-04: FittedBox/autoSize for hours (shrink to fit, no overflow).
-                            style = if (hasHours) {
-                                MaterialTheme.typography.displaySmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 0.sp,
-                                )
-                            } else {
-                                MaterialTheme.typography.displayMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 0.sp,
-                                )
-                            },
-                            color = if (state.isRunning || state.isFinished) accent else MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                    val mainStyle = if (hasHours) {
+                        MaterialTheme.typography.displaySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.sp,
+                        )
+                    } else {
+                        MaterialTheme.typography.displayMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.sp,
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
-                    ExpressiveStatePill(
-                        text = if (state.isRunning) stringResource(R.string.st_TimerScreen_y5z6) else if (state.isRinging) stringResource(R.string.st_TimerScreen_a7b8) else stringResource(R.string.st_TimerScreen_c9d0),
-                        icon = timerStatusIcon(state),
-                        color = accent,
+                    PrecisionTimerText(
+                        timeMillis = display,
+                        showMillis = state.showMilliseconds,
+                        isRunning = state.isRunning,
+                        accent = accent,
+                        style = mainStyle,
+                        fractionStyle = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    AnimatedVisibility(
+                        visible = state.showStatusPill,
+                        enter = fadeIn() + scaleIn(),
+                        exit = fadeOut() + scaleOut(),
+                    ) {
+                        ExpressiveStatePill(
+                            text = if (state.isRunning) stringResource(R.string.st_TimerScreen_y5z6) else if (state.isRinging) stringResource(R.string.st_TimerScreen_a7b8) else stringResource(R.string.st_TimerScreen_c9d0),
+                            icon = timerStatusIcon(state),
+                            color = accent,
+                        )
+                    }
                 }
             }
             ToolzWavyCircularProgressIndicator(

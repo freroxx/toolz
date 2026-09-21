@@ -17,8 +17,11 @@
 
 package com.frerox.toolz.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -36,11 +39,14 @@ import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,12 +59,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.graphics.shapes.CornerRounding
-import androidx.graphics.shapes.Morph
-import androidx.graphics.shapes.RoundedPolygon
 import com.frerox.toolz.ui.theme.LocalVibrationManager
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.absoluteValue
@@ -90,19 +94,6 @@ private fun nearestPage(current: Int, cycle: Int, value: Int): Int {
     return candidates.minBy { (it - current).absoluteValue }
 }
 
-// --- Real androidx.graphics.shapes plumbing --------------------------------
-// The Shape adapter (MorphPolygonShape) lives in its own file in this
-// package — it fits path bounds to size dynamically, matching whatever
-// normalization this project's graphics-shapes version produces. Don't
-// redeclare it here.
-
-// Shape-morph on the focus pill (androidx.graphics.shapes RoundedPolygon +
-// Morph + this package's MorphPolygonShape) was attempted and removed: it
-// rendered as zero-area at rest against this project's resolved
-// graphics-shapes artifact. The pill below uses a plain RoundedCornerShape
-// instead. Revisit shape-morph separately if wanted — needs on-device
-// debugging of MorphPolygonShape.createOutline, not further blind guesses.
-
 /**
  * Infinite duration wheel (H / M / S) — M3 Expressive, iOS-style loop feel.
  *
@@ -112,11 +103,15 @@ private fun nearestPage(current: Int, cycle: Int, value: Int): Int {
  * - Scroll itself is never driven by an Animatable — only rendering reacts to
  *   the pager's live offset.
  *
- * Shape system: the focus pill is clipped with a real androidx.graphics.shapes
- * Morph between two RoundedPolygon squircles (round at rest, tighter while
- * dragging), via this package's MorphPolygonShape adapter — not a static
- * RoundedCornerShape chip. Elevation comes from a real graphicsLayer shadow
- * on that clip, so it reads as a lifted container.
+ * Shape system: the focus pill is a plain RoundedCornerShape tonal container
+ * (secondaryContainer) with real elevation via graphicsLayer.shadowElevation.
+ * It reacts to drag state — insets slightly and lifts while a column is
+ * actively spinning, relaxes back at rest — and the settled digit gets a
+ * quick spring "pop" on arrival so landing on a new number reads as an
+ * arrival rather than just a stop. (A polygon shape-morph version using
+ * androidx.graphics.shapes RoundedPolygon/Morph was tried and dropped: it
+ * rendered zero-area against this project's resolved graphics-shapes
+ * artifact. Worth revisiting separately with on-device debugging.)
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -187,7 +182,7 @@ fun VerticalSmoothDurationPicker(
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
         ) {
             InfiniteWheelColumn(
                 pagerState = hoursPager,
@@ -246,8 +241,13 @@ fun VerticalSmoothDurationPicker(
 
 @Composable
 private fun WheelSeparator(accent: Color) {
+    // Aligned to the focus-pill center: one full wheel slot of top offset
+    // (the pager's vertical contentPadding), then centered in one row height.
+    // The parent Row is Top-aligned so the column labels below never shift this.
     Box(
-        modifier = Modifier.height(WheelSlot * WheelViewportRows - WheelRowGap),
+        modifier = Modifier
+            .padding(top = WheelSlot)
+            .height(WheelRowHeight),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -271,6 +271,30 @@ private fun InfiniteWheelColumn(
     hero: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    // Pill reacts to interaction with plain, safe float animations — no
+    // custom shape math. Slightly inset + lifted while actively dragging,
+    // reads as "picked up"; relaxes back with a bouncy settle.
+    val dragging = pagerState.isScrollInProgress
+    val pillInset by animateFloatAsState(
+        targetValue = if (dragging) 1f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "pillInset",
+    )
+    val pillElevation by animateFloatAsState(
+        targetValue = if (dragging) 6f else 2f,
+        animationSpec = tween(180),
+        label = "pillElevation",
+    )
+
+    // Brief scale "pop" on the settled value itself, so landing on a new
+    // number reads as an arrival, not just a stop.
+    val settled = floorMod(pagerState.settledPage, cycle)
+    val popScale = remember { Animatable(1f) }
+    LaunchedEffect(settled) {
+        popScale.snapTo(0.86f)
+        popScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
+    }
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -281,20 +305,16 @@ private fun InfiniteWheelColumn(
                 .height(WheelSlot * WheelViewportRows - WheelRowGap),
             contentAlignment = Alignment.Center,
         ) {
-            // Focus pill: tonal container with real elevation. (A polygon
-            // shape-morph version was attempted here using this project's
-            // MorphPolygonShape + androidx.graphics.shapes, but it rendered
-            // as zero-area at rest against this graphics-shapes build — see
-            // project notes. Shipping the plain rounded pill rather than
-            // carrying dead/invisible code; shape-morph can be revisited
-            // separately with on-device debugging of MorphPolygonShape.)
+            // Focus pill: tonal container, real elevation, subtly reactive
+            // to drag state (insets + lifts while spinning, relaxes at rest).
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(WheelRowHeight)
-                    .padding(horizontal = if (hero) 3.dp else 5.dp)
+                    .padding(horizontal = (if (hero) 3.dp else 5.dp) + (pillInset * 3).dp)
                     .graphicsLayer {
-                        shadowElevation = 3.dp.toPx()
+                        shadowElevation = pillElevation.dp.toPx()
+                        scaleY = 1f - pillInset * 0.04f
                         shape = RoundedCornerShape(16.dp)
                         clip = true
                     }
@@ -324,8 +344,8 @@ private fun InfiniteWheelColumn(
                         .fillMaxWidth()
                         .height(WheelRowHeight)
                         .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
+                            scaleX = scale * (if (selected) popScale.value else 1f)
+                            scaleY = scale * (if (selected) popScale.value else 1f)
                         }
                         .semantics {
                             contentDescription = if (selected) {
@@ -353,12 +373,68 @@ private fun InfiniteWheelColumn(
             }
         }
         Spacer(Modifier.height(8.dp))
+        val labelAlpha by animateFloatAsState(
+            targetValue = if (dragging) 0.9f else 0.6f,
+            animationSpec = tween(180),
+            label = "labelAlpha",
+        )
         Text(
             text = label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = labelAlpha),
             letterSpacing = 1.5.sp,
+        )
+    }
+}
+
+// TODO: wrap in your project's theme composable (e.g. ToolzTheme { ... })
+// once you tell me its actual name/import — left as MaterialTheme directly
+// for now so this compiles without guessing at a symbol that may not exist.
+// If your app defines its own accent color source (e.g. a design-system
+// token) swap the hardcoded Color.kt value below for that instead.
+@Preview(name = "Duration picker — light", showBackground = true)
+@Composable
+private fun VerticalSmoothDurationPickerPreviewLight() {
+    MaterialTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            DurationPickerPreviewContent()
+        }
+    }
+}
+
+@Preview(
+    name = "Duration picker — dark",
+    showBackground = true,
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+private fun VerticalSmoothDurationPickerPreviewDark() {
+    MaterialTheme {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            DurationPickerPreviewContent()
+        }
+    }
+}
+
+@Composable
+private fun DurationPickerPreviewContent() {
+    var hours by remember { mutableStateOf(0) }
+    var minutes by remember { mutableStateOf(9) }
+    var seconds by remember { mutableStateOf(6) }
+
+    Box(modifier = Modifier.padding(16.dp)) {
+        VerticalSmoothDurationPicker(
+            hours = hours,
+            minutes = minutes,
+            seconds = seconds,
+            accent = MaterialTheme.colorScheme.primary,
+            enabled = true,
+            onChange = { h, m, s ->
+                hours = h
+                minutes = m
+                seconds = s
+            },
         )
     }
 }

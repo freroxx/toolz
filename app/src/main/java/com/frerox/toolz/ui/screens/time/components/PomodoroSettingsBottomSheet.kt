@@ -55,6 +55,7 @@ fun PomodoroSettingsBottomSheet(
     onResetQuotes: () -> Unit,
     onResetGoal: () -> Unit,
     onGradualVolumeChanged: (Boolean) -> Unit,
+    onShowStatusPillChanged: (Boolean) -> Unit,
     onRingtoneChanged: ((String) -> Unit)? = null,
     onClearQuoteError: (() -> Unit)? = null,
 ) {
@@ -165,6 +166,12 @@ fun PomodoroSettingsBottomSheet(
                     title = "Gradual Volume",
                     checked = state.gradualVolume,
                     onCheckedChange = onGradualVolumeChanged
+                )
+
+                ToggleRow(
+                    title = "Show Status Pill",
+                    checked = state.showStatusPill,
+                    onCheckedChange = onShowStatusPillChanged
                 )
 
                 // P-P1-02: custom ringtone picker with persistable grant. Wired only

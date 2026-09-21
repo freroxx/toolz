@@ -20,7 +20,7 @@ package com.frerox.toolz.ui.screens.time
 import android.content.res.Configuration
 import androidx.compose.ui.res.stringResource
 import com.frerox.toolz.R
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -29,7 +29,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,7 +91,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.frerox.toolz.ui.components.BouncyShape
@@ -100,6 +99,7 @@ import com.frerox.toolz.ui.components.ExpressiveStatePill
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.PrecisionTimerText
 import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
@@ -230,6 +230,12 @@ fun StopwatchScreen(
                         checked = state.showMilliseconds,
                         onCheckedChange = viewModel::setShowMilliseconds,
                     )
+                    PreferenceRow(
+                        title = stringResource(R.string.st_StopwatchScreen_b2c3),
+                        subtitle = stringResource(R.string.st_StopwatchScreen_d4e5),
+                        checked = state.showStatusPill,
+                        onCheckedChange = viewModel::setShowStatusPill,
+                    )
                 }
                 SettingsSection(title = stringResource(R.string.st_StopwatchScreen_s9t0), icon = Icons.Rounded.Settings, accent = accent) {
                     PreferenceRow(
@@ -269,6 +275,7 @@ private fun StopwatchContent(
                 elapsedTime = state.elapsedTime,
                 isRunning = state.isRunning,
                 showMilliseconds = state.showMilliseconds,
+                showStatusPill = state.showStatusPill,
                 lastLapAt = state.lastLapAt,
                 lapFlashAt = lapFlashAt,
                 accent = accent,
@@ -295,6 +302,7 @@ private fun StopwatchDial(
     elapsedTime: Long,
     isRunning: Boolean,
     showMilliseconds: Boolean,
+    showStatusPill: Boolean,
     lastLapAt: Long,
     lapFlashAt: Long,
     accent: Color,
@@ -305,10 +313,9 @@ private fun StopwatchDial(
         label = "lapPulse",
     )
     val sweepProgress = ((elapsedTime % 60_000L).toFloat() / 60_000f).coerceIn(0f, 1f)
-    val locale = safeStopwatchLocale()
-    val timeString = formatStopwatchTime(elapsedTime, showMilliseconds, locale)
     // Long strings (>24h / ms digits) drop to a smaller style so 100h+ fits (S-P2-01).
-    val timeStyle = if (timeString.length > 11) {
+    val longForm = showMilliseconds || elapsedTime >= 3_600_000L
+    val timeStyle = if (longForm) {
         MaterialTheme.typography.headlineMedium.copy(
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
@@ -336,46 +343,31 @@ private fun StopwatchDial(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    // FIX (user report): 2 fractional digits, not 3 — centiseconds.
-                    // AnimatedContent ticking every 30ms looks broken (constant
-                    // fade/scale churn), so when ms are shown render plain Text
-                    // with no transition; animate only whole-second changes.
-                    if (showMilliseconds) {
-                        Text(
-                            text = timeString,
-                            style = timeStyle,
-                            color = if (isRunning) accent else MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    } else {
-                        AnimatedContent(
-                            targetState = timeString,
-                            // TalkBack liveRegion=Off (S-P2-04): liveRegion is intentionally
-                            // left UNSET (the property default). The ticker must never
-                            // spam announcements; the time stays focusable/readable on demand.
-                            transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.97f)).togetherWith(fadeOut()) },
-                            label = "stopwatchTime",
-                        ) { time ->
-                            Text(
-                                text = time,
-                                style = timeStyle,
-                                color = if (isRunning) accent else MaterialTheme.colorScheme.onSurface,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    ExpressiveStatePill(
-                        text = if (isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
-                        icon = if (isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
-                        color = accent,
+                    PrecisionTimerText(
+                        timeMillis = elapsedTime,
+                        showMillis = showMilliseconds,
+                        isRunning = isRunning,
+                        accent = accent,
+                        style = timeStyle,
+                        fractionStyle = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                        ),
+                        ceilSeconds = false,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    AnimatedVisibility(
+                        visible = showStatusPill,
+                        enter = fadeIn() + scaleIn(),
+                        exit = fadeOut() + scaleOut(),
+                    ) {
+                        ExpressiveStatePill(
+                            text = if (isRunning) stringResource(R.string.st_StopwatchScreen_y5z6) else if (elapsedTime > 0L) stringResource(R.string.st_StopwatchScreen_a7b8) else stringResource(R.string.st_StopwatchScreen_c9d0),
+                            icon = if (isRunning) Icons.Rounded.Timer else Icons.Rounded.Timeline,
+                            color = accent,
+                        )
+                    }
                 }
             }
             ToolzWavyCircularProgressIndicator(

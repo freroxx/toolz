@@ -61,6 +61,8 @@ data class TimerState(
     val keepScreenOn: Boolean = true,
     val gradualVolume: Boolean = false,
     val alarmsEnabled: Boolean = true,
+    val showMilliseconds: Boolean = false,
+    val showStatusPill: Boolean = true,
 )
 
 @HiltViewModel
@@ -154,6 +156,16 @@ class TimerViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.timerRepeat.distinctUntilChanged().collect { repeat ->
                 _uiState.update { it.copy(repeatLastDuration = repeat) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.timerShowMs.distinctUntilChanged().collect { showMs ->
+                _uiState.update { it.copy(showMilliseconds = showMs) }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.timerShowStatusPill.distinctUntilChanged().collect { show ->
+                _uiState.update { it.copy(showStatusPill = show) }
             }
         }
 
@@ -566,6 +578,16 @@ class TimerViewModel @Inject constructor(
 
     fun setGradualVolume(enabled: Boolean) {
         viewModelScope.launch { try { settingsRepository.setTimerGradualVolume(enabled) } catch (_: Exception) {} }
+    }
+
+    fun setShowMilliseconds(enabled: Boolean) {
+        _uiState.update { it.copy(showMilliseconds = enabled) }
+        viewModelScope.launch { try { settingsRepository.setTimerShowMs(enabled) } catch (_: Exception) {} }
+    }
+
+    fun setShowStatusPill(enabled: Boolean) {
+        _uiState.update { it.copy(showStatusPill = enabled) }
+        viewModelScope.launch { try { settingsRepository.setTimerShowStatusPill(enabled) } catch (_: Exception) {} }
     }
 
     fun toggleAlarms() {
