@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -134,6 +135,13 @@ fun VerticalSmoothDurationPicker(
     val minutesPager = rememberPagerState(initialPage = initialPage(TIMER_WHEEL_MINUTES, safeMinutes)) { Int.MAX_VALUE }
     val secondsPager = rememberPagerState(initialPage = initialPage(TIMER_WHEEL_SECONDS, safeSeconds)) { Int.MAX_VALUE }
 
+    // The settle reporter below is keyed on the pager objects (stable), so a
+    // plain read of safeHours/safeMinutes/safeSeconds inside would freeze the
+    // first-composition values forever: any wheel position matching the launch
+    // values (e.g. mins back to 0) would compare equal and swallow onChange.
+    // rememberUpdatedState keeps the guard comparing against current state.
+    val latestStaged by rememberUpdatedState(Triple(safeHours, safeMinutes, safeSeconds))
+
     LaunchedEffect(hoursPager, minutesPager, secondsPager) {
         snapshotFlow {
             Triple(
@@ -142,7 +150,8 @@ fun VerticalSmoothDurationPicker(
                 floorMod(secondsPager.settledPage, TIMER_WHEEL_SECONDS),
             )
         }.distinctUntilChanged().collect { (h, m, s) ->
-            if (h != safeHours || m != safeMinutes || s != safeSeconds) {
+            val (lh, lm, ls) = latestStaged
+            if (h != lh || m != lm || s != ls) {
                 vibrationManager?.vibrateTick()
                 onChange(h, m, s)
             }

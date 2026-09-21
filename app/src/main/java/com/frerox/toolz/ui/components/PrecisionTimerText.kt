@@ -17,16 +17,11 @@
 
 package com.frerox.toolz.ui.components
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -95,12 +90,13 @@ fun formatPreciseTimeParts(
  * - One Row, children aligned by FIRST BASELINE — whole + fraction share the
  *   same baseline at any size pairing, so `.cc` never floats.
  * - Tabular numerals (`tnum`) so `00↔99` never reflows the dial.
- * - Whole seconds crossfade with a short rise (1/sec); the fraction swaps
- *   plainly at 10Hz with no spring, no stretch, no alpha flicker.
+ * - ZERO per-tick motion: whole + fraction swap instantly like a real clock.
+ *   Motion exists only where it means something — the ms toggle
+ *   (fade + width morph, user-initiated) and the running/paused/error color
+ *   crossfade (state transitions, never per tick).
  * - Whole stays `onSurface` for readability; only the fraction signals state
  *   (accent while running, muted while paused). Error color only when the
  *   passed accent is the theme error (ringing / finished).
- * - Static swap under performance mode.
  */
 @Composable
 fun PrecisionTimerText(
@@ -148,17 +144,20 @@ fun PrecisionTimerText(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // No per-tick animation — digits swap instantly. The only motion here
+        // is the ms toggle below (user-initiated) and the color crossfade
+        // above (state transitions).
+        Text(
+            text = parts.whole,
+            style = wholeStyle,
+            color = wholeColor,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.alignByBaseline(),
+        )
         if (performanceMode) {
-            Text(
-                text = parts.whole,
-                style = wholeStyle,
-                color = wholeColor,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier.alignByBaseline(),
-            )
             if (parts.fraction != null) {
                 Text(
                     text = parts.fraction,
@@ -172,29 +171,6 @@ fun PrecisionTimerText(
                 )
             }
             return@Row
-        }
-        AnimatedContent(
-            targetState = parts.whole,
-            transitionSpec = {
-                (fadeIn(tween(220, easing = FastOutSlowInEasing)) +
-                    slideInVertically(tween(220, easing = FastOutSlowInEasing)) { it / 6 }
-                    ).togetherWith(
-                    fadeOut(tween(160, easing = FastOutSlowInEasing)) +
-                        slideOutVertically(tween(160, easing = FastOutSlowInEasing)) { -it / 6 }
-                )
-            },
-            label = "preciseWhole",
-            modifier = Modifier.alignByBaseline(),
-        ) { whole ->
-            Text(
-                text = whole,
-                style = wholeStyle,
-                color = wholeColor,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip,
-            )
         }
         AnimatedVisibility(
             visible = parts.fraction != null,
