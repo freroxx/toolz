@@ -1,4 +1,4 @@
-**# Background Remover — Model Audit (BR-MODELS, 2026 revamp)
+# Background Remover — Model Info
 
 > Renamed from `MODELS.md` → `BR-MODELS.md`. Code references
 > (`BackgroundModel.kt:24`, `BackgroundModel.kt:116`) point here.
