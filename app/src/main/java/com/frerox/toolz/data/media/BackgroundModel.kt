@@ -21,7 +21,7 @@ package com.frerox.toolz.data.media
  * Curated lineup for Background Removal (2026 revamp).
  *
  * All models are downloaded on-demand through the Model Hub — nothing ships in the APK.
- * See MODELS.md (repo root) for the full audit trail: source, license, SHA-256.
+ * See BR-MODELS.md (repo root) for the full audit trail: source, license, SHA-256.
  *
  * Tiers:
  * - FAST    — U²-Net+ ONNX: general subjects, small download, CPU-friendly.
@@ -113,7 +113,7 @@ enum class BackgroundModel(
         expectedSha256 = "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
         expectedSizeBytes = 178648008L,
         gatedOnWifi = true,
-        licenseName = "See MODELS.md (ISNet via rembg)",
+        licenseName = "See BR-MODELS.md (ISNet via rembg)",
         licenseUrl = "https://github.com/danielgatis/rembg",
         isRecommended = true,
     ),
