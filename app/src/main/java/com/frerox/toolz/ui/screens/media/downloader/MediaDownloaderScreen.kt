@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AddToHomeScreen
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
@@ -69,20 +72,25 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil3.compose.AsyncImage
 import com.frerox.toolz.R
+import com.frerox.toolz.shortcuts.ToolShortcutDefinitions
+import com.frerox.toolz.shortcuts.ToolShortcutManager
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveContainedLoadingIndicator
 import com.frerox.toolz.ui.components.ExpressiveSwitch
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
+import com.frerox.toolz.ui.components.LargeExpressiveShape
+import com.frerox.toolz.ui.components.SquircleShape
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
+import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
 import com.frerox.toolz.ui.components.fadingEdges
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
+import com.frerox.toolz.ui.theme.toolzBackground
 import com.frerox.toolz.worker.SocialDownloadWorker
 
 /**
  * Unified Media Downloader tool — YouTube, TikTok and Instagram Reels.
- * Polished M3 expressive flow: paste link → preview → quality → download,
- * with animated state transitions and rich download feedback.
+ * M3 Expressive flow: select platforms → paste link → preview → quality → download.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,28 +114,40 @@ fun MediaDownloaderScreen(
     LaunchedEffect(initialUrl) {
         if (!initialUrl.isNullOrBlank()) viewModel.prefill(initialUrl)
     }
-    // Transient confirmation only — errors render inline.
     LaunchedEffect(ui.downloadEnqueued) {
         ui.downloadEnqueued?.let {
             snackbar.showSnackbar(it.take(160))
             viewModel.consumeEnqueued()
         }
     }
-    // Tactile result feedback.
     LaunchedEffect(hasResult, ui.error) {
         if (hasResult) haptic.success()
         else if (ui.error != null) haptic.error()
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize().toolzBackground(),
+        containerColor = Color.Transparent,
         topBar = {
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_MediaDownloader_Title),
                 subtitle = stringResource(R.string.st_MediaDownloader_Sub),
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    ToolzTonalExpressiveIconButton(onClick = onBack, shape = SquircleShape) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
                     }
+                },
+                actions = {
+                    ToolzTonalExpressiveIconButton(
+                        onClick = {
+                            val def = ToolShortcutDefinitions.findById("shortcut_media_downloader")
+                            if (def != null) ToolShortcutManager.requestPinShortcut(context, def)
+                        },
+                        shape = SquircleShape,
+                    ) {
+                        Icon(Icons.Rounded.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
                 },
             )
         },
@@ -137,18 +157,16 @@ fun MediaDownloaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .fadingEdges(top = 12.dp, bottom = 28.dp),
+                .fadingEdges(top = 16.dp, bottom = 32.dp),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // ── Link input ──────────────────────────────────────────
             item(key = "input") {
                 DownloaderSection(0) {
                     InputCard(viewModel = viewModel, isBusy = isBusy)
                 }
             }
 
-            // ── Fetching skeleton ───────────────────────────────────
             item(key = "fetching") {
                 AnimatedVisibility(
                     visible = isBusy,
@@ -159,7 +177,6 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            // ── Error / blocked ─────────────────────────────────────
             item(key = "error") {
                 AnimatedVisibility(
                     visible = ui.error != null,
@@ -194,7 +211,6 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            // ── Result ──────────────────────────────────────────────
             item(key = "result") {
                 AnimatedVisibility(
                     visible = hasResult && !isBusy,
@@ -210,7 +226,6 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            // ── Empty hero ──────────────────────────────────────────
             if (isIdle) {
                 item(key = "empty") {
                     DownloaderSection(1) {
@@ -219,7 +234,6 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            // ── Downloads ───────────────────────────────────────────
             if (downloads.isNotEmpty()) {
                 item(key = "downloads_header") {
                     Row(
@@ -274,7 +288,7 @@ private fun InputCard(
     val context = LocalContext.current
     val haptic = rememberToolzHapticFeedback()
 
-    ExpressiveCard(onClick = {}, enabled = false) {
+    ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -287,7 +301,7 @@ private fun InputCard(
                 trailingIcon = {
                     if (ui.url.isNotBlank()) {
                         IconButton(onClick = { viewModel.onUrlChange("") }) {
-                            Icon(Icons.Rounded.Close, contentDescription = null)
+                            Icon(Icons.Rounded.Close, stringResource(R.string.st_MediaDownloader_Clear))
                         }
                     } else {
                         IconButton(onClick = {
@@ -307,6 +321,9 @@ private fun InputCard(
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                 ),
@@ -315,7 +332,11 @@ private fun InputCard(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            PlatformStatusRow(detected = ui.detectedPlatform)
+            PlatformStatusRow(
+                enabled = ui.enabledPlatforms,
+                detected = ui.detectedPlatform,
+                onToggle = viewModel::togglePlatform,
+            )
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -410,12 +431,17 @@ private fun ResultCard(
     val audioOpts = remember(ui.options) { ui.options.filter { it.isAudio } }
     val selected = ui.options.firstOrNull { it.id == ui.selectedId }
 
-    ExpressiveCard(onClick = {}, enabled = false) {
+    ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Thumbnail
+            Text(
+                stringResource(R.string.st_MediaDownloader_ResultLabel),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Black,
+            )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -431,7 +457,7 @@ private fun ResultCard(
                     )
                 } else {
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -463,7 +489,6 @@ private fun ResultCard(
                 }
             }
 
-            // Meta
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
                     title,
@@ -497,22 +522,20 @@ private fun ResultCard(
                 }
             }
 
-            // Quality groups
             if (ui.options.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.st_MediaDownloader_ChooseQuality),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Black,
+                )
                 if (videoOpts.isNotEmpty()) {
                     if (audioOpts.isNotEmpty()) {
                         Text(
                             stringResource(R.string.st_MediaDownloader_VideoGroup),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
-                        )
-                    } else {
-                        Text(
-                            stringResource(R.string.st_MediaDownloader_Quality),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                     videoOpts.forEach { opt ->
@@ -526,9 +549,9 @@ private fun ResultCard(
                 if (audioOpts.isNotEmpty()) {
                     Text(
                         stringResource(R.string.st_MediaDownloader_AudioGroup),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold,
                     )
                     audioOpts.forEach { opt ->
                         QualityOptionRow(

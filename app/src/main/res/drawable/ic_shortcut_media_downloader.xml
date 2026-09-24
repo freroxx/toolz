@@ -4,7 +4,7 @@
     android:viewportWidth="960"
     android:viewportHeight="960">
     <path android:fillColor="#FF00ACC1" android:pathData="M480,80A400,400 0,1 0,480,880A400,400 0,0 0,480,80Z" />
-    <group android:translateY="528" android:pivotX="480" android:pivotY="480" android:scaleX="0.55" android:scaleY="0.55">
-        <path android:fillColor="#FFFFFF" android:pathData="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200Zm0 240q-83 0-141.5-58.5T280-280h80q0 50 35 85t85 85q50 0 85-35t35-85h80q0 83-58.5 141.5T480-80Z" />
+    <group android:translateY="528" android:pivotX="480" android:pivotY="480" android:scaleX="0.58" android:scaleY="0.58">
+        <path android:fillColor="#FFFFFF" android:pathData="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200Zm-160 320v-80h320v80H320Z" />
     </group>
 </vector>

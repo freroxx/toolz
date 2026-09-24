@@ -5,22 +5,28 @@
 package com.frerox.toolz.ui.screens.media.downloader
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +37,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,15 +46,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
@@ -59,101 +69,97 @@ import coil3.video.VideoFrameDecoder
 import com.frerox.toolz.R
 import com.frerox.toolz.data.downloader.MediaDownloaderRepository
 import com.frerox.toolz.ui.components.ExpressiveCard
+import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.components.ExpressiveStatePill
 import com.frerox.toolz.ui.components.ExpressiveTypingDots
+import com.frerox.toolz.ui.components.LargeExpressiveShape
+import com.frerox.toolz.ui.components.MediumExpressiveShape
+import com.frerox.toolz.ui.components.SmallExpressiveShape
 import com.frerox.toolz.ui.components.StaggeredEntrance
 import com.frerox.toolz.ui.components.ToolzOutlinedExpressiveIconButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveButton
 import com.frerox.toolz.ui.components.ToolzWavyLinearProgressIndicator
 import com.frerox.toolz.ui.components.rememberToolzHapticFeedback
 
-// ── Platform status ─────────────────────────────────────────────────────────
+// ── Platform selector ───────────────────────────────────────────────────────
 
-private data class PlatformMeta(val label: String, val dot: Color)
+private data class PlatformMeta(
+    val platform: MediaDownloaderRepository.Platform,
+    val label: String,
+    val dot: Color,
+)
+
+private val platformMetas = listOf(
+    PlatformMeta(MediaDownloaderRepository.Platform.YOUTUBE, "YouTube", Color(0xFFFF0000)),
+    PlatformMeta(MediaDownloaderRepository.Platform.TIKTOK, "TikTok", Color(0xFF000000)),
+    PlatformMeta(MediaDownloaderRepository.Platform.INSTAGRAM, "Reels", Color(0xFFDD2A7B)),
+)
 
 @Composable
 fun PlatformStatusRow(
+    enabled: Set<MediaDownloaderRepository.Platform>,
     detected: MediaDownloaderRepository.Platform?,
+    onToggle: (MediaDownloaderRepository.Platform) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        PlatformStatusPill(
-            meta = PlatformMeta("YouTube", Color(0xFFFF0000)),
-            highlighted = detected == MediaDownloaderRepository.Platform.YOUTUBE,
-            dimmed = detected != null && detected != MediaDownloaderRepository.Platform.YOUTUBE,
-            modifier = Modifier.weight(1f),
-        )
-        PlatformStatusPill(
-            meta = PlatformMeta("TikTok", Color(0xFF000000)),
-            highlighted = detected == MediaDownloaderRepository.Platform.TIKTOK,
-            dimmed = detected != null && detected != MediaDownloaderRepository.Platform.TIKTOK,
-            modifier = Modifier.weight(1f),
-        )
-        PlatformStatusPill(
-            meta = PlatformMeta("Reels", Color(0xFFDD2A7B)),
-            highlighted = detected == MediaDownloaderRepository.Platform.INSTAGRAM,
-            dimmed = detected != null && detected != MediaDownloaderRepository.Platform.INSTAGRAM,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun PlatformStatusPill(
-    meta: PlatformMeta,
-    highlighted: Boolean,
-    dimmed: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val container = when {
-        highlighted -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLowest
-    }
-    val content = when {
-        highlighted -> MaterialTheme.colorScheme.onSecondaryContainer
-        dimmed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = container,
-        contentColor = content,
-        border = if (highlighted) {
-            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
-        } else null,
-    ) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                shape = CircleShape,
-                color = if (dimmed) meta.dot.copy(alpha = 0.35f) else meta.dot,
-                modifier = Modifier.size(10.dp),
-            ) {}
-            androidx.compose.foundation.layout.Spacer(Modifier.width(7.dp))
             Text(
-                meta.label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (highlighted) FontWeight.Black else FontWeight.Bold,
+                stringResource(R.string.st_MediaDownloader_Platforms),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                stringResource(R.string.st_MediaDownloader_PlatformsHint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            AnimatedVisibility(
-                visible = highlighted,
-                enter = fadeIn() + scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
-                exit = fadeOut(),
-            ) {
-                Row {
-                    androidx.compose.foundation.layout.Spacer(Modifier.width(5.dp))
-                    Icon(Icons.Rounded.Check, null, modifier = Modifier.size(15.dp))
-                }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            platformMetas.forEach { meta ->
+                val isEnabled = meta.platform in enabled
+                val isDetected = detected == meta.platform
+                ExpressiveFilterChip(
+                    selected = isEnabled,
+                    onClick = { onToggle(meta.platform) },
+                    modifier = Modifier.weight(1f),
+                    label = {
+                        Text(
+                            meta.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isEnabled) FontWeight.Black else FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (isEnabled) meta.dot else meta.dot.copy(alpha = 0.3f),
+                                    CircleShape,
+                                ),
+                        )
+                    },
+                    trailingIcon = if (isDetected && isEnabled) {
+                        {
+                            Icon(Icons.Rounded.Check, null, modifier = Modifier.size(15.dp))
+                        }
+                    } else null,
+                )
             }
         }
     }
@@ -175,7 +181,7 @@ fun QualityOptionRow(
             onSelect()
         },
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = SmallExpressiveShape,
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
@@ -240,7 +246,7 @@ fun QualityOptionRow(
             }
             AnimatedVisibility(
                 visible = selected,
-                enter = fadeIn() + scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
+                enter = fadeIn() + scaleIn(androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy)),
                 exit = fadeOut(),
             ) {
                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
@@ -271,6 +277,7 @@ fun StateMessageCard(
         onClick = {},
         enabled = false,
         modifier = modifier,
+        shape = MediumExpressiveShape,
         containerColor = containerColor,
         contentColor = contentColor,
     ) {
@@ -301,7 +308,30 @@ fun StateMessageCard(
     }
 }
 
-// ── Loading skeleton ────────────────────────────────────────────────────────
+// ── Loading skeleton (shimmer, layout-matched to ResultCard) ────────────────
+
+@Composable
+private fun rememberShimmerBrush(delayMs: Int): Brush {
+    val transition = rememberInfiniteTransition(label = "dlShimmer$delayMs")
+    val progress by transition.animateFloat(
+        initialValue = -0.8f,
+        targetValue = 1.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, delayMillis = delayMs, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "dlShimmerProgress$delayMs",
+    )
+    return Brush.horizontalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceContainerLow,
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        startX = progress * 900f,
+        endX = progress * 900f + 500f,
+    )
+}
 
 @Composable
 fun FetchingSkeletonCard(modifier: Modifier = Modifier) {
@@ -309,30 +339,50 @@ fun FetchingSkeletonCard(modifier: Modifier = Modifier) {
         onClick = {},
         enabled = false,
         modifier = modifier,
+        shape = LargeExpressiveShape,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth().height(180.dp),
-            ) {}
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth(0.75f).height(18.dp),
-            ) {}
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth(0.45f).height(14.dp),
-            ) {}
+            val thumbBrush = rememberShimmerBrush(0)
+            val titleBrush = rememberShimmerBrush(60)
+            val rowBrush = rememberShimmerBrush(140)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(thumbBrush),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.78f)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(titleBrush),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.46f)
+                    .height(13.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(titleBrush),
+            )
+            repeat(2) { i ->
+                val brush = rememberShimmerBrush(200 + i * 80)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp)
+                        .clip(SmallExpressiveShape)
+                        .background(brush),
+                )
+            }
             ExpressiveLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
                     stringResource(R.string.st_MediaDownloader_FetchingLabel),
@@ -342,6 +392,9 @@ fun FetchingSkeletonCard(modifier: Modifier = Modifier) {
                 )
                 ExpressiveTypingDots()
             }
+            // Keep unused warning quiet while preserving staggered timing reference.
+            @Suppress("UNUSED_EXPRESSION")
+            rowBrush
         }
     }
 }
@@ -353,31 +406,33 @@ fun EmptyStateHero(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 28.dp),
+            .padding(vertical = 20.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Surface(
-            shape = RoundedCornerShape(32.dp),
+            shape = MediumExpressiveShape,
             color = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ) {
             Icon(
                 Icons.Rounded.Download,
                 null,
-                modifier = Modifier.padding(26.dp).size(44.dp),
+                modifier = Modifier.padding(22.dp).size(40.dp),
             )
         }
         Text(
             stringResource(R.string.st_MediaDownloader_EmptyTitle),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
         )
         Text(
             stringResource(R.string.st_MediaDownloader_Empty),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 32.dp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp),
         )
     }
 }
@@ -406,6 +461,7 @@ fun MediaDownloadRow(
         },
         enabled = openable,
         modifier = modifier,
+        shape = MediumExpressiveShape,
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(
@@ -447,6 +503,18 @@ fun MediaDownloadRow(
                 if (active) {
                     ToolzOutlinedExpressiveIconButton(onClick = onCancel) {
                         Icon(Icons.Rounded.Close, stringResource(R.string.st_MediaDownloader_Cancel))
+                    }
+                } else if (openable) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Icon(
+                            Icons.Rounded.OpenInNew,
+                            stringResource(R.string.st_MediaDownloader_Open),
+                            modifier = Modifier.padding(9.dp).size(17.dp),
+                        )
                     }
                 }
             }
@@ -492,7 +560,7 @@ private fun DownloadThumb(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        androidx.compose.foundation.layout.Box(
+        Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -508,7 +576,7 @@ private fun DownloadThumb(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         loading = {
-                            androidx.compose.foundation.layout.Box(
+                            Box(
                                 Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -525,7 +593,7 @@ private fun DownloadThumb(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         loading = {
-                            androidx.compose.foundation.layout.Box(
+                            Box(
                                 Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center,
                             ) {

@@ -25,12 +25,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 
 /**
  * ViewModel for the unified Media Downloader tool (YouTube / TikTok / Instagram Reels).
@@ -44,7 +48,17 @@ class MediaDownloaderViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val repository: MediaDownloaderRepository,
     private val catalogRepository: CatalogRepository,
+    private val dataStore: DataStore<Preferences>,
 ) : ViewModel() {
+
+    companion object {
+        private val PLATFORMS_KEY = stringSetPreferencesKey("media_downloader_platforms")
+        private val DEFAULT_PLATFORMS = setOf(
+            MediaDownloaderRepository.Platform.YOUTUBE.name,
+            MediaDownloaderRepository.Platform.TIKTOK.name,
+            MediaDownloaderRepository.Platform.INSTAGRAM.name,
+        )
+    }
 
     data class QualityOption(
         val id: String,
@@ -65,6 +79,11 @@ class MediaDownloaderViewModel @Inject constructor(
     data class UiState(
         val url: String = "",
         val detectedPlatform: MediaDownloaderRepository.Platform? = null,
+        val enabledPlatforms: Set<MediaDownloaderRepository.Platform> = setOf(
+            MediaDownloaderRepository.Platform.YOUTUBE,
+            MediaDownloaderRepository.Platform.TIKTOK,
+            MediaDownloaderRepository.Platform.INSTAGRAM,
+        ),
         val extracting: Boolean = false,
         val error: String? = null,
         val remote: DownloadzExtractResponse? = null,
@@ -102,12 +121,45 @@ class MediaDownloaderViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            dataStore.data
+                .map { prefs -> prefs[PLATFORMS_KEY] ?: DEFAULT_PLATFORMS }
+                .collect { names ->
+                    val parsed = names.mapNotNull { runCatching { MediaDownloaderRepository.Platform.valueOf(it) }.getOrNull() }.toSet()
+                    val effective = parsed.ifEmpty {
+                        setOf(
+                            MediaDownloaderRepository.Platform.YOUTUBE,
+                            MediaDownloaderRepository.Platform.TIKTOK,
+                            MediaDownloaderRepository.Platform.INSTAGRAM,
+                        )
+                    }
+                    if (_ui.value.enabledPlatforms != effective) {
+                        _ui.value = _ui.value.copy(enabledPlatforms = effective)
+                    }
+                }
+        }
+        viewModelScope.launch {
             combine(
                 WorkManager.getInstance(appContext).getWorkInfosByTagFlow(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD),
                 WorkManager.getInstance(appContext).getWorkInfosByTagFlow(VideoDownloadWorker.TAG_VIDEO_DOWNLOAD),
                 WorkManager.getInstance(appContext).getWorkInfosByTagFlow(YouTubeMp3DownloadWorker.TAG_MP3_DOWNLOAD),
             ) { social, video, mp3 -> (social + video + mp3).sortedByDescending { it.id.toString() }.take(10) }
                 .collect { _downloads.value = it }
+        }
+    }
+
+    fun togglePlatform(platform: MediaDownloaderRepository.Platform) {
+        val current = _ui.value.enabledPlatforms
+        val next = if (platform in current) {
+            if (current.size <= 1) return
+            current - platform
+        } else {
+            current + platform
+        }
+        _ui.value = _ui.value.copy(enabledPlatforms = next, error = null)
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                prefs[PLATFORMS_KEY] = next.map { it.name }.toSet()
+            }
         }
     }
 
@@ -246,6 +298,16 @@ class MediaDownloaderViewModel @Inject constructor(
         val raw = _ui.value.url.trim()
         if (raw.isBlank()) {
             _ui.value = _ui.value.copy(error = "Paste a link first.")
+            return
+        }
+        val detected = repository.detectPlatform(raw)
+        if (detected != null && detected !in _ui.value.enabledPlatforms) {
+            val msg = try {
+                appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_PlatformDisabled)
+            } catch (_: Exception) {
+                "This link is from a disabled platform. Enable it above to continue."
+            }
+            _ui.value = _ui.value.copy(error = msg, detectedPlatform = detected)
             return
         }
         extractJob?.cancel()

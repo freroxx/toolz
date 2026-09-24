@@ -2424,6 +2424,13 @@
     <string name="st_MediaDownloader_Open">Open</string>
     <string name="st_MediaDownloader_NoApp">No app found to open this file</string>
     <string name="st_MediaDownloader_FileGone">File not found — it may have been moved or deleted</string>
+    <string name="st_MediaDownloader_Platforms">Platforms</string>
+    <string name="st_MediaDownloader_PlatformsHint">Only these platforms will be accepted</string>
+    <string name="st_MediaDownloader_PlatformDisabled">This link is from a disabled platform. Enable it above to continue.</string>
+    <string name="st_MediaDownloader_Clear">Clear</string>
+    <string name="st_MediaDownloader_PasteAndGo">Paste and fetch</string>
+    <string name="st_MediaDownloader_ResultLabel">Preview</string>
+    <string name="st_MediaDownloader_ChooseQuality">Choose quality</string>
     <string name="st_SearchScreen_ws_q_quadhd">Quad HD • merged</string>
     <string name="st_SearchScreen_ws_q_ultrahd">Ultra HD • merged</string>
     <string name="st_SearchScreen_ws_q_fullhd_merged">Full HD • merged</string>
