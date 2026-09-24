@@ -193,14 +193,10 @@ class MediaDownloaderViewModel @Inject constructor(
         _ui.value = _ui.value.copy(audioOnly = audioOnly)
         // Never re-extract without a link: toggling the switch after clearing the
         // field used to wipe the current result into a "Paste a link first" error.
+        // Otherwise always re-extract so the option list matches the mode — reusing
+        // the old mixed list is what leaked video rows into audio-only mode.
         if (_ui.value.url.trim().isBlank()) return
-        // Fast path: options already contain audio rows — just reselect, no network.
-        if (audioOnly && _ui.value.options.any { it.isAudio }) {
-            val firstAudio = _ui.value.options.first { it.isAudio }
-            _ui.value = _ui.value.copy(selectedId = firstAudio.id, downloadEnqueued = null)
-            return
-        }
-        if (_ui.value.remote != null || _ui.value.localSourceUrl != null) extract()
+        extract()
     }
 
     fun selectOption(id: String) {
@@ -417,7 +413,7 @@ class MediaDownloaderViewModel @Inject constructor(
                 )
             }
         if (audioOnly) {
-            return (directAudio + converterAudioLadder()).distinctBy { it.id }.take(10)
+            return (directAudio + converterAudioLadder(includeDirectMp3 = false)).distinctBy { it.id }.take(10)
         }
         val out = mutableListOf<QualityOption>()
         if (!res.download_url.isNullOrBlank()) {
@@ -447,20 +443,31 @@ class MediaDownloaderViewModel @Inject constructor(
                 )
             }
         out += directAudio
+        // MP3 is always offered in video mode too (converter-backed so it works
+        // on every platform, even when the server exposes no direct MP3 stream).
+        out += converterAudioLadder(includeDirectMp3 = false).first()
         return out.distinctBy { it.id }.take(14)
     }
 
     /**
      * Converter-backed audio ladder. The base audio is downloaded first, then
      * transcoded on-device with the file-converter backend ([ConversionEngine]).
+     *
+     * @param includeDirectMp3 true on the local YouTube path, where the native
+     * MP3 engine downloads directly. Remote platforms use the converted MP3
+     * instead, since servers don't reliably expose a direct MP3 stream.
      */
-    private fun converterAudioLadder(): List<QualityOption> = listOf(
-        QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true),
-        QualityOption("AUDIO_M4A", "M4A", "Converted on device • AAC", isAudio = true, targetExt = "m4a", conversion = ConversionEngine.ConversionType.AUDIO_TO_M4A),
-        QualityOption("AUDIO_WAV", "WAV", "Converted on device • lossless", isAudio = true, targetExt = "wav", conversion = ConversionEngine.ConversionType.AUDIO_TO_WAV),
-        QualityOption("AUDIO_OGG", "OGG", "Converted on device • Vorbis", isAudio = true, targetExt = "ogg", conversion = ConversionEngine.ConversionType.AUDIO_TO_OGG),
-        QualityOption("AUDIO_FLAC", "FLAC", "Converted on device • lossless", isAudio = true, targetExt = "flac", conversion = ConversionEngine.ConversionType.AUDIO_TO_FLAC),
-    )
+    private fun converterAudioLadder(includeDirectMp3: Boolean = true): List<QualityOption> = buildList {
+        if (includeDirectMp3) {
+            add(QualityOption("MP3", "MP3", "Direct • 320k", isAudio = true))
+        } else {
+            add(QualityOption("AUDIO_MP3", "MP3", "Converted on device • 320k", isAudio = true, targetExt = "mp3", conversion = ConversionEngine.ConversionType.AUDIO_TO_MP3))
+        }
+        add(QualityOption("AUDIO_M4A", "M4A", "Converted on device • AAC", isAudio = true, targetExt = "m4a", conversion = ConversionEngine.ConversionType.AUDIO_TO_M4A))
+        add(QualityOption("AUDIO_WAV", "WAV", "Converted on device • lossless", isAudio = true, targetExt = "wav", conversion = ConversionEngine.ConversionType.AUDIO_TO_WAV))
+        add(QualityOption("AUDIO_OGG", "OGG", "Converted on device • Vorbis", isAudio = true, targetExt = "ogg", conversion = ConversionEngine.ConversionType.AUDIO_TO_OGG))
+        add(QualityOption("AUDIO_FLAC", "FLAC", "Converted on device • lossless", isAudio = true, targetExt = "flac", conversion = ConversionEngine.ConversionType.AUDIO_TO_FLAC))
+    }
 
     private fun buildLocalOptions(heights: List<Int>): List<QualityOption> {
         // Audio-only mode offers the converter-backed audio ladder instead of video.
@@ -607,28 +614,60 @@ class MediaDownloaderViewModel @Inject constructor(
     /** Fires pending file-converter jobs for base downloads that just succeeded. */
     private fun checkPendingConversions(infos: List<WorkInfo>) {
         if (pendingConversions.isEmpty()) return
+        val byId = infos.associateBy { it.id.toString() }
         for (info in infos) {
-            val conversion = pendingConversions[info.id.toString()] ?: continue
-            when (info.state) {
-                WorkInfo.State.SUCCEEDED -> {
-                    pendingConversions.remove(info.id.toString())
-                    val label = _labels.value[info.id.toString()]
-                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        val uri = resolveDownloadUri(info, label)
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            if (uri != null) {
-                                startConversion(conversion, uri)
-                            } else {
-                                toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
-                            }
+            handlePendingWork(info, pendingConversions[info.id.toString()] ?: continue)
+        }
+        // The list above is capped to 10 recent downloads — a pending base download
+        // can fall outside that window, so query those IDs directly instead of
+        // silently dropping the conversion.
+        val missing = pendingConversions.keys - byId.keys
+        if (missing.isNotEmpty()) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val wm = WorkManager.getInstance(appContext)
+                val found = mutableListOf<WorkInfo>()
+                for (key in missing) {
+                    val uuid = runCatching { java.util.UUID.fromString(key) }.getOrNull()
+                    if (uuid == null) {
+                        continue
+                    }
+                    try {
+                        wm.getWorkInfoById(uuid).get()?.let { found += it }
+                    } catch (_: Exception) {
+                        // WorkManager query failed — keep pending for the next emission.
+                    }
+                }
+                if (found.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        for (info in found) {
+                            handlePendingWork(info, pendingConversions[info.id.toString()] ?: continue)
                         }
                     }
                 }
-                WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
-                    pendingConversions.remove(info.id.toString())
-                }
-                else -> Unit
             }
+        }
+    }
+
+    private fun handlePendingWork(info: WorkInfo, conversion: ConversionEngine.ConversionType) {
+        when (info.state) {
+            WorkInfo.State.SUCCEEDED -> {
+                pendingConversions.remove(info.id.toString())
+                val label = _labels.value[info.id.toString()]
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val uri = resolveDownloadUri(info, label)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (uri != null) {
+                            startConversion(conversion, uri)
+                        } else {
+                            toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+                        }
+                    }
+                }
+            }
+            WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
+                pendingConversions.remove(info.id.toString())
+            }
+            else -> Unit
         }
     }
 
@@ -646,7 +685,11 @@ class MediaDownloaderViewModel @Inject constructor(
             }
             toast(appContext, "Converting to ${conversion.extension.uppercase()}…")
         } catch (_: Exception) {
-            toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+            try {
+                toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_ConvertFailed))
+            } catch (_: Exception) {
+                toast(appContext, "Couldn't start the audio conversion.")
+            }
         }
     }
 
