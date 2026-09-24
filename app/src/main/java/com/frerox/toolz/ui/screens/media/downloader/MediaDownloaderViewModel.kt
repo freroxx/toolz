@@ -18,6 +18,8 @@ import androidx.work.workDataOf
 import com.frerox.toolz.data.catalog.CatalogRepository
 import com.frerox.toolz.data.downloader.DownloadzExtractResponse
 import com.frerox.toolz.data.downloader.MediaDownloaderRepository
+import com.frerox.toolz.service.FileConversionService
+import com.frerox.toolz.util.ConversionEngine
 import com.frerox.toolz.worker.SocialDownloadWorker
 import com.frerox.toolz.worker.VideoDownloadWorker
 import com.frerox.toolz.worker.YouTubeMp3DownloadWorker
@@ -66,6 +68,10 @@ class MediaDownloaderViewModel @Inject constructor(
         val detail: String,
         val isAudio: Boolean = false,
         val isHd: Boolean = false,
+        /** Target container for converter-backed options (null = direct download). */
+        val targetExt: String? = null,
+        /** File-converter backend type used after the base audio download finishes. */
+        val conversion: ConversionEngine.ConversionType? = null,
     )
 
     /** Human-readable info for a download row, captured at enqueue time. */
@@ -119,6 +125,13 @@ class MediaDownloaderViewModel @Inject constructor(
 
     private var extractJob: Job? = null
 
+    /**
+     * Base-download work IDs awaiting post-download conversion via the
+     * file-converter backend. Main-thread confined (written in
+     * [downloadSelected], consumed in the downloads collector).
+     */
+    private val pendingConversions = mutableMapOf<String, ConversionEngine.ConversionType>()
+
     init {
         viewModelScope.launch {
             dataStore.data
@@ -143,7 +156,10 @@ class MediaDownloaderViewModel @Inject constructor(
                 WorkManager.getInstance(appContext).getWorkInfosByTagFlow(VideoDownloadWorker.TAG_VIDEO_DOWNLOAD),
                 WorkManager.getInstance(appContext).getWorkInfosByTagFlow(YouTubeMp3DownloadWorker.TAG_MP3_DOWNLOAD),
             ) { social, video, mp3 -> (social + video + mp3).sortedByDescending { it.id.toString() }.take(10) }
-                .collect { _downloads.value = it }
+                .collect {
+                    _downloads.value = it
+                    checkPendingConversions(it)
+                }
         }
     }
 
@@ -175,6 +191,15 @@ class MediaDownloaderViewModel @Inject constructor(
     fun setAudioOnly(audioOnly: Boolean) {
         if (_ui.value.audioOnly == audioOnly) return
         _ui.value = _ui.value.copy(audioOnly = audioOnly)
+        // Never re-extract without a link: toggling the switch after clearing the
+        // field used to wipe the current result into a "Paste a link first" error.
+        if (_ui.value.url.trim().isBlank()) return
+        // Fast path: options already contain audio rows — just reselect, no network.
+        if (audioOnly && _ui.value.options.any { it.isAudio }) {
+            val firstAudio = _ui.value.options.first { it.isAudio }
+            _ui.value = _ui.value.copy(selectedId = firstAudio.id, downloadEnqueued = null)
+            return
+        }
         if (_ui.value.remote != null || _ui.value.localSourceUrl != null) extract()
     }
 
@@ -216,27 +241,14 @@ class MediaDownloaderViewModel @Inject constructor(
     /** Opens a finished download in an external viewer/player. */
     fun openDownload(context: Context, info: WorkInfo, label: DownloadLabel?) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val out = info.outputData
-            val mime = out.getString("mime_type")
-            val displayName = out.getString("display_name")
-            var uri = out.getString("file_uri")?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
-            if (uri != null && !uriResolves(uri)) uri = null
-            if (uri == null && displayName != null) uri = findInMediaStore(displayName)
-            if (uri == null && label != null) {
-                val safe = label.title.replace(Regex("[^a-zA-Z0-9 \\-.]"), "_").take(80)
-                val exts = if (label.isAudio) listOf(".mp3") else listOf(".mp4", ".mp3")
-                for (ext in exts) {
-                    uri = findInMediaStore(safe + ext)
-                    if (uri != null) break
-                }
-            }
+            val uri = resolveDownloadUri(info, label)
             if (uri == null) {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     toast(context, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
                 }
                 return@launch
             }
-            val resolvedMime = mime
+            val resolvedMime = info.outputData.getString("mime_type")
                 ?: appContext.contentResolver.getType(uri)
                 ?: if (label?.isAudio == true) "audio/*" else "video/*"
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
@@ -294,6 +306,28 @@ class MediaDownloaderViewModel @Inject constructor(
         return null
     }
 
+    /** Shared URI resolution for finished downloads (IO context). */
+    private fun resolveDownloadUri(info: WorkInfo, label: DownloadLabel?): android.net.Uri? {
+        val out = info.outputData
+        val displayName = out.getString("display_name")
+        var uri = out.getString("file_uri")?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+        if (uri != null && !uriResolves(uri)) uri = null
+        if (uri == null && displayName != null) uri = findInMediaStore(displayName)
+        if (uri == null && label != null) {
+            val safe = label.title.replace(Regex("[^a-zA-Z0-9 \\-.]"), "_").take(80)
+            val exts = if (label.isAudio) {
+                listOf(".mp3", ".m4a", ".wav", ".ogg", ".flac", ".opus", ".aac")
+            } else {
+                listOf(".mp4", ".mp3")
+            }
+            for (ext in exts) {
+                uri = findInMediaStore(safe + ext)
+                if (uri != null) break
+            }
+        }
+        return uri
+    }
+
     fun extract() {
         val raw = _ui.value.url.trim()
         if (raw.isBlank()) {
@@ -320,11 +354,16 @@ class MediaDownloaderViewModel @Inject constructor(
             when (val res = repository.extract(raw, _ui.value.audioOnly)) {
                 is MediaDownloaderRepository.ExtractResult.Remote -> {
                     val opts = buildRemoteOptions(res.response)
+                    val defaultId = if (_ui.value.audioOnly) {
+                        opts.firstOrNull { it.isAudio }?.id ?: opts.firstOrNull()?.id ?: "best"
+                    } else {
+                        opts.firstOrNull()?.id ?: "best"
+                    }
                     _ui.value = _ui.value.copy(
                         extracting = false,
                         remote = res.response,
                         options = opts,
-                        selectedId = opts.firstOrNull()?.id ?: "best",
+                        selectedId = defaultId,
                     )
                 }
                 is MediaDownloaderRepository.ExtractResult.Blocked -> {
@@ -365,6 +404,21 @@ class MediaDownloaderViewModel @Inject constructor(
     }
 
     private fun buildRemoteOptions(res: DownloadzExtractResponse): List<QualityOption> {
+        val audioOnly = _ui.value.audioOnly
+        val directAudio = res.formats.audio
+            .filter { !it.url.isNullOrBlank() && it.format_id != null }
+            .take(3)
+            .map { f ->
+                QualityOption(
+                    id = f.format_id!!,
+                    label = f.abr?.let { "${it.toInt()}k audio" } ?: f.resolution?.takeIf { it != "unknown" } ?: "Audio",
+                    detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "mp3"),
+                    isAudio = true,
+                )
+            }
+        if (audioOnly) {
+            return (directAudio + converterAudioLadder()).distinctBy { it.id }.take(10)
+        }
         val out = mutableListOf<QualityOption>()
         if (!res.download_url.isNullOrBlank()) {
             out += QualityOption("best", "Best quality", "recommended")
@@ -392,21 +446,25 @@ class MediaDownloaderViewModel @Inject constructor(
                     isHd = (h ?: 0) >= 1080,
                 )
             }
-        res.formats.audio
-            .filter { !it.url.isNullOrBlank() && it.format_id != null }
-            .take(4)
-            .forEach { f ->
-                out += QualityOption(
-                    id = f.format_id!!,
-                    label = f.abr?.let { "${it.toInt()}k audio" } ?: f.resolution?.takeIf { it != "unknown" } ?: "Audio",
-                    detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "mp3"),
-                    isAudio = true,
-                )
-            }
+        out += directAudio
         return out.distinctBy { it.id }.take(14)
     }
 
+    /**
+     * Converter-backed audio ladder. The base audio is downloaded first, then
+     * transcoded on-device with the file-converter backend ([ConversionEngine]).
+     */
+    private fun converterAudioLadder(): List<QualityOption> = listOf(
+        QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true),
+        QualityOption("AUDIO_M4A", "M4A", "Converted on device • AAC", isAudio = true, targetExt = "m4a", conversion = ConversionEngine.ConversionType.AUDIO_TO_M4A),
+        QualityOption("AUDIO_WAV", "WAV", "Converted on device • lossless", isAudio = true, targetExt = "wav", conversion = ConversionEngine.ConversionType.AUDIO_TO_WAV),
+        QualityOption("AUDIO_OGG", "OGG", "Converted on device • Vorbis", isAudio = true, targetExt = "ogg", conversion = ConversionEngine.ConversionType.AUDIO_TO_OGG),
+        QualityOption("AUDIO_FLAC", "FLAC", "Converted on device • lossless", isAudio = true, targetExt = "flac", conversion = ConversionEngine.ConversionType.AUDIO_TO_FLAC),
+    )
+
     private fun buildLocalOptions(heights: List<Int>): List<QualityOption> {
+        // Audio-only mode offers the converter-backed audio ladder instead of video.
+        if (_ui.value.audioOnly) return converterAudioLadder()
         // heights is now HONEST (only real playable heights, empty = probe failed).
         // Empty → unknown: offer the full ladder with "if available" notes (old UX),
         // default selection stays 720p. Non-empty → cap the ladder at the real max so
@@ -443,6 +501,11 @@ class MediaDownloaderViewModel @Inject constructor(
         val opt = s.options.firstOrNull { it.id == s.selectedId } ?: s.options.firstOrNull()
         if (opt == null) {
             _ui.value = s.copy(error = "Nothing to download yet — extract a link first.")
+            return
+        }
+        // Converter-backed audio: download base audio first, transcode on completion.
+        if (opt.conversion != null) {
+            downloadThenConvert(context, s, opt)
             return
         }
         // Remote path (TikTok / IG / remote YouTube)
@@ -489,6 +552,104 @@ class MediaDownloaderViewModel @Inject constructor(
         _ui.value = s.copy(downloadEnqueued = "Download started — ${opt.label}")
     }
 
+    /**
+     * Downloads base audio (MP3 / best audio stream), then transcodes it on-device
+     * with the file-converter backend once the download succeeds.
+     */
+    private fun downloadThenConvert(context: Context, s: UiState, opt: QualityOption) {
+        val conversion = opt.conversion ?: return
+        val ext = opt.targetExt ?: "m4a"
+        val remote = s.remote
+        if (remote != null && !remote.blocked) {
+            val pageUrl = remote.original_url?.ifBlank { s.url.trim() } ?: s.url.trim()
+            val baseFormatId = remote.formats.audio.firstOrNull { !it.url.isNullOrBlank() && it.format_id != null }?.format_id ?: "best"
+            val title = remote.title ?: "media"
+            val fileName = repository.downloadFileName(title, "mp3")
+            val req = OneTimeWorkRequestBuilder<SocialDownloadWorker>()
+                .setInputData(
+                    workDataOf(
+                        SocialDownloadWorker.KEY_PAGE_URL to pageUrl,
+                        SocialDownloadWorker.KEY_FORMAT_ID to baseFormatId,
+                        SocialDownloadWorker.KEY_FILE_NAME to fileName,
+                        SocialDownloadWorker.KEY_TITLE to title,
+                        SocialDownloadWorker.KEY_THUMBNAIL_URL to remote.thumbnail,
+                        SocialDownloadWorker.KEY_IS_AUDIO to true,
+                    )
+                )
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .addTag(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD)
+                .build()
+            WorkManager.getInstance(appContext).enqueueUniqueWork(
+                "social_download_${pageUrl.hashCode()}_${System.currentTimeMillis()}",
+                ExistingWorkPolicy.REPLACE,
+                req,
+            )
+            pendingConversions[req.id.toString()] = conversion
+            rememberLabel(req.id, DownloadLabel(title, "${opt.label} • .$ext", true, remote.thumbnail))
+            _ui.value = s.copy(downloadEnqueued = "Download started — converting to ${opt.label} next")
+            toast(context, "Downloading audio, then converting to ${opt.label}…")
+            return
+        }
+        val sourceUrl = s.localSourceUrl ?: s.url.trim()
+        val title = s.localTitle ?: remote?.title ?: "YouTube video"
+        val thumb = s.localThumbnail ?: remote?.thumbnail
+        val baseId = enqueueMp3(sourceUrl, title, thumb, context)
+        if (baseId != null) {
+            pendingConversions[baseId.toString()] = conversion
+            rememberLabel(baseId, DownloadLabel(title, "${opt.label} • .$ext", true, thumb))
+            _ui.value = s.copy(downloadEnqueued = "Download started — converting to ${opt.label} next")
+        } else {
+            _ui.value = s.copy(error = "Could not start the audio download. Try again.")
+        }
+    }
+
+    /** Fires pending file-converter jobs for base downloads that just succeeded. */
+    private fun checkPendingConversions(infos: List<WorkInfo>) {
+        if (pendingConversions.isEmpty()) return
+        for (info in infos) {
+            val conversion = pendingConversions[info.id.toString()] ?: continue
+            when (info.state) {
+                WorkInfo.State.SUCCEEDED -> {
+                    pendingConversions.remove(info.id.toString())
+                    val label = _labels.value[info.id.toString()]
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val uri = resolveDownloadUri(info, label)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            if (uri != null) {
+                                startConversion(conversion, uri)
+                            } else {
+                                toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+                            }
+                        }
+                    }
+                }
+                WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> {
+                    pendingConversions.remove(info.id.toString())
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun startConversion(conversion: ConversionEngine.ConversionType, uri: android.net.Uri) {
+        try {
+            val intent = android.content.Intent(appContext, FileConversionService::class.java).apply {
+                putParcelableArrayListExtra("input_uris", ArrayList(listOf(uri)))
+                putExtra("conversion_type", conversion.name)
+                putExtra("high_quality", true)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
+            toast(appContext, "Converting to ${conversion.extension.uppercase()}…")
+        } catch (_: Exception) {
+            toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_FileGone))
+        }
+    }
+
     private fun enqueueVideo(sourceUrl: String, title: String, thumb: String?, quality: String, context: Context) {
         try {
             android.widget.Toast.makeText(context, "Downloading video ($quality)…", android.widget.Toast.LENGTH_SHORT).show()
@@ -518,11 +679,11 @@ class MediaDownloaderViewModel @Inject constructor(
         }
     }
 
-    private fun enqueueMp3(sourceUrl: String, title: String, thumb: String?, context: Context) {
+    private fun enqueueMp3(sourceUrl: String, title: String, thumb: String?, context: Context): java.util.UUID? {
         try {
             android.widget.Toast.makeText(context, "Downloading MP3…", android.widget.Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
-        try {
+        return try {
             val req = OneTimeWorkRequestBuilder<YouTubeMp3DownloadWorker>()
                 .setInputData(
                     workDataOf(
@@ -541,8 +702,10 @@ class MediaDownloaderViewModel @Inject constructor(
                 req,
             )
             rememberLabel(req.id, DownloadLabel(title, "MP3", isAudio = true, thumbnailUrl = thumb))
+            req.id
         } catch (_: Exception) {
             enqueueVideo(sourceUrl, title, thumb, "MP3", context)
+            null
         }
     }
 

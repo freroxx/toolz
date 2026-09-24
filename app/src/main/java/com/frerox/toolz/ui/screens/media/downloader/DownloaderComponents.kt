@@ -27,12 +27,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Movie
@@ -72,7 +73,6 @@ import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveFilterChip
 import com.frerox.toolz.ui.components.ExpressiveLinearProgressIndicator
 import com.frerox.toolz.ui.components.ExpressiveStatePill
-import com.frerox.toolz.ui.components.ExpressiveTypingDots
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.MediumExpressiveShape
 import com.frerox.toolz.ui.components.SmallExpressiveShape
@@ -95,6 +95,20 @@ private val platformMetas = listOf(
     PlatformMeta(MediaDownloaderRepository.Platform.TIKTOK, "TikTok", Color(0xFF000000)),
     PlatformMeta(MediaDownloaderRepository.Platform.INSTAGRAM, "Reels", Color(0xFFDD2A7B)),
 )
+
+/** Display names in fixed order, restricted to the enabled set. */
+fun platformNames(enabled: Set<MediaDownloaderRepository.Platform>): String {
+    val ordered = listOf(
+        MediaDownloaderRepository.Platform.YOUTUBE to "YouTube",
+        MediaDownloaderRepository.Platform.TIKTOK to "TikTok",
+        MediaDownloaderRepository.Platform.INSTAGRAM to "Instagram",
+    ).filter { (platform, _) -> platform in enabled }.map { (_, label) -> label }
+    return if (ordered.isEmpty()) "YouTube / TikTok / Instagram" else ordered.joinToString(" / ")
+}
+
+/** Adaptive input hint, e.g. "Paste TikTok / Instagram link…" when YouTube is off. */
+fun platformHint(enabled: Set<MediaDownloaderRepository.Platform>): String =
+    "Paste ${platformNames(enabled)} link…"
 
 @Composable
 fun PlatformStatusRow(
@@ -345,56 +359,122 @@ fun FetchingSkeletonCard(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val thumbBrush = rememberShimmerBrush(0)
-            val titleBrush = rememberShimmerBrush(60)
-            val rowBrush = rememberShimmerBrush(140)
+            // Section label placeholder ("Preview").
+            Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(rememberShimmerBrush(0)),
+            )
+            // 16:9 thumbnail, same as ResultCard.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(thumbBrush),
+                    .background(rememberShimmerBrush(40)),
+            )
+            // Title (2 lines) + uploader line, same widths as real text.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(17.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(rememberShimmerBrush(100)),
             )
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.78f)
-                    .height(18.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(titleBrush),
+                    .fillMaxWidth(0.58f)
+                    .height(17.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(rememberShimmerBrush(140)),
             )
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.46f)
+                    .width(110.dp)
                     .height(13.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(titleBrush),
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(rememberShimmerBrush(180)),
             )
-            repeat(2) { i ->
-                val brush = rememberShimmerBrush(200 + i * 80)
+            // Stats row placeholders (views + likes pills).
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box(
                     modifier = Modifier
+                        .width(64.dp)
+                        .height(15.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(rememberShimmerBrush(220)),
+                )
+                Box(
+                    modifier = Modifier
+                        .width(64.dp)
+                        .height(15.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(rememberShimmerBrush(260)),
+                )
+            }
+            // Section label placeholder ("Choose quality").
+            Box(
+                modifier = Modifier
+                    .width(120.dp)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(rememberShimmerBrush(300)),
+            )
+            // Quality rows, mirroring QualityOptionRow: icon tile + 2 text bars + check.
+            repeat(4) { i ->
+                val brush = rememberShimmerBrush(340 + i * 70)
+                Row(
+                    modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
                         .clip(SmallExpressiveShape)
-                        .background(brush),
-                )
+                        .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(35.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(brush),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.6f)
+                                .height(15.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(brush),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.4f)
+                                .height(11.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(brush),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(brush),
+                    )
+                }
             }
-            ExpressiveLinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    stringResource(R.string.st_MediaDownloader_FetchingLabel),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold,
-                )
-                ExpressiveTypingDots()
-            }
-            // Keep unused warning quiet while preserving staggered timing reference.
-            @Suppress("UNUSED_EXPRESSION")
-            rowBrush
+            // Download CTA placeholder.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(rememberShimmerBrush(640)),
+            )
         }
     }
 }
@@ -402,7 +482,10 @@ fun FetchingSkeletonCard(modifier: Modifier = Modifier) {
 // ── Empty state hero ────────────────────────────────────────────────────────
 
 @Composable
-fun EmptyStateHero(modifier: Modifier = Modifier) {
+fun EmptyStateHero(
+    hint: String? = null,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -416,7 +499,7 @@ fun EmptyStateHero(modifier: Modifier = Modifier) {
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ) {
             Icon(
-                Icons.Rounded.Download,
+                Icons.Rounded.CloudDownload,
                 null,
                 modifier = Modifier.padding(22.dp).size(40.dp),
             )
@@ -428,7 +511,7 @@ fun EmptyStateHero(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center,
         )
         Text(
-            stringResource(R.string.st_MediaDownloader_Empty),
+            hint ?: stringResource(R.string.st_MediaDownloader_Empty),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -649,7 +732,7 @@ private fun DownloadStatusPill(state: WorkInfo.State) {
     when (state) {
         WorkInfo.State.RUNNING -> ExpressiveStatePill(
             text = stringResource(R.string.st_MediaDownloader_StatusDownloading),
-            icon = Icons.Rounded.Download,
+            icon = Icons.Rounded.CloudDownload,
             color = MaterialTheme.colorScheme.primary,
             isFilled = true,
         )

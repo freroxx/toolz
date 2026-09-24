@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,8 +34,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AddToHomeScreen
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ContentPaste
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Link
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -229,7 +231,9 @@ fun MediaDownloaderScreen(
             if (isIdle) {
                 item(key = "empty") {
                     DownloaderSection(1) {
-                        EmptyStateHero()
+                        EmptyStateHero(
+                            hint = "Paste a ${platformNames(ui.enabledPlatforms)} link above to preview title, thumbnail and quality options.",
+                        )
                     }
                 }
             }
@@ -296,7 +300,7 @@ private fun InputCard(
             TextField(
                 value = ui.url,
                 onValueChange = viewModel::onUrlChange,
-                placeholder = { Text(stringResource(R.string.st_MediaDownloader_Hint)) },
+                placeholder = { Text(platformHint(ui.enabledPlatforms)) },
                 leadingIcon = { Icon(Icons.Rounded.Link, null) },
                 trailingIcon = {
                     if (ui.url.isNotBlank()) {
@@ -332,27 +336,32 @@ private fun InputCard(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 1.dp,
+            )
+
             PlatformStatusRow(
                 enabled = ui.enabledPlatforms,
                 detected = ui.detectedPlatform,
                 onToggle = viewModel::togglePlatform,
             )
 
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 1.dp,
+            )
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                ) {
-                    Icon(
-                        Icons.Rounded.MusicNote,
-                        null,
-                        modifier = Modifier.padding(8.dp).size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Icon(
+                    Icons.Rounded.MusicNote,
+                    null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     stringResource(R.string.st_MediaDownloader_AudioOnly),
                     style = MaterialTheme.typography.bodyMedium,
@@ -368,7 +377,9 @@ private fun InputCard(
             ToolzExpressiveButton(
                 onClick = viewModel::extract,
                 enabled = ui.url.isNotBlank() && !isBusy,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
             ) {
                 if (isBusy) {
                     ExpressiveContainedLoadingIndicator(
@@ -381,7 +392,7 @@ private fun InputCard(
                         fontWeight = FontWeight.Black,
                     )
                 } else {
-                    Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
                     Text(
                         stringResource(R.string.st_MediaDownloader_Get),
                         fontWeight = FontWeight.Black,
@@ -390,22 +401,11 @@ private fun InputCard(
             }
 
             if (!ui.apiConfigured) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.Warning,
-                        null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        stringResource(R.string.st_MediaDownloader_ServerNeeded),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                Text(
+                    stringResource(R.string.st_MediaDownloader_ServerNeeded),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
@@ -572,7 +572,7 @@ private fun ResultCard(
                     onClick = onDownload,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
                     Text(
                         "${stringResource(R.string.st_MediaDownloader_Download)} • ${selected?.label ?: ""}",
                         fontWeight = FontWeight.Black,
