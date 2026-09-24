@@ -25,6 +25,8 @@ import com.frerox.toolz.data.music.MusicRepository
 import com.frerox.toolz.data.music.MusicTrack
 import com.frerox.toolz.data.music.toMediaItem
 import com.frerox.toolz.data.settings.SettingsRepository
+import com.frerox.toolz.service.MusicFocusState
+import com.frerox.toolz.service.MusicPlayerService
 import com.frerox.toolz.ui.screens.media.MusicUiState
 import com.frerox.toolz.util.VibrationManager
 import kotlinx.coroutines.CoroutineScope
@@ -488,7 +490,9 @@ class PlaybackTransport(
                 p.volume = 0f
                 p.play()
                 if (!uiState.value.isMutedByAi) {
-                    fadeVolume(1f, 100)
+                    // Duck-aware: never fade back to full volume while the
+                    // service is ducked — that silently un-ducked playback.
+                    fadeVolume(if (MusicFocusState.isDucking) MusicPlayerService.DUCK_VOLUME else 1f, 100)
                 } else {
                     p.volume = 0f
                 }
@@ -505,7 +509,7 @@ class PlaybackTransport(
             p.pause()
             if (!uiState.value.isMutedByAi) {
                 fadeVolume(0f, 80) {
-                    p.volume = 1f
+                    p.volume = if (MusicFocusState.isDucking) MusicPlayerService.DUCK_VOLUME else 1f
                 }
             }
         }

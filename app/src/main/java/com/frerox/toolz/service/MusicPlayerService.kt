@@ -81,6 +81,11 @@ import java.io.FileOutputStream
 import javax.inject.Inject
 import kotlin.math.sqrt
 
+/** Process-wide duck flag so UI fades don't stomp the service's duck volume. */
+internal object MusicFocusState {
+    @Volatile var isDucking: Boolean = false
+}
+
 @AndroidEntryPoint
 class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
@@ -97,6 +102,24 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         const val ACTION_TOGGLE_SHUFFLE = "com.frerox.toolz.action.TOGGLE_SHUFFLE"
         const val ACTION_CYCLE_REPEAT = "com.frerox.toolz.action.CYCLE_REPEAT"
         const val ACTION_SEEK_TO_POSITION = "com.frerox.toolz.action.SEEK_TO_POSITION"
+        // Explicit user recovery: steal focus back and play even after a
+        // permanent LOSS latched the player paused. Used by the UI refresh /
+        // retry button so "refresh" actually heals a focus stall (a MediaStore
+        // rescan alone never could).
+        const val ACTION_FORCE_RESUME = "com.frerox.toolz.action.FORCE_RESUME"
+        // Tear down stale focus state (abandon + fresh request + volume reset)
+        // without starting playback. Sent after library rescans.
+        const val ACTION_RESET_AUDIO_FOCUS = "com.frerox.toolz.action.RESET_AUDIO_FOCUS"
+        // Manual-resume steal window: a LOSS arriving right after the user
+        // pressed play is usually stale redelivery / race — retry the focus
+        // request once instead of latching paused forever ("resume instantly
+        // pauses" loop).
+        private const val MANUAL_RESUME_GRACE_MS = 2_000L
+        private const val FOCUS_STEAL_COOLDOWN_MS = 2_000L
+        // Headset/BT broadcasts often arrive in bursts (NOISY + ACL + PLUG for
+        // one unplug). Debounce so one physical event pauses once.
+        private const val NOISY_DEBOUNCE_MS = 1_500L
+        const val DUCK_VOLUME = 0.2f
 
         // How many upcoming tracks the widget's "Up Next" queue shows.
         // Bounded deliberately: Glance's RemoteViews-backed LazyColumn has
@@ -159,17 +182,34 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     // Timestamps (elapsedRealtime) of recent onPlayerError calls.
     private val recentPlaybackErrors = ArrayDeque<Long>()
     private var lastFocusRequestMs = 0L
+    private var lastAudioLossMs = 0L
+    private var lastManualResumeMs = 0L
+    private var lastStealRetryMs = 0L
+    private var lastNoisyPauseMs = 0L
+    private var consecutiveFocusDenials = 0
+
+    private fun markManualResume() {
+        lastManualResumeMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun setDucking(ducked: Boolean, volume: Float) {
+        isDucking = ducked
+        MusicFocusState.isDucking = ducked
+        runCatching { player.volume = volume }
+    }
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         if (!audioFocusEnabled) return@OnAudioFocusChangeListener
-        Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange isPlaying=${runCatching { player.isPlaying }.getOrDefault(false)}")
+        val now = SystemClock.elapsedRealtime()
+        val playing = runCatching { player.isPlaying }.getOrDefault(false)
+        val playWhenReady = runCatching { player.playWhenReady }.getOrDefault(false)
+        val playbackState = runCatching { player.playbackState }.getOrDefault(-1)
+        Log.i("MusicPlayerService", "onAudioFocusChange=$focusChange isPlaying=$playing playWhenReady=$playWhenReady state=$playbackState hasFocus=$hasAudioFocus shouldResume=$shouldResumeOnFocusGain ducking=$isDucking prefDuck=$audioFocusDucking denials=$consecutiveFocusDenials")
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
-                if (isDucking) {
-                    runCatching { player.volume = 1.0f }
-                    isDucking = false
-                }
+                consecutiveFocusDenials = 0
+                if (isDucking) setDucking(false, 1.0f)
                 if (shouldResumeOnFocusGain) {
                     shouldResumeOnFocusGain = false
                     if (runCatching { !player.isPlaying }.getOrDefault(false)) runCatching { player.play() }
@@ -177,23 +217,52 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
-                shouldResumeOnFocusGain = false
-                if (isDucking) {
-                    runCatching { player.volume = 1.0f }
-                    isDucking = false
+                lastAudioLossMs = now
+                // Manual-resume steal-back: a permanent LOSS landing inside the
+                // grace window after an explicit user play is usually stale
+                // redelivery (HyperOS) or a race with our own re-request — try
+                // once to steal focus back instead of latching paused forever.
+                // Transient losses (calls) are never stolen: they can't be
+                // preempted and fighting them blasts music over the call.
+                if (now - lastManualResumeMs < MANUAL_RESUME_GRACE_MS &&
+                    now - lastStealRetryMs > FOCUS_STEAL_COOLDOWN_MS
+                ) {
+                    lastStealRetryMs = now
+                    lastFocusRequestMs = 0L
+                    Log.i("MusicPlayerService", "LOSS in manual-resume grace, attempting steal-back")
+                    if (requestAudioFocus()) {
+                        Log.i("MusicPlayerService", "steal-back granted, keeping playback")
+                        updateWidget()
+                        return@OnAudioFocusChangeListener
+                    }
+                    Log.w("MusicPlayerService", "steal-back denied, pausing")
                 }
+                shouldResumeOnFocusGain = false
+                if (isDucking) setDucking(false, 1.0f)
                 if (runCatching { player.isPlaying }.getOrDefault(false)) runCatching { player.pause() }
                 abandonAudioFocus()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                lastAudioLossMs = now
                 shouldResumeOnFocusGain = runCatching { player.isPlaying }.getOrDefault(false)
                 if (runCatching { player.isPlaying }.getOrDefault(false)) runCatching { player.pause() }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 if (audioFocusDucking) {
                     if (!isDucking && runCatching { player.isPlaying }.getOrDefault(false)) {
-                        runCatching { player.volume = 0.2f }
-                        isDucking = true
+                        setDucking(true, DUCK_VOLUME)
+                        Log.i("MusicPlayerService", "ducking to $DUCK_VOLUME")
+                        // UI fades (100ms anti-pop in PlaybackTransport) run on
+                        // the same singleton player and restore 1.0f — re-apply
+                        // duck slightly after so ducking stays audible.
+                        serviceScope.launch {
+                            kotlinx.coroutines.delay(350L)
+                            if (isDucking && audioFocusDucking &&
+                                runCatching { player.isPlaying }.getOrDefault(false)
+                            ) {
+                                runCatching { player.volume = DUCK_VOLUME }
+                            }
+                        }
                     }
                 } else {
                     shouldResumeOnFocusGain = runCatching { player.isPlaying }.getOrDefault(false)
@@ -234,7 +303,12 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 AudioManager.AUDIOFOCUS_REQUEST_FAILED
             }
             hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            if (!hasAudioFocus) Log.w("MusicPlayerService", "audio focus not granted res=$res, continuing playback (pause only on LOSS callback)")
+            if (hasAudioFocus) {
+                consecutiveFocusDenials = 0
+            } else {
+                consecutiveFocusDenials++
+                Log.w("MusicPlayerService", "audio focus not granted res=$res denials=$consecutiveFocusDenials, continuing playback (pause only on LOSS callback)")
+            }
             hasAudioFocus
         } else {
             @Suppress("DEPRECATION")
@@ -245,8 +319,56 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 AudioManager.AUDIOFOCUS_REQUEST_FAILED
             }
             hasAudioFocus = res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            if (!hasAudioFocus) {
+                consecutiveFocusDenials++
+                Log.w("MusicPlayerService", "legacy audio focus not granted res=$res denials=$consecutiveFocusDenials")
+            } else {
+                consecutiveFocusDenials = 0
+            }
             hasAudioFocus
         }
+    }
+
+    /**
+     * Explicit user recovery after a latched LOSS stall: drop any stale
+     * request, steal focus back, and play. Unlike the passive path (play then
+     * best-effort request), this requests FIRST so a grant is in hand before
+     * playback starts — and still plays on denial so a broken OEM focus
+     * implementation can't brick music forever (a real LOSS will pause again
+     * with a clear log if focus is truly unavailable, e.g. a call).
+     */
+    private fun forceResume() {
+        markManualResume()
+        lastFocusRequestMs = 0L
+        lastStealRetryMs = SystemClock.elapsedRealtime()
+        runCatching { abandonAudioFocus() }
+        val granted = requestAudioFocus()
+        Log.i("MusicPlayerService", "forceResume granted=$granted denials=$consecutiveFocusDenials items=${runCatching { player.mediaItemCount }.getOrDefault(-1)}")
+        runCatching {
+            if (player.mediaItemCount == 0) {
+                restorePlaybackState(autoPlay = true)
+            } else {
+                player.prepare()
+                player.play()
+            }
+        }
+        updateWidget()
+    }
+
+    /** Heal stale focus state without starting playback (used after rescans). */
+    private fun resetAudioFocus() {
+        runCatching { abandonAudioFocus() }
+        shouldResumeOnFocusGain = false
+        consecutiveFocusDenials = 0
+        lastFocusRequestMs = 0L
+        setDucking(false, 1.0f)
+        if (audioFocusEnabled && runCatching { player.isPlaying }.getOrDefault(false)) {
+            val granted = requestAudioFocus()
+            Log.i("MusicPlayerService", "resetAudioFocus granted=$granted")
+        } else {
+            Log.i("MusicPlayerService", "resetAudioFocus cleared (idle)")
+        }
+        updateWidget()
     }
 
     private fun abandonAudioFocus() {
@@ -261,10 +383,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             @Suppress("DEPRECATION")
             runCatching { am.abandonAudioFocus(audioFocusListener) }
         }
-        if (isDucking) {
-            runCatching { player.volume = 1.0f }
-            isDucking = false
-        }
+        if (isDucking) setDucking(false, 1.0f)
     }
 
     private var cachedProcessedBitmap: Bitmap? = null
@@ -315,6 +434,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         if (state == 1) { // Plugged
                             if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
                         } else if (state == 0) { // Unplugged — checkpoint exact second, then pause
+                            if (!debounceNoisy()) return@runCatching
                             savePlaybackState()
                             if (player.isPlaying) player.pause()
                         }
@@ -323,17 +443,18 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = false)
                     }
                     BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
-                        // Audio becoming noisy usually handles this, but be safe.
-                        // Guard isPlaying so a stray disconnect can't pause a
-                        // fresh play() that raced the broadcast.
-                        if (player.isPlaying) {
-                            savePlaybackState()
-                            player.pause()
-                        }
+                        // Deliberately no pause: ACL fires for ANY BT profile
+                        // disconnect (watch, etc.), not just audio output. Real
+                        // audio-route loss always arrives as
+                        // ACTION_AUDIO_BECOMING_NOISY (plus ExoPlayer's own
+                        // handleAudioBecomingNoisy) — pausing here is what made
+                        // music randomly stop when a watch disconnected.
+                        Log.i("MusicPlayerService", "BT ACL disconnected (no pause; noisy handles audio loss)")
                     }
                     AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
                         // Wired/BT output lost (earphones unplugged, BT dropped):
                         // persist the exact position first so pocket-resume is exact.
+                        if (!debounceNoisy()) return@runCatching
                         if (player.isPlaying) {
                             savePlaybackState()
                             player.pause()
@@ -344,6 +465,13 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             }.onFailure {
                 Log.w("MusicPlayerService", "headsetReceiver failed", it)
             }
+        }
+
+        private fun debounceNoisy(): Boolean {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastNoisyPauseMs < NOISY_DEBOUNCE_MS) return false
+            lastNoisyPauseMs = now
+            return true
         }
     }
 
@@ -363,6 +491,10 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             updateWidget()
             if (isPlaying) {
+                // Any play start (UI tap, widget, headset, auto-resume) opens
+                // the steal-back window so a stale LOSS redelivery can't latch
+                // the player paused forever. Transient losses still pause.
+                markManualResume()
                 // Media3 now owns the foreground with the real media notification.
                 // Drop our transient placeholder so "Preparing music…" never sticks
                 // and never competes with (or suppresses) the real notification.
@@ -732,25 +864,38 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     // Shared pocket-resume path: if the process was killed, the queue is empty —
     // restore the last song at its exact saved second and play. Otherwise toggle.
     private fun resumeLastIfEmptyOrPlay() {
+        markManualResume()
         if (player.mediaItemCount == 0) {
             restorePlaybackState(autoPlay = true)
         } else {
-            if (player.isPlaying) player.pause() else player.play()
+            if (player.isPlaying) player.pause()
+            else {
+                lastFocusRequestMs = 0L
+                requestAudioFocus()
+                player.play()
+            }
         }
     }
 
     private fun handleMediaButtonPlayPause() {
         runCatching {
+            markManualResume()
             if (player.mediaItemCount == 0) {
                 restorePlaybackState(autoPlay = true)
             } else {
-                if (player.isPlaying) player.pause() else player.play()
+                if (player.isPlaying) player.pause()
+                else {
+                    lastFocusRequestMs = 0L
+                    requestAudioFocus()
+                    player.play()
+                }
             }
         }
     }
 
     private fun handleMediaButtonNext() {
         runCatching {
+            markManualResume()
             if (player.mediaItemCount == 0) {
                 restorePlaybackState(autoPlay = true)
             } else if (player.hasNextMediaItem()) {
@@ -758,6 +903,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else if (player.repeatMode == Player.REPEAT_MODE_ALL) {
                 player.seekTo(0, 0L)
             } else {
+                lastFocusRequestMs = 0L
+                requestAudioFocus()
                 player.play()
             }
         }
@@ -765,6 +912,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
 
     private fun handleMediaButtonPrevious() {
         runCatching {
+            markManualResume()
             if (player.mediaItemCount == 0) {
                 restorePlaybackState(autoPlay = true)
             } else if (player.currentPosition > 3_000) {
@@ -774,6 +922,8 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             } else if (player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 0) {
                 player.seekTo(player.mediaItemCount - 1, 0L)
             } else {
+                lastFocusRequestMs = 0L
+                requestAudioFocus()
                 player.play()
             }
         }
@@ -854,19 +1004,16 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 if (!enabled) {
                     // Smart focus OFF: restore volume, clear resume flag, abandon focus,
                     // and keep playing (music mixes with other apps).
-                    if (isDucking) {
-                        player.volume = 1.0f
-                        isDucking = false
-                    }
+                    if (isDucking) setDucking(false, 1.0f)
                     shouldResumeOnFocusGain = false
+                    consecutiveFocusDenials = 0
                     abandonAudioFocus()
                 } else {
                     // Smart focus ON
                     if (isDucking && !ducking) {
                         // Was ducking (playing quietly), but ducking is now disabled
                         // -> restore volume and pause instead, remembering to resume on gain
-                        player.volume = 1.0f
-                        isDucking = false
+                        setDucking(false, 1.0f)
                         shouldResumeOnFocusGain = player.isPlaying
                         if (player.isPlaying) player.pause()
                     } else if (!isDucking && ducking && shouldResumeOnFocusGain && !player.isPlaying) {
@@ -875,9 +1022,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         // if the transient focus is still held. We attempt to resume
                         // ducking; if focus is still held by another app, the system
                         // will keep us ducked via the listener, otherwise we play at full.
-                        player.volume = 0.2f
-                        isDucking = true
+                        setDucking(true, DUCK_VOLUME)
                         shouldResumeOnFocusGain = false
+                        markManualResume()
                         player.play()
                     }
                     // Re-request focus with updated willPauseWhenDucked if currently
@@ -888,15 +1035,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                     } else if (!wasEnabled || oldDucking != ducking) {
                         // Enabled while idle or ducking pref changed while idle:
                         // ensure no stale duck volume.
-                        if (isDucking) {
-                            player.volume = 1.0f
-                            isDucking = false
-                        }
-                        // If we were idle and just enabled focus, make sure volume is clean
-                        if (!wasEnabled) {
-                            player.volume = 1.0f
-                            isDucking = false
-                        }
+                        if (isDucking) setDucking(false, 1.0f)
                     }
                 }
             }
@@ -1057,7 +1196,17 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             when (action) {
                 ACTION_TOGGLE_PLAY -> {
                     if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
-                    else if (player.isPlaying) player.pause() else player.play()
+                    else if (player.isPlaying) player.pause()
+                    else {
+                        // Explicit user resume: request focus FIRST so a grant is
+                        // in hand before playback starts (avoids start-then-LOSS
+                        // instant-pause), then play regardless — a genuine LOSS
+                        // (call) will pause again with a clear log.
+                        markManualResume()
+                        lastFocusRequestMs = 0L
+                        requestAudioFocus()
+                        player.play()
+                    }
                 }
                 ACTION_SKIP_NEXT -> {
                     if (player.mediaItemCount == 0) restorePlaybackState(autoPlay = true)
@@ -1074,10 +1223,17 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                 ACTION_SEEK_TO_QUEUE_INDEX -> {
                     val index = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
                     if (index in 0 until player.mediaItemCount) {
+                        markManualResume()
                         player.seekTo(index, 0L)
-                        if (!player.isPlaying) player.play()
+                        if (!player.isPlaying) {
+                            lastFocusRequestMs = 0L
+                            requestAudioFocus()
+                            player.play()
+                        }
                     }
                 }
+                ACTION_FORCE_RESUME -> forceResume()
+                ACTION_RESET_AUDIO_FOCUS -> resetAudioFocus()
             ACTION_TOGGLE_FAVORITE -> {
                 serviceScope.launch {
                     val currentMediaId = player.currentMediaItem?.mediaId
@@ -1125,6 +1281,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // onIsPlayingChanged cancels the placeholder and Media3's real media
         // notification takes over. Non-playback actions demote immediately.
         val needsGrace = action == ACTION_TOGGLE_PLAY ||
+            action == ACTION_FORCE_RESUME ||
             action == ACTION_SKIP_NEXT ||
             action == ACTION_SKIP_PREV ||
             action == ACTION_SEEK_TO_QUEUE_INDEX

@@ -713,6 +713,33 @@ class MusicPlayerViewModel @Inject constructor(
             lastAutoScanMs = System.currentTimeMillis()
             _uiState.update { it.copy(isLoading = false) }
             hapticSuccess()
+            // A focus stall (permanent LOSS latched paused) survives rescans —
+            // heal stale focus state too so refresh actually recovers playback.
+            resetServiceAudioFocus()
+        }
+    }
+
+    /** Explicit user recovery: steal audio focus back and resume playback. */
+    fun forceResumeMusic() {
+        runCatching {
+            val intent = Intent(context, MusicPlayerService::class.java).apply {
+                action = MusicPlayerService.ACTION_FORCE_RESUME
+            }
+            context.startService(intent)
+        }.onFailure {
+            Log.w("MusicPlayerVM", "forceResumeMusic failed", it)
+        }
+        hapticSuccess()
+    }
+
+    private fun resetServiceAudioFocus() {
+        runCatching {
+            val intent = Intent(context, MusicPlayerService::class.java).apply {
+                action = MusicPlayerService.ACTION_RESET_AUDIO_FOCUS
+            }
+            context.startService(intent)
+        }.onFailure {
+            Log.w("MusicPlayerVM", "resetServiceAudioFocus failed", it)
         }
     }
 
