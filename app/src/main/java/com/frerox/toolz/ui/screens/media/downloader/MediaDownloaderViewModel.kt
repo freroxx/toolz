@@ -31,11 +31,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 
 /**
@@ -55,6 +57,8 @@ class MediaDownloaderViewModel @Inject constructor(
 
     companion object {
         private val PLATFORMS_KEY = stringSetPreferencesKey("media_downloader_platforms")
+        private val HISTORY_KEY = stringPreferencesKey("media_downloader_link_history")
+        private const val HISTORY_MAX = 20
         private val DEFAULT_PLATFORMS = setOf(
             MediaDownloaderRepository.Platform.YOUTUBE.name,
             MediaDownloaderRepository.Platform.TIKTOK.name,
@@ -72,6 +76,15 @@ class MediaDownloaderViewModel @Inject constructor(
         val targetExt: String? = null,
         /** File-converter backend type used after the base audio download finishes. */
         val conversion: ConversionEngine.ConversionType? = null,
+    )
+
+    /** A previously processed link: re-opening it re-extracts fresh options. */
+    data class HistoryEntry(
+        val url: String,
+        val title: String,
+        val thumbnailUrl: String? = null,
+        val platform: MediaDownloaderRepository.Platform? = null,
+        val timestampMs: Long = System.currentTimeMillis(),
     )
 
     /** Human-readable info for a download row, captured at enqueue time. */
@@ -115,6 +128,9 @@ class MediaDownloaderViewModel @Inject constructor(
     private val _labels = MutableStateFlow<Map<String, DownloadLabel>>(emptyMap())
     val labels: StateFlow<Map<String, DownloadLabel>> = _labels.asStateFlow()
 
+    private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
+    val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
+
     private fun rememberLabel(id: java.util.UUID, label: DownloadLabel) {
         val next = _labels.value.toMutableMap()
         next[id.toString()] = label
@@ -133,6 +149,14 @@ class MediaDownloaderViewModel @Inject constructor(
     private val pendingConversions = mutableMapOf<String, ConversionEngine.ConversionType>()
 
     init {
+        viewModelScope.launch {
+            val saved = try {
+                decodeHistory(dataStore.data.map { prefs -> prefs[HISTORY_KEY] }.first())
+            } catch (_: Exception) {
+                emptyList()
+            }
+            _history.value = saved
+        }
         viewModelScope.launch {
             dataStore.data
                 .map { prefs -> prefs[PLATFORMS_KEY] ?: DEFAULT_PLATFORMS }
@@ -207,6 +231,71 @@ class MediaDownloaderViewModel @Inject constructor(
         if (url.isNullOrBlank()) return
         onUrlChange(url)
         extract()
+    }
+
+    /** Re-runs a history entry with fresh options. */
+    fun reopenHistory(entry: HistoryEntry) {
+        onUrlChange(entry.url)
+        extract()
+    }
+
+    fun clearHistory() {
+        _history.value = emptyList()
+        viewModelScope.launch {
+            try {
+                dataStore.edit { prefs -> prefs.remove(HISTORY_KEY) }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun recordHistory(entry: HistoryEntry) {
+        val next = (_history.value.filterNot { it.url == entry.url } + entry).takeLast(HISTORY_MAX)
+        _history.value = next
+        viewModelScope.launch {
+            try {
+                dataStore.edit { prefs -> prefs[HISTORY_KEY] = encodeHistory(next) }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun encodeHistory(entries: List<HistoryEntry>): String {
+        val arr = org.json.JSONArray()
+        entries.forEach { e ->
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("url", e.url)
+                    put("title", e.title)
+                    put("thumbnailUrl", e.thumbnailUrl)
+                    put("platform", e.platform?.name)
+                    put("timestampMs", e.timestampMs)
+                },
+            )
+        }
+        return arr.toString()
+    }
+
+    private fun decodeHistory(raw: String?): List<HistoryEntry> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val obj = arr.getJSONObject(i)
+                val url = obj.optString("url").ifBlank { return@mapNotNull null }
+                HistoryEntry(
+                    url = url,
+                    title = obj.optString("title").ifBlank { url },
+                    thumbnailUrl = obj.optString("thumbnailUrl").ifBlank { null },
+                    platform = obj.optString("platform").ifBlank { null }?.let {
+                        runCatching { MediaDownloaderRepository.Platform.valueOf(it) }.getOrNull()
+                    },
+                    timestampMs = obj.optLong("timestampMs", System.currentTimeMillis()),
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     /** Clears the current result so the user can start a fresh lookup. */
@@ -361,6 +450,14 @@ class MediaDownloaderViewModel @Inject constructor(
                         options = opts,
                         selectedId = defaultId,
                     )
+                    recordHistory(
+                        HistoryEntry(
+                            url = raw,
+                            title = res.response.title ?: raw,
+                            thumbnailUrl = res.response.thumbnail,
+                            platform = repository.detectPlatform(raw),
+                        ),
+                    )
                 }
                 is MediaDownloaderRepository.ExtractResult.Blocked -> {
                     _ui.value = _ui.value.copy(
@@ -390,6 +487,14 @@ class MediaDownloaderViewModel @Inject constructor(
                         localHeights = heights,
                         options = opts,
                         selectedId = opts.firstOrNull { it.id == "720p" }?.id ?: opts.firstOrNull()?.id ?: "best",
+                    )
+                    recordHistory(
+                        HistoryEntry(
+                            url = raw,
+                            title = res.title,
+                            thumbnailUrl = res.thumbnailUrl,
+                            platform = MediaDownloaderRepository.Platform.YOUTUBE,
+                        ),
                     )
                 }
                 is MediaDownloaderRepository.ExtractResult.Error -> {

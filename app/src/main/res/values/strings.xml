@@ -2427,11 +2427,16 @@
     <string name="st_MediaDownloader_ConvertFailed">Couldn\'t start the audio conversion — convert the downloaded file in File Converter</string>
     <string name="st_MediaDownloader_Platforms">Platforms</string>
     <string name="st_MediaDownloader_PlatformsHint">Only these platforms will be accepted</string>
+    <string name="st_MediaDownloader_Options">Options</string>
     <string name="st_MediaDownloader_PlatformDisabled">This link is from a disabled platform. Enable it above to continue.</string>
     <string name="st_MediaDownloader_Clear">Clear</string>
     <string name="st_MediaDownloader_PasteAndGo">Paste and fetch</string>
     <string name="st_MediaDownloader_ResultLabel">Preview</string>
     <string name="st_MediaDownloader_ChooseQuality">Choose quality</string>
+    <string name="st_MediaDownloader_History">History</string>
+    <string name="st_MediaDownloader_ClearAll">Clear all</string>
+    <string name="st_MediaDownloader_Links">Links</string>
+    <string name="st_MediaDownloader_NoHistory">No history yet — processed links will appear here</string>
     <string name="st_SearchScreen_ws_q_quadhd">Quad HD • merged</string>
     <string name="st_SearchScreen_ws_q_ultrahd">Ultra HD • merged</string>
     <string name="st_SearchScreen_ws_q_fullhd_merged">Full HD • merged</string>

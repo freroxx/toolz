@@ -6,11 +6,11 @@ package com.frerox.toolz.ui.screens.media.downloader
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,7 +45,6 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,7 +59,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,9 +107,11 @@ fun MediaDownloaderScreen(
     val ui by viewModel.ui.collectAsState()
     val downloads by viewModel.downloads.collectAsState()
     val labels by viewModel.labels.collectAsState()
+    val history by viewModel.history.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val haptic = rememberToolzHapticFeedback()
+    var showHistory by rememberSaveable { mutableStateOf(false) }
 
     val remote = ui.remote
     val hasResult = (remote != null && !remote.blocked) || ui.localSourceUrl != null
@@ -133,7 +138,7 @@ fun MediaDownloaderScreen(
         topBar = {
             ExpressiveTopAppBar(
                 title = stringResource(R.string.st_MediaDownloader_Title),
-                subtitle = stringResource(R.string.st_MediaDownloader_Sub),
+                subtitle = platformNames(ui.enabledPlatforms, " • "),
                 navigationIcon = {
                     ToolzTonalExpressiveIconButton(onClick = onBack, shape = SquircleShape) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
@@ -169,21 +174,34 @@ fun MediaDownloaderScreen(
                 }
             }
 
+            if (history.isNotEmpty()) {
+                item(key = "history") {
+                    DownloaderSection(1) {
+                        HistoryCard(
+                            count = history.size,
+                            onClick = { showHistory = true },
+                        )
+                    }
+                }
+            }
+
             item(key = "fetching") {
                 AnimatedVisibility(
                     visible = isBusy,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
+                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 ) {
-                    FetchingSkeletonCard()
+                    FetchingSkeletonCard(
+                        vertical = isVerticalVideo(ui.detectedPlatform),
+                    )
                 }
             }
 
             item(key = "error") {
                 AnimatedVisibility(
                     visible = ui.error != null,
-                    enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.97f),
-                    exit = fadeOut() + shrinkVertically() + scaleOut(targetScale = 0.97f),
+                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 ) {
                     ui.error?.let { msg ->
                         StateMessageCard(
@@ -199,8 +217,8 @@ fun MediaDownloaderScreen(
             item(key = "blocked") {
                 AnimatedVisibility(
                     visible = ui.blockedMessage != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically(),
+                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 ) {
                     ui.blockedMessage?.let { msg ->
                         StateMessageCard(
@@ -216,8 +234,8 @@ fun MediaDownloaderScreen(
             item(key = "result") {
                 AnimatedVisibility(
                     visible = hasResult && !isBusy,
-                    enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.97f),
-                    exit = fadeOut() + shrinkVertically() + scaleOut(targetScale = 0.97f),
+                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 ) {
                     if (hasResult) {
                         ResultCard(
@@ -233,6 +251,7 @@ fun MediaDownloaderScreen(
                     DownloaderSection(1) {
                         EmptyStateHero(
                             hint = "Paste a ${platformNames(ui.enabledPlatforms)} link above to preview title, thumbnail and quality options.",
+                            platforms = "Works with ${platformNames(ui.enabledPlatforms, " • ")}",
                         )
                     }
                 }
@@ -249,7 +268,7 @@ fun MediaDownloaderScreen(
                             stringResource(R.string.st_MediaDownloader_Active),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.Bold,
                         )
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -277,6 +296,28 @@ fun MediaDownloaderScreen(
                     )
                 }
             }
+        }
+
+        if (showHistory) {
+            HistorySheet(
+                history = history,
+                downloads = downloads,
+                labels = labels,
+                onLinkClick = { entry ->
+                    showHistory = false
+                    viewModel.reopenHistory(entry)
+                },
+                onClearHistory = viewModel::clearHistory,
+                onDismiss = { showHistory = false },
+                downloadProgress = viewModel::downloadProgress,
+                downloadFileUri = { info ->
+                    info.outputData.getString(SocialDownloadWorker.KEY_FILE_URI)
+                },
+                onCancelDownload = viewModel::cancelDownload,
+                onOpenDownload = { info, label ->
+                    viewModel.openDownload(context, info, label)
+                },
+            )
         }
     }
 }
@@ -336,25 +377,23 @@ private fun InputCard(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                thickness = 1.dp,
-            )
-
             PlatformStatusRow(
                 enabled = ui.enabledPlatforms,
                 detected = ui.detectedPlatform,
                 onToggle = viewModel::togglePlatform,
             )
 
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                thickness = 1.dp,
+            Text(
+                stringResource(R.string.st_MediaDownloader_Options),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Icon(
                     Icons.Rounded.MusicNote,
@@ -365,7 +404,7 @@ private fun InputCard(
                 Text(
                     stringResource(R.string.st_MediaDownloader_AudioOnly),
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 ExpressiveSwitch(
@@ -431,23 +470,35 @@ private fun ResultCard(
     val audioOpts = remember(ui.options) { ui.options.filter { it.isAudio } }
     val selected = ui.options.firstOrNull { it.id == ui.selectedId }
 
-    ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
+    ExpressiveCard(
+        onClick = {},
+        enabled = false,
+        shape = LargeExpressiveShape,
+        modifier = Modifier.animateContentSize(tween(140)),
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 stringResource(R.string.st_MediaDownloader_ResultLabel),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
             )
-            Box(
-                modifier = Modifier
+            val verticalThumb = isVerticalVideo(resolvePlatform(ui.detectedPlatform, remote?.platform))
+            val thumbModifier = if (verticalThumb) {
+                Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .clip(RoundedCornerShape(20.dp))
+            } else {
+                Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(20.dp)),
-            ) {
+                    .clip(RoundedCornerShape(20.dp))
+            }
+            Box(modifier = thumbModifier) {
                 if (!thumb.isNullOrBlank()) {
                     AsyncImage(
                         model = thumb,
@@ -527,7 +578,7 @@ private fun ResultCard(
                     stringResource(R.string.st_MediaDownloader_ChooseQuality),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.Bold,
                 )
                 if (videoOpts.isNotEmpty()) {
                     if (audioOpts.isNotEmpty()) {
@@ -535,7 +586,7 @@ private fun ResultCard(
                             stringResource(R.string.st_MediaDownloader_VideoGroup),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     videoOpts.forEach { opt ->
@@ -551,7 +602,7 @@ private fun ResultCard(
                         stringResource(R.string.st_MediaDownloader_AudioGroup),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                     )
                     audioOpts.forEach { opt ->
                         QualityOptionRow(
@@ -612,7 +663,7 @@ private fun StatChip(
             value,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
