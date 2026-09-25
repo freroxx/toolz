@@ -119,6 +119,7 @@ sealed class Screen(val route: String) {
         val homeRoute: String = "media_downloader"
         fun createRoute(url: String? = null) = if (url.isNullOrBlank()) "media_downloader" else "media_downloader?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
     }
+    object MediaDownloaderSettings : Screen("media_downloader_settings")
     object BackgroundRemover : Screen("background_remover?initialUri={initialUri}") {
         fun createRoute(initialUri: String? = null) =
             "background_remover" + (initialUri?.let { "?initialUri=${java.net.URLEncoder.encode(it, "UTF-8")}" } ?: "")

@@ -1173,6 +1173,12 @@ fun ToolzNavHost(
             com.frerox.toolz.ui.screens.media.downloader.MediaDownloaderScreen(
                 onBack = { toolOnBack() },
                 initialUrl = initialUrl,
+                onNavigateToSettings = { navController.navigate(Screen.MediaDownloaderSettings.route) },
+            )
+        }
+        composable(route = Screen.MediaDownloaderSettings.route) {
+            com.frerox.toolz.ui.screens.media.downloader.MediaDownloaderSettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
         composable(

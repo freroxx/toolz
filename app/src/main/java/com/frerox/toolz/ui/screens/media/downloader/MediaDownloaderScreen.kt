@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +32,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.rounded.AddToHomeScreen
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
@@ -41,7 +46,6 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Movie
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,10 +85,11 @@ import com.frerox.toolz.shortcuts.ToolShortcutDefinitions
 import com.frerox.toolz.shortcuts.ToolShortcutManager
 import com.frerox.toolz.ui.components.ExpressiveCard
 import com.frerox.toolz.ui.components.ExpressiveContainedLoadingIndicator
-import com.frerox.toolz.ui.components.ExpressiveSwitch
+import com.frerox.toolz.ui.components.ExpressiveSplitButton
 import com.frerox.toolz.ui.components.ExpressiveTopAppBar
 import com.frerox.toolz.ui.components.LargeExpressiveShape
 import com.frerox.toolz.ui.components.SquircleShape
+import com.frerox.toolz.ui.components.ToolzConnectedButtonGroup
 import com.frerox.toolz.ui.components.ToolzExpressiveButton
 import com.frerox.toolz.ui.components.ToolzExpressiveTextButton
 import com.frerox.toolz.ui.components.ToolzTonalExpressiveIconButton
@@ -102,6 +107,7 @@ import com.frerox.toolz.worker.SocialDownloadWorker
 fun MediaDownloaderScreen(
     onBack: () -> Unit,
     initialUrl: String? = null,
+    onNavigateToSettings: () -> Unit = {},
     viewModel: MediaDownloaderViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.ui.collectAsState()
@@ -125,6 +131,12 @@ fun MediaDownloaderScreen(
         ui.downloadEnqueued?.let {
             snackbar.showSnackbar(it.take(160))
             viewModel.consumeEnqueued()
+        }
+    }
+    LaunchedEffect(ui.conversionStarted) {
+        ui.conversionStarted?.let {
+            snackbar.showSnackbar(it.take(160))
+            viewModel.consumeConversionStarted()
         }
     }
     LaunchedEffect(hasResult, ui.error) {
@@ -170,7 +182,11 @@ fun MediaDownloaderScreen(
         ) {
             item(key = "input") {
                 DownloaderSection(0) {
-                    InputCard(viewModel = viewModel, isBusy = isBusy)
+                    InputCard(
+                        viewModel = viewModel,
+                        isBusy = isBusy,
+                        onNavigateToSettings = onNavigateToSettings,
+                    )
                 }
             }
 
@@ -191,8 +207,12 @@ fun MediaDownloaderScreen(
                     enter = fadeIn(tween(140)) + expandVertically(tween(140)),
                     exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
                 ) {
+                    val skeletonMode = ui.detectedPlatform?.let {
+                        viewModel.effectiveModeForUi(it)
+                    } ?: ui.mode
                     FetchingSkeletonCard(
                         vertical = isVerticalVideo(ui.detectedPlatform),
+                        mode = skeletonMode,
                     )
                 }
             }
@@ -250,8 +270,14 @@ fun MediaDownloaderScreen(
                 item(key = "empty") {
                     DownloaderSection(1) {
                         EmptyStateHero(
-                            hint = "Paste a ${platformNames(ui.enabledPlatforms)} link above to preview title, thumbnail and quality options.",
-                            platforms = "Works with ${platformNames(ui.enabledPlatforms, " • ")}",
+                            hint = stringResource(
+                                R.string.st_MediaDownloader_EmptyHint,
+                                platformNames(ui.enabledPlatforms),
+                            ),
+                            platforms = stringResource(
+                                R.string.st_MediaDownloader_WorksWith,
+                                platformNames(ui.enabledPlatforms, " • "),
+                            ),
                         )
                     }
                 }
@@ -293,6 +319,7 @@ fun MediaDownloaderScreen(
                         fileUri = info.outputData.getString(SocialDownloadWorker.KEY_FILE_URI),
                         onCancel = { viewModel.cancelDownload(info.id) },
                         onOpen = { viewModel.openDownload(context, info, label) },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
@@ -328,6 +355,7 @@ fun MediaDownloaderScreen(
 private fun InputCard(
     viewModel: MediaDownloaderViewModel,
     isBusy: Boolean,
+    onNavigateToSettings: () -> Unit,
 ) {
     val ui by viewModel.ui.collectAsState()
     val context = LocalContext.current
@@ -390,54 +418,78 @@ private fun InputCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.heightIn(min = 48.dp),
+            val modeIndex = when (
+                ui.detectedPlatform?.let { viewModel.effectiveModeForUi(it) } ?: ui.mode
             ) {
-                Icon(
-                    Icons.Rounded.MusicNote,
-                    null,
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    stringResource(R.string.st_MediaDownloader_AudioOnly),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                ExpressiveSwitch(
-                    checked = ui.audioOnly,
-                    onCheckedChange = viewModel::setAudioOnly,
-                )
+                MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
+                MediaDownloaderViewModel.DownloadMode.BOTH -> 1
+                MediaDownloaderViewModel.DownloadMode.AUDIO -> 2
             }
+            ToolzConnectedButtonGroup(
+                selectedIndex = modeIndex,
+                options = listOf(
+                    stringResource(R.string.st_MediaDownloader_VideoGroup),
+                    stringResource(R.string.st_MediaDownloader_Both),
+                    stringResource(R.string.st_MediaDownloader_AudioGroup),
+                ),
+                unCheckedIcons = listOf(
+                    Icons.Outlined.Movie,
+                    Icons.Outlined.Layers,
+                    Icons.Outlined.MusicNote,
+                ),
+                checkedIcons = listOf(
+                    Icons.Filled.Movie,
+                    Icons.Filled.Layers,
+                    Icons.Filled.MusicNote,
+                ),
+                onOptionSelected = { index ->
+                    viewModel.setMode(
+                        when (index) {
+                            0 -> MediaDownloaderViewModel.DownloadMode.VIDEO
+                            2 -> MediaDownloaderViewModel.DownloadMode.AUDIO
+                            else -> MediaDownloaderViewModel.DownloadMode.BOTH
+                        },
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-            ToolzExpressiveButton(
+            ExpressiveSplitButton(
                 onClick = viewModel::extract,
-                enabled = ui.url.isNotBlank() && !isBusy,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-            ) {
-                if (isBusy) {
-                    ExpressiveContainedLoadingIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        containerColor = Color.Transparent,
-                    )
-                    Text(
-                        stringResource(R.string.st_MediaDownloader_Fetching),
-                        fontWeight = FontWeight.Black,
-                    )
-                } else {
-                    Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
-                    Text(
-                        stringResource(R.string.st_MediaDownloader_Get),
-                        fontWeight = FontWeight.Black,
-                    )
-                }
-            }
+                onMenuClick = onNavigateToSettings,
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = {
+                    if (isBusy) {
+                        ExpressiveContainedLoadingIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = Color.Transparent,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Rounded.CloudDownload,
+                            null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                },
+                label = {
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = isBusy,
+                        label = "ctaLabel",
+                    ) { busy ->
+                        Text(
+                            if (busy) {
+                                stringResource(R.string.st_MediaDownloader_Fetching)
+                            } else {
+                                stringResource(R.string.st_MediaDownloader_Get)
+                            },
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                },
+            )
 
             if (!ui.apiConfigured) {
                 Text(

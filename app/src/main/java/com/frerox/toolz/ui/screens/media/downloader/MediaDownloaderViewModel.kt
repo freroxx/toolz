@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.datastore.core.DataStore
@@ -58,7 +57,10 @@ class MediaDownloaderViewModel @Inject constructor(
     companion object {
         private val PLATFORMS_KEY = stringSetPreferencesKey("media_downloader_platforms")
         private val HISTORY_KEY = stringPreferencesKey("media_downloader_link_history")
+        private val FORMAT_PREFS_KEY = stringPreferencesKey("media_downloader_format_prefs")
         private const val HISTORY_MAX = 20
+        /** Converted-audio ladder containers; mp3 is always on. */
+        val DEFAULT_LADDER_EXTS = setOf("mp3", "m4a", "wav", "ogg", "flac")
         private val DEFAULT_PLATFORMS = setOf(
             MediaDownloaderRepository.Platform.YOUTUBE.name,
             MediaDownloaderRepository.Platform.TIKTOK.name,
@@ -66,12 +68,30 @@ class MediaDownloaderViewModel @Inject constructor(
         )
     }
 
+    /** What to fetch: video streams, audio streams, or both (default). */
+    enum class DownloadMode { VIDEO, BOTH, AUDIO }
+
+    /** Per-platform format memory, edited in the customization screen. */
+    data class PlatformFormatPrefs(
+        val favorites: List<String> = emptyList(),
+        val hidden: Set<String> = emptySet(),
+        val autoSelect: String? = null,
+        val defaultMode: DownloadMode? = null,
+    )
+
+    data class DownloaderPrefs(
+        val perPlatform: Map<String, PlatformFormatPrefs> = emptyMap(),
+        val ladderExts: Set<String> = DEFAULT_LADDER_EXTS,
+    )
+
     data class QualityOption(
         val id: String,
         val label: String,
         val detail: String,
         val isAudio: Boolean = false,
         val isHd: Boolean = false,
+        /** Lowercase container (mp4, mp3, …) used for favorites/hide/auto-select. */
+        val ext: String = "",
         /** Target container for converter-backed options (null = direct download). */
         val targetExt: String? = null,
         /** File-converter backend type used after the base audio download finishes. */
@@ -114,9 +134,10 @@ class MediaDownloaderViewModel @Inject constructor(
         val probingLocal: Boolean = false,
         val options: List<QualityOption> = emptyList(),
         val selectedId: String = "best",
-        val audioOnly: Boolean = false,
+        val mode: DownloadMode = DownloadMode.BOTH,
         val apiConfigured: Boolean = true,
         val downloadEnqueued: String? = null,
+        val conversionStarted: String? = null,
     )
 
     private val _ui = MutableStateFlow(UiState(apiConfigured = repository.isApiConfigured()))
@@ -130,6 +151,9 @@ class MediaDownloaderViewModel @Inject constructor(
 
     private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
+
+    private val _formatPrefs = MutableStateFlow(DownloaderPrefs())
+    val formatPrefs: StateFlow<DownloaderPrefs> = _formatPrefs.asStateFlow()
 
     private fun rememberLabel(id: java.util.UUID, label: DownloadLabel) {
         val next = _labels.value.toMutableMap()
@@ -150,12 +174,12 @@ class MediaDownloaderViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val saved = try {
-                decodeHistory(dataStore.data.map { prefs -> prefs[HISTORY_KEY] }.first())
-            } catch (_: Exception) {
-                emptyList()
-            }
-            _history.value = saved
+            dataStore.data.map { prefs -> decodeHistory(prefs[HISTORY_KEY]) }
+                .collect { _history.value = it }
+        }
+        viewModelScope.launch {
+            dataStore.data.map { prefs -> decodePrefs(prefs[FORMAT_PREFS_KEY]) }
+                .collect { _formatPrefs.value = it }
         }
         viewModelScope.launch {
             dataStore.data
@@ -212,13 +236,19 @@ class MediaDownloaderViewModel @Inject constructor(
         )
     }
 
-    fun setAudioOnly(audioOnly: Boolean) {
-        if (_ui.value.audioOnly == audioOnly) return
-        _ui.value = _ui.value.copy(audioOnly = audioOnly)
-        // Never re-extract without a link: toggling the switch after clearing the
+    fun setMode(mode: DownloadMode) {
+        val platform = _ui.value.url.trim().takeIf { it.isNotBlank() }?.let {
+            repository.detectPlatform(it)
+        }
+        val hasOverride = platform?.let { _formatPrefs.value.perPlatform[it.name]?.defaultMode } != null
+        if (_ui.value.mode == mode && !hasOverride) return
+        _ui.value = _ui.value.copy(mode = mode)
+        // What you tap is what applies: a per-platform override would otherwise
+        // silently win and make the switch look broken.
+        if (platform != null && hasOverride) setPlatformMode(platform, null)
+        // Never re-extract without a link: toggling the mode after clearing the
         // field used to wipe the current result into a "Paste a link first" error.
-        // Otherwise always re-extract so the option list matches the mode — reusing
-        // the old mixed list is what leaked video rows into audio-only mode.
+        // Otherwise always re-extract so the option list matches the mode.
         if (_ui.value.url.trim().isBlank()) return
         extract()
     }
@@ -296,6 +326,174 @@ class MediaDownloaderViewModel @Inject constructor(
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    // ── Format preferences (customization screen, backup-compatible) ──────────
+    // Everything lives in the shared settings DataStore file, so the backup &
+    // restore tool picks it up with BackupItem.SETTINGS and no extra wiring.
+
+    private fun prefsFor(platform: MediaDownloaderRepository.Platform): PlatformFormatPrefs =
+        _formatPrefs.value.perPlatform[platform.name] ?: PlatformFormatPrefs()
+
+    private fun updatePrefs(transform: (DownloaderPrefs) -> DownloaderPrefs) {
+        val next = transform(_formatPrefs.value).let { prefs ->
+            // mp3 is always available in the converted ladder.
+            prefs.copy(ladderExts = prefs.ladderExts + "mp3")
+        }
+        _formatPrefs.value = next
+        viewModelScope.launch {
+            try {
+                dataStore.edit { it[FORMAT_PREFS_KEY] = encodePrefs(next) }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun toggleFavorite(platform: MediaDownloaderRepository.Platform, ext: String) {
+        val key = platform.name
+        updatePrefs { prefs ->
+            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
+            val next = if (ext in cur.favorites) cur.favorites - ext else cur.favorites + ext
+            prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(favorites = next)))
+        }
+    }
+
+    fun toggleHidden(platform: MediaDownloaderRepository.Platform, ext: String) {
+        if (ext == "mp3" || ext == "mp4") return
+        val key = platform.name
+        updatePrefs { prefs ->
+            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
+            val next = if (ext in cur.hidden) cur.hidden - ext else cur.hidden + ext
+            prefs.copy(
+                perPlatform = prefs.perPlatform + (
+                    key to cur.copy(hidden = next, favorites = cur.favorites - ext)
+                    ),
+            )
+        }
+    }
+
+    fun setAutoSelect(platform: MediaDownloaderRepository.Platform, ext: String?) {
+        val key = platform.name
+        updatePrefs { prefs ->
+            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
+            prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(autoSelect = ext)))
+        }
+    }
+
+    fun setPlatformMode(platform: MediaDownloaderRepository.Platform, mode: DownloadMode?) {
+        val key = platform.name
+        updatePrefs { prefs ->
+            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
+            prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(defaultMode = mode)))
+        }
+    }
+
+    fun setLadderExt(ext: String, enabled: Boolean) {
+        if (ext == "mp3") return
+        updatePrefs { prefs ->
+            val next = if (enabled) prefs.ladderExts + ext else prefs.ladderExts - ext
+            prefs.copy(ladderExts = next)
+        }
+    }
+
+    fun resetFormatPrefs() {
+        _formatPrefs.value = DownloaderPrefs()
+        viewModelScope.launch {
+            try {
+                dataStore.edit { it.remove(FORMAT_PREFS_KEY) }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun encodePrefs(prefs: DownloaderPrefs): String {
+        val root = org.json.JSONObject()
+        val perPlatform = org.json.JSONObject()
+        prefs.perPlatform.forEach { (key, p) ->
+            perPlatform.put(
+                key,
+                org.json.JSONObject().apply {
+                    put("favorites", org.json.JSONArray(p.favorites))
+                    put("hidden", org.json.JSONArray(p.hidden.toList()))
+                    put("autoSelect", p.autoSelect)
+                    put("defaultMode", p.defaultMode?.name)
+                },
+            )
+        }
+        root.put("perPlatform", perPlatform)
+        root.put("ladderExts", org.json.JSONArray(prefs.ladderExts.toList()))
+        return root.toString()
+    }
+
+    private fun decodePrefs(raw: String?): DownloaderPrefs {
+        if (raw.isNullOrBlank()) return DownloaderPrefs()
+        return try {
+            val root = org.json.JSONObject(raw)
+            val perPlatform = mutableMapOf<String, PlatformFormatPrefs>()
+            val pp = root.optJSONObject("perPlatform")
+            if (pp != null) {
+                val keys = pp.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    // Ignore platforms from newer app versions.
+                    if (runCatching { MediaDownloaderRepository.Platform.valueOf(key) }.getOrNull() == null) continue
+                    val obj = pp.optJSONObject(key) ?: continue
+                    perPlatform[key] = PlatformFormatPrefs(
+                        favorites = obj.optJSONArray("favorites")?.let { arr ->
+                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+                        } ?: emptyList(),
+                        hidden = obj.optJSONArray("hidden")?.let { arr ->
+                            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
+                        } ?: emptySet(),
+                        autoSelect = obj.optString("autoSelect").ifBlank { null },
+                        defaultMode = obj.optString("defaultMode").ifBlank { null }?.let {
+                            runCatching { DownloadMode.valueOf(it) }.getOrNull()
+                        },
+                    )
+                }
+            }
+            val ladder = root.optJSONArray("ladderExts")?.let { arr ->
+                (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
+            } ?: DEFAULT_LADDER_EXTS
+            DownloaderPrefs(perPlatform = perPlatform, ladderExts = ladder + "mp3")
+        } catch (_: Exception) {
+            DownloaderPrefs()
+        }
+    }
+
+    /** Per-platform default mode override, falling back to the global switch. */
+    private fun effectiveMode(platform: MediaDownloaderRepository.Platform?): DownloadMode =
+        platform?.let { _formatPrefs.value.perPlatform[it.name]?.defaultMode } ?: _ui.value.mode
+
+    /** Effective mode for UI display (global switch + platform override). */
+    fun effectiveModeForUi(platform: MediaDownloaderRepository.Platform): DownloadMode =
+        effectiveMode(platform)
+
+    /**
+     * Applies hide + favorite-sort prefs. Video (mp4) rows are never hidden —
+     * every mp4 row would match and the list would lose all video. Unknown
+     * extensions are never hidden, and if hiding would empty the list the
+     * filter is ignored (fail-open).
+     */
+    private fun applyFormatPrefs(
+        platform: MediaDownloaderRepository.Platform,
+        options: List<QualityOption>,
+    ): List<QualityOption> {
+        val prefs = prefsFor(platform)
+        if (prefs.hidden.isEmpty() && prefs.favorites.isEmpty()) return options
+        var list = if (prefs.hidden.isEmpty()) {
+            options
+        } else {
+            options.filter { it.ext.isBlank() || it.ext == "mp4" || it.ext !in prefs.hidden }
+        }
+        if (list.isEmpty()) list = options
+        if (prefs.favorites.isNotEmpty()) {
+            val rank = prefs.favorites.withIndex().associate { it.value to it.index }
+            list = list.sortedWith(
+                compareBy({ rank[it.ext] ?: Int.MAX_VALUE }, { options.indexOf(it) }),
+            )
+        }
+        return list
     }
 
     /** Clears the current result so the user can start a fresh lookup. */
@@ -436,14 +634,11 @@ class MediaDownloaderViewModel @Inject constructor(
                 localTitle = null, localSourceUrl = null, options = emptyList(),
                 selectedId = "best", downloadEnqueued = null,
             )
-            when (val res = repository.extract(raw, _ui.value.audioOnly)) {
+            when (val res = repository.extract(raw, effectiveMode(detected) == DownloadMode.AUDIO)) {
                 is MediaDownloaderRepository.ExtractResult.Remote -> {
-                    val opts = buildRemoteOptions(res.response)
-                    val defaultId = if (_ui.value.audioOnly) {
-                        opts.firstOrNull { it.isAudio }?.id ?: opts.firstOrNull()?.id ?: "best"
-                    } else {
-                        opts.firstOrNull()?.id ?: "best"
-                    }
+                    val mode = effectiveMode(detected)
+                    val opts = buildRemoteOptions(res.response, mode, detected)
+                    val defaultId = defaultSelection(detected, mode, opts)
                     _ui.value = _ui.value.copy(
                         extracting = false,
                         remote = res.response,
@@ -464,7 +659,9 @@ class MediaDownloaderViewModel @Inject constructor(
                         extracting = false,
                         remote = res.response,
                         blockedMessage = res.message,
-                        options = res.response?.let { buildRemoteOptions(it) } ?: emptyList(),
+                        options = res.response?.let {
+                            buildRemoteOptions(it, effectiveMode(detected), detected)
+                        } ?: emptyList(),
                     )
                 }
                 is MediaDownloaderRepository.ExtractResult.LocalYouTube -> {
@@ -481,12 +678,22 @@ class MediaDownloaderViewModel @Inject constructor(
                     } catch (_: Exception) {
                         emptyList()
                     }
-                    val opts = buildLocalOptions(heights)
+                    val mode = effectiveMode(detected)
+                    val opts = buildLocalOptions(
+                        heights,
+                        mode,
+                        MediaDownloaderRepository.Platform.YOUTUBE,
+                    )
                     _ui.value = _ui.value.copy(
                         probingLocal = false,
                         localHeights = heights,
                         options = opts,
-                        selectedId = opts.firstOrNull { it.id == "720p" }?.id ?: opts.firstOrNull()?.id ?: "best",
+                        selectedId = defaultSelection(
+                            MediaDownloaderRepository.Platform.YOUTUBE,
+                            mode,
+                            opts,
+                            preferredId = "720p",
+                        ),
                     )
                     recordHistory(
                         HistoryEntry(
@@ -504,8 +711,11 @@ class MediaDownloaderViewModel @Inject constructor(
         }
     }
 
-    private fun buildRemoteOptions(res: DownloadzExtractResponse): List<QualityOption> {
-        val audioOnly = _ui.value.audioOnly
+    private fun buildRemoteOptions(
+        res: DownloadzExtractResponse,
+        mode: DownloadMode,
+        platform: MediaDownloaderRepository.Platform?,
+    ): List<QualityOption> {
         val directAudio = res.formats.audio
             .filter { !it.url.isNullOrBlank() && it.format_id != null }
             .take(3)
@@ -515,19 +725,24 @@ class MediaDownloaderViewModel @Inject constructor(
                     label = f.abr?.let { "${it.toInt()}k audio" } ?: f.resolution?.takeIf { it != "unknown" } ?: "Audio",
                     detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "mp3"),
                     isAudio = true,
+                    ext = (f.ext ?: "mp3").lowercase(),
                 )
             }
-        if (audioOnly) {
-            return (directAudio + converterAudioLadder(includeDirectMp3 = false)).distinctBy { it.id }.take(10)
+        if (mode == DownloadMode.AUDIO) {
+            val list = (directAudio + converterAudioLadder(includeDirectMp3 = false)).distinctBy { it.id }
+            val withPrefs = platform?.let { applyFormatPrefs(it, list) } ?: list
+            return withPrefs.take(10)
         }
         val out = mutableListOf<QualityOption>()
         if (!res.download_url.isNullOrBlank()) {
-            out += QualityOption("best", "Best quality", "recommended")
+            out += QualityOption("best", "Best quality", "recommended", ext = res.ext?.lowercase() ?: "mp4")
         }
         // Server-side cobalt ladder first (converted on demand), then direct formats.
         res.quality_options.forEach { q ->
             if (q.f.isNotBlank()) {
-                out += QualityOption(q.f, q.label, "server", isAudio = q.f.endsWith("mp3"), isHd = false)
+                val isAudio = q.f.endsWith("mp3")
+                if (mode == DownloadMode.VIDEO && isAudio) return@forEach
+                out += QualityOption(q.f, q.label, "server", isAudio = isAudio, isHd = false, ext = if (isAudio) "mp3" else "mp4")
             }
         }
         res.formats.video
@@ -545,13 +760,19 @@ class MediaDownloaderViewModel @Inject constructor(
                         if (h != null && h >= 1080) "HD" else null,
                     ).joinToString(" · ").ifBlank { f.ext ?: "mp4" },
                     isHd = (h ?: 0) >= 1080,
+                    ext = (f.ext ?: "mp4").lowercase(),
                 )
             }
         out += directAudio
-        // MP3 is always offered in video mode too (converter-backed so it works
-        // on every platform, even when the server exposes no direct MP3 stream).
-        out += converterAudioLadder(includeDirectMp3 = false).first()
-        return out.distinctBy { it.id }.take(14)
+        if (mode != DownloadMode.VIDEO) {
+            // MP3 is always offered too (converter-backed so it works on every
+            // platform, even when the server exposes no direct MP3 stream).
+            val convertedMp3 = converterAudioLadder(includeDirectMp3 = false).first()
+            if (out.none { it.id == convertedMp3.id }) out += convertedMp3
+        }
+        val withPrefs = platform?.let { applyFormatPrefs(it, out) } ?: out
+        val filtered = if (mode == DownloadMode.VIDEO) withPrefs.filter { !it.isAudio } else withPrefs
+        return filtered.distinctBy { it.id }.take(14)
     }
 
     /**
@@ -564,35 +785,46 @@ class MediaDownloaderViewModel @Inject constructor(
      */
     private fun converterAudioLadder(includeDirectMp3: Boolean = true): List<QualityOption> = buildList {
         if (includeDirectMp3) {
-            add(QualityOption("MP3", "MP3", "Direct • 320k", isAudio = true))
+            add(QualityOption("MP3", "MP3", "Direct • 320k", isAudio = true, ext = "mp3"))
         } else {
-            add(QualityOption("AUDIO_MP3", "MP3", "Converted on device • 320k", isAudio = true, targetExt = "mp3", conversion = ConversionEngine.ConversionType.AUDIO_TO_MP3))
+            add(QualityOption("AUDIO_MP3", "MP3", "Converted on device • 320k", isAudio = true, ext = "mp3", targetExt = "mp3", conversion = ConversionEngine.ConversionType.AUDIO_TO_MP3))
         }
-        add(QualityOption("AUDIO_M4A", "M4A", "Converted on device • AAC", isAudio = true, targetExt = "m4a", conversion = ConversionEngine.ConversionType.AUDIO_TO_M4A))
-        add(QualityOption("AUDIO_WAV", "WAV", "Converted on device • lossless", isAudio = true, targetExt = "wav", conversion = ConversionEngine.ConversionType.AUDIO_TO_WAV))
-        add(QualityOption("AUDIO_OGG", "OGG", "Converted on device • Vorbis", isAudio = true, targetExt = "ogg", conversion = ConversionEngine.ConversionType.AUDIO_TO_OGG))
-        add(QualityOption("AUDIO_FLAC", "FLAC", "Converted on device • lossless", isAudio = true, targetExt = "flac", conversion = ConversionEngine.ConversionType.AUDIO_TO_FLAC))
-    }
+        add(QualityOption("AUDIO_M4A", "M4A", "Converted on device • AAC", isAudio = true, ext = "m4a", targetExt = "m4a", conversion = ConversionEngine.ConversionType.AUDIO_TO_M4A))
+        add(QualityOption("AUDIO_WAV", "WAV", "Converted on device • lossless", isAudio = true, ext = "wav", targetExt = "wav", conversion = ConversionEngine.ConversionType.AUDIO_TO_WAV))
+        add(QualityOption("AUDIO_OGG", "OGG", "Converted on device • Vorbis", isAudio = true, ext = "ogg", targetExt = "ogg", conversion = ConversionEngine.ConversionType.AUDIO_TO_OGG))
+        add(QualityOption("AUDIO_FLAC", "FLAC", "Converted on device • lossless", isAudio = true, ext = "flac", targetExt = "flac", conversion = ConversionEngine.ConversionType.AUDIO_TO_FLAC))
+    }.filter { it.targetExt == null || it.targetExt in _formatPrefs.value.ladderExts }
 
-    private fun buildLocalOptions(heights: List<Int>): List<QualityOption> {
+    private fun buildLocalOptions(
+        heights: List<Int>,
+        mode: DownloadMode,
+        platform: MediaDownloaderRepository.Platform,
+    ): List<QualityOption> {
         // Audio-only mode offers the converter-backed audio ladder instead of video.
-        if (_ui.value.audioOnly) return converterAudioLadder()
+        if (mode == DownloadMode.AUDIO) {
+            val list = converterAudioLadder().distinctBy { it.id }
+            return (applyFormatPrefs(platform, list)).take(10)
+        }
+        val includeMp3 = mode == DownloadMode.BOTH
         // heights is now HONEST (only real playable heights, empty = probe failed).
         // Empty → unknown: offer the full ladder with "if available" notes (old UX),
         // default selection stays 720p. Non-empty → cap the ladder at the real max so
         // we never promise 1080p on a 360p-only video (the old 640x360 bug).
         if (heights.isEmpty()) {
-            return buildList {
+            val ladder = buildList {
                 add(QualityOption("1080p", "1080p", "Full HD • merged if available", isHd = true))
                 add(QualityOption("720p", "720p", "HD if available"))
                 add(QualityOption("480p", "480p", "SD if available"))
                 add(QualityOption("360p", "360p", "Low"))
                 add(QualityOption("240p", "240p", "Data saver"))
-                add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
+                if (includeMp3) {
+                    add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
+                }
             }
+            return applyFormatPrefs(platform, ladder.withVideoExt())
         }
         val maxH = heights.maxOrNull() ?: 0
-        return buildList {
+        val ladder = buildList {
             if (maxH >= 2160 || heights.any { it >= 2160 }) add(QualityOption("2160p", "2160p", "Ultra HD • merged", isHd = true))
             if (maxH >= 1440 || heights.any { it >= 1440 }) add(QualityOption("1440p", "1440p", "Quad HD • merged", isHd = true))
             if (maxH >= 1080 || heights.any { it in 721..1200 }) add(QualityOption("1080p", "1080p", "Full HD • merged", isHd = true))
@@ -601,8 +833,44 @@ class MediaDownloaderViewModel @Inject constructor(
             // Always keep a playable low fallback + audio.
             add(QualityOption("360p", "360p", if (maxH < 480) "Best for this video" else "Low"))
             add(QualityOption("240p", "240p", "Data saver"))
-            add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
+            if (includeMp3) {
+                add(QualityOption("MP3", "MP3", "Audio only • 320k", isAudio = true))
+            }
         }
+        return applyFormatPrefs(platform, ladder.withVideoExt())
+    }
+
+    /** Local rows carry no ext from the probe: video is always mp4, audio is mp3. */
+    private fun List<QualityOption>.withVideoExt(): List<QualityOption> =
+        map { opt ->
+            when {
+                opt.ext.isNotBlank() -> opt
+                opt.isAudio -> opt.copy(ext = "mp3")
+                else -> opt.copy(ext = "mp4")
+            }
+        }
+
+    /** Default selection: remembered auto format, then an explicit preference,
+     * then the mode default, then the first row. */
+    private fun defaultSelection(
+        platform: MediaDownloaderRepository.Platform?,
+        mode: DownloadMode,
+        opts: List<QualityOption>,
+        preferredId: String? = null,
+    ): String {
+        platform?.let { p ->
+            prefsFor(p).autoSelect?.let { auto ->
+                opts.firstOrNull { it.ext == auto }?.id?.let { return it }
+            }
+        }
+        preferredId?.let { preferred ->
+            opts.firstOrNull { it.id == preferred }?.id?.let { return it }
+        }
+        return when (mode) {
+            DownloadMode.AUDIO -> opts.firstOrNull { it.isAudio }?.id
+            DownloadMode.VIDEO -> opts.firstOrNull { !it.isAudio }?.id
+            DownloadMode.BOTH -> null
+        } ?: opts.firstOrNull()?.id ?: "best"
     }
 
     /** Pure helper for unit tests: max playable height, 0 when unknown. */
@@ -788,7 +1056,15 @@ class MediaDownloaderViewModel @Inject constructor(
             } else {
                 appContext.startService(intent)
             }
-            toast(appContext, "Converting to ${conversion.extension.uppercase()}…")
+            val msg = try {
+                appContext.getString(
+                    com.frerox.toolz.R.string.st_MediaDownloader_ConvertingTo,
+                    conversion.extension.uppercase(),
+                )
+            } catch (_: Exception) {
+                "Converting to ${conversion.extension.uppercase()}… find it in File Converter"
+            }
+            _ui.value = _ui.value.copy(conversionStarted = msg)
         } catch (_: Exception) {
             try {
                 toast(appContext, appContext.getString(com.frerox.toolz.R.string.st_MediaDownloader_ConvertFailed))
@@ -878,6 +1154,10 @@ class MediaDownloaderViewModel @Inject constructor(
 
     fun consumeEnqueued() {
         _ui.value = _ui.value.copy(downloadEnqueued = null)
+    }
+
+    fun consumeConversionStarted() {
+        _ui.value = _ui.value.copy(conversionStarted = null)
     }
 
     private fun formatBytes(n: Long): String = when {

@@ -405,6 +405,7 @@ private fun rememberShimmerBrush(delayMs: Int): Brush {
 @Composable
 fun FetchingSkeletonCard(
     vertical: Boolean = false,
+    mode: MediaDownloaderViewModel.DownloadMode = MediaDownloaderViewModel.DownloadMode.BOTH,
     modifier: Modifier = Modifier,
 ) {
     ExpressiveCard(
@@ -490,50 +491,48 @@ fun FetchingSkeletonCard(
                     .clip(RoundedCornerShape(7.dp))
                     .background(rememberShimmerBrush(280)),
             )
-            // Quality rows, mirroring QualityOptionRow: 64dp, icon tile + 2 bars + radio.
-            repeat(4) { i ->
-                val brush = rememberShimmerBrush(320 + i * 40)
-                Row(
+            // Quality rows mirror the result structure for the active mode: grouped
+            // 3+2 with subgroup labels in Both mode, plain rows otherwise — exactly
+            // like ResultCard, which only shows subgroup labels with both groups.
+            var delay = 320
+            val videoRows = when (mode) {
+                MediaDownloaderViewModel.DownloadMode.VIDEO -> 6
+                MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
+                MediaDownloaderViewModel.DownloadMode.BOTH -> 3
+            }
+            val audioRows = when (mode) {
+                MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
+                MediaDownloaderViewModel.DownloadMode.AUDIO -> 5
+                MediaDownloaderViewModel.DownloadMode.BOTH -> 2
+            }
+            if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(SmallExpressiveShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                        .padding(horizontal = 14.dp)
-                        .height(64.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+                        .width(60.dp)
+                        .height(13.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(rememberShimmerBrush(delay)),
+                )
+                delay += 30
+            }
+            repeat(videoRows) {
+                SkeletonQualityRow(delayMs = delay)
+                delay += 40
+            }
+            if (mode != MediaDownloaderViewModel.DownloadMode.VIDEO) {
+                if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(brush),
+                            .width(60.dp)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(rememberShimmerBrush(delay)),
                     )
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.6f)
-                                .height(15.dp)
-                                .clip(RoundedCornerShape(7.dp))
-                                .background(brush),
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.4f)
-                                .height(11.dp)
-                                .clip(RoundedCornerShape(5.dp))
-                                .background(brush),
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(brush),
-                    )
+                    delay += 30
+                }
+                repeat(audioRows) {
+                    SkeletonQualityRow(delayMs = delay)
+                    delay += 40
                 }
             }
             // Download CTA placeholder.
@@ -542,9 +541,65 @@ fun FetchingSkeletonCard(
                     .fillMaxWidth()
                     .height(52.dp)
                     .clip(RoundedCornerShape(26.dp))
-                    .background(rememberShimmerBrush(640)),
+                    .background(rememberShimmerBrush(520)),
+            )
+            // "New link" action placeholder, mirroring ResultCard.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .width(96.dp)
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(rememberShimmerBrush(560)),
             )
         }
+    }
+}
+
+@Composable
+private fun SkeletonQualityRow(delayMs: Int) {
+    val brush = rememberShimmerBrush(delayMs)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(SmallExpressiveShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(horizontal = 14.dp)
+            .height(64.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(brush),
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .height(15.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(brush),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(11.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(brush),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(brush),
+        )
     }
 }
 
@@ -1143,13 +1198,13 @@ private fun historyPlatformLabel(platform: MediaDownloaderRepository.Platform?):
 private fun formatHistoryDate(timestampMs: Long): String {
     val diff = System.currentTimeMillis() - timestampMs
     if (diff < 0) return ""
-    val minutes = diff / 60_000
-    if (minutes < 1) return "Just now"
-    if (minutes < 60) return "${minutes}m ago"
-    val hours = minutes / 60
-    if (hours < 24) return "${hours}h ago"
-    val days = hours / 24
-    if (days < 7) return "${days}d ago"
+    if (diff < 7 * 24 * 60 * 60 * 1_000L) {
+        return try {
+            android.text.format.DateUtils.getRelativeTimeSpanString(timestampMs).toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
     return try {
         java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault())
             .format(java.util.Date(timestampMs))
