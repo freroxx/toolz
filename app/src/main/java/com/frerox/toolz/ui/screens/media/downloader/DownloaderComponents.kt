@@ -4,11 +4,13 @@
  */
 package com.frerox.toolz.ui.screens.media.downloader
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -54,11 +56,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -112,10 +116,10 @@ fun platformNames(
     val ordered = listOf(
         MediaDownloaderRepository.Platform.YOUTUBE to "YouTube",
         MediaDownloaderRepository.Platform.TIKTOK to "TikTok",
-        MediaDownloaderRepository.Platform.INSTAGRAM to "Instagram",
+        MediaDownloaderRepository.Platform.INSTAGRAM to "Reels",
     ).filter { (platform, _) -> platform in enabled }.map { (_, label) -> label }
     return if (ordered.isEmpty()) {
-        listOf("YouTube", "TikTok", "Instagram").joinToString(separator)
+        listOf("YouTube", "TikTok", "Reels").joinToString(separator)
     } else {
         ordered.joinToString(separator)
     }
@@ -233,6 +237,13 @@ fun QualityOptionRow(
     modifier: Modifier = Modifier,
 ) {
     val haptic = rememberToolzHapticFeedback()
+    var pressed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val interaction = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    androidx.compose.runtime.LaunchedEffect(interaction) {
+        interaction.interactions.collect {
+            pressed = it is androidx.compose.foundation.interaction.PressInteraction.Press
+        }
+    }
     // Always-present radio: color crossfades instead of mounting a check badge,
     // so selecting never shifts the row content sideways.
     val radioColor by androidx.compose.animation.animateColorAsState(
@@ -241,21 +252,27 @@ fun QualityOptionRow(
         } else {
             MaterialTheme.colorScheme.outlineVariant
         },
-        animationSpec = tween(200),
+        animationSpec = spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow),
         label = "qualityRadio",
+    )
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pressed) 0.98f else 1f,
+        animationSpec = spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMedium, dampingRatio = 0.7f),
+        label = "qualityPress",
+    )
+    val containerColor by androidx.compose.animation.animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
+        animationSpec = spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow),
+        label = "qualityContainer",
     )
     Surface(
         onClick = {
             haptic.tick()
             onSelect()
         },
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().graphicsLayer(scaleX = scale, scaleY = scale),
         shape = SmallExpressiveShape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLowest
-        },
+        color = containerColor,
         contentColor = if (selected) {
             MaterialTheme.colorScheme.onPrimaryContainer
         } else {
@@ -266,6 +283,7 @@ fun QualityOptionRow(
         } else {
             BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
         },
+        interactionSource = interaction,
     ) {
         Row(
             modifier = Modifier
@@ -387,6 +405,8 @@ fun StateMessageCard(
 
 @Composable
 private fun rememberShimmerBrush(delayMs: Int): Brush {
+    // Kept for single-use shimmer spots. The fetching card itself shares one
+    // transition (see FetchingSkeletonCard) to avoid a dozen concurrent loops.
     val transition = rememberInfiniteTransition(label = "dlShimmer$delayMs")
     val progress by transition.animateFloat(
         initialValue = -0.8f,
@@ -414,6 +434,27 @@ fun FetchingSkeletonCard(
     mode: MediaDownloaderViewModel.DownloadMode = MediaDownloaderViewModel.DownloadMode.BOTH,
     modifier: Modifier = Modifier,
 ) {
+    // One shared shimmer loop for the whole card — previously every placeholder
+    // owned its own infiniteTransition and janked on low-end devices.
+    val transition = rememberInfiniteTransition(label = "dlShimmerShared")
+    val progress by transition.animateFloat(
+        initialValue = -0.8f,
+        targetValue = 1.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "dlShimmerSharedProgress",
+    )
+    val shimmer = Brush.horizontalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceContainerLow,
+            MaterialTheme.colorScheme.surfaceContainer,
+            MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        startX = progress * 900f,
+        endX = progress * 900f + 500f,
+    )
     ExpressiveCard(
         onClick = {},
         enabled = false,
@@ -424,14 +465,7 @@ fun FetchingSkeletonCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Section label placeholder ("Preview").
-            Box(
-                modifier = Modifier
-                    .width(64.dp)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(rememberShimmerBrush(0)),
-            )
+            // Thumbnail first — no "Preview" label to match ResultCard.
             // Thumbnail: 16:9 for YouTube, fixed portrait height for TikTok/Reels.
             if (vertical) {
                 Box(
@@ -439,7 +473,7 @@ fun FetchingSkeletonCard(
                         .fillMaxWidth()
                         .height(300.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(rememberShimmerBrush(40)),
+                        .background(shimmer),
                 )
             } else {
                 Box(
@@ -447,7 +481,7 @@ fun FetchingSkeletonCard(
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(rememberShimmerBrush(40)),
+                        .background(shimmer),
                 )
             }
             // Title (2 lines) + uploader line, same widths as real text.
@@ -456,21 +490,21 @@ fun FetchingSkeletonCard(
                     .fillMaxWidth(0.85f)
                     .height(17.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(rememberShimmerBrush(80)),
+                    .background(shimmer),
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.58f)
                     .height(17.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(rememberShimmerBrush(120)),
+                    .background(shimmer),
             )
             Box(
                 modifier = Modifier
                     .width(110.dp)
                     .height(13.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(rememberShimmerBrush(160)),
+                    .background(shimmer),
             )
             // Stats row placeholders (views + likes pills).
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -479,14 +513,14 @@ fun FetchingSkeletonCard(
                         .width(64.dp)
                         .height(15.dp)
                         .clip(RoundedCornerShape(7.dp))
-                        .background(rememberShimmerBrush(200)),
+                        .background(shimmer),
                 )
                 Box(
                     modifier = Modifier
                         .width(64.dp)
                         .height(15.dp)
                         .clip(RoundedCornerShape(7.dp))
-                        .background(rememberShimmerBrush(240)),
+                        .background(shimmer),
                 )
             }
             // Section label placeholder ("Choose quality").
@@ -495,12 +529,11 @@ fun FetchingSkeletonCard(
                     .width(120.dp)
                     .height(14.dp)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(rememberShimmerBrush(280)),
+                    .background(shimmer),
             )
             // Quality rows mirror the result structure for the active mode: grouped
             // 3+2 with subgroup labels in Both mode, plain rows otherwise — exactly
             // like ResultCard, which only shows subgroup labels with both groups.
-            var delay = 320
             val videoRows = when (mode) {
                 MediaDownloaderViewModel.DownloadMode.VIDEO -> 6
                 MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
@@ -517,13 +550,11 @@ fun FetchingSkeletonCard(
                         .width(60.dp)
                         .height(13.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(rememberShimmerBrush(delay)),
+                        .background(shimmer),
                 )
-                delay += 30
             }
             repeat(videoRows) {
-                SkeletonQualityRow(delayMs = delay)
-                delay += 40
+                SkeletonQualityRow(brush = shimmer)
             }
             if (mode != MediaDownloaderViewModel.DownloadMode.VIDEO) {
                 if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
@@ -532,13 +563,11 @@ fun FetchingSkeletonCard(
                             .width(60.dp)
                             .height(13.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(rememberShimmerBrush(delay)),
+                            .background(shimmer),
                     )
-                    delay += 30
                 }
                 repeat(audioRows) {
-                    SkeletonQualityRow(delayMs = delay)
-                    delay += 40
+                    SkeletonQualityRow(brush = shimmer)
                 }
             }
             // Download CTA placeholder.
@@ -547,7 +576,7 @@ fun FetchingSkeletonCard(
                     .fillMaxWidth()
                     .height(52.dp)
                     .clip(RoundedCornerShape(26.dp))
-                    .background(rememberShimmerBrush(520)),
+                    .background(shimmer),
             )
             // "New link" action placeholder, mirroring ResultCard.
             Box(
@@ -556,15 +585,14 @@ fun FetchingSkeletonCard(
                     .width(96.dp)
                     .height(20.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(rememberShimmerBrush(560)),
+                    .background(shimmer),
             )
         }
     }
 }
 
 @Composable
-private fun SkeletonQualityRow(delayMs: Int) {
-    val brush = rememberShimmerBrush(delayMs)
+private fun SkeletonQualityRow(brush: Brush) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -667,7 +695,7 @@ fun MediaDownloadRow(
     info: WorkInfo,
     label: MediaDownloaderViewModel.DownloadLabel?,
     progress: Float,
-    fileUri: String?,
+    fileUri: String? = null,
     onCancel: () -> Unit,
     onOpen: () -> Unit,
     onRetry: (() -> Unit)? = null,
@@ -676,6 +704,22 @@ fun MediaDownloadRow(
     val active = info.state == WorkInfo.State.RUNNING || info.state == WorkInfo.State.ENQUEUED
     val openable = info.state == WorkInfo.State.SUCCEEDED
     val haptic = rememberToolzHapticFeedback()
+    val resolvedUri = fileUri ?: info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_FILE_URI)
+    // Infer kind from label first, then output mime/display name, then file extension.
+    // Fixes audio-only downloads showing a video icon after restart (label == null).
+    val outMime = info.outputData.getString("mime_type")
+        ?: info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_MIME_TYPE)
+    val outName = info.outputData.getString("display_name")
+        ?: info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_DISPLAY_NAME)
+        ?: resolvedUri
+    val effectiveIsAudio = label?.isAudio == true ||
+        label?.mediaKind == "audio" ||
+        (outMime?.startsWith("audio/") == true) ||
+        (label == null && outName?.lowercase()?.endsWith(".mp3") == true) ||
+        (label == null && outName?.lowercase()?.let { it.endsWith(".m4a") || it.endsWith(".wav") || it.endsWith(".ogg") || it.endsWith(".flac") } == true)
+    val effectiveIsImage = label?.mediaKind == "image" ||
+        (outMime?.startsWith("image/") == true) ||
+        (label == null && outName?.lowercase()?.let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") || it.endsWith(".webp") } == true)
     ExpressiveCard(
         onClick = {
             if (openable) {
@@ -684,7 +728,7 @@ fun MediaDownloadRow(
             }
         },
         enabled = openable,
-        modifier = modifier,
+        modifier = modifier.animateContentSize(spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)),
         shape = MediumExpressiveShape,
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -693,11 +737,11 @@ fun MediaDownloadRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 DownloadThumb(
-                    fileUri = fileUri,
+                    fileUri = resolvedUri,
                     remoteThumb = label?.thumbnailUrl,
-                    isAudio = label?.isAudio == true,
-                    isImage = label?.mediaKind == "image",
-                    showPlayBadge = openable && label?.mediaKind == "video",
+                    isAudio = effectiveIsAudio,
+                    isImage = effectiveIsImage,
+                    showPlayBadge = openable && !effectiveIsAudio && !effectiveIsImage,
                     modifier = Modifier.size(56.dp),
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -939,6 +983,19 @@ private fun DownloadStatusPill(state: WorkInfo.State) {
 
 @Composable
 private fun fallbackTitle(info: WorkInfo): Int {
+    val outMime = info.outputData.getString("mime_type")
+        ?: info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_MIME_TYPE)
+    if (outMime?.startsWith("audio/") == true) return R.string.st_MediaDownloader_FallbackAudio
+    if (outMime?.startsWith("image/") == true) return R.string.st_MediaDownloader_FallbackMedia
+    val outName = info.outputData.getString("display_name")
+        ?: info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_DISPLAY_NAME).orEmpty()
+    val lower = outName.lowercase()
+    if (lower.endsWith(".mp3") || lower.endsWith(".m4a") || lower.endsWith(".wav") || lower.endsWith(".ogg") || lower.endsWith(".flac")) {
+        return R.string.st_MediaDownloader_FallbackAudio
+    }
+    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp")) {
+        return R.string.st_MediaDownloader_FallbackMedia
+    }
     val tags = info.tags.joinToString(" ")
     return when {
         "mp3" in tags || "music" in tags -> R.string.st_MediaDownloader_FallbackAudio
@@ -978,6 +1035,7 @@ fun HistoryCard(
     count: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    activeCount: Int = 0,
 ) {
     val haptic = rememberToolzHapticFeedback()
     ExpressiveCard(
@@ -993,18 +1051,41 @@ fun HistoryCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Icon(
-                Icons.Rounded.History,
-                null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.History,
+                    null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                if (activeCount > 0) {
+                    Box(
+                        modifier = Modifier.align(Alignment.TopEnd).size(10.dp)
+                            .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                            .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                    )
+                }
+            }
             Text(
                 stringResource(R.string.st_MediaDownloader_History),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
+            if (activeCount > 0) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                ) {
+                    Text(
+                        "$activeCount active",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -1044,6 +1125,7 @@ fun HistorySheet(
     onRetryDownload: (WorkInfo) -> Unit,
     canRetryDownload: (WorkInfo) -> Boolean,
     onOpenDownload: (WorkInfo, MediaDownloaderViewModel.DownloadLabel?) -> Unit,
+    onDeleteHistoryEntry: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     ModalBottomSheet(
@@ -1106,7 +1188,7 @@ fun HistorySheet(
                         )
                     }
                     items(history, key = { it.url }) { entry ->
-                        HistoryLinkRow(entry = entry, onClick = onLinkClick)
+                        HistoryLinkRow(entry = entry, onClick = onLinkClick, onDelete = onDeleteHistoryEntry)
                     }
                 }
                 if (downloads.isNotEmpty()) {
@@ -1158,6 +1240,7 @@ fun HistorySheet(
 private fun HistoryLinkRow(
     entry: MediaDownloaderViewModel.HistoryEntry,
     onClick: (MediaDownloaderViewModel.HistoryEntry) -> Unit,
+    onDelete: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val haptic = rememberToolzHapticFeedback()
@@ -1221,12 +1304,29 @@ private fun HistoryLinkRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(
-                Icons.Rounded.ChevronRight,
-                null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (onDelete != null) {
+                androidx.compose.material3.IconButton(
+                    onClick = {
+                        haptic.tick()
+                        onDelete(entry.url)
+                    },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.st_MediaDownloader_Clear),
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

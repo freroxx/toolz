@@ -5,13 +5,21 @@
 package com.frerox.toolz.ui.screens.media.downloader
 
 import android.content.Context
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,6 +131,10 @@ fun MediaDownloaderScreen(
     val hasResult = (remote != null && !remote.blocked) || ui.localSourceUrl != null
     val isBusy = ui.extracting || ui.probingLocal
     val isIdle = !hasResult && !isBusy && ui.error == null && ui.blockedMessage == null
+    val activeDownloads = downloads.count { it.state == androidx.work.WorkInfo.State.RUNNING || it.state == androidx.work.WorkInfo.State.ENQUEUED }
+    // Smooth expressive motion: spring for layout, emphasized-feel fades.
+    val enterMotion = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) + expandVertically(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.85f))
+    val exitMotion = fadeOut(spring(stiffness = Spring.StiffnessMedium)) + shrinkVertically(spring(stiffness = Spring.StiffnessMedium, dampingRatio = 0.9f))
 
     LaunchedEffect(initialUrl) {
         if (!initialUrl.isNullOrBlank()) viewModel.prefill(initialUrl)
@@ -190,11 +202,12 @@ fun MediaDownloaderScreen(
                 }
             }
 
-            if (history.isNotEmpty()) {
+            if (history.isNotEmpty() || activeDownloads > 0) {
                 item(key = "history") {
                     DownloaderSection(1) {
                         HistoryCard(
                             count = history.size,
+                            activeCount = activeDownloads,
                             onClick = { showHistory = true },
                         )
                     }
@@ -204,8 +217,8 @@ fun MediaDownloaderScreen(
             item(key = "fetching") {
                 AnimatedVisibility(
                     visible = isBusy,
-                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
+                    enter = enterMotion,
+                    exit = exitMotion,
                 ) {
                     val skeletonMode = ui.detectedPlatform?.let {
                         viewModel.effectiveModeForUi(it)
@@ -220,8 +233,8 @@ fun MediaDownloaderScreen(
             item(key = "error") {
                 AnimatedVisibility(
                     visible = ui.error != null,
-                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
+                    enter = enterMotion,
+                    exit = exitMotion,
                 ) {
                     ui.error?.let { msg ->
                         StateMessageCard(
@@ -237,8 +250,8 @@ fun MediaDownloaderScreen(
             item(key = "blocked") {
                 AnimatedVisibility(
                     visible = ui.blockedMessage != null,
-                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
+                    enter = enterMotion,
+                    exit = exitMotion,
                 ) {
                     ui.blockedMessage?.let { msg ->
                         StateMessageCard(
@@ -254,8 +267,8 @@ fun MediaDownloaderScreen(
             item(key = "result") {
                 AnimatedVisibility(
                     visible = hasResult && !isBusy,
-                    enter = fadeIn(tween(140)) + expandVertically(tween(140)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
+                    enter = enterMotion,
+                    exit = exitMotion,
                 ) {
                     if (hasResult) {
                         ResultCard(
@@ -280,52 +293,6 @@ fun MediaDownloaderScreen(
                             ),
                         )
                     }
-                }
-            }
-
-            if (downloads.isNotEmpty()) {
-                item(key = "downloads_header") {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = 4.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.st_MediaDownloader_Active),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            Text(
-                                downloads.size.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            )
-                        }
-                    }
-                }
-                items(downloads, key = { it.id }) { info ->
-                    val label = labels[info.id.toString()]
-                    MediaDownloadRow(
-                        info = info,
-                        label = label,
-                        progress = viewModel.downloadProgress(info),
-                        fileUri = info.outputData.getString(SocialDownloadWorker.KEY_FILE_URI),
-                        onCancel = { viewModel.cancelDownload(info.id) },
-                        onOpen = { viewModel.openDownload(context, info, label) },
-                        onRetry = if (viewModel.canRetryDownload(info)) {
-                            { viewModel.retryDownload(info) }
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.animateItem(),
-                    )
                 }
             }
         }
@@ -353,6 +320,7 @@ fun MediaDownloaderScreen(
                 onOpenDownload = { info, label ->
                     viewModel.openDownload(context, info, label)
                 },
+                onDeleteHistoryEntry = viewModel::deleteHistoryEntry,
             )
         }
     }
@@ -375,22 +343,27 @@ private fun InputCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            val noClipboardMsg = stringResource(R.string.st_MediaDownloader_NoClipboardLink)
             TextField(
                 value = ui.url,
                 onValueChange = viewModel::onUrlChange,
                 placeholder = { Text(platformHint(ui.enabledPlatforms)) },
-                leadingIcon = { Icon(Icons.Rounded.Link, null) },
+                leadingIcon = { Icon(Icons.Rounded.Link, contentDescription = null) },
                 trailingIcon = {
-                    if (ui.url.isNotBlank()) {
-                        IconButton(onClick = { viewModel.onUrlChange("") }) {
-                            Icon(Icons.Rounded.Close, stringResource(R.string.st_MediaDownloader_Clear))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (ui.url.isNotBlank()) {
+                            IconButton(onClick = { viewModel.clearAll() }) {
+                                Icon(Icons.Rounded.Close, stringResource(R.string.st_MediaDownloader_Clear))
+                            }
                         }
-                    } else {
                         IconButton(onClick = {
-                            readLinkFromClipboard(context)?.let { pasted ->
+                            val pasted = readLinkFromClipboard(context)
+                            if (pasted != null) {
                                 haptic.tick()
                                 viewModel.onUrlChange(pasted)
                                 viewModel.extract()
+                            } else {
+                                viewModel.showInfo(noClipboardMsg)
                             }
                         }) {
                             Icon(
@@ -467,11 +440,11 @@ private fun InputCard(
                 onClick = viewModel::extract,
                 onMenuClick = onNavigateToSettings,
                 enabled = !isBusy,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(62.dp),
                 leadingIcon = {
                     if (isBusy) {
                         ExpressiveContainedLoadingIndicator(
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(24.dp),
                             color = MaterialTheme.colorScheme.onPrimary,
                             containerColor = Color.Transparent,
                         )
@@ -479,13 +452,16 @@ private fun InputCard(
                         Icon(
                             Icons.Rounded.CloudDownload,
                             null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 },
                 label = {
-                    androidx.compose.animation.AnimatedContent(
+                    AnimatedContent(
                         targetState = isBusy,
+                        transitionSpec = {
+                            fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium))
+                        },
                         label = "ctaLabel",
                     ) { busy ->
                         Text(
@@ -495,12 +471,18 @@ private fun InputCard(
                                 stringResource(R.string.st_MediaDownloader_Get)
                             },
                             fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
                         )
                     }
                 },
             )
 
-            if (!ui.apiConfigured) {
+            if (!ui.apiConfigured && ui.enabledPlatforms.any {
+                    it == com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform.TIKTOK ||
+                        it == com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform.INSTAGRAM
+                }
+            ) {
                 Text(
                     stringResource(R.string.st_MediaDownloader_ServerNeeded),
                     style = MaterialTheme.typography.labelSmall,
@@ -512,6 +494,60 @@ private fun InputCard(
 }
 
 // ── Result card ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun PreviewThumbnail(
+    thumb: String,
+    modifier: Modifier = Modifier,
+) {
+    // Skeleton shimmer while loading (not a spinner), icon tile on error.
+    val transition = rememberInfiniteTransition(label = "previewShimmer")
+    val progress by transition.animateFloat(
+        initialValue = -0.8f,
+        targetValue = 1.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart,
+        ),
+        label = "previewShimmerProgress",
+    )
+    val shimmer = androidx.compose.ui.graphics.Brush.horizontalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.surfaceContainerLow,
+            MaterialTheme.colorScheme.surfaceContainer,
+            MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        startX = progress * 900f,
+        endX = progress * 900f + 500f,
+    )
+    coil3.compose.SubcomposeAsyncImage(
+        model = thumb,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier,
+        loading = {
+            Box(
+                Modifier.fillMaxSize().background(shimmer),
+                contentAlignment = Alignment.Center,
+            ) { }
+        },
+        error = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Movie,
+                        null,
+                        modifier = Modifier.size(44.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+        },
+    )
+}
 
 @Composable
 private fun ResultCard(
@@ -536,18 +572,12 @@ private fun ResultCard(
         onClick = {},
         enabled = false,
         shape = LargeExpressiveShape,
-        modifier = Modifier.animateContentSize(tween(140)),
+        modifier = Modifier.animateContentSize(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = 0.85f)),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(
-                stringResource(R.string.st_MediaDownloader_ResultLabel),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold,
-            )
             val verticalThumb = imageOpts.isEmpty() && isVerticalVideo(resolvePlatform(ui.detectedPlatform, remote?.platform))
             val thumbModifier = if (verticalThumb) {
                 Modifier
@@ -562,10 +592,8 @@ private fun ResultCard(
             }
             Box(modifier = thumbModifier) {
                 if (!thumb.isNullOrBlank()) {
-                    AsyncImage(
-                        model = thumb,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                    PreviewThumbnail(
+                        thumb = thumb,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -701,15 +729,23 @@ private fun ResultCard(
                 }
                 ToolzExpressiveButton(
                     onClick = onDownload,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(58.dp),
                 ) {
-                    Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
-                    Text(
-                        "${if (selected?.kind == "image") stringResource(R.string.st_MediaDownloader_Save) else stringResource(R.string.st_MediaDownloader_Download)} • ${selected?.label ?: ""}",
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(20.dp))
+                        val action = if (selected?.kind == "image") stringResource(R.string.st_MediaDownloader_Save) else stringResource(R.string.st_MediaDownloader_Download)
+                        val suffix = selected?.label?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: ""
+                        Text(
+                            "$action$suffix",
+                            fontWeight = FontWeight.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     ToolzExpressiveTextButton(onClick = viewModel::clearResult) {
@@ -756,8 +792,9 @@ private fun readLinkFromClipboard(context: Context): String? {
         val clip = cm.primaryClip ?: return null
         for (i in 0 until clip.itemCount) {
             val text = clip.getItemAt(i).coerceToText(context)?.toString() ?: continue
-            val url = Regex("https?://[^\\s]+").find(text)?.value
-            if (url != null) return url
+            val raw = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(text)?.value ?: continue
+            val cleaned = raw.trim().trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"')
+            if (cleaned.isNotBlank()) return cleaned
         }
         null
     } catch (_: Exception) {

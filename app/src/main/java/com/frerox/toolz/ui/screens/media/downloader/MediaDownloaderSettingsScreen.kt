@@ -326,16 +326,19 @@ private fun PlatformPrefsCard(
 
             PrefGroupLabel(
                 stringResource(R.string.st_MediaDownloader_Favorites),
-                stringResource(R.string.st_MediaDownloader_FavoritesHint),
+                "Audio + photos pin to top. Video is always MP4, so MP4 favorite is off.",
             )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 exts.forEach { ext ->
+                    // MP4 covers every video row — favoriting it would be a dead toggle.
+                    val dead = ext == "mp4"
                     ExpressiveFilterChip(
-                        selected = ext in prefs.favorites,
-                        onClick = { onToggleFavorite(ext) },
+                        selected = !dead && ext in prefs.favorites,
+                        enabled = !dead,
+                        onClick = { if (!dead) onToggleFavorite(ext) },
                         label = {
                             Text(
                                 ext.uppercase(),

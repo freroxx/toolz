@@ -737,7 +737,18 @@
     <string name="st_Settings_Section_Media">MEDIA &amp; AUDIO</string>
     <string name="st_Settings_Section_Health">HEALTH &amp; ACTIVITY</string>
     <string name="st_Settings_Section_Notifications">NOTIFICATIONS</string>
+    <string name="st_Settings_Section_Widgets">WIDGETS</string>
     <string name="st_Settings_Section_System">SYSTEM &amp; DATA</string>
+
+    <!-- Widgets -->
+    <string name="widget_music_label">Toolz Music</string>
+    <string name="widget_music_desc">Playback controls with live progress and Up Next queue</string>
+    <string name="widget_pomodoro_label">Toolz Focus Timer</string>
+    <string name="widget_pomodoro_desc">Pomodoro countdown with session goal and quick controls</string>
+    <string name="widget_toolbar_label">Toolz Quick Actions</string>
+    <string name="widget_toolbar_desc">Search bar with customizable shortcuts to flashlight, QR and timer</string>
+    <string name="widget_screentime_label">Toolz Screen Time</string>
+    <string name="widget_screentime_desc">Daily usage ring with top apps and goal progress</string>
 
     <!-- About Section -->
     <string name="st_About_Toolz">TOOLZ</string>
@@ -2454,8 +2465,21 @@
     <string name="st_MediaDownloader_Auto">Auto</string>
     <string name="st_MediaDownloader_DefaultMode">Default mode</string>
     <string name="st_MediaDownloader_AudioFormats">Audio formats</string>
-    <string name="st_MediaDownloader_AudioFormatsHint">Used when Toolz falls back to on-device audio conversion</string>
+    <string name="st_MediaDownloader_AudioFormatsHint">Offered for audio downloads, converted on-device when needed</string>
     <string name="st_MediaDownloader_ResetDefaults">Reset to defaults</string>
+    <string name="st_MediaDownloader_NoClipboardLink">No link found in clipboard</string>
+    <string name="st_MediaDownloader_KeepOnePlatform">Keep at least one platform enabled</string>
+    <string name="st_MediaDownloader_Cancelling">Cancelling download…</string>
+    <string name="st_MediaDownloader_RetryStarted">Retry started</string>
+    <string name="st_MediaDownloader_ReopenToRetry">Reopen the original link to retry this download.</string>
+    <string name="st_MediaDownloader_PasteFirst">Paste a link first.</string>
+    <string name="st_MediaDownloader_NothingToDownload">Nothing to download yet — extract a link first.</string>
+    <string name="st_MediaDownloader_FormatGone">That format is no longer available. Extract the link again.</string>
+    <string name="st_MediaDownloader_Expired">This result expired. Extract the link again.</string>
+    <string name="st_MediaDownloader_BlockedGeneric">This media is blocked and can\'t be downloaded.</string>
+    <string name="st_MediaDownloader_NoAudio">No downloadable audio format is available.</string>
+    <string name="st_MediaDownloader_EnqueueFailed">Could not start the download. Try again.</string>
+    <string name="st_MediaDownloader_Opening">Opening…</string>
     <string name="st_SearchScreen_ws_q_quadhd">Quad HD • merged</string>
     <string name="st_SearchScreen_ws_q_ultrahd">Ultra HD • merged</string>
     <string name="st_SearchScreen_ws_q_fullhd_merged">Full HD • merged</string>
