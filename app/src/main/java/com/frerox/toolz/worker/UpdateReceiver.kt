@@ -127,5 +127,8 @@ class UpdateReceiver : BroadcastReceiver() {
             .build()
 
         notificationManager.notify(NotificationHelper.ID_UPDATE_READY, notification)
+        // Collapse the "update available" row: keeping 8001 next to 8002 reads
+        // as a duplicate. The ready-to-install row supersedes it.
+        try { notificationManager.cancel(NotificationHelper.ID_APP_UPDATE) } catch (_: Exception) {}
     }
 }

@@ -178,6 +178,19 @@ class ToolService : Service() {
     private var todoJob: Job? = null
     private var todoBase: Long = 0L
 
+    // Single-row notification protocol: each tool state owns exactly one
+    // notification ID (2001..2004); the FGS row reuses the active tool's ID
+    // instead of a parallel ID_FOREGROUND_SERVICE row (dup fix).
+    @Volatile private var lastFgsId: Int = NotificationHelper.ID_FOREGROUND_SERVICE
+    // Finish re-entrancy guards: ticker + watchdog + boot restore can all
+    // observe the same session end (dup alarm + double session count).
+    @Volatile private var isPomodoroFinishing: Boolean = false
+    @Volatile private var isTimerFinishing: Boolean = false
+    @Volatile private var lastPomodoroFinishAt: Long = 0L
+    @Volatile private var lastTimerFinishAt: Long = 0L
+    // Widget/notification tap-storm guard (rapid toggle/skip re-posts FGS).
+    @Volatile private var lastPomodoroToggleAt: Long = 0L
+
     private val binder = LocalBinder()
 
     inner class LocalBinder : Binder() {
@@ -211,11 +224,27 @@ class ToolService : Service() {
                 snoozeTimer(millis)
             }
             ACTION_POMODORO_TOGGLE -> {
-                if (_isPomodoroRunning.value) pausePomodoro()
-                else startPomodoro(_pomodoroRemaining.value, _pomodoroMode.value)
+                // Tap-storm guard: widget + notification taps can double-fire and
+                // re-post FGS back-to-back (looks like a duplicate row flashing).
+                val nowToggle = SystemClock.elapsedRealtime()
+                if (nowToggle - lastPomodoroToggleAt < 500L) {
+                    ensureForeground()
+                } else {
+                    lastPomodoroToggleAt = nowToggle
+                    if (_isPomodoroRunning.value) pausePomodoro()
+                    else startPomodoro(_pomodoroRemaining.value, _pomodoroMode.value)
+                }
             }
             ACTION_POMODORO_STOP, ACTION_POMODORO_RESET -> resetPomodoro()
-            ACTION_POMODORO_SKIP -> skipPomodoro()
+            ACTION_POMODORO_SKIP -> {
+                val nowSkip = SystemClock.elapsedRealtime()
+                if (nowSkip - lastPomodoroToggleAt < 500L) {
+                    ensureForeground()
+                } else {
+                    lastPomodoroToggleAt = nowSkip
+                    skipPomodoro()
+                }
+            }
             ACTION_POMODORO_FINISH -> onPomodoroWatchdogFired()
             ACTION_TODO_STOP -> stopTodoSession()
             ACTION_STOP_ALARM -> stopAlarm()
@@ -463,13 +492,7 @@ class ToolService : Service() {
             } else {
                 createTimerNotification()
             }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-                } else {
-                    startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif)
-                }
-            } catch (_: Exception) {}
+            startForegroundTracked(NotificationHelper.ID_TIMER, notif)
             return
         }
         // Background toggle OFF → satisfy the FGS start requirement, then demote
@@ -478,20 +501,47 @@ class ToolService : Service() {
             hideForeground()
             return
         }
-        val notif = when {
-            _isStopwatchRunning.value -> createStopwatchNotification()
-            _isTimerRunning.value -> createTimerNotification()
-            _isPomodoroRunning.value -> createPomodoroNotification()
-            _isTodoSessionActive.value -> createTodoNotification()
-            isPomodoroNotificationsEnabled && (_isPomodoroRunning.value || (_pomodoroRemaining.value < _pomodoroTotalMs.value)) -> createPomodoroNotification()
-            else -> createGenericNotification()
+        val (fgsId, notif) = when {
+            _isStopwatchRunning.value -> NotificationHelper.ID_STOPWATCH to createStopwatchNotification()
+            _isTimerRunning.value -> NotificationHelper.ID_TIMER to createTimerNotification()
+            _isPomodoroRunning.value -> NotificationHelper.ID_POMODORO to createPomodoroNotification()
+            _isTodoSessionActive.value -> NotificationHelper.ID_TODO to createTodoNotification()
+            isPomodoroNotificationsEnabled && (_isPomodoroRunning.value || (_pomodoroRemaining.value < _pomodoroTotalMs.value)) -> NotificationHelper.ID_POMODORO to createPomodoroNotification()
+            else -> NotificationHelper.ID_FOREGROUND_SERVICE to createGenericNotification()
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, notif)
+        startForegroundTracked(fgsId, notif)
+    }
+
+    /**
+     * Single-row FGS post: the foreground row reuses the active tool's own ID
+     * so a running tool shows exactly one row. On FGS-ID switch the stale row
+     * is cancelled and still-active tools are re-mirrored.
+     */
+    private fun startForegroundTracked(id: Int, notif: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(id, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(id, notif)
+            }
+        } catch (_: Exception) { return }
+        if (id != lastFgsId) {
+            val old = lastFgsId
+            lastFgsId = id
+            try { getSystemService(NotificationManager::class.java).cancel(old) } catch (_: Exception) {}
+            repostActiveToolRows(exceptId = id)
         }
+    }
+
+    /** Re-mirror still-active tools after the FGS row moves to another tool. */
+    private fun repostActiveToolRows(exceptId: Int) {
+        try {
+            if (exceptId != NotificationHelper.ID_STOPWATCH && _isStopwatchRunning.value) updateStopwatchNotification()
+            if (exceptId != NotificationHelper.ID_TIMER && (_isTimerRunning.value || _isTimerRinging.value)) updateTimerNotification()
+            if (exceptId != NotificationHelper.ID_POMODORO && _isPomodoroRunning.value) updatePomodoroNotification()
+            if (exceptId != NotificationHelper.ID_TODO && _isTodoSessionActive.value) updateTodoNotification()
+        } catch (_: Exception) {}
     }
 
     /**
@@ -512,6 +562,7 @@ class ToolService : Service() {
             } else {
                 startForeground(NotificationHelper.ID_FOREGROUND_SERVICE, silent)
             }
+            lastFgsId = NotificationHelper.ID_FOREGROUND_SERVICE
         } catch (_: Exception) {}
         try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
         try {
@@ -704,6 +755,7 @@ class ToolService : Service() {
             !_isTimerRinging.value
         ) {
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            lastFgsId = NotificationHelper.ID_FOREGROUND_SERVICE
         }
     }
 
@@ -721,6 +773,7 @@ class ToolService : Service() {
         }
         _isTimerRunning.value = true
         _isTimerRinging.value = false
+        isTimerFinishing = false
         timerEndTimestamp = SystemClock.elapsedRealtime() + durationMillis
         timerJob?.cancel()
         timerJob = serviceScope.launch {
@@ -766,6 +819,7 @@ class ToolService : Service() {
     fun resetTimer() {
         _isTimerRunning.value = false
         _isTimerRinging.value = false
+        isTimerFinishing = false
         timerJob?.cancel()
         _timerRemaining.value = 0L
         _timerInitial.value = 0L
@@ -806,6 +860,7 @@ class ToolService : Service() {
         stopTimerAlarmOnly()
         _isTimerRinging.value = false
         _isTimerRunning.value = false
+        isTimerFinishing = false
         timerJob?.cancel()
         timerRingStopJob?.cancel()
         cancelTimerWatchdog()
@@ -841,6 +896,13 @@ class ToolService : Service() {
     }
 
     private fun onTimerFinished() {
+        // Re-entrancy guard: ticker + watchdog + boot restore observe the same end.
+        // Without this the alarm posts twice (dup heads-up + double sound).
+        if (isTimerFinishing) return
+        val nowFinish = SystemClock.elapsedRealtime()
+        if (nowFinish - lastTimerFinishAt < 2000L) return
+        isTimerFinishing = true
+        lastTimerFinishAt = nowFinish
         _isTimerRunning.value = false
         timerJob?.cancel()
         cancelTimerWatchdog()
@@ -928,7 +990,7 @@ class ToolService : Service() {
             val intent = Intent(this, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_NAVIGATE_TO, Screen.Timer.route)
             }
-            val pi = PendingIntent.getActivity(this, 3103, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val pi = PendingIntent.getActivity(this, REQ_TIMER_ZERO_ERROR, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val notif = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_TOOL_ACTIVE)
                 .setContentTitle("Timer needs a duration")
                 .setContentText("Pick a duration greater than 0:00, then press Start.")
@@ -937,7 +999,7 @@ class ToolService : Service() {
                 .setAutoCancel(true)
                 .build()
             val manager = getSystemService(NotificationManager::class.java)
-            manager.notify(3103, notif)
+            manager.notify(REQ_TIMER_ZERO_ERROR, notif)
         } catch (_: Exception) {}
     }
 
@@ -1107,9 +1169,13 @@ class ToolService : Service() {
             ensureForeground()
         } else {
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+            lastFgsId = NotificationHelper.ID_FOREGROUND_SERVICE
             try {
                 val manager = getSystemService(NotificationManager::class.java)
+                manager.cancel(NotificationHelper.ID_STOPWATCH)
                 manager.cancel(NotificationHelper.ID_TIMER)
+                manager.cancel(NotificationHelper.ID_POMODORO)
+                manager.cancel(NotificationHelper.ID_TODO)
             } catch (_: Exception) {}
         }
     }
@@ -1283,6 +1349,7 @@ class ToolService : Service() {
         _pomodoroTotalMs.value = durationForMode(safeMode).coerceAtLeast(actualDuration)
         if (_pomodoroTotalMs.value <= 0L) _pomodoroTotalMs.value = actualDuration
         _isPomodoroRunning.value = true
+        isPomodoroFinishing = false
         pomodoroEndTimestamp = SystemClock.elapsedRealtime() + actualDuration
         pomodoroJob?.cancel()
         pomodoroJob = serviceScope.launch {
@@ -1327,6 +1394,13 @@ class ToolService : Service() {
     }
 
     private fun onPomodoroFinished() {
+        // Re-entrancy guard: ticker + watchdog + boot restore observe the same
+        // end. Without this the alarm posts twice and the session double-counts.
+        if (isPomodoroFinishing) return
+        val nowFinish = SystemClock.elapsedRealtime()
+        if (nowFinish - lastPomodoroFinishAt < 2000L) return
+        isPomodoroFinishing = true
+        lastPomodoroFinishAt = nowFinish
         val completedMode = _pomodoroMode.value
         cancelPomodoroWatchdog()
         stopPomodoroWidgetLoop()
@@ -1376,7 +1450,9 @@ class ToolService : Service() {
             try { settingsRepository.clearPomodoroRunState() } catch (_: Exception) {}
         }
         serviceScope.launch { pushPomodoroWidgetState() }
-        updatePomodoroNotification("Session finished!")
+        // Single-row finish: drop the ongoing row; the alarm (3002) is the only
+        // finish visual. Never re-post an ongoing row here (was: 2003 + FGS 1000).
+        try { getSystemService(NotificationManager::class.java).cancel(NotificationHelper.ID_POMODORO) } catch (_: Exception) {}
 
         // P-P0-04: Service owns auto-start. VM NEVER auto-starts from stale state.
         if (pomodoroAutoStartCached) {
@@ -1387,7 +1463,7 @@ class ToolService : Service() {
                 try { startPomodoro(nextDuration, nextMode) } catch (_: Exception) {}
             }
         } else {
-            ensureForeground()
+            maybeReleaseForegroundIfIdle()
         }
         // Release the short finish hold once ringing path is armed; ringing stops
         // via stopAlarm() which also releases. Keep bounded by timeout regardless.
@@ -1430,9 +1506,11 @@ class ToolService : Service() {
 
     fun resetPomodoro() {
         _isPomodoroRunning.value = false
+        isPomodoroFinishing = false
         pomodoroJob?.cancel()
         stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
+        stopPomodoroAlarmOnly()
         _pomodoroRemaining.value = durationForMode(_pomodoroMode.value)
         _pomodoroTotalMs.value = _pomodoroRemaining.value
         serviceScope.launch(Dispatchers.IO) {
@@ -1465,9 +1543,11 @@ class ToolService : Service() {
         val skippedMode = _pomodoroMode.value
         val completedBefore = _pomodoroSessionsDone.value.coerceAtLeast(0).coerceAtMost(999)
         _isPomodoroRunning.value = false
+        isPomodoroFinishing = false
         pomodoroJob?.cancel()
         stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
+        stopPomodoroAlarmOnly()
 
         if (skippedMode == "WORK") {
             val optimistic = (completedBefore + 1).coerceAtLeast(0).coerceAtMost(999)
@@ -1730,6 +1810,8 @@ class ToolService : Service() {
             }
         }
         ensureForeground()
+        // Mirror when another tool owns the FGS row (otherwise no Todo row at all).
+        updateTodoNotification()
     }
 
     fun stopTodoSession() {
@@ -1738,6 +1820,9 @@ class ToolService : Service() {
         _todoSessionTime.value = 0L
         _todoTaskId.value = null
         _todoTaskTitle.value = null
+        // Cancel our own row: stopForegroundIfIdle only removes the FGS row,
+        // so without this ID_TODO leaked in the shade after every session.
+        try { getSystemService(NotificationManager::class.java).cancel(NotificationHelper.ID_TODO) } catch (_: Exception) {}
         // Shared-file protocol: NEVER stopForeground(REMOVE) unconditionally —
         // that kills Timer/Stopwatch/Pomodoro. Demote only when all idle.
         stopForegroundIfIdle()
@@ -1912,9 +1997,12 @@ class ToolService : Service() {
     }
 
     fun stopAlarm() {
-        // Backward-compatible shared stop: stops BOTH timer + shared players, cancels both alarm IDs.
+        // Backward-compatible shared stop: stops timer + pomodoro players.
         // Timer paths prefer stopTimerAlarmOnly(); Pomodoro paths keep using this.
         // P-P1-03: dismiss must leave no stuck heads-up — cancel BOTH alarm IDs + ongoing.
+        // Targeted: never cancel the Timer alarm here (Timer has its own dismiss
+        // path). Cancelling 3001 here killed a live Timer alert when dismissing
+        // Pomodoro.
         _isTimerRinging.value = false
         serviceScope.launch(Dispatchers.IO) {
             timerPlayerMutex.withLock { try { stopTimerAlarmLocked() } catch (_: Exception) {} }
@@ -1922,7 +2010,6 @@ class ToolService : Service() {
         }
         try {
             val manager = getSystemService(android.app.NotificationManager::class.java)
-            manager.cancel(NotificationHelper.ID_TIMER_ALARM)
             manager.cancel(NotificationHelper.ID_POMODORO_ALARM)
             manager.cancel(NotificationHelper.ID_POMODORO)
         } catch (_: Exception) {}
@@ -1952,7 +2039,10 @@ class ToolService : Service() {
             action = ACTION_DISMISS_ALARM
             putExtra(EXTRA_NOTIFICATION_ID, notificationId)
         }
-        val dismissPI = PendingIntent.getService(this, notificationId + 100, dismissIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // Distinct dismiss code: notificationId+100 (=3102 for Pomodoro) collided
+        // numerically with REQ_TIMER_CONTENT. Pomodoro uses its own range.
+        val dismissReq = if (notificationId == NotificationHelper.ID_POMODORO_ALARM) REQ_POMODORO_DISMISS else notificationId + 100
+        val dismissPI = PendingIntent.getService(this, dismissReq, dismissIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         // T-P1-01: FSI check on A14+ with fallback; distinct requestCodes; re-alert allowed.
         val canFullScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -2354,6 +2444,10 @@ class ToolService : Service() {
         const val REQ_TIMER_STOPRESET = 3105
         // Pomodoro watchdog uses its own range — never reuse timer codes.
         const val REQ_POMODORO_WATCHDOG = 3201
+        const val REQ_POMODORO_DISMISS = 3202
+        // Timer zero-duration error: was 3103, shared numerically with
+        // REQ_TIMER_DISMISS (different component, but confusing + fragile).
+        const val REQ_TIMER_ZERO_ERROR = 3106
 
         const val RING_TIMEOUT_MS = 5 * 60_000L
     }
