@@ -136,6 +136,12 @@ class ToolService : Service() {
     val pomodoroFinishedCount: StateFlow<Int> = _pomodoroFinishedCount
     private var pomodoroJob: Job? = null
     private var pomodoroEndTimestamp: Long = 0L
+    // Widget live-push loop while a session runs: the Glance snapshot only
+    // re-renders on push, so without this the countdown text/ring freezes
+    // between state transitions. 15s keeps MM:SS roughly live without the
+    // flicker/battery cost of per-second Glance re-renders.
+    private var pomodoroWidgetJob: Job? = null
+    private val POMODORO_WIDGET_PUSH_INTERVAL_MS = 15_000L
     // P-P0-01: NO in-memory workSessionsCount — cadence derives purely from persisted
     // _pomodoroSessionsDone via nextModeAfterWork(). Never reintroduce a second counter.
 
@@ -307,8 +313,8 @@ class ToolService : Service() {
             ) { running, mode, done ->
                 Triple(running, mode, done)
             }.collect { _ ->
-                // P-P1-03: NEVER push per-tick — remaining excluded from key on purpose.
-                // Widget ticks locally via chronometer; push only on running/mode/done.
+                // P-P1-03: transition pushes carry running/mode/done; the 1s
+                // ticker below never pushes — the 15s widget loop owns that.
                 pushPomodoroWidgetState()
             }
         }
@@ -1261,7 +1267,8 @@ class ToolService : Service() {
 
     // --- Pomodoro Logic (P-P0-01/02/03 + P-P1-03 + P-P2-02) ---
     // DataStore is truth for sessions/goal/durations. Service owns auto-start + sound.
-    // Widget is pushed on running/mode/done only — never per-tick.
+    // Widget pushes on running/mode/done transitions plus a throttled 15s loop
+    // while running (Glance snapshots only re-render on push).
     fun startPomodoro(durationMillis: Long, mode: String) {
         val safeMode = when (mode) {
             "SHORT_BREAK", "LONG_BREAK", "WORK" -> mode
@@ -1293,13 +1300,36 @@ class ToolService : Service() {
             try { persistPomodoroState() } catch (_: Exception) {}
         }
         serviceScope.launch { pushPomodoroWidgetState() }
+        startPomodoroWidgetLoop()
         ensureForeground()
         updatePomodoroNotification()
+    }
+
+    /** Periodic widget refresh while running — stopped on pause/reset/skip/finish. */
+    private fun startPomodoroWidgetLoop() {
+        pomodoroWidgetJob?.cancel()
+        pomodoroWidgetJob = serviceScope.launch {
+            while (_isPomodoroRunning.value) {
+                delay(POMODORO_WIDGET_PUSH_INTERVAL_MS)
+                if (!_isPomodoroRunning.value) break
+                try {
+                    _pomodoroRemaining.value =
+                        (pomodoroEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                    pushPomodoroWidgetState()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun stopPomodoroWidgetLoop() {
+        pomodoroWidgetJob?.cancel()
+        pomodoroWidgetJob = null
     }
 
     private fun onPomodoroFinished() {
         val completedMode = _pomodoroMode.value
         cancelPomodoroWatchdog()
+        stopPomodoroWidgetLoop()
         // completedBefore is the count BEFORE this finish — nextModeAfterWork()
         // expects the pre-finish count (see PomodoroPhaseTest: 3 -> LONG means
         // the 4th session just finished). Never pass the post-increment value.
@@ -1388,6 +1418,7 @@ class ToolService : Service() {
         } catch (_: Exception) {}
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
+        stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
         serviceScope.launch(Dispatchers.IO) {
             try { persistPomodoroState() } catch (_: Exception) {}
@@ -1400,6 +1431,7 @@ class ToolService : Service() {
     fun resetPomodoro() {
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
+        stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
         _pomodoroRemaining.value = durationForMode(_pomodoroMode.value)
         _pomodoroTotalMs.value = _pomodoroRemaining.value
@@ -1434,6 +1466,7 @@ class ToolService : Service() {
         val completedBefore = _pomodoroSessionsDone.value.coerceAtLeast(0).coerceAtMost(999)
         _isPomodoroRunning.value = false
         pomodoroJob?.cancel()
+        stopPomodoroWidgetLoop()
         cancelPomodoroWatchdog()
 
         if (skippedMode == "WORK") {

@@ -74,11 +74,14 @@ import java.util.Locale
 class PomodoroGlanceWidget : GlanceAppWidget() {
 
     companion object {
+        // Reference sizes for the widget picker + preview rendering.
         private val COMPACT = DpSize(150.dp, 150.dp)
         private val EXPANDED = DpSize(300.dp, 160.dp)
     }
 
-    override val sizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
+    // Exact: the launcher stretches one layout to the real canvas; LocalSize
+    // picks square vs wide so every intermediate resize step re-lays out.
+    override val sizeMode: SizeMode = SizeMode.Exact
     override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
     override val stateDefinition = PomodoroWidgetStateDefinition
 
@@ -100,7 +103,7 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                             ringColor = 0xFF6750A4.toInt(),
                             trackColor = 0xFFE7E0EC.toInt(),
                             fillColor = 0x00000000,
-                            sizePx = 256
+                            sizePx = 192
                         ),
                         displayMs = 24 * 60 * 1000L,
                         openPomodoroIntent = Intent(context, MainActivity::class.java).apply {
@@ -142,14 +145,14 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         val goalProgress = (sessionsDone.toFloat() / sessionsGoal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
 
         val palette = PomodoroWidgetPalette.resolve(context, mode)
-        // 256px ring / 96px goal is plenty for a widget (launcher downsamples
-        // anyway) and halves the per-update allocation vs 320/120.
+        // 192px ring / 96px goal is plenty for a widget (launcher downsamples
+        // anyway) and cuts the per-update allocation vs 256.
         val ringBitmap = buildProgressBitmap(
             progress = elapsedProgress,
             ringColor = palette.accent,
             trackColor = palette.track,
             fillColor = 0x00000000,
-            sizePx = 256
+            sizePx = 192
         )
         val goalBitmap = buildProgressBitmap(
             progress = goalProgress,
@@ -167,7 +170,7 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         provideContent {
             GlanceTheme {
                 val size = LocalSize.current
-                val isExpanded = size.width >= 280.dp && size.height >= 140.dp
+                val isExpanded = size.width >= 260.dp && size.height >= 130.dp
 
                 // Outer is NOT clickable — inner play/reset/skip buttons are
                 // clickables. Nesting them under an outer clickable breaks on

@@ -60,6 +60,14 @@ fun downloaderPlatformExts(platform: MediaDownloaderRepository.Platform): List<S
     // preferences Toolz can remember whenever a matching option is available.
     listOf("mp4", "mp3", "m4a", "wav", "ogg", "flac")
 
+/**
+ * Quality keys users can pin or auto-select. Video by quality label (stable
+ * across local ladders and remote assets alike), audio by container.
+ * MP4 is intentionally absent: every video row is MP4, so it could never sort.
+ */
+fun downloaderQualityKeys(): List<String> =
+    listOf("1080p", "720p", "480p", "360p", "MP3", "M4A", "WAV", "OGG", "FLAC")
+
 private fun platformDisplayName(platform: MediaDownloaderRepository.Platform): String =
     when (platform) {
         MediaDownloaderRepository.Platform.YOUTUBE -> "YouTube"
@@ -114,6 +122,7 @@ fun MediaDownloaderSettingsScreen(
             )
         },
     ) { padding ->
+        val entranceSeen = rememberDownloaderEntranceSeen()
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -123,7 +132,7 @@ fun MediaDownloaderSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item(key = "audio_formats") {
-                DownloaderSection(0) {
+                DownloaderSection(0, entranceSeen) {
                     AudioFormatsCard(
                         enabled = prefs.ladderExts,
                         onToggle = viewModel::setLadderExt,
@@ -131,7 +140,7 @@ fun MediaDownloaderSettingsScreen(
                 }
             }
             item(key = "platform_picker") {
-                DownloaderSection(1) {
+                DownloaderSection(1, entranceSeen) {
                     ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
                         ToolzConnectedButtonGroup(
                             selectedIndex = platforms.indexOf(platform).takeIf { it >= 0 } ?: 0,
@@ -147,7 +156,7 @@ fun MediaDownloaderSettingsScreen(
                 }
             }
             item(key = "platform_detail") {
-                DownloaderSection(2) {
+                DownloaderSection(2, entranceSeen) {
                     PlatformPrefsCard(
                         platform = platform,
                         prefs = prefs.perPlatform[platform.name]
@@ -160,7 +169,7 @@ fun MediaDownloaderSettingsScreen(
                 }
             }
             item(key = "reset") {
-                DownloaderSection(3) {
+                DownloaderSection(3, entranceSeen) {
                     ToolzOutlinedExpressiveButton(
                         onClick = viewModel::resetFormatPrefs,
                         modifier = Modifier.fillMaxWidth(),
@@ -326,22 +335,19 @@ private fun PlatformPrefsCard(
 
             PrefGroupLabel(
                 stringResource(R.string.st_MediaDownloader_Favorites),
-                "Audio + photos pin to top. Video is always MP4, so MP4 favorite is off.",
+                "Video by quality, audio by format. Pinned rows jump to the top.",
             )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                exts.forEach { ext ->
-                    // MP4 covers every video row — favoriting it would be a dead toggle.
-                    val dead = ext == "mp4"
+                downloaderQualityKeys().forEach { key ->
                     ExpressiveFilterChip(
-                        selected = !dead && ext in prefs.favorites,
-                        enabled = !dead,
-                        onClick = { if (!dead) onToggleFavorite(ext) },
+                        selected = prefs.favorites.any { it.uppercase() == key.uppercase() },
+                        onClick = { onToggleFavorite(key) },
                         label = {
                             Text(
-                                ext.uppercase(),
+                                key.uppercase(),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -375,7 +381,10 @@ private fun PlatformPrefsCard(
                 }
             }
 
-            PrefGroupLabel(stringResource(R.string.st_MediaDownloader_AutoSelect))
+            PrefGroupLabel(
+                stringResource(R.string.st_MediaDownloader_AutoSelect),
+                "Pre-selects this quality whenever it appears.",
+            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -391,13 +400,13 @@ private fun PlatformPrefsCard(
                         )
                     },
                 )
-                exts.forEach { ext ->
+                downloaderQualityKeys().forEach { key ->
                     ExpressiveFilterChip(
-                        selected = prefs.autoSelect == ext,
-                        onClick = { onAutoSelect(ext) },
+                        selected = prefs.autoSelect?.uppercase() == key.uppercase(),
+                        onClick = { onAutoSelect(key) },
                         label = {
                             Text(
-                                ext.uppercase(),
+                                key.uppercase(),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                             )

@@ -19,7 +19,6 @@ package com.frerox.toolz.widget.glance
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -34,10 +33,13 @@ import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.appwidget.PreviewSizeMode
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
@@ -63,65 +65,54 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import androidx.glance.action.actionParametersOf
-import androidx.glance.appwidget.PreviewSizeMode
-import androidx.glance.appwidget.action.actionRunCallback
-import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
-import com.frerox.toolz.widget.ui.decodeWidgetArt
-import com.frerox.toolz.widget.ui.isColorDark
-import com.frerox.toolz.widget.ui.readWidgetAppearance
-import com.frerox.toolz.widget.ui.resolveWidgetAccent
-import com.frerox.toolz.widget.ui.toWidgetColorProvider
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_FAVORITE
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_NEXT
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_PREV
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_REPEAT
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_SEEK
-import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_SEEK_POSITION
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_SHUFFLE
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_TOGGLE
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.PARAM_ACTION
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.PARAM_INDEX
+import com.frerox.toolz.widget.ui.WidgetOuterCorner
+import com.frerox.toolz.widget.ui.decodeWidgetArt
+import com.frerox.toolz.widget.ui.isColorDark
+import com.frerox.toolz.widget.ui.readWidgetAppearance
+import com.frerox.toolz.widget.ui.resolveWidgetAccent
+import com.frerox.toolz.widget.ui.toWidgetColorProvider
+import com.frerox.toolz.widget.ui.widgetBackgroundProvider
+import com.frerox.toolz.widget.ui.widgetNavIntent
 
 // ---------------------------------------------------------------------------
-//  Music Glance widget — Material 3 Expressive, production-ready
-//  Three breakpoints tuned for launcher grid:
-//    COMPACT  180×110 — art, title/artist, play, subtle progress
-//    EXPANDED 270×180 — art, title, transport, live progress + time, queue preview (3)
-//    HERO     270×320 — full transport, progress + time, scrollable Up Next (8)
-//  Production: handles not-playing, empty queue, long text, dark/light, a11y,
-//  bitmap failures, JSON corruption, disabled states, haptics.
-//  Expressive: tonal accent tint, squircle play, 28dp outer, 16/22/32 art,
-//  vibrant palette fallback, hierarchy via weight/color/alpha/size.
+//  Music Glance widget — Material 3 Expressive.
+//  Two breakpoints driven by the live canvas (SizeMode.Exact):
+//    COMPACT  — art, title/artist, play, inset progress
+//    EXPANDED — art, title, transport, progress + time, Up Next (max 3 rows)
+//  Outer container is never clickable (nested clickables break on Samsung /
+//  Pixel launchers); art + titles carry the open-app action as siblings.
 // ---------------------------------------------------------------------------
 
 class MusicGlanceWidget : GlanceAppWidget() {
 
     companion object {
-        // M3 Expressive: responsive sizes with queue-aware heights
-        // Compact 110, Expanded 230 with queue, Hero 360 full
+        // Reference sizes for the widget picker + preview rendering.
         private val COMPACT = DpSize(180.dp, 110.dp)
-        private val EXPANDED = DpSize(270.dp, 230.dp)
-        private val HERO = DpSize(270.dp, 360.dp)
+        private val EXPANDED = DpSize(270.dp, 210.dp)
 
-        // M3 Expressive: outer container extra-large (28dp) — most expressive
-        // radius available in Glance (single uniform radius, API 31+).
-        private val OUTER_CORNER_RADIUS = 28.dp
-        // Inner expressive radii
-        private val INNER_CORNER_SMALL = 14.dp
-        private val INNER_CORNER_MEDIUM = 18.dp
-        private val INNER_CORNER_LARGE = 22.dp
+        private val OUTER_CORNER_RADIUS = WidgetOuterCorner
     }
 
-    override val sizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED, HERO))
+    // Exact: launcher stretches the single layout to the real canvas and
+    // LocalSize drives the compact/expanded breakpoint — every intermediate
+    // resize step re-lays out instead of snapping between fixed sizes.
+    override val sizeMode: SizeMode = SizeMode.Exact
     override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
     override val stateDefinition = MusicWidgetStateDefinition
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
         provideContent {
             GlanceTheme {
-                // Static preview with realistic sample data — no DataStore, no effects.
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
@@ -138,11 +129,7 @@ class MusicGlanceWidget : GlanceAppWidget() {
                         accentColor = null,
                         progress = 0.42f,
                         isFavorite = true,
-                        hasNext = true,
-                        hasPrev = true,
-                        openMusicIntent = Intent(context, MainActivity::class.java).apply {
-                            putExtra("navigate_to", "music_player")
-                        }
+                        openMusicIntent = widgetNavIntent(context, "music_player")
                     )
                 }
             }
@@ -168,21 +155,13 @@ class MusicGlanceWidget : GlanceAppWidget() {
         val capturedAtElapsedMs = prefs[MusicWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] ?: 0L
         val queue = decodeQueueJson(prefs[MusicWidgetState.KEY_QUEUE_JSON])
 
-        // Downsampled decode — never OOM, never crash on corrupt file.
         val appearance = try { readWidgetAppearance(context) } catch (_: Exception) {
             com.frerox.toolz.widget.ui.WidgetAppearance()
         }
         val artBitmap = if (appearance.showArt) decodeWidgetArt(artPath) else null
-
-        // Accent: dynamic track color wins when followDynamic, else settings custom.
         val accentColor = resolveWidgetAccent(accentHex, appearance)
+        val openMusicIntent = widgetNavIntent(context, "music_player")
 
-        val openMusicIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "music_player")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-
-        // Realtime progress via elapsedRealtime interpolation (no per-second push needed)
         val nowElapsedMs = SystemClock.elapsedRealtime()
         val liveProgress = liveProgressFraction(
             positionAtCaptureMs = positionAtCaptureMs,
@@ -191,26 +170,21 @@ class MusicGlanceWidget : GlanceAppWidget() {
             isPlaying = playing,
             nowElapsedMs = nowElapsedMs
         )
-        // Time labels for expressive progress (mm:ss)
-        val positionLabel = formatTime(if (playing) (positionAtCaptureMs + (nowElapsedMs - capturedAtElapsedMs).coerceAtLeast(0L)).coerceIn(0L, durationMs) else positionAtCaptureMs)
+        val livePositionMs = if (playing) {
+            (positionAtCaptureMs + (nowElapsedMs - capturedAtElapsedMs).coerceAtLeast(0L))
+                .coerceIn(0L, durationMs.coerceAtLeast(0L))
+        } else {
+            positionAtCaptureMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
+        }
+        val positionLabel = formatTime(livePositionMs)
         val durationLabel = formatTime(durationMs)
 
         provideContent {
             GlanceTheme {
                 val size = LocalSize.current
-                // Height-aware tiers: wide-but-short launchers stay Compact, no overflow.
-                val tier = when {
-                    size.height >= 320.dp && size.width >= 250.dp -> WidgetTier.Hero
-                    size.width >= EXPANDED.width && size.height >= 180.dp -> WidgetTier.Expanded
-                    else -> WidgetTier.Compact
-                }
+                val isExpanded = size.width >= 250.dp && size.height >= 170.dp
 
-                // Outer expressive container: surface (or custom bg) + 28dp.
-                // Custom bg from WIDGETS settings when followDynamic is off.
-                // NOTE: outer is NOT clickable — nested clickables (outer + inner
-                // transport buttons) break on many launchers. Art + titles carry
-                // the open-app action individually (siblings of buttons, never parents).
-                val outerBg = com.frerox.toolz.widget.ui.widgetBackgroundProvider(appearance)
+                val outerBg = widgetBackgroundProvider(appearance)
                     ?: GlanceTheme.colors.surface
                 Box(
                     modifier = GlanceModifier
@@ -219,81 +193,43 @@ class MusicGlanceWidget : GlanceAppWidget() {
                         .cornerRadius(OUTER_CORNER_RADIUS),
                     contentAlignment = Alignment.TopStart,
                 ) {
-                    // Subtle tonal accent wash behind content (expressive)
-                    Box(
-                        modifier = GlanceModifier.fillMaxSize()
-                            .background(accentColor?.copy(alpha = 0.06f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant)
-                            .cornerRadius(OUTER_CORNER_RADIUS)
-                    ) {}
-                    // Top accent strip — 4dp expressive header rule
-                    Box(
-                        modifier = GlanceModifier.fillMaxWidth().height(4.dp)
-                            .background(accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary)
-                    ) {}
-                    // Content with top inset for accent strip
-                    Box(
-                        modifier = GlanceModifier.fillMaxSize().padding(top = 4.dp),
-                        contentAlignment = Alignment.TopStart
-                    ) {
-                        when (tier) {
-                            WidgetTier.Compact -> CompactMusicContent(
-                                title = title,
-                                artist = artist,
-                                isPlaying = playing,
-                                artBitmap = artBitmap,
-                                artShape = artShape,
-                                accentColor = accentColor,
-                                progress = liveProgress,
-                                isFavorite = isFavorite,
-                                hasNext = hasNext,
-                                hasPrev = hasPrev,
-                                openMusicIntent = openMusicIntent
-                            )
-                            WidgetTier.Expanded -> ExpandedMusicContent(
-                                title = title,
-                                artist = artist,
-                                progress = liveProgress,
-                                positionLabel = positionLabel,
-                                durationLabel = durationLabel,
-                                isPlaying = playing,
-                                artBitmap = artBitmap,
-                                artShape = artShape,
-                                isFavorite = isFavorite,
-                                accentColor = accentColor,
-                                hasNext = hasNext,
-                                hasPrev = hasPrev,
-                                isShuffle = isShuffle,
-                                repeatMode = repeatMode,
-                                queue = if (appearance.showQueue) queue else emptyList(),
-                                openMusicIntent = openMusicIntent
-                            )
-                            WidgetTier.Hero -> HeroMusicContent(
-                                title = title,
-                                artist = artist,
-                                progress = liveProgress,
-                                positionLabel = positionLabel,
-                                durationLabel = durationLabel,
-                                isPlaying = playing,
-                                artBitmap = artBitmap,
-                                artShape = artShape,
-                                isFavorite = isFavorite,
-                                accentColor = accentColor,
-                                hasNext = hasNext,
-                                hasPrev = hasPrev,
-                                isShuffle = isShuffle,
-                                repeatMode = repeatMode,
-                                queue = if (appearance.showQueue) queue else emptyList(),
-                                openMusicIntent = openMusicIntent
-                            )
-                        }
+                    if (isExpanded) {
+                        ExpandedMusicContent(
+                            title = title,
+                            artist = artist,
+                            progress = liveProgress,
+                            positionLabel = positionLabel,
+                            durationLabel = durationLabel,
+                            isPlaying = playing,
+                            artBitmap = artBitmap,
+                            artShape = artShape,
+                            isFavorite = isFavorite,
+                            accentColor = accentColor,
+                            hasNext = hasNext,
+                            hasPrev = hasPrev,
+                            isShuffle = isShuffle,
+                            repeatMode = repeatMode,
+                            queue = if (appearance.showQueue) queue else emptyList(),
+                            openMusicIntent = openMusicIntent
+                        )
+                    } else {
+                        CompactMusicContent(
+                            title = title,
+                            artist = artist,
+                            isPlaying = playing,
+                            artBitmap = artBitmap,
+                            artShape = artShape,
+                            accentColor = accentColor,
+                            progress = liveProgress,
+                            isFavorite = isFavorite,
+                            openMusicIntent = openMusicIntent
+                        )
                     }
                 }
             }
         }
     }
 }
-
-private enum class WidgetTier { Compact, Expanded, Hero }
 
 // ---------------------------------------------------------------------------
 //  Helpers
@@ -353,7 +289,6 @@ private fun TransportButton(
 @Composable
 private fun FavoriteButton(isFavorite: Boolean, size: Dp, accentColor: Color?) {
     val iconRes = if (isFavorite) R.drawable.ic_widget_favorite_filled else R.drawable.ic_widget_favorite_outline
-    // Expressive: tonal container when favorited, surfaceVariant otherwise
     val bg = if (isFavorite) (accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.primaryContainer)
              else GlanceTheme.colors.surfaceVariant
     Box(
@@ -386,7 +321,7 @@ private fun PlayPauseButton(
     size: Dp,
     iconSize: Dp
 ) {
-    // M3 Expressive: squircle (0.4f) for play/pause FAB, accent container
+    // M3 Expressive: squircle FAB in the accent container.
     Box(
         modifier = GlanceModifier
             .size(size)
@@ -414,13 +349,17 @@ private fun PlayPauseButton(
 private fun TimeLabel(text: String, color: ColorProvider) {
     Text(
         text,
-        style = TextStyle(color = color, fontSize = 10.sp, fontWeight = FontWeight.Medium),
+        style = androidx.glance.text.TextStyle(
+            color = color,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
+        ),
         maxLines = 1
     )
 }
 
 // ---------------------------------------------------------------------------
-//  Compact tier — minimal but expressive, with progress + playing badge
+//  Compact tier — art, titles, play, inset progress
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -433,8 +372,6 @@ private fun CompactMusicContent(
     accentColor: Color?,
     progress: Float,
     isFavorite: Boolean,
-    hasNext: Boolean,
-    hasPrev: Boolean,
     openMusicIntent: Intent
 ) {
     Column(modifier = GlanceModifier.fillMaxSize()) {
@@ -459,14 +396,6 @@ private fun CompactMusicContent(
                     provider = artProvider, contentDescription = "Album art",
                     modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp), contentScale = ContentScale.Crop
                 )
-                // Now-playing dot badge (expressive)
-                if (isPlaying) {
-                    Box(
-                        modifier = GlanceModifier.size(10.dp).cornerRadius(5.dp)
-                            .background(Color(0xFF4CAF50).toWidgetColorProvider()),
-                        contentAlignment = Alignment.Center
-                    ) {}
-                }
             }
 
             Spacer(GlanceModifier.width(10.dp))
@@ -511,22 +440,25 @@ private fun CompactMusicContent(
             PlayPauseButton(
                 isPlaying = isPlaying,
                 accentColor = accentColor,
-                size = 42.dp,
-                iconSize = 20.dp
+                size = 48.dp,
+                iconSize = 22.dp
             )
         }
-        // Progress — display only (no fake seek; tap targets must be honest).
-        LinearProgressIndicator(
-            progress = progress,
-            modifier = GlanceModifier.fillMaxWidth().height(3.dp),
-            color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
-            backgroundColor = GlanceTheme.colors.surfaceVariant
-        )
+        // Inset progress: 12dp horizontal + 10dp bottom so the bar never
+        // clips under the 28dp outer corners. Display only — never a seek target.
+        Box(modifier = GlanceModifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+            LinearProgressIndicator(
+                progress = progress,
+                modifier = GlanceModifier.fillMaxWidth().height(4.dp).cornerRadius(2.dp),
+                color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
+                backgroundColor = GlanceTheme.colors.surfaceVariant
+            )
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
-//  Expanded tier — expressive header + transport + progress + time + queue
+//  Expanded tier — header + transport + progress + time + Up Next
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -557,10 +489,9 @@ private fun ExpandedMusicContent(
             accentColor = accentColor,
             isFavorite = isFavorite,
             isPlaying = isPlaying,
-            nextTitle = null,
             artSize = 60.dp,
             titleFontSize = 15.sp,
-            favoriteButtonSize = 32.dp,
+            favoriteButtonSize = 36.dp,
             openMusicIntent = openMusicIntent
         )
 
@@ -572,14 +503,13 @@ private fun ExpandedMusicContent(
             hasPrev = hasPrev,
             isShuffle = isShuffle,
             repeatMode = repeatMode,
-            secondaryButtonSize = 36.dp,
+            secondaryButtonSize = 40.dp,
             secondaryIconSize = 18.dp,
-            playButtonSize = 48.dp,
-            playIconSize = 22.dp
+            playButtonSize = 52.dp,
+            playIconSize = 24.dp
         )
         Spacer(GlanceModifier.height(8.dp))
 
-        // Expressive progress with time labels
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TimeLabel(positionLabel, GlanceTheme.colors.onSurfaceVariant)
             Spacer(GlanceModifier.width(8.dp))
@@ -595,7 +525,6 @@ private fun ExpandedMusicContent(
             TimeLabel(durationLabel, GlanceTheme.colors.onSurfaceVariant)
         }
 
-        // Queue preview — expressive, scrollable, 3 rows max (42dp)
         if (queue.isNotEmpty()) {
             Spacer(GlanceModifier.height(8.dp))
             Row(
@@ -623,7 +552,7 @@ private fun ExpandedMusicContent(
             Spacer(GlanceModifier.height(4.dp))
             LazyColumn(modifier = GlanceModifier.fillMaxWidth().height(48.dp)) {
                 itemsIndexed(
-                    items = queue.take(8),
+                    items = queue.take(3),
                     itemId = { _, track -> track.mediaId.hashCode().toLong() }
                 ) { _, track ->
                     Row(
@@ -665,162 +594,6 @@ private fun ExpandedMusicContent(
     }
 }
 
-// ---------------------------------------------------------------------------
-//  Hero tier — most expressive, scrollable queue with full details
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun HeroMusicContent(
-    title: String,
-    artist: String,
-    progress: Float,
-    positionLabel: String,
-    durationLabel: String,
-    isPlaying: Boolean,
-    artBitmap: android.graphics.Bitmap?,
-    artShape: String,
-    isFavorite: Boolean,
-    accentColor: Color?,
-    hasNext: Boolean,
-    hasPrev: Boolean,
-    isShuffle: Boolean = false,
-    repeatMode: Int = 0,
-    queue: List<QueueTrackInfo>,
-    openMusicIntent: Intent
-) {
-    Column(modifier = GlanceModifier.fillMaxSize().padding(14.dp)) {
-        NowPlayingHeader(
-            title = title,
-            artist = artist,
-            artBitmap = artBitmap,
-            artShape = artShape,
-            accentColor = accentColor,
-            isFavorite = isFavorite,
-            isPlaying = isPlaying,
-            nextTitle = null,
-            artSize = 64.dp,
-            titleFontSize = 16.sp,
-            favoriteButtonSize = 34.dp,
-            openMusicIntent = openMusicIntent
-        )
-
-        Spacer(GlanceModifier.height(10.dp))
-        TransportRow(
-            isPlaying = isPlaying,
-            accentColor = accentColor,
-            hasNext = hasNext,
-            hasPrev = hasPrev,
-            isShuffle = isShuffle,
-            repeatMode = repeatMode,
-            secondaryButtonSize = 40.dp,
-            secondaryIconSize = 18.dp,
-            playButtonSize = 52.dp,
-            playIconSize = 24.dp
-        )
-        Spacer(GlanceModifier.height(10.dp))
-
-        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TimeLabel(positionLabel, GlanceTheme.colors.onSurfaceVariant)
-            Spacer(GlanceModifier.width(8.dp))
-            Box(modifier = GlanceModifier.defaultWeight()) {
-                LinearProgressIndicator(
-                    progress = progress,
-                    modifier = GlanceModifier.fillMaxWidth().height(7.dp).cornerRadius(4.dp),
-                    color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
-                    backgroundColor = GlanceTheme.colors.surfaceVariant
-                )
-            }
-            Spacer(GlanceModifier.width(8.dp))
-            TimeLabel(durationLabel, GlanceTheme.colors.onSurfaceVariant)
-        }
-
-        Spacer(GlanceModifier.height(12.dp))
-
-        // Expressive divider
-        Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(GlanceTheme.colors.outline)) {}
-
-        Spacer(GlanceModifier.height(10.dp))
-
-        if (queue.isEmpty()) {
-            Box(modifier = GlanceModifier.fillMaxWidth().defaultWeight(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Image(
-                        provider = ImageProvider(R.drawable.ic_music_note),
-                        contentDescription = null,
-                        modifier = GlanceModifier.size(32.dp),
-                        colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant)
-                    )
-                    Spacer(GlanceModifier.height(8.dp))
-                    Text(
-                        "Queue is empty",
-                        style = TextStyle(
-                            color = GlanceTheme.colors.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center
-                        )
-                    )
-                    Spacer(GlanceModifier.height(4.dp))
-                    Text(
-                        "Add tracks from Library or Catalog to keep the music going",
-                        style = TextStyle(
-                            color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center
-                        )
-                    )
-                }
-            }
-        } else {
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "UP NEXT",
-                    style = TextStyle(
-                        color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
-                        fontSize = 11.sp, fontWeight = FontWeight.Bold
-                    )
-                )
-                Spacer(GlanceModifier.width(6.dp))
-                Box(
-                    modifier = GlanceModifier.background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.primaryContainer)
-                        .cornerRadius(8.dp).padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        "${queue.size}",
-                        style = TextStyle(color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    )
-                }
-                Spacer(GlanceModifier.defaultWeight())
-                // Shuffle badge when on — use primaryContainer as fallback if tertiary not available
-                if (isShuffle) {
-                    Box(
-                        modifier = GlanceModifier.background(GlanceTheme.colors.primaryContainer).cornerRadius(8.dp).padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text("Shuffle", style = TextStyle(color = GlanceTheme.colors.onPrimaryContainer, fontSize = 9.sp, fontWeight = FontWeight.Bold))
-                    }
-                }
-            }
-            Spacer(GlanceModifier.height(6.dp))
-            // Divider under header
-            Box(modifier = GlanceModifier.fillMaxWidth().height(1.dp).background(GlanceTheme.colors.outline)) {}
-            Spacer(GlanceModifier.height(6.dp))
-            LazyColumn(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-                itemsIndexed(
-                    items = queue,
-                    itemId = { _, track -> track.mediaId.hashCode().toLong() }
-                ) { index, track ->
-                    QueueRow(track = track, accentColor = accentColor, index = index + 1)
-                }
-            }
-            // Footer — subtle
-            Spacer(GlanceModifier.height(6.dp))
-            Text(
-                "Tap a track to play • Scroll for more",
-                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center),
-                modifier = GlanceModifier.fillMaxWidth()
-            )
-        }
-    }
-}
-
 @Composable
 private fun QueueRow(track: QueueTrackInfo, accentColor: Color?, index: Int = -1) {
     Row(
@@ -837,7 +610,6 @@ private fun QueueRow(track: QueueTrackInfo, accentColor: Color?, index: Int = -1
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Index or dot
         if (index > 0) {
             Box(
                 modifier = GlanceModifier.size(20.dp).cornerRadius(10.dp)
@@ -869,7 +641,6 @@ private fun QueueRow(track: QueueTrackInfo, accentColor: Color?, index: Int = -1
             )
         }
         Spacer(GlanceModifier.width(8.dp))
-        // Duration placeholder dot if available
         Box(
             modifier = GlanceModifier.size(18.dp).cornerRadius(9.dp)
                 .background(GlanceTheme.colors.surfaceVariant),
@@ -886,7 +657,7 @@ private fun QueueRow(track: QueueTrackInfo, accentColor: Color?, index: Int = -1
 }
 
 // ---------------------------------------------------------------------------
-//  Shared header + transport row — M3 Expressive hierarchy
+//  Shared header + transport row
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -898,7 +669,6 @@ private fun NowPlayingHeader(
     accentColor: Color?,
     isFavorite: Boolean,
     isPlaying: Boolean = false,
-    nextTitle: String?,
     artSize: Dp,
     titleFontSize: androidx.compose.ui.unit.TextUnit,
     favoriteButtonSize: Dp,
@@ -961,17 +731,6 @@ private fun NowPlayingHeader(
                     )
                 }
             }
-
-            if (nextTitle != null) {
-                Spacer(GlanceModifier.height(3.dp))
-                Text(
-                    "Up next: $nextTitle", maxLines = 1, style = TextStyle(
-                        color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            }
             Spacer(GlanceModifier.defaultWeight())
         }
 
@@ -994,19 +753,17 @@ private fun TransportRow(
     playButtonSize: Dp,
     playIconSize: Dp
 ) {
-    // Glance hard limit: max 10 children per Row. Old layout had 11
-    // (5 buttons + 6 spacers) and crashed with "Truncated Row container".
-    // New: outer Row has 5 children (left cluster, spacer, play, spacer,
-    // right cluster); each cluster is a nested Row of 3. Never nests clickables.
+    // Glance hard limit: max 10 children per Row. Outer Row has 5 children
+    // (left cluster, spacer, play, spacer, right cluster); each cluster is a
+    // nested Row of 3. Never nests clickables.
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Left cluster: shuffle + prev.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                modifier = GlanceModifier.size(40.dp).cornerRadius(20.dp)
                     .background(
                         if (isShuffle) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
                         else GlanceTheme.colors.surfaceVariant
@@ -1017,7 +774,7 @@ private fun TransportRow(
                 Image(
                     provider = ImageProvider(R.drawable.ic_widget_shuffle),
                     contentDescription = if (isShuffle) "Shuffle on" else "Shuffle off",
-                    modifier = GlanceModifier.size(16.dp),
+                    modifier = GlanceModifier.size(18.dp),
                     colorFilter = androidx.glance.ColorFilter.tint(
                         if (isShuffle) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
                         else GlanceTheme.colors.onSurfaceVariant
@@ -1048,7 +805,6 @@ private fun TransportRow(
 
         Spacer(GlanceModifier.width(8.dp))
 
-        // Right cluster: next + repeat.
         Row(verticalAlignment = Alignment.CenterVertically) {
             TransportButton(
                 iconRes = R.drawable.ic_widget_next,
@@ -1062,7 +818,7 @@ private fun TransportRow(
             )
             Spacer(GlanceModifier.width(8.dp))
             Box(
-                modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                modifier = GlanceModifier.size(40.dp).cornerRadius(20.dp)
                     .background(
                         if (repeatMode != 0) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
                         else GlanceTheme.colors.surfaceVariant
@@ -1073,7 +829,7 @@ private fun TransportRow(
                 Image(
                     provider = ImageProvider(if (repeatMode == 1) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat),
                     contentDescription = when (repeatMode) { 1 -> "Repeat one" ; 2 -> "Repeat all" ; else -> "Repeat off" },
-                    modifier = GlanceModifier.size(16.dp),
+                    modifier = GlanceModifier.size(18.dp),
                     colorFilter = androidx.glance.ColorFilter.tint(
                         if (repeatMode != 0) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
                         else GlanceTheme.colors.onSurfaceVariant
@@ -1083,5 +839,3 @@ private fun TransportRow(
         }
     }
 }
-
-// Shared helpers live in widget.ui.WidgetTheme (isColorDark, toWidgetColorProvider).

@@ -325,14 +325,24 @@ class MediaDownloaderViewModel @Inject constructor(
         }
         val hasOverride = platform?.let { _formatPrefs.value.perPlatform[it.name]?.defaultMode } != null
         if (_ui.value.mode == mode && !hasOverride) return
+        val before = effectiveMode(platform)
         _ui.value = _ui.value.copy(mode = mode)
         // What you tap is what applies: a per-platform override would otherwise
-        // silently win and make the switch look broken.
-        if (platform != null && hasOverride) setPlatformMode(platform, null)
+        // silently win and make the switch look broken. Clear it inline without
+        // triggering setPlatformMode's own re-extract (we extract once below).
+        if (platform != null && hasOverride) {
+            val key = platform.name
+            updatePrefs { prefs ->
+                val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
+                prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(defaultMode = null)))
+            }
+        }
         // Never re-extract without a link: toggling the mode after clearing the
         // field used to wipe the current result into a "Paste a link first" error.
-        // Otherwise always re-extract so the option list matches the mode.
         if (_ui.value.url.trim().isBlank()) return
+        // Skip the network round-trip when the effective list can't change:
+        // same effective mode with options already on screen.
+        if (effectiveMode(platform) == before && _ui.value.options.isNotEmpty()) return
         extract()
     }
 
@@ -449,15 +459,21 @@ class MediaDownloaderViewModel @Inject constructor(
         }
     }
 
-    fun toggleFavorite(platform: MediaDownloaderRepository.Platform, ext: String) {
-        // MP4 covers every video row — favoriting it is a dead toggle, ignore.
-        if (ext == "mp4") return
-        val key = platform.name
+    fun toggleFavorite(platform: MediaDownloaderRepository.Platform, key: String) {
+        // Favorites are quality keys ("720p", "M4A") — video is never "mp4".
+        if (key.equals("mp4", ignoreCase = true)) return
+        val pkey = platform.name
         updatePrefs { prefs ->
-            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
-            val next = if (ext in cur.favorites) cur.favorites - ext else cur.favorites + ext
-            prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(favorites = next)))
+            val cur = prefs.perPlatform[pkey] ?: PlatformFormatPrefs()
+            val norm = key.uppercase()
+            val next = if (cur.favorites.any { it.uppercase() == norm }) {
+                cur.favorites.filterNot { it.uppercase() == norm }
+            } else {
+                cur.favorites + key
+            }
+            prefs.copy(perPlatform = prefs.perPlatform + (pkey to cur.copy(favorites = next)))
         }
+        refreshVisibleOptions()
     }
 
     fun toggleHidden(platform: MediaDownloaderRepository.Platform, ext: String) {
@@ -472,14 +488,16 @@ class MediaDownloaderViewModel @Inject constructor(
                     ),
             )
         }
+        refreshVisibleOptions()
     }
 
-    fun setAutoSelect(platform: MediaDownloaderRepository.Platform, ext: String?) {
-        val key = platform.name
+    fun setAutoSelect(platform: MediaDownloaderRepository.Platform, key: String?) {
+        val pkey = platform.name
         updatePrefs { prefs ->
-            val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
-            prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(autoSelect = ext)))
+            val cur = prefs.perPlatform[pkey] ?: PlatformFormatPrefs()
+            prefs.copy(perPlatform = prefs.perPlatform + (pkey to cur.copy(autoSelect = key)))
         }
+        refreshVisibleOptions()
     }
 
     fun setPlatformMode(platform: MediaDownloaderRepository.Platform, mode: DownloadMode?) {
@@ -488,6 +506,12 @@ class MediaDownloaderViewModel @Inject constructor(
             val cur = prefs.perPlatform[key] ?: PlatformFormatPrefs()
             prefs.copy(perPlatform = prefs.perPlatform + (key to cur.copy(defaultMode = mode)))
         }
+        // A mode override changes the server audio_only flag — re-extract if this
+        // platform is on screen so the list actually matches the new default.
+        val detected = _ui.value.url.trim().takeIf { it.isNotBlank() }?.let {
+            repository.detectPlatform(it)
+        }
+        if (detected == platform && _ui.value.url.trim().isNotBlank()) extract()
     }
 
     fun setLadderExt(ext: String, enabled: Boolean) {
@@ -495,6 +519,40 @@ class MediaDownloaderViewModel @Inject constructor(
         updatePrefs { prefs ->
             val next = if (enabled) prefs.ladderExts + ext else prefs.ladderExts - ext
             prefs.copy(ladderExts = next)
+        }
+        refreshVisibleOptions()
+    }
+
+    /**
+     * Rebuilds the currently visible option list with fresh prefs — no network.
+     * Previously changing favorites/hide/auto in settings did nothing until the
+     * next manual extract, which made the whole screen feel broken.
+     */
+    private fun refreshVisibleOptions() {
+        val s = _ui.value
+        val detected = s.url.trim().takeIf { it.isNotBlank() }?.let {
+            repository.detectPlatform(it)
+        }
+        val remote = s.remote
+        if (remote != null && !remote.blocked) {
+            val mode = effectiveMode(detected)
+            val opts = buildRemoteOptions(remote, mode, detected)
+            _ui.value = s.copy(
+                options = opts,
+                selectedId = opts.firstOrNull { it.id == s.selectedId }?.id
+                    ?: defaultSelection(detected, mode, opts),
+            )
+            return
+        }
+        if (s.localSourceUrl != null) {
+            val platform = MediaDownloaderRepository.Platform.YOUTUBE
+            val mode = effectiveMode(detected ?: platform)
+            val opts = buildLocalOptions(s.localHeights, mode, platform)
+            _ui.value = s.copy(
+                options = opts,
+                selectedId = opts.firstOrNull { it.id == s.selectedId }?.id
+                    ?: defaultSelection(platform, mode, opts, preferredId = "720p"),
+            )
         }
     }
 
@@ -506,6 +564,7 @@ class MediaDownloaderViewModel @Inject constructor(
             } catch (_: Exception) {
             }
         }
+        refreshVisibleOptions()
     }
 
     private fun encodePrefs(prefs: DownloaderPrefs): String {
@@ -572,10 +631,12 @@ class MediaDownloaderViewModel @Inject constructor(
         effectiveMode(platform)
 
     /**
-     * Applies hide + favorite-sort prefs. Video (mp4) rows are never hidden —
-     * every mp4 row would match and the list would lose all video. Unknown
-     * extensions are never hidden, and if hiding would empty the list the
-     * filter is ignored (fail-open).
+     * Applies hide + favorite-sort prefs. Favorites match quality keys first
+     * (id or label like "720p"/"M4A"), falling back to container ext, so they
+     * work on both local ladders and opaque remote assets. Video (mp4) rows
+     * are never hidden — every mp4 row would match and the list would lose
+     * all video. Unknown extensions are never hidden, and if hiding would
+     * empty the list the filter is ignored (fail-open).
      */
     private fun applyFormatPrefs(
         platform: MediaDownloaderRepository.Platform,
@@ -590,9 +651,18 @@ class MediaDownloaderViewModel @Inject constructor(
         }
         if (list.isEmpty()) list = options
         if (prefs.favorites.isNotEmpty()) {
-            val rank = prefs.favorites.withIndex().associate { it.value to it.index }
+            val normFavs = prefs.favorites.map { it.uppercase() }
+            fun favRank(opt: QualityOption): Int {
+                val idUp = opt.id.uppercase()
+                val labelUp = opt.label.uppercase()
+                val extUp = opt.ext.uppercase()
+                normFavs.forEachIndexed { i, fav ->
+                    if (fav == idUp || fav == labelUp || fav == extUp) return i
+                }
+                return Int.MAX_VALUE
+            }
             list = list.sortedWith(
-                compareBy({ rank[it.ext] ?: Int.MAX_VALUE }, { options.indexOf(it) }),
+                compareBy({ favRank(it) }, { options.indexOf(it) }),
             )
         }
         return list
@@ -1073,7 +1143,10 @@ class MediaDownloaderViewModel @Inject constructor(
     ): String {
         platform?.let { p ->
             prefsFor(p).autoSelect?.let { auto ->
-                opts.firstOrNull { it.ext == auto }?.id?.let { return it }
+                val norm = auto.uppercase()
+                opts.firstOrNull {
+                    it.id.uppercase() == norm || it.label.uppercase() == norm || it.ext.uppercase() == norm
+                }?.id?.let { return it }
             }
         }
         preferredId?.let { preferred ->

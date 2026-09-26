@@ -18,6 +18,7 @@
 package com.frerox.toolz.widget.ui
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -56,6 +57,17 @@ import kotlinx.coroutines.flow.firstOrNull
 val WidgetOuterCorner: Dp = 28.dp
 val WidgetPlaySquircleFraction: Float = 0.35f
 const val WIDGET_MIN_TOUCH_DP: Int = 48
+
+/**
+ * Single deep-link factory for every Glance widget. Uses
+ * MainActivity.EXTRA_NAVIGATE_TO ("navigate_to") so widget taps resolve
+ * through the same pass-through as shortcuts and notifications.
+ */
+fun widgetNavIntent(context: Context, route: String): Intent =
+    Intent(context, com.frerox.toolz.MainActivity::class.java).apply {
+        putExtra(com.frerox.toolz.MainActivity.EXTRA_NAVIGATE_TO, route)
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+    }
 
 fun isColorDark(color: Color): Boolean {
     val darkness = 1 - (0.299f * color.red + 0.587f * color.green + 0.114f * color.blue)

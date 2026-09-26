@@ -52,6 +52,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Visibility
@@ -126,6 +127,8 @@ fun MediaDownloaderScreen(
     val snackbar = remember { SnackbarHostState() }
     val haptic = rememberToolzHapticFeedback()
     var showHistory by rememberSaveable { mutableStateOf(false) }
+    // Once-per-entry entrance gate: survives LazyColumn recycling on scroll.
+    val entranceSeen = rememberDownloaderEntranceSeen()
 
     val remote = ui.remote
     val hasResult = (remote != null && !remote.blocked) || ui.localSourceUrl != null
@@ -165,7 +168,7 @@ fun MediaDownloaderScreen(
                 subtitle = platformNames(ui.enabledPlatforms, " • "),
                 navigationIcon = {
                     ToolzTonalExpressiveIconButton(onClick = onBack, shape = SquircleShape) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -176,7 +179,7 @@ fun MediaDownloaderScreen(
                         },
                         shape = SquircleShape,
                     ) {
-                        Icon(Icons.Rounded.AddToHomeScreen, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Rounded.AddToHomeScreen, contentDescription = "Add to Home screen", modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.width(8.dp))
                 },
@@ -193,7 +196,7 @@ fun MediaDownloaderScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item(key = "input") {
-                DownloaderSection(0) {
+                DownloaderSection(0, entranceSeen) {
                     InputCard(
                         viewModel = viewModel,
                         isBusy = isBusy,
@@ -204,7 +207,7 @@ fun MediaDownloaderScreen(
 
             if (history.isNotEmpty() || activeDownloads > 0) {
                 item(key = "history") {
-                    DownloaderSection(1) {
+                    DownloaderSection(1, entranceSeen) {
                         HistoryCard(
                             count = history.size,
                             activeCount = activeDownloads,
@@ -281,7 +284,7 @@ fun MediaDownloaderScreen(
 
             if (isIdle) {
                 item(key = "empty") {
-                    DownloaderSection(1) {
+                    DownloaderSection(2, entranceSeen) {
                         EmptyStateHero(
                             hint = stringResource(
                                 R.string.st_MediaDownloader_EmptyHint,
@@ -339,10 +342,11 @@ private fun InputCard(
     val haptic = rememberToolzHapticFeedback()
 
     ExpressiveCard(onClick = {}, enabled = false, shape = LargeExpressiveShape) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        Column {
+            Column(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
             val noClipboardMsg = stringResource(R.string.st_MediaDownloader_NoClipboardLink)
             TextField(
                 value = ui.url,
@@ -435,48 +439,57 @@ private fun InputCard(
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
+            } // close padded content column
 
-            ExpressiveSplitButton(
-                onClick = viewModel::extract,
-                onMenuClick = onNavigateToSettings,
-                enabled = !isBusy,
-                modifier = Modifier.fillMaxWidth().height(62.dp),
-                leadingIcon = {
-                    if (isBusy) {
-                        ExpressiveContainedLoadingIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = Color.Transparent,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Rounded.CloudDownload,
-                            null,
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
-                },
-                label = {
-                    AnimatedContent(
-                        targetState = isBusy,
-                        transitionSpec = {
-                            fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium))
-                        },
-                        label = "ctaLabel",
-                    ) { busy ->
-                        Text(
-                            if (busy) {
-                                stringResource(R.string.st_MediaDownloader_Fetching)
-                            } else {
-                                stringResource(R.string.st_MediaDownloader_Get)
+            // Wide CTA: card-level insets (12dp) instead of the 16dp content
+            // padding, so the primary action spans visibly wider.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                ExpressiveSplitButton(
+                    onClick = viewModel::extract,
+                    onMenuClick = onNavigateToSettings,
+                    enabled = !isBusy,
+                    modifier = Modifier.fillMaxWidth().height(66.dp),
+                    leadingIcon = {
+                        if (isBusy) {
+                            ExpressiveContainedLoadingIndicator(
+                                modifier = Modifier.size(26.dp),
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                containerColor = Color.Transparent,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Rounded.CloudDownload,
+                                null,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    },
+                    label = {
+                        AnimatedContent(
+                            targetState = isBusy,
+                            transitionSpec = {
+                                fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium))
                             },
-                            fontWeight = FontWeight.Black,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                        )
-                    }
-                },
-            )
+                            label = "ctaLabel",
+                        ) { busy ->
+                            Text(
+                                if (busy) {
+                                    stringResource(R.string.st_MediaDownloader_Fetching)
+                                } else {
+                                    stringResource(R.string.st_MediaDownloader_Get)
+                                },
+                                fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                            )
+                        }
+                    },
+                )
+            }
 
             if (!ui.apiConfigured && ui.enabledPlatforms.any {
                     it == com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform.TIKTOK ||
@@ -487,6 +500,7 @@ private fun InputCard(
                     stringResource(R.string.st_MediaDownloader_ServerNeeded),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 )
             }
         }
@@ -630,27 +644,34 @@ private fun ResultCard(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (!uploader.isNullOrBlank()) {
-                    Text(
-                        uploader,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PlatformDot(platform = resolvePlatform(ui.detectedPlatform, remote?.platform))
+                        Text(
+                            uploader,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
                 }
                 if (views != null || likes != null) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (views != null) {
@@ -695,6 +716,7 @@ private fun ResultCard(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                     videoOpts.forEach { opt ->
@@ -711,6 +733,7 @@ private fun ResultCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
                     audioOpts.forEach { opt ->
                         QualityOptionRow(
@@ -721,11 +744,23 @@ private fun ResultCard(
                     }
                 }
                 if (selected?.isHd == true) {
-                    Text(
-                        stringResource(R.string.st_SearchScreen_ws_yt_hd_note),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.HighQuality,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            stringResource(R.string.st_SearchScreen_ws_yt_hd_note),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
                 ToolzExpressiveButton(
                     onClick = onDownload,
@@ -761,26 +796,49 @@ private fun ResultCard(
 }
 
 @Composable
+private fun PlatformDot(
+    platform: com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform?,
+    modifier: Modifier = Modifier,
+) {
+    val dot = when (platform) {
+        com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform.YOUTUBE -> Color(0xFFFF0000)
+        com.frerox.toolz.data.downloader.MediaDownloaderRepository.Platform.INSTAGRAM -> Color(0xFFDD2A7B)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = modifier
+            .size(10.dp)
+            .background(dot, androidx.compose.foundation.shape.CircleShape),
+    )
+}
+
+@Composable
 private fun StatChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     value: String,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
-        Icon(
-            icon,
-            null,
-            modifier = Modifier.size(15.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Icon(
+                icon,
+                null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

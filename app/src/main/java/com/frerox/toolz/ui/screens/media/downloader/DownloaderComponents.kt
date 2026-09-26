@@ -463,7 +463,7 @@ fun FetchingSkeletonCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Thumbnail first — no "Preview" label to match ResultCard.
             // Thumbnail: 16:9 for YouTube, fixed portrait height for TikTok/Reels.
@@ -531,18 +531,19 @@ fun FetchingSkeletonCard(
                     .clip(RoundedCornerShape(7.dp))
                     .background(shimmer),
             )
-            // Quality rows mirror the result structure for the active mode: grouped
-            // 3+2 with subgroup labels in Both mode, plain rows otherwise — exactly
-            // like ResultCard, which only shows subgroup labels with both groups.
+            // Quality rows mirror the result structure for the active mode, with
+            // representative counts: BOTH typically shows 4+ video and 3+ audio
+            // (direct + converted), AUDIO up to 5, VIDEO up to 5. Capped so the
+            // skeleton never flashes taller than the real card.
             val videoRows = when (mode) {
-                MediaDownloaderViewModel.DownloadMode.VIDEO -> 6
+                MediaDownloaderViewModel.DownloadMode.VIDEO -> 5
                 MediaDownloaderViewModel.DownloadMode.AUDIO -> 0
-                MediaDownloaderViewModel.DownloadMode.BOTH -> 3
+                MediaDownloaderViewModel.DownloadMode.BOTH -> 4
             }
             val audioRows = when (mode) {
                 MediaDownloaderViewModel.DownloadMode.VIDEO -> 0
                 MediaDownloaderViewModel.DownloadMode.AUDIO -> 5
-                MediaDownloaderViewModel.DownloadMode.BOTH -> 2
+                MediaDownloaderViewModel.DownloadMode.BOTH -> 3
             }
             if (mode == MediaDownloaderViewModel.DownloadMode.BOTH) {
                 Box(
@@ -570,11 +571,11 @@ fun FetchingSkeletonCard(
                     SkeletonQualityRow(brush = shimmer)
                 }
             }
-            // Download CTA placeholder.
+            // Download CTA placeholder — same 58dp height as the real button.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(58.dp)
                     .clip(RoundedCornerShape(26.dp))
                     .background(shimmer),
             )
@@ -1022,10 +1023,36 @@ fun formatCount(n: Long?): String? {
     }
 }
 
-// Re-export for staggered sections without extra imports at call site.
+// Entrance wrapper shared by downloader screens.
+// The seen-set lives at the SCREEN level (remembered once per entry), so
+// LazyColumn item recycling on scroll can never replay the slide/fade.
+// Pass the screen's set in; first composition plays, everything after is direct.
+class DownloaderEntranceSeen {
+    private val _seen = mutableSetOf<Int>()
+    fun isSeen(index: Int): Boolean = index in _seen
+    fun markSeen(index: Int) { _seen += index }
+}
+
 @Composable
-fun DownloaderSection(index: Int, content: @Composable () -> Unit) {
-    StaggeredEntrance(index = index) { content() }
+fun rememberDownloaderEntranceSeen(): DownloaderEntranceSeen {
+    return androidx.compose.runtime.remember { DownloaderEntranceSeen() }
+}
+
+@Composable
+fun DownloaderSection(
+    index: Int,
+    seen: DownloaderEntranceSeen? = null,
+    content: @Composable () -> Unit,
+) {
+    if (seen == null || seen.isSeen(index)) {
+        androidx.compose.foundation.layout.Box { content() }
+    } else {
+        StaggeredEntrance(index = index) { content() }
+        androidx.compose.runtime.LaunchedEffect(index) {
+            kotlinx.coroutines.delay(450L + index * 60L)
+            seen.markSeen(index)
+        }
+    }
 }
 
 // ── History entry card ──────────────────────────────────────────────────────

@@ -55,10 +55,10 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import com.frerox.toolz.MainActivity
 import com.frerox.toolz.widget.ScreenTimeWidgetDrawer
 import com.frerox.toolz.widget.WidgetEntryPoint
 import com.frerox.toolz.widget.ui.WidgetOuterCorner
+import com.frerox.toolz.widget.ui.widgetNavIntent
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.firstOrNull
 import java.util.Calendar
@@ -73,11 +73,14 @@ import kotlin.math.roundToInt
 class ScreenTimeGlanceWidget : GlanceAppWidget() {
 
     companion object {
+        // Reference sizes for the widget picker + preview rendering.
         private val COMPACT = DpSize(180.dp, 140.dp)
         private val EXPANDED = DpSize(300.dp, 200.dp)
     }
 
-    override val sizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
+    // Exact: one layout stretched to the real canvas; LocalSize picks the
+    // ring + 2-bar vs 3-bar arrangement at every intermediate size.
+    override val sizeMode: SizeMode = SizeMode.Exact
     override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
@@ -103,14 +106,8 @@ class ScreenTimeGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val data = loadData(context)
-        val openFocusIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "focus_flow")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val openSettingsIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "settings")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
+        val openFocusIntent = widgetNavIntent(context, "focus_flow")
+        val openSettingsIntent = widgetNavIntent(context, "settings")
 
         provideContent {
             GlanceTheme {
@@ -303,7 +300,7 @@ private fun ScreenTimeContent(
         }
 
         Row(
-            modifier = GlanceModifier.fillMaxSize().padding(16.dp),
+            modifier = GlanceModifier.fillMaxSize().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Ring + center text.
@@ -416,4 +413,18 @@ private fun ScreenTimeContent(
 
 class ScreenTimeWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ScreenTimeGlanceWidget()
+
+    // First instance placed → ensure the 15-min refresh is scheduled
+    // (covers fresh installs where the Application hook hasn't run yet).
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        try { com.frerox.toolz.worker.ScreenTimeWidgetWorker.schedule(context) } catch (_: Exception) {}
+    }
+
+    // Last instance removed → stop the periodic work; it reschedules on
+    // the next onEnabled / app start.
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        try { com.frerox.toolz.worker.ScreenTimeWidgetWorker.cancel(context) } catch (_: Exception) {}
+    }
 }

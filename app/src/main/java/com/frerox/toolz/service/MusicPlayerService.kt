@@ -127,12 +127,11 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
         // anyway — the next handful is what's actually useful at a glance.
         private const val MAX_QUEUE_ROWS = 8
 
-        // P-Revamp: Realtime correction every 2s for true live progress
-        // instead of 12s drift correction. The widget interpolates position
-        // between pushes, but 12s made scrub/seek feel laggy and queue
-        // updates stale. 2s keeps bar smooth and queue fresh with minimal
-        // battery impact (Glance throttles per widgetId).
-        private const val PROGRESS_CORRECTION_INTERVAL_MS = 2_000L
+        // Live progress: throttled correction every 10s while playing. The
+        // widget interpolates position between pushes from the captured
+        // timestamp, so 10s keeps the bar and time labels roughly live at
+        // one-fifth the re-render, DataStore and PNG-write cost of 2s.
+        private const val PROGRESS_CORRECTION_INTERVAL_MS = 10_000L
 
         // Pocket-resume persistence: while playing we checkpoint the exact
         // position every 5s (was 30s — up to 30s of drift if the process died).
@@ -1297,12 +1296,9 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
     }
 
     /**
-     * Periodic drift correction while playing — NOT a "make the bar move"
-     * timer. The widget derives its own live position between pushes (see
-     * MusicWidgetSupport.liveProgressFraction), so this only needs to run
-     * often enough to catch drift, not every second. Replaces the previous
-     * 1s poll loop, cutting widget re-renders by roughly 12x during
-     * continuous playback while the bar looks equally live.
+     * Periodic drift correction while playing. The widget interpolates its
+     * own live position between pushes from the captured timestamp, so this
+     * loop only needs to re-anchor drift and refresh queue/shuffle state.
      */
     private fun startWidgetCorrectionLoop() {
         widgetCorrectionJob?.cancel()
@@ -1582,6 +1578,7 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
             val album = currentItem?.mediaMetadata?.albumTitle?.toString()
 
             // P2-03 fix: Palette work off Main (was blocking serviceScope/Main)
+            var artRegenerated = false
             if (forceBitmapRefresh || artUri != lastTrackUri || artShape != lastShape || cachedProcessedBitmap == null) {
                 var bitmap = if (artUri != null) loadBitmap(artUri) else null
                 if (bitmap == null) {
@@ -1598,14 +1595,20 @@ class MusicPlayerService : MediaSessionService(), SensorEventListener {
                         palette.getVibrantColor(palette.getMutedColor(Color.BLUE))
                     }
                     lastAccentColor = String.format("#%06X", 0xFFFFFF and color)
+                    artRegenerated = true
                 }
             }
 
-            // Save bitmap to internal storage so Glance can load it
+            // Save bitmap to internal storage so Glance can load it. Only
+            // rewrite the PNG when the art actually changed (or the file is
+            // missing) — the correction loop pushes every 10s and must not
+            // pay a PNG compress + fsync on every tick.
             val artFilePath = cachedProcessedBitmap?.let { bmp ->
                 try {
                     val file = File(filesDir, "widget_art.png")
-                    FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 85, it) }
+                    if (artRegenerated || !file.exists()) {
+                        FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.PNG, 85, it) }
+                    }
                     file.absolutePath
                 } catch (_: Exception) { null }
             }

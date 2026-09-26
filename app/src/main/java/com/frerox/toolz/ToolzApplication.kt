@@ -103,6 +103,10 @@ class ToolzApplication : Application(), Configuration.Provider {
         scheduleWhisperDelivery()
         schedulePurgeShotReschedule()
         com.frerox.toolz.worker.ClipboardCleanupWorker.schedule(this)
+        // Screen Time widget: 15-min refresh while instances exist. KEEP makes
+        // this idempotent across reboots/updates; the receiver cancels it when
+        // the last instance is removed and re-schedules on re-place.
+        com.frerox.toolz.worker.ScreenTimeWidgetWorker.schedule(this)
         // Warm the search DNS client at startup so the user's first search doesn't pay the
         // DoH bootstrap cost (blocking InetAddress bootstrap + DataStore reads) mid-query.
         appScope.launch {

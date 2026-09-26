@@ -53,9 +53,9 @@ import androidx.glance.layout.wrapContentHeight
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
 import com.frerox.toolz.widget.ui.WidgetOuterCorner
+import com.frerox.toolz.widget.ui.widgetNavIntent
 import kotlinx.coroutines.flow.firstOrNull
 
 // ---------------------------------------------------------------------------
@@ -68,13 +68,15 @@ import kotlinx.coroutines.flow.firstOrNull
 class QuickActionsGlanceWidget : GlanceAppWidget() {
 
     companion object {
-        // Responsive so horizontal resize actually re-lays out:
-        // narrow shows 2 slots, wide shows 3. Heights fixed — toolbar is 1 cell tall.
-        private val COMPACT = DpSize(200.dp, 64.dp)
-        private val EXPANDED = DpSize(280.dp, 64.dp)
+        // Reference sizes for the widget picker + preview rendering.
+        // 72dp tall: 48dp touch targets + headroom for launcher system
+        // padding (Android 12+ insets clip exact-64dp toolbars).
+        private val COMPACT = DpSize(200.dp, 72.dp)
+        private val EXPANDED = DpSize(280.dp, 72.dp)
     }
 
-    override val sizeMode: SizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
+    // Exact: narrow launchers drop to 2 slots via LocalSize, wide shows 3.
+    override val sizeMode: SizeMode = SizeMode.Exact
     override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
@@ -94,39 +96,17 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
     }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val openSearchIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "search")
+        val openSearchIntent = widgetNavIntent(context, "search").apply {
             putExtra("auto_focus_search", true)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val voiceIntent = try {
-            Intent(android.speech.RecognizerIntent.ACTION_WEB_SEARCH).apply {
-                putExtra(
-                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    android.speech.RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH
-                )
-            }.takeIf {
-                it.resolveActivity(context.packageManager) != null
-            } ?: openSearchIntent
-        } catch (_: Exception) {
-            openSearchIntent
-        }
-        val flashlightIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "flashlight")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val qrIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", "qr_generator")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pomodoroIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "pomodoro")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val timerIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "timer")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
+        // Voice slot opens in-app search (same destination as the hint).
+        // The old external ACTION_WEB_SEARCH branch could resolve to another
+        // app and broke the single-tap contract on launchers without Google.
+        val voiceIntent = openSearchIntent
+        val flashlightIntent = widgetNavIntent(context, "flashlight")
+        val qrIntent = widgetNavIntent(context, "qr_generator")
+        val pomodoroIntent = widgetNavIntent(context, "pomodoro")
+        val timerIntent = widgetNavIntent(context, "timer")
 
         val slots = try {
             readToolbarSlots(context)
@@ -149,11 +129,8 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
         }
     }
 
-    private fun dummyIntent(context: Context, route: String): Intent {
-        return Intent(context, MainActivity::class.java).apply {
-            putExtra("navigate_to", route)
-        }
-    }
+    private fun dummyIntent(context: Context, route: String): Intent =
+        widgetNavIntent(context, route)
 }
 
 private suspend fun readToolbarSlots(context: Context): List<String> {
@@ -197,7 +174,7 @@ private fun ToolbarContent(
             modifier = GlanceModifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Search badge — 48dp touch, opens search.

@@ -34,9 +34,22 @@ import com.frerox.toolz.widget.glance.SearchBarWidgetReceiver
 
 object WidgetPreviewsPublisher {
     private const val TAG = "WidgetPreviews"
+    private const val PREFS = "widget_previews"
+    private const val KEY_LAST_PUBLISH_MS = "last_publish_ms"
+    // setWidgetPreviews is rate-limited (~2/hr) and each publish re-renders
+    // all four widgets. MainActivity calls this on every cold start, so
+    // throttle to once per day — previews don't change faster than that.
+    private const val MIN_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
-    suspend fun publishAll(context: Context) {
+    suspend fun publishAll(context: Context, force: Boolean = false) {
         if (Build.VERSION.SDK_INT < 35) return
+        if (!force) {
+            try {
+                val last = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getLong(KEY_LAST_PUBLISH_MS, 0L)
+                if (System.currentTimeMillis() - last < MIN_INTERVAL_MS) return
+            } catch (_: Exception) {}
+        }
         try {
             val manager = GlanceAppWidgetManager(context)
             // Publish in priority order; each is independently guarded.
@@ -61,6 +74,10 @@ object WidgetPreviewsPublisher {
             } catch (e: Exception) {
                 Log.w(TAG, "screentime preview failed", e)
             }
+            try {
+                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putLong(KEY_LAST_PUBLISH_MS, System.currentTimeMillis()).apply()
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             Log.w(TAG, "publishAll failed (non-fatal)", e)
         }
