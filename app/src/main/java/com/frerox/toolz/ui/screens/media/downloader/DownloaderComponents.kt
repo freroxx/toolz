@@ -37,10 +37,12 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -281,7 +283,11 @@ fun QualityOptionRow(
                 },
             ) {
                 Icon(
-                    if (option.isAudio) Icons.Rounded.MusicNote else Icons.Rounded.HighQuality,
+                    when (option.kind) {
+                        "audio" -> Icons.Rounded.MusicNote
+                        "image" -> Icons.Rounded.Image
+                        else -> Icons.Rounded.HighQuality
+                    },
                     null,
                     modifier = Modifier.padding(6.dp).size(20.dp),
                     tint = if (selected) {
@@ -664,6 +670,7 @@ fun MediaDownloadRow(
     fileUri: String?,
     onCancel: () -> Unit,
     onOpen: () -> Unit,
+    onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val active = info.state == WorkInfo.State.RUNNING || info.state == WorkInfo.State.ENQUEUED
@@ -689,7 +696,8 @@ fun MediaDownloadRow(
                     fileUri = fileUri,
                     remoteThumb = label?.thumbnailUrl,
                     isAudio = label?.isAudio == true,
-                    showPlayBadge = openable && label?.isAudio != true,
+                    isImage = label?.mediaKind == "image",
+                    showPlayBadge = openable && label?.mediaKind == "video",
                     modifier = Modifier.size(56.dp),
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -733,6 +741,10 @@ fun MediaDownloadRow(
                             modifier = Modifier.padding(9.dp).size(17.dp),
                         )
                     }
+                } else if (onRetry != null) {
+                    ToolzOutlinedExpressiveIconButton(onClick = onRetry) {
+                        Icon(Icons.Rounded.Refresh, stringResource(R.string.st_MediaDownloader_RetryDownload))
+                    }
                 }
             }
             if (active) {
@@ -753,6 +765,19 @@ fun MediaDownloadRow(
                         modifier = Modifier.align(Alignment.End),
                     )
                 }
+            } else if (info.state == WorkInfo.State.FAILED) {
+                Text(
+                    info.outputData.getString(com.frerox.toolz.worker.SocialDownloadWorker.KEY_ERROR)
+                        ?: stringResource(R.string.st_MediaDownloader_DownloadFailedHint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else if (info.state == WorkInfo.State.CANCELLED) {
+                Text(
+                    stringResource(R.string.st_MediaDownloader_CancelledHint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -768,6 +793,7 @@ private fun DownloadThumb(
     fileUri: String?,
     remoteThumb: String?,
     isAudio: Boolean,
+    isImage: Boolean,
     showPlayBadge: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -781,8 +807,15 @@ private fun DownloadThumb(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxSize(),
         ) {
-            val hasVideoFile = !fileUri.isNullOrBlank() && !isAudio
+            val hasImageFile = !fileUri.isNullOrBlank() && isImage
+            val hasVideoFile = !fileUri.isNullOrBlank() && !isAudio && !isImage
             when {
+                hasImageFile -> AsyncImage(
+                    model = fileUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 hasVideoFile -> {
                     SubcomposeAsyncImage(
                         model = ImageRequest.Builder(context).data(fileUri).apply {
@@ -800,7 +833,7 @@ private fun DownloadThumb(
                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                             }
                         },
-                        error = { RemoteThumbOrIcon(remoteThumb, isAudio) },
+                        error = { RemoteThumbOrIcon(remoteThumb, isAudio, isImage) },
                     )
                 }
                 !remoteThumb.isNullOrBlank() -> {
@@ -817,10 +850,10 @@ private fun DownloadThumb(
                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                             }
                         },
-                        error = { RemoteThumbOrIcon(null, isAudio) },
+                        error = { RemoteThumbOrIcon(null, isAudio, isImage) },
                     )
                 }
-                else -> RemoteThumbOrIcon(null, isAudio)
+                else -> RemoteThumbOrIcon(null, isAudio, isImage)
             }
             if (showPlayBadge) {
                 Surface(
@@ -843,7 +876,7 @@ private fun DownloadThumb(
 }
 
 @Composable
-private fun RemoteThumbOrIcon(remoteThumb: String?, isAudio: Boolean) {
+private fun RemoteThumbOrIcon(remoteThumb: String?, isAudio: Boolean, isImage: Boolean) {
     if (!remoteThumb.isNullOrBlank()) {
         AsyncImage(
             model = remoteThumb,
@@ -853,7 +886,11 @@ private fun RemoteThumbOrIcon(remoteThumb: String?, isAudio: Boolean) {
         )
     } else {
         Icon(
-            if (isAudio) Icons.Rounded.MusicNote else Icons.Rounded.Movie,
+            when {
+                isAudio -> Icons.Rounded.MusicNote
+                isImage -> Icons.Rounded.Image
+                else -> Icons.Rounded.Movie
+            },
             null,
             modifier = Modifier.size(26.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
@@ -1004,6 +1041,8 @@ fun HistorySheet(
     downloadProgress: (WorkInfo) -> Float,
     downloadFileUri: (WorkInfo) -> String?,
     onCancelDownload: (java.util.UUID) -> Unit,
+    onRetryDownload: (WorkInfo) -> Unit,
+    canRetryDownload: (WorkInfo) -> Boolean,
     onOpenDownload: (WorkInfo, MediaDownloaderViewModel.DownloadLabel?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1089,6 +1128,11 @@ fun HistorySheet(
                             fileUri = downloadFileUri(info),
                             onCancel = { onCancelDownload(info.id) },
                             onOpen = { onOpenDownload(info, label) },
+                            onRetry = if (canRetryDownload(info)) {
+                                { onRetryDownload(info) }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }

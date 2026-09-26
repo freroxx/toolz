@@ -319,6 +319,11 @@ fun MediaDownloaderScreen(
                         fileUri = info.outputData.getString(SocialDownloadWorker.KEY_FILE_URI),
                         onCancel = { viewModel.cancelDownload(info.id) },
                         onOpen = { viewModel.openDownload(context, info, label) },
+                        onRetry = if (viewModel.canRetryDownload(info)) {
+                            { viewModel.retryDownload(info) }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -341,6 +346,10 @@ fun MediaDownloaderScreen(
                     info.outputData.getString(SocialDownloadWorker.KEY_FILE_URI)
                 },
                 onCancelDownload = viewModel::cancelDownload,
+                onRetryDownload = { info ->
+                    if (viewModel.canRetryDownload(info)) viewModel.retryDownload(info)
+                },
+                canRetryDownload = viewModel::canRetryDownload,
                 onOpenDownload = { info, label ->
                     viewModel.openDownload(context, info, label)
                 },
@@ -518,8 +527,9 @@ private fun ResultCard(
     val views = formatCount(remote?.stats?.view_count)
     val likes = formatCount(remote?.stats?.like_count)
 
-    val videoOpts = remember(ui.options) { ui.options.filter { !it.isAudio } }
-    val audioOpts = remember(ui.options) { ui.options.filter { it.isAudio } }
+    val videoOpts = remember(ui.options) { ui.options.filter { it.kind == "video" } }
+    val audioOpts = remember(ui.options) { ui.options.filter { it.kind == "audio" } }
+    val imageOpts = remember(ui.options) { ui.options.filter { it.kind == "image" } }
     val selected = ui.options.firstOrNull { it.id == ui.selectedId }
 
     ExpressiveCard(
@@ -538,7 +548,7 @@ private fun ResultCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.SemiBold,
             )
-            val verticalThumb = isVerticalVideo(resolvePlatform(ui.detectedPlatform, remote?.platform))
+            val verticalThumb = imageOpts.isEmpty() && isVerticalVideo(resolvePlatform(ui.detectedPlatform, remote?.platform))
             val thumbModifier = if (verticalThumb) {
                 Modifier
                     .fillMaxWidth()
@@ -627,11 +637,29 @@ private fun ResultCard(
 
             if (ui.options.isNotEmpty()) {
                 Text(
-                    stringResource(R.string.st_MediaDownloader_ChooseQuality),
+                    if (imageOpts.isNotEmpty() && videoOpts.isEmpty() && audioOpts.isEmpty()) {
+                        stringResource(R.string.st_MediaDownloader_Photos)
+                    } else {
+                        stringResource(R.string.st_MediaDownloader_ChooseQuality)
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
+                if (imageOpts.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.st_MediaDownloader_PhotosHint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    imageOpts.forEach { opt ->
+                        QualityOptionRow(
+                            option = opt,
+                            selected = ui.selectedId == opt.id,
+                            onSelect = { viewModel.selectOption(opt.id) },
+                        )
+                    }
+                }
                 if (videoOpts.isNotEmpty()) {
                     if (audioOpts.isNotEmpty()) {
                         Text(
@@ -677,7 +705,7 @@ private fun ResultCard(
                 ) {
                     Icon(Icons.Rounded.CloudDownload, null, modifier = Modifier.size(18.dp))
                     Text(
-                        "${stringResource(R.string.st_MediaDownloader_Download)} • ${selected?.label ?: ""}",
+                        "${if (selected?.kind == "image") stringResource(R.string.st_MediaDownloader_Save) else stringResource(R.string.st_MediaDownloader_Download)} • ${selected?.label ?: ""}",
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

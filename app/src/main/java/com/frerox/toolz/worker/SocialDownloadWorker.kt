@@ -61,6 +61,8 @@ class SocialDownloadWorker @AssistedInject constructor(
         const val KEY_FILE_URI = "file_uri"
         const val KEY_DISPLAY_NAME = "display_name"
         const val KEY_MIME_TYPE = "mime_type"
+        /** Human-readable, non-sensitive failure reason for the in-app download card. */
+        const val KEY_ERROR = "error"
         const val CHANNEL_ID = NotificationHelper.CHANNEL_VIDEO_DOWNLOADS
         const val NOTIFICATION_ID_BASE = 3000
     }
@@ -68,9 +70,30 @@ class SocialDownloadWorker @AssistedInject constructor(
     private val notificationManager =
         applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+    /**
+     * Retain only opaque asset identifiers and harmless display metadata in the
+     * failed work output. WorkManager does not surface a completed request's
+     * input, so this allows a retry after process recreation without saving a
+     * bearer token, source URL, or upstream cookie.
+     */
+    private fun failure(reason: String): Result {
+        val output = androidx.work.Data.Builder().putString(KEY_ERROR, reason.take(160))
+        listOf(
+            KEY_EXTRACTION_ID,
+            KEY_ASSET_ID,
+            KEY_FILE_NAME,
+            KEY_TITLE,
+            KEY_MIME_TYPE_INPUT,
+        ).forEach { key -> inputData.getString(key)?.let { output.putString(key, it) } }
+        output.putBoolean(KEY_IS_AUDIO, inputData.getBoolean(KEY_IS_AUDIO, false))
+        return Result.failure(output.build())
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val extractionId = inputData.getString(KEY_EXTRACTION_ID) ?: return@withContext Result.failure()
-        val assetId = inputData.getString(KEY_ASSET_ID) ?: return@withContext Result.failure()
+        val extractionId = inputData.getString(KEY_EXTRACTION_ID)
+            ?: return@withContext failure("This download is missing its media reference.")
+        val assetId = inputData.getString(KEY_ASSET_ID)
+            ?: return@withContext failure("This download is missing its file reference.")
         val title = inputData.getString(KEY_TITLE) ?: "media"
         val fileName = inputData.getString(KEY_FILE_NAME)?.ifBlank { "$title.mp4" } ?: "$title.mp4"
         val isAudio = inputData.getBoolean(KEY_IS_AUDIO, false)
@@ -93,9 +116,10 @@ class SocialDownloadWorker @AssistedInject constructor(
             if (base.isBlank()) {
                 progressChannel.close(); progressJob.cancel()
                 showErrorNotification(notificationId, safeTitle, "Download server not configured")
-                return@withContext Result.failure()
+                return@withContext failure("The download server is not configured.")
             }
             val sessionToken = createGuestSession(base) ?: run {
+                progressChannel.close(); progressJob.cancel()
                 showErrorNotification(notificationId, safeTitle, "Could not create a download session")
                 return@withContext Result.retry()
             }
@@ -119,7 +143,7 @@ class SocialDownloadWorker @AssistedInject constructor(
             if (!ok || !tmp.exists() || tmp.length() <= 0) {
                 try { tmp.delete() } catch (_: Exception) {}
                 showErrorNotification(notificationId, safeTitle, "Server refused the download")
-                return@withContext Result.failure()
+                return@withContext failure("The link expired or the server could not provide this file. Extract it again and retry.")
             }
 
             publishProgress(notificationId, "Saving file...", 0.92f)
@@ -145,12 +169,12 @@ class SocialDownloadWorker @AssistedInject constructor(
                 )
             } else {
                 showErrorNotification(notificationId, safeTitle, "Could not save file to gallery")
-                Result.failure()
+                failure("Toolz could not save this file to your device.")
             }
         } catch (e: Exception) {
             android.util.Log.e("SocialDownloadWorker", "Failure downloading $extractionId/$assetId", e)
             showErrorNotification(notificationId, safeTitle, e.message ?: "Download failed")
-            Result.failure()
+            failure("The download could not be completed. Check your connection and retry.")
         }
     }
 

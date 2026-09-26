@@ -8,6 +8,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -115,6 +116,10 @@ class MediaDownloaderViewModel @Inject constructor(
         val qualityLabel: String,
         val isAudio: Boolean,
         val thumbnailUrl: String? = null,
+        /** video, audio, or image; retained for resilient post-download UI. */
+        val mediaKind: String = if (isAudio) "audio" else "video",
+        /** Opaque worker input retained only for an in-session retry. */
+        val retryData: Data? = null,
     )
 
     data class UiState(
@@ -521,6 +526,61 @@ class MediaDownloaderViewModel @Inject constructor(
 
     fun cancelDownload(id: java.util.UUID) {
         WorkManager.getInstance(appContext).cancelWorkById(id)
+        _ui.value = _ui.value.copy(downloadEnqueued = "Cancelling download…")
+    }
+
+    /** Re-enqueues a terminal social-media download with its original opaque asset handle. */
+    fun retryDownload(info: WorkInfo) {
+        if (info.state !in setOf(WorkInfo.State.FAILED, WorkInfo.State.CANCELLED)) return
+        val label = _labels.value[info.id.toString()]
+        val retryData = label?.retryData ?: retryDataFrom(info)
+        if (SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD !in info.tags || retryData == null) {
+            _ui.value = _ui.value.copy(error = "Reopen the original link to retry this download.")
+            return
+        }
+        val req = OneTimeWorkRequestBuilder<SocialDownloadWorker>()
+            .setInputData(retryData)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .addTag(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD)
+            .build()
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "social_retry_${info.id}_${System.currentTimeMillis()}",
+            ExistingWorkPolicy.REPLACE,
+            req,
+        )
+        val retryLabel = label ?: DownloadLabel(
+            title = retryData.getString(SocialDownloadWorker.KEY_TITLE) ?: "Media",
+            qualityLabel = retryData.getString(SocialDownloadWorker.KEY_FILE_NAME) ?: "Download",
+            isAudio = retryData.getBoolean(SocialDownloadWorker.KEY_IS_AUDIO, false),
+            thumbnailUrl = retryData.getString(SocialDownloadWorker.KEY_THUMBNAIL_URL),
+            mediaKind = when {
+                retryData.getString(SocialDownloadWorker.KEY_MIME_TYPE_INPUT)?.startsWith("image/") == true -> "image"
+                retryData.getBoolean(SocialDownloadWorker.KEY_IS_AUDIO, false) -> "audio"
+                else -> "video"
+            },
+        )
+        rememberLabel(req.id, retryLabel.copy(retryData = retryData))
+        _ui.value = _ui.value.copy(downloadEnqueued = "Retry started")
+    }
+
+    fun canRetryDownload(info: WorkInfo): Boolean =
+        info.state in setOf(WorkInfo.State.FAILED, WorkInfo.State.CANCELLED) &&
+            SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD in info.tags &&
+            (_labels.value[info.id.toString()]?.retryData != null || retryDataFrom(info) != null)
+
+    private fun retryDataFrom(info: WorkInfo): Data? {
+        val output = info.outputData
+        val extractionId = output.getString(SocialDownloadWorker.KEY_EXTRACTION_ID) ?: return null
+        val assetId = output.getString(SocialDownloadWorker.KEY_ASSET_ID) ?: return null
+        return Data.Builder()
+            .putString(SocialDownloadWorker.KEY_EXTRACTION_ID, extractionId)
+            .putString(SocialDownloadWorker.KEY_ASSET_ID, assetId)
+            .putString(SocialDownloadWorker.KEY_FILE_NAME, output.getString(SocialDownloadWorker.KEY_FILE_NAME))
+            .putString(SocialDownloadWorker.KEY_TITLE, output.getString(SocialDownloadWorker.KEY_TITLE))
+            .putString(SocialDownloadWorker.KEY_MIME_TYPE_INPUT, output.getString(SocialDownloadWorker.KEY_MIME_TYPE_INPUT))
+            .putBoolean(SocialDownloadWorker.KEY_IS_AUDIO, output.getBoolean(SocialDownloadWorker.KEY_IS_AUDIO, false))
+            .build()
     }
 
     /** Opens a finished download in an external viewer/player. */
@@ -535,7 +595,11 @@ class MediaDownloaderViewModel @Inject constructor(
             }
             val resolvedMime = info.outputData.getString("mime_type")
                 ?: appContext.contentResolver.getType(uri)
-                ?: if (label?.isAudio == true) "audio/*" else "video/*"
+                ?: when (label?.mediaKind) {
+                    "image" -> "image/*"
+                    "audio" -> "audio/*"
+                    else -> "video/*"
+                }
             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, resolvedMime)
                 addFlags(
@@ -569,6 +633,7 @@ class MediaDownloaderViewModel @Inject constructor(
         val collections = listOf(
             android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
         )
         for (collection in collections) {
             try {
@@ -600,10 +665,10 @@ class MediaDownloaderViewModel @Inject constructor(
         if (uri == null && displayName != null) uri = findInMediaStore(displayName)
         if (uri == null && label != null) {
             val safe = label.title.replace(Regex("[^a-zA-Z0-9 \\-.]"), "_").take(80)
-            val exts = if (label.isAudio) {
-                listOf(".mp3", ".m4a", ".wav", ".ogg", ".flac", ".opus", ".aac")
-            } else {
-                listOf(".mp4", ".mp3")
+            val exts = when (label.mediaKind) {
+                "image" -> listOf(".jpg", ".jpeg", ".png", ".webp", ".gif")
+                "audio" -> listOf(".mp3", ".m4a", ".wav", ".ogg", ".flac", ".opus", ".aac")
+                else -> listOf(".mp4", ".webm", ".mkv")
             }
             for (ext in exts) {
                 uri = findInMediaStore(safe + ext)
@@ -718,6 +783,22 @@ class MediaDownloaderViewModel @Inject constructor(
         mode: DownloadMode,
         platform: MediaDownloaderRepository.Platform?,
     ): List<QualityOption> {
+        // Galleries contain independently downloadable photos, never an audio
+        // track. Keep them usable even if the user prefers audio for this app.
+        if (res.media_kind == "gallery") {
+            return res.assets
+                .filter { it.kind == "image" && it.id.isNotBlank() }
+                .mapIndexed { index, f ->
+                    QualityOption(
+                        id = f.id,
+                        label = "Photo ${index + 1}",
+                        detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "image").uppercase(),
+                        ext = (f.ext ?: "jpg").lowercase(),
+                        kind = "image",
+                    )
+                }
+                .take(20)
+        }
         val directAudio = res.assets.filter { it.kind == "audio" && it.id.isNotBlank() }
             .take(3)
             .map { f ->
@@ -898,18 +979,17 @@ class MediaDownloaderViewModel @Inject constructor(
             val ext = asset.ext ?: if (isAudio) "mp3" else "mp4"
             val baseName = if (asset.kind == "image") "${remote.title ?: "photo"}-${asset.id}" else remote.title
             val fileName = repository.downloadFileName(baseName, ext)
+            val inputData = workDataOf(
+                SocialDownloadWorker.KEY_EXTRACTION_ID to extractionId,
+                SocialDownloadWorker.KEY_ASSET_ID to asset.id,
+                SocialDownloadWorker.KEY_FILE_NAME to fileName,
+                SocialDownloadWorker.KEY_TITLE to (remote.title ?: "media"),
+                SocialDownloadWorker.KEY_THUMBNAIL_URL to remote.thumbnail,
+                SocialDownloadWorker.KEY_IS_AUDIO to isAudio,
+                SocialDownloadWorker.KEY_MIME_TYPE_INPUT to asset.mime_type,
+            )
             val req = OneTimeWorkRequestBuilder<SocialDownloadWorker>()
-                .setInputData(
-                    workDataOf(
-                        SocialDownloadWorker.KEY_EXTRACTION_ID to extractionId,
-                        SocialDownloadWorker.KEY_ASSET_ID to asset.id,
-                        SocialDownloadWorker.KEY_FILE_NAME to fileName,
-                        SocialDownloadWorker.KEY_TITLE to (remote.title ?: "media"),
-                        SocialDownloadWorker.KEY_THUMBNAIL_URL to remote.thumbnail,
-                        SocialDownloadWorker.KEY_IS_AUDIO to isAudio,
-                        SocialDownloadWorker.KEY_MIME_TYPE_INPUT to asset.mime_type,
-                    )
-                )
+                .setInputData(inputData)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .addTag(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD)
@@ -919,7 +999,10 @@ class MediaDownloaderViewModel @Inject constructor(
                 ExistingWorkPolicy.REPLACE,
                 req,
             )
-            rememberLabel(req.id, DownloadLabel(remote.title ?: "media", opt.label, isAudio, remote.thumbnail))
+            rememberLabel(
+                req.id,
+                DownloadLabel(remote.title ?: "media", opt.label, isAudio, remote.thumbnail, asset.kind, inputData),
+            )
             _ui.value = s.copy(downloadEnqueued = "Download started — ${opt.label}")
             toast(context, "Downloading ${opt.label}…")
             return
