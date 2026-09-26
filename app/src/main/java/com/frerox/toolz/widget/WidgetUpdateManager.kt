@@ -30,7 +30,6 @@ import com.frerox.toolz.widget.glance.PomodoroWidgetState
 import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import com.frerox.toolz.widget.glance.QuickActionsGlanceWidget
 import com.frerox.toolz.widget.glance.ScreenTimeGlanceWidget
-import com.frerox.toolz.widget.glance.SearchBarGlanceWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -91,7 +90,7 @@ class WidgetUpdateManager @Inject constructor(
                     } else {
                         prefs.remove(MusicWidgetState.KEY_NEXT_TITLE)
                     }
-                    prefs[MusicWidgetState.KEY_QUEUE_JSON] = encodeQueueJson(queue)
+                    prefs[MusicWidgetState.KEY_QUEUE_JSON] = encodeQueueJson(queue.take(8))
                 }
                 // Explicitly trigger a refresh for this instance
                 MusicGlanceWidget().update(context, glanceId)
@@ -143,19 +142,20 @@ class WidgetUpdateManager @Inject constructor(
     }
 
     suspend fun updateSearchBarWidget() {
-        // SearchBar doesn't have dynamic state yet, but we provide this for consistency
-        try {
-            SearchBarGlanceWidget().updateAll(context)
-        } catch (_: Exception) { }
+        // Live toolbar is QuickActionsGlanceWidget served by SearchBarWidgetReceiver.
+        // SearchBarGlanceWidget class is dead — don't update it (zero ids, wasted work).
         try {
             QuickActionsGlanceWidget().updateAll(context)
         } catch (_: Exception) { }
     }
 
-    suspend fun refreshAllWidgets() {
+    suspend fun updateScreenTimeWidget() {
         try {
-            SearchBarGlanceWidget().updateAll(context)
+            ScreenTimeGlanceWidget().updateAll(context)
         } catch (_: Exception) { }
+    }
+
+    suspend fun refreshAllWidgets() {
         try {
             QuickActionsGlanceWidget().updateAll(context)
         } catch (_: Exception) { }

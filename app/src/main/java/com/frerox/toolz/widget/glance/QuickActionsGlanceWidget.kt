@@ -28,6 +28,7 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -66,8 +67,15 @@ import kotlinx.coroutines.flow.firstOrNull
 
 class QuickActionsGlanceWidget : GlanceAppWidget() {
 
-    override val sizeMode: SizeMode = SizeMode.Single
-    override val previewSizeMode: PreviewSizeMode = SizeMode.Single
+    companion object {
+        // Responsive so horizontal resize actually re-lays out:
+        // narrow shows 2 slots, wide shows 3. Heights fixed — toolbar is 1 cell tall.
+        private val COMPACT = DpSize(200.dp, 64.dp)
+        private val EXPANDED = DpSize(280.dp, 64.dp)
+    }
+
+    override val sizeMode: SizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
+    override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
 
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
         provideContent {
@@ -76,7 +84,7 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
                     slots = listOf("mic", "flashlight", "qr"),
                     openSearchIntent = dummyIntent(context, "search"),
                     micIntent = dummyIntent(context, "search"),
-                    flashlightIntent = Intent(),
+                    flashlightIntent = dummyIntent(context, "flashlight"),
                     qrIntent = dummyIntent(context, "qr_generator"),
                     pomodoroIntent = dummyIntent(context, "pomodoro"),
                     timerIntent = dummyIntent(context, "timer")
@@ -173,6 +181,11 @@ private fun ToolbarContent(
     pomodoroIntent: Intent,
     timerIntent: Intent
 ) {
+    // Narrow launchers show 2 slots, wide shows 3 — keeps Row under the
+    // 10-child hard limit at every size (outer Row always has 4 children).
+    val widgetWidth = LocalSize.current.width
+    val maxSlots = if (widgetWidth < 240.dp) 2 else 3
+    val visibleSlots = slots.take(maxSlots)
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -184,12 +197,12 @@ private fun ToolbarContent(
             modifier = GlanceModifier
                 .fillMaxWidth()
                 .wrapContentHeight()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Search badge — opens search.
+            // Search badge — 48dp touch, opens search.
             Box(
-                modifier = GlanceModifier.size(40.dp).cornerRadius(20.dp)
+                modifier = GlanceModifier.size(48.dp).cornerRadius(24.dp)
                     .background(GlanceTheme.colors.primary)
                     .clickable(actionStartActivity(openSearchIntent)),
                 contentAlignment = Alignment.Center
@@ -197,7 +210,7 @@ private fun ToolbarContent(
                 Image(
                     provider = ImageProvider(R.drawable.ic_search),
                     contentDescription = "Search",
-                    modifier = GlanceModifier.size(20.dp),
+                    modifier = GlanceModifier.size(22.dp),
                     colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onPrimary)
                 )
             }
@@ -211,7 +224,7 @@ private fun ToolbarContent(
                     .clickable(actionStartActivity(openSearchIntent)),
                 style = TextStyle(
                     color = GlanceTheme.colors.onSurfaceVariant,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 ),
                 maxLines = 1
@@ -219,10 +232,12 @@ private fun ToolbarContent(
 
             Spacer(GlanceModifier.width(8.dp))
 
-            // Slots — siblings, max 3, 48dp touch.
-            slots.take(3).forEach { slot ->
-                Spacer(GlanceModifier.width(8.dp))
-                when (slot) {
+            // Slots in ONE nested Row: outer stays at 4 children, inner max 5
+            // (3 buttons + 2 spacers). Never exceeds Glance's 10-child limit.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                visibleSlots.forEachIndexed { index, slot ->
+                    if (index > 0) Spacer(GlanceModifier.width(8.dp))
+                    when (slot) {
                     "mic" -> SlotButton(
                         icon = R.drawable.ic_widget_mic,
                         desc = "Voice Search",
@@ -271,6 +286,7 @@ private fun ToolbarContent(
                         intent = micIntent,
                         isActivity = true
                     )
+                    }
                 }
             }
         }
@@ -305,6 +321,6 @@ private fun SlotButton(
     }
 }
 
-class QuickActionsWidgetReceiver : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = QuickActionsGlanceWidget()
-}
+// NOTE: QuickActionsWidgetReceiver is dead — the live toolbar receiver is
+// SearchBarWidgetReceiver (same component name as the old search bar, so pinned
+// widgets auto-migrate). Kept out to avoid a duplicate, undeclared widget.

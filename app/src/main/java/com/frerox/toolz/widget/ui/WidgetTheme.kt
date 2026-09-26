@@ -63,10 +63,12 @@ fun isColorDark(color: Color): Boolean {
 }
 
 fun Color.toWidgetColorProvider(): ColorProvider {
-    val self = this
-    return object : ColorProvider {
-        override fun getColor(context: Context): Color = self
-    }
+    // MUST use the official factory (FixedColorProvider). Anonymous
+    // ColorProvider impls log "Unexpected background color modifier" /
+    // "Unexpected progress indicator color" and are dropped by
+    // Glance's RemoteViews translator, which only accepts
+    // Fixed / Resource / DayNight providers.
+    return androidx.glance.unit.ColorProvider(this)
 }
 
 fun parseAccentHex(hex: String?): Color? {

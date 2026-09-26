@@ -184,7 +184,7 @@ class ScreenTimeGlanceWidget : GlanceAppWidget() {
                 ringColor = ring,
                 trackColor = track,
                 bgColor = bg,
-                sizePx = 300
+                sizePx = 256
             )
             val top = apps.take(3)
             ScreenTimeData(
@@ -243,12 +243,17 @@ private fun ScreenTimeContent(
 ) {
     val size = LocalSize.current
     val expanded = size.width >= 260.dp && size.height >= 170.dp
+    // Outer is NOT clickable when showing the permission CTA (nested clickable
+    // breaks). Otherwise ring + list carry the open-focus action as siblings.
+    val outerClickable = if (!hasPermission) {
+        GlanceModifier.fillMaxSize()
+    } else {
+        GlanceModifier.fillMaxSize().clickable(actionStartActivity(openFocusIntent))
+    }
     Box(
-        modifier = GlanceModifier
-            .fillMaxSize()
+        modifier = outerClickable
             .background(GlanceTheme.colors.surface)
-            .cornerRadius(WidgetOuterCorner)
-            .clickable(actionStartActivity(openFocusIntent)),
+            .cornerRadius(WidgetOuterCorner),
         contentAlignment = Alignment.Center
     ) {
         if (!hasPermission) {
@@ -360,43 +365,48 @@ private fun ScreenTimeContent(
                         )
                     )
                 } else {
-                    val rows = if (expanded) topApps.size else minOf(2, topApps.size)
+                    // Each app is ONE child (Column wrapping Row + bar) so the
+                    // parent Column never exceeds Glance's 10-child limit:
+                    // title + spacer + up to 3 blocks = max 5 children.
+                    val rows = if (expanded) topApps.size.coerceAtMost(3) else minOf(2, topApps.size)
                     repeat(rows) { i ->
+                        if (i > 0) Spacer(GlanceModifier.height(8.dp))
                         val (name, time) = topApps[i]
                         val frac = topFractions.getOrNull(i) ?: 0f
-                        Row(
-                            modifier = GlanceModifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                name,
-                                modifier = GlanceModifier.defaultWeight(),
-                                style = TextStyle(
-                                    color = GlanceTheme.colors.onSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                maxLines = 1
-                            )
-                            Spacer(GlanceModifier.width(8.dp))
-                            Text(
-                                time,
-                                style = TextStyle(
-                                    color = GlanceTheme.colors.onSurfaceVariant,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                maxLines = 1
+                        Column(modifier = GlanceModifier.fillMaxWidth()) {
+                            Row(
+                                modifier = GlanceModifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    name,
+                                    modifier = GlanceModifier.defaultWeight(),
+                                    style = TextStyle(
+                                        color = GlanceTheme.colors.onSurface,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    maxLines = 1
+                                )
+                                Spacer(GlanceModifier.width(8.dp))
+                                Text(
+                                    time,
+                                    style = TextStyle(
+                                        color = GlanceTheme.colors.onSurfaceVariant,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(GlanceModifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = frac.coerceIn(0f, 1f),
+                                modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+                                color = GlanceTheme.colors.primary,
+                                backgroundColor = GlanceTheme.colors.surfaceVariant
                             )
                         }
-                        Spacer(GlanceModifier.height(4.dp))
-                        LinearProgressIndicator(
-                            progress = frac.coerceIn(0f, 1f),
-                            modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-                            color = GlanceTheme.colors.primary,
-                            backgroundColor = GlanceTheme.colors.surfaceVariant
-                        )
-                        if (i < rows - 1) Spacer(GlanceModifier.height(8.dp))
                     }
                 }
             }

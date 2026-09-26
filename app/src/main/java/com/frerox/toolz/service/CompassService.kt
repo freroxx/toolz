@@ -30,8 +30,6 @@ import android.os.IBinder
 import android.widget.RemoteViews
 import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
-import com.frerox.toolz.widget.CompassWidgetProvider
-import com.frerox.toolz.widget.WidgetUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
@@ -76,11 +74,11 @@ class CompassService : Service(), SensorEventListener {
 
     private fun updateCompassWidget(azimuth: Float) {
         val appWidgetManager = AppWidgetManager.getInstance(this)
-        val componentName = ComponentName(this, CompassWidgetProvider::class.java)
+        // Legacy compass widget provider was removed (no manifest entry, not
+        // user-addable). Keep the update targeted by class name so this dead
+        // path still compiles if the service ever runs; no class reference.
+        val componentName = ComponentName(this, "com.frerox.toolz.widget.CompassWidgetProvider")
         val views = RemoteViews(packageName, R.layout.compass_widget)
-
-        // Apply theme settings
-        WidgetUtils.applyTheme(this, views, settingsRepository)
 
         // Rotate the dial
         views.setFloat(R.id.widget_compass_dial, "setRotation", -azimuth)

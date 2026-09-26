@@ -29,13 +29,16 @@ import org.json.JSONObject
 
 /** Encodes the up-next queue for DataStore storage. Empty list -> "[]", never null. */
 fun encodeQueueJson(queue: List<QueueTrackInfo>): String {
+    // Glance LazyColumn + DataStore budget: max 8 rows, titles trimmed.
+    // Upstream already caps at 8 (MAX_QUEUE_ROWS) — double-guard here so a
+    // future caller can't blow the 10-child / Binder limit.
     val array = JSONArray()
-    queue.forEach { track ->
+    queue.take(8).forEach { track ->
         array.put(
             JSONObject().apply {
-                put("id", track.mediaId)
-                put("title", track.title)
-                put("artist", track.artist)
+                put("id", track.mediaId.take(120))
+                put("title", track.title.take(60).ifBlank { "Unknown" })
+                put("artist", track.artist.take(60).ifBlank { "Unknown" })
                 put("index", track.queueIndex,)
             }
         )

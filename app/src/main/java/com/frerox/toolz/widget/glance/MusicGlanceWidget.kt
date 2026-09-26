@@ -139,7 +139,10 @@ class MusicGlanceWidget : GlanceAppWidget() {
                         progress = 0.42f,
                         isFavorite = true,
                         hasNext = true,
-                        hasPrev = true
+                        hasPrev = true,
+                        openMusicIntent = Intent(context, MainActivity::class.java).apply {
+                            putExtra("navigate_to", "music_player")
+                        }
                     )
                 }
             }
@@ -204,14 +207,16 @@ class MusicGlanceWidget : GlanceAppWidget() {
 
                 // Outer expressive container: surface (or custom bg) + 28dp.
                 // Custom bg from WIDGETS settings when followDynamic is off.
+                // NOTE: outer is NOT clickable — nested clickables (outer + inner
+                // transport buttons) break on many launchers. Art + titles carry
+                // the open-app action individually (siblings of buttons, never parents).
                 val outerBg = com.frerox.toolz.widget.ui.widgetBackgroundProvider(appearance)
                     ?: GlanceTheme.colors.surface
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .background(outerBg)
-                        .cornerRadius(OUTER_CORNER_RADIUS)
-                        .clickable(actionStartActivity(openMusicIntent)),
+                        .cornerRadius(OUTER_CORNER_RADIUS),
                     contentAlignment = Alignment.TopStart,
                 ) {
                     // Subtle tonal accent wash behind content (expressive)
@@ -241,7 +246,8 @@ class MusicGlanceWidget : GlanceAppWidget() {
                                 progress = liveProgress,
                                 isFavorite = isFavorite,
                                 hasNext = hasNext,
-                                hasPrev = hasPrev
+                                hasPrev = hasPrev,
+                                openMusicIntent = openMusicIntent
                             )
                             WidgetTier.Expanded -> ExpandedMusicContent(
                                 title = title,
@@ -258,7 +264,8 @@ class MusicGlanceWidget : GlanceAppWidget() {
                                 hasPrev = hasPrev,
                                 isShuffle = isShuffle,
                                 repeatMode = repeatMode,
-                                queue = if (appearance.showQueue) queue else emptyList()
+                                queue = if (appearance.showQueue) queue else emptyList(),
+                                openMusicIntent = openMusicIntent
                             )
                             WidgetTier.Hero -> HeroMusicContent(
                                 title = title,
@@ -275,7 +282,8 @@ class MusicGlanceWidget : GlanceAppWidget() {
                                 hasPrev = hasPrev,
                                 isShuffle = isShuffle,
                                 repeatMode = repeatMode,
-                                queue = if (appearance.showQueue) queue else emptyList()
+                                queue = if (appearance.showQueue) queue else emptyList(),
+                                openMusicIntent = openMusicIntent
                             )
                         }
                     }
@@ -426,7 +434,8 @@ private fun CompactMusicContent(
     progress: Float,
     isFavorite: Boolean,
     hasNext: Boolean,
-    hasPrev: Boolean
+    hasPrev: Boolean,
+    openMusicIntent: Intent
 ) {
     Column(modifier = GlanceModifier.fillMaxSize()) {
         Row(
@@ -439,10 +448,11 @@ private fun CompactMusicContent(
                 "SQUIRCLE", "SQUARE_ROUNDED" -> 20.dp
                 else -> 12.dp
             }
-            // Art with tonal wash behind
+            // Art — taps open the player (sibling of transport, never a parent).
             Box(
                 modifier = GlanceModifier.size(52.dp).cornerRadius(cornerDp)
-                    .background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant),
+                    .background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant)
+                    .clickable(actionStartActivity(openMusicIntent)),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -461,7 +471,10 @@ private fun CompactMusicContent(
 
             Spacer(GlanceModifier.width(10.dp))
 
-            Column(modifier = GlanceModifier.defaultWeight().fillMaxHeight()) {
+            Column(
+                modifier = GlanceModifier.defaultWeight().fillMaxHeight()
+                    .clickable(actionStartActivity(openMusicIntent))
+            ) {
                 Spacer(GlanceModifier.defaultWeight())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -532,7 +545,8 @@ private fun ExpandedMusicContent(
     hasPrev: Boolean,
     isShuffle: Boolean = false,
     repeatMode: Int = 0,
-    queue: List<QueueTrackInfo> = emptyList()
+    queue: List<QueueTrackInfo> = emptyList(),
+    openMusicIntent: Intent
 ) {
     Column(modifier = GlanceModifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp)) {
         NowPlayingHeader(
@@ -546,7 +560,8 @@ private fun ExpandedMusicContent(
             nextTitle = null,
             artSize = 60.dp,
             titleFontSize = 15.sp,
-            favoriteButtonSize = 32.dp
+            favoriteButtonSize = 32.dp,
+            openMusicIntent = openMusicIntent
         )
 
         Spacer(GlanceModifier.height(8.dp))
@@ -670,7 +685,8 @@ private fun HeroMusicContent(
     hasPrev: Boolean,
     isShuffle: Boolean = false,
     repeatMode: Int = 0,
-    queue: List<QueueTrackInfo>
+    queue: List<QueueTrackInfo>,
+    openMusicIntent: Intent
 ) {
     Column(modifier = GlanceModifier.fillMaxSize().padding(14.dp)) {
         NowPlayingHeader(
@@ -684,7 +700,8 @@ private fun HeroMusicContent(
             nextTitle = null,
             artSize = 64.dp,
             titleFontSize = 16.sp,
-            favoriteButtonSize = 34.dp
+            favoriteButtonSize = 34.dp,
+            openMusicIntent = openMusicIntent
         )
 
         Spacer(GlanceModifier.height(10.dp))
@@ -884,7 +901,8 @@ private fun NowPlayingHeader(
     nextTitle: String?,
     artSize: Dp,
     titleFontSize: androidx.compose.ui.unit.TextUnit,
-    favoriteButtonSize: Dp
+    favoriteButtonSize: Dp,
+    openMusicIntent: Intent
 ) {
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
@@ -899,25 +917,22 @@ private fun NowPlayingHeader(
 
         Box(
             modifier = GlanceModifier.size(artSize).cornerRadius(cornerDp)
-                .background(accentColor?.copy(alpha = 0.10f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant),
+                .background(accentColor?.copy(alpha = 0.10f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant)
+                .clickable(actionStartActivity(openMusicIntent)),
             contentAlignment = Alignment.Center
         ) {
             Image(
                 provider = artProvider, contentDescription = "Album art",
                 modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp), contentScale = ContentScale.Crop
             )
-            // Playing indicator ring (expressive) — accent border when playing
-            if (isPlaying) {
-                Box(
-                    modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp)
-                        .background(Color.Transparent.toWidgetColorProvider())
-                ) {}
-            }
         }
 
         Spacer(GlanceModifier.width(12.dp))
 
-        Column(modifier = GlanceModifier.defaultWeight().fillMaxHeight()) {
+        Column(
+            modifier = GlanceModifier.defaultWeight().fillMaxHeight()
+                .clickable(actionStartActivity(openMusicIntent))
+        ) {
             Spacer(GlanceModifier.defaultWeight())
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -979,41 +994,48 @@ private fun TransportRow(
     playButtonSize: Dp,
     playIconSize: Dp
 ) {
-    Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Spacer(GlanceModifier.defaultWeight())
-
-        // Shuffle — M3 expressive tonal chip, 36dp for a11y, icon 16dp
-        Box(
-            modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
-                .background(
-                    if (isShuffle) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
-                    else GlanceTheme.colors.surfaceVariant
+    // Glance hard limit: max 10 children per Row. Old layout had 11
+    // (5 buttons + 6 spacers) and crashed with "Truncated Row container".
+    // New: outer Row has 5 children (left cluster, spacer, play, spacer,
+    // right cluster); each cluster is a nested Row of 3. Never nests clickables.
+    Row(
+        modifier = GlanceModifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Left cluster: shuffle + prev.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                    .background(
+                        if (isShuffle) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
+                        else GlanceTheme.colors.surfaceVariant
+                    )
+                    .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SHUFFLE))),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    provider = ImageProvider(R.drawable.ic_widget_shuffle),
+                    contentDescription = if (isShuffle) "Shuffle on" else "Shuffle off",
+                    modifier = GlanceModifier.size(16.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(
+                        if (isShuffle) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
+                        else GlanceTheme.colors.onSurfaceVariant
+                    )
                 )
-                .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SHUFFLE))),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                provider = ImageProvider(R.drawable.ic_widget_shuffle),
-                contentDescription = if (isShuffle) "Shuffle on" else "Shuffle off",
-                modifier = GlanceModifier.size(16.dp),
-                colorFilter = androidx.glance.ColorFilter.tint(
-                    if (isShuffle) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
-                    else GlanceTheme.colors.onSurfaceVariant
-                )
+            }
+            Spacer(GlanceModifier.width(8.dp))
+            TransportButton(
+                iconRes = R.drawable.ic_widget_prev,
+                contentDescription = "Previous track",
+                enabled = hasPrev,
+                size = secondaryButtonSize,
+                iconSize = secondaryIconSize,
+                backgroundColor = GlanceTheme.colors.surfaceVariant,
+                iconTint = GlanceTheme.colors.onSurface,
+                action = ACTION_PREV
             )
         }
-        Spacer(GlanceModifier.width(8.dp))
-
-        TransportButton(
-            iconRes = R.drawable.ic_widget_prev,
-            contentDescription = "Previous track",
-            enabled = hasPrev,
-            size = secondaryButtonSize,
-            iconSize = secondaryIconSize,
-            backgroundColor = GlanceTheme.colors.surfaceVariant,
-            iconTint = GlanceTheme.colors.onSurface,
-            action = ACTION_PREV
-        )
 
         Spacer(GlanceModifier.width(8.dp))
 
@@ -1026,39 +1048,39 @@ private fun TransportRow(
 
         Spacer(GlanceModifier.width(8.dp))
 
-        TransportButton(
-            iconRes = R.drawable.ic_widget_next,
-            contentDescription = "Next track",
-            enabled = hasNext,
-            size = secondaryButtonSize,
-            iconSize = secondaryIconSize,
-            backgroundColor = GlanceTheme.colors.surfaceVariant,
-            iconTint = GlanceTheme.colors.onSurface,
-            action = ACTION_NEXT
-        )
-        Spacer(GlanceModifier.width(8.dp))
-        // Repeat — tonal when active, shows ONE badge via icon swap
-        Box(
-            modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
-                .background(
-                    if (repeatMode != 0) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
-                    else GlanceTheme.colors.surfaceVariant
-                )
-                .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_REPEAT))),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                provider = ImageProvider(if (repeatMode == 1) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat),
-                contentDescription = when (repeatMode) { 1 -> "Repeat one" ; 2 -> "Repeat all" ; else -> "Repeat off" },
-                modifier = GlanceModifier.size(16.dp),
-                colorFilter = androidx.glance.ColorFilter.tint(
-                    if (repeatMode != 0) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
-                    else GlanceTheme.colors.onSurfaceVariant
-                )
+        // Right cluster: next + repeat.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TransportButton(
+                iconRes = R.drawable.ic_widget_next,
+                contentDescription = "Next track",
+                enabled = hasNext,
+                size = secondaryButtonSize,
+                iconSize = secondaryIconSize,
+                backgroundColor = GlanceTheme.colors.surfaceVariant,
+                iconTint = GlanceTheme.colors.onSurface,
+                action = ACTION_NEXT
             )
+            Spacer(GlanceModifier.width(8.dp))
+            Box(
+                modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
+                    .background(
+                        if (repeatMode != 0) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
+                        else GlanceTheme.colors.surfaceVariant
+                    )
+                    .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_REPEAT))),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    provider = ImageProvider(if (repeatMode == 1) R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat),
+                    contentDescription = when (repeatMode) { 1 -> "Repeat one" ; 2 -> "Repeat all" ; else -> "Repeat off" },
+                    modifier = GlanceModifier.size(16.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(
+                        if (repeatMode != 0) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
+                        else GlanceTheme.colors.onSurfaceVariant
+                    )
+                )
+            }
         }
-
-        Spacer(GlanceModifier.defaultWeight())
     }
 }
 

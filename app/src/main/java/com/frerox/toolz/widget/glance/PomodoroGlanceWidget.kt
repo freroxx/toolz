@@ -100,9 +100,12 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                             ringColor = 0xFF6750A4.toInt(),
                             trackColor = 0xFFE7E0EC.toInt(),
                             fillColor = 0x00000000,
-                            sizePx = 320
+                            sizePx = 256
                         ),
-                        displayMs = 24 * 60 * 1000L
+                        displayMs = 24 * 60 * 1000L,
+                        openPomodoroIntent = Intent(context, MainActivity::class.java).apply {
+                            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "pomodoro")
+                        }
                     )
                 }
             }
@@ -139,19 +142,21 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         val goalProgress = (sessionsDone.toFloat() / sessionsGoal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
 
         val palette = PomodoroWidgetPalette.resolve(context, mode)
+        // 256px ring / 96px goal is plenty for a widget (launcher downsamples
+        // anyway) and halves the per-update allocation vs 320/120.
         val ringBitmap = buildProgressBitmap(
             progress = elapsedProgress,
             ringColor = palette.accent,
             trackColor = palette.track,
             fillColor = 0x00000000,
-            sizePx = 320
+            sizePx = 256
         )
         val goalBitmap = buildProgressBitmap(
             progress = goalProgress,
             ringColor = palette.secondary,
             trackColor = palette.track,
             fillColor = 0x00000000,
-            sizePx = 120
+            sizePx = 96
         )
 
         val openPomodoroIntent = Intent(context, MainActivity::class.java).apply {
@@ -164,12 +169,14 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                 val size = LocalSize.current
                 val isExpanded = size.width >= 280.dp && size.height >= 140.dp
 
+                // Outer is NOT clickable — inner play/reset/skip buttons are
+                // clickables. Nesting them under an outer clickable breaks on
+                // many launchers. Time + ring carry the open-app action instead.
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .background(GlanceTheme.colors.surface)
-                        .cornerRadius(WidgetOuterCorner)
-                        .clickable(actionStartActivity(openPomodoroIntent)),
+                        .cornerRadius(WidgetOuterCorner),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isExpanded) {
@@ -180,14 +187,16 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
                             sessionsGoal = sessionsGoal,
                             ringBitmap = ringBitmap,
                             goalBitmap = goalBitmap,
-                            displayMs = liveRemaining
+                            displayMs = liveRemaining,
+                            openPomodoroIntent = openPomodoroIntent
                         )
                     } else {
                         CompactPomodoroContent(
                             mode = mode,
                             isRunning = isRunning,
                             ringBitmap = ringBitmap,
-                            displayMs = liveRemaining
+                            displayMs = liveRemaining,
+                            openPomodoroIntent = openPomodoroIntent
                         )
                     }
                 }
@@ -249,7 +258,8 @@ private fun CompactPomodoroContent(
     mode: String,
     isRunning: Boolean,
     ringBitmap: Bitmap,
-    displayMs: Long
+    displayMs: Long,
+    openPomodoroIntent: Intent
 ) {
     val actions = rememberPomodoroActions()
     Box(modifier = GlanceModifier.fillMaxSize().padding(9.dp), contentAlignment = Alignment.Center) {
@@ -263,6 +273,7 @@ private fun CompactPomodoroContent(
             Spacer(GlanceModifier.height(7.dp))
             Text(
                 text = formatWidgetClock(displayMs),
+                modifier = GlanceModifier.clickable(actionStartActivity(openPomodoroIntent)),
                 style = TextStyle(
                     color = GlanceTheme.colors.onSurface,
                     fontSize = 31.sp,
@@ -291,13 +302,18 @@ private fun ExpandedPomodoroContent(
     sessionsGoal: Int,
     ringBitmap: Bitmap,
     goalBitmap: Bitmap,
-    displayMs: Long
+    displayMs: Long,
+    openPomodoroIntent: Intent
 ) {
     Row(
         modifier = GlanceModifier.fillMaxSize().padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = GlanceModifier.size(130.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = GlanceModifier.size(130.dp)
+                .clickable(actionStartActivity(openPomodoroIntent)),
+            contentAlignment = Alignment.Center
+        ) {
             Image(provider = ImageProvider(ringBitmap), contentDescription = null, modifier = GlanceModifier.fillMaxSize())
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
                 PhasePill(mode = mode, isRunning = isRunning)
@@ -450,8 +466,8 @@ private fun WidgetIconButton(
 
 @Composable
 private fun rememberPomodoroActions(): PomodoroWidgetActions {
-    val pkg = LocalContext.current.packageName
-    val receiver = ComponentName(pkg, "com.frerox.toolz.widget.glance.PomodoroWidgetReceiver")
+    val context = LocalContext.current
+    val receiver = ComponentName(context, PomodoroWidgetReceiver::class.java)
     return PomodoroWidgetActions(
         toggle = Intent(POMODORO_ACTION_TOGGLE).apply { component = receiver },
         reset = Intent(POMODORO_ACTION_RESET).apply { component = receiver },
