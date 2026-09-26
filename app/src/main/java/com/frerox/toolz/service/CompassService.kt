@@ -18,8 +18,6 @@
 package com.frerox.toolz.service
 
 import android.app.Service
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
@@ -27,8 +25,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.IBinder
-import android.widget.RemoteViews
-import com.frerox.toolz.R
 import com.frerox.toolz.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -43,7 +39,6 @@ class CompassService : Service(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var rotationVector: Sensor? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var lastUpdate = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -56,34 +51,10 @@ class CompassService : Service(), SensorEventListener {
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastUpdate < 100) return // Limit updates to 10fps for battery
-        lastUpdate = currentTime
-
-        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
-            val rotationMatrix = FloatArray(9)
-            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-            val orientation = FloatArray(3)
-            SensorManager.getOrientation(rotationMatrix, orientation)
-            val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
-            val normalizedAzimuth = (azimuth + 360) % 360
-
-            updateCompassWidget(normalizedAzimuth)
-        }
-    }
-
-    private fun updateCompassWidget(azimuth: Float) {
-        val appWidgetManager = AppWidgetManager.getInstance(this)
-        // Legacy compass widget provider was removed (no manifest entry, not
-        // user-addable). Keep the update targeted by class name so this dead
-        // path still compiles if the service ever runs; no class reference.
-        val componentName = ComponentName(this, "com.frerox.toolz.widget.CompassWidgetProvider")
-        val views = RemoteViews(packageName, R.layout.compass_widget)
-
-        // Rotate the dial
-        views.setFloat(R.id.widget_compass_dial, "setRotation", -azimuth)
-        
-        appWidgetManager.updateAppWidget(componentName, views)
+        // Sensor kept for in-app Compass screen. No widget path:
+        // the legacy compass_widget.xml RemoteViews provider was removed
+        // (orphan ComponentName, hardcoded colors, non-resizable).
+        // A future compass widget must be rebuilt with Glance + Responsive sizes.
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

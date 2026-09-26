@@ -138,10 +138,14 @@ class ToolService : Service() {
     private var pomodoroEndTimestamp: Long = 0L
     // Widget live-push loop while a session runs: the Glance snapshot only
     // re-renders on push, so without this the countdown text/ring freezes
-    // between state transitions. 15s keeps MM:SS roughly live without the
+    // between state transitions. 5s keeps MM:SS live without the
     // flicker/battery cost of per-second Glance re-renders.
     private var pomodoroWidgetJob: Job? = null
-    private val POMODORO_WIDGET_PUSH_INTERVAL_MS = 15_000L
+    private val POMODORO_WIDGET_PUSH_INTERVAL_MS = 5_000L
+    // Timer widget live-push loop (mirrors Pomodoro): Glance only re-renders
+    // on push, so a 5s tick keeps MM:SS live without per-second cost.
+    private var timerWidgetJob: Job? = null
+    private val TIMER_WIDGET_PUSH_INTERVAL_MS = 5_000L
     // P-P0-01: NO in-memory workSessionsCount — cadence derives purely from persisted
     // _pomodoroSessionsDone via nextModeAfterWork(). Never reintroduce a second counter.
 
@@ -796,6 +800,8 @@ class ToolService : Service() {
         }
         ensureForeground()
         updateTimerNotification()
+        serviceScope.launch { pushTimerWidgetState() }
+        startTimerWidgetLoop()
     }
 
     fun pauseTimer() {
@@ -809,11 +815,13 @@ class ToolService : Service() {
         timerJob?.cancel()
         cancelTimerWatchdog()
         releaseTimerWakeLock()
+        stopTimerWidgetLoop()
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
         ensureForeground()
         updateTimerNotification()
+        serviceScope.launch { pushTimerWidgetState() }
     }
 
     fun resetTimer() {
@@ -827,6 +835,7 @@ class ToolService : Service() {
         cancelTimerWatchdog()
         releaseTimerWakeLock()
         stopTimerAlarmOnly()
+        stopTimerWidgetLoop()
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.cancel(NotificationHelper.ID_TIMER)
@@ -834,6 +843,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
+        serviceScope.launch { pushTimerWidgetState() }
         // T-P0-02: stopForeground only when all idle — never demote timer while ringing (already stopped).
         maybeReleaseForegroundIfIdle()
     }
@@ -844,6 +854,7 @@ class ToolService : Service() {
         _timerInitial.value = safe
         _timerRemaining.value = safe
         timerEndTimestamp = 0L
+        serviceScope.launch { pushTimerWidgetState() }
     }
 
     /** Additive: update remaining while keeping initial immutable (paused addTime). */
@@ -853,6 +864,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
+        serviceScope.launch { pushTimerWidgetState() }
     }
 
     /** Dismiss == reset (clear initial unless repeat). Timer-only stop, never touches Pomodoro. */
@@ -865,6 +877,7 @@ class ToolService : Service() {
         timerRingStopJob?.cancel()
         cancelTimerWatchdog()
         releaseTimerWakeLock()
+        stopTimerWidgetLoop()
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.cancel(NotificationHelper.ID_TIMER_ALARM)
@@ -884,6 +897,7 @@ class ToolService : Service() {
                 }
             } catch (_: Exception) {}
         }
+        serviceScope.launch { pushTimerWidgetState() }
         maybeReleaseForegroundIfIdle()
     }
 
@@ -906,6 +920,7 @@ class ToolService : Service() {
         _isTimerRunning.value = false
         timerJob?.cancel()
         cancelTimerWatchdog()
+        stopTimerWidgetLoop()
         // T-P1-01: Always vibrate + post visual even if sound off (respect channel importance).
         try { vibrateFinish() } catch (_: Exception) {}
         try {
@@ -926,6 +941,7 @@ class ToolService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try { persistTimerState() } catch (_: Exception) {}
         }
+        serviceScope.launch { pushTimerWidgetState() }
         ensureForeground()
     }
 
@@ -2397,6 +2413,37 @@ class ToolService : Service() {
                 sessionsGoal = pomodoroSessionsGoalCached.coerceIn(1, 12),
             )
         } catch (_: Exception) {}
+    }
+
+    private suspend fun pushTimerWidgetState() {
+        try {
+            widgetUpdateManager.updateTimerWidget(
+                remainingMs = _timerRemaining.value.coerceAtLeast(0L),
+                totalMs = _timerInitial.value.coerceAtLeast(1L).coerceAtLeast(_timerRemaining.value.coerceAtLeast(1L)),
+                isRunning = _isTimerRunning.value,
+                isRinging = _isTimerRinging.value,
+            )
+        } catch (_: Exception) {}
+    }
+
+    private fun startTimerWidgetLoop() {
+        timerWidgetJob?.cancel()
+        timerWidgetJob = serviceScope.launch {
+            while (_isTimerRunning.value) {
+                delay(TIMER_WIDGET_PUSH_INTERVAL_MS)
+                if (!_isTimerRunning.value) break
+                try {
+                    _timerRemaining.value =
+                        (timerEndTimestamp - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                    pushTimerWidgetState()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun stopTimerWidgetLoop() {
+        timerWidgetJob?.cancel()
+        timerWidgetJob = null
     }
 
     // ── Vibration ─────────────────────────────────────────────────────────

@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:initialLayout="@layout/glance_default_loading_layout"
-    android:previewLayout="@layout/widget_pomodoro_preview"
-    android:label="@string/widget_pomodoro_label"
+    android:previewLayout="@layout/widget_timer_preview"
+    android:label="@string/widget_timer_label"
     android:minWidth="150dp"
     android:minHeight="150dp"
     android:minResizeWidth="150dp"
     android:minResizeHeight="150dp"
     android:maxResizeWidth="340dp"
-    android:maxResizeHeight="260dp"
+    android:maxResizeHeight="240dp"
     android:targetCellWidth="2"
     android:targetCellHeight="2"
     android:updatePeriodMillis="0"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
-    android:description="@string/widget_pomodoro_desc" />
+    android:description="@string/widget_timer_desc" />

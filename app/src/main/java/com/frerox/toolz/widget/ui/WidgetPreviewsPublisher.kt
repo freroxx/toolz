@@ -23,22 +23,20 @@ import android.util.Log
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import com.frerox.toolz.widget.glance.MusicWidgetReceiver
 import com.frerox.toolz.widget.glance.PomodoroWidgetReceiver
-import com.frerox.toolz.widget.glance.ScreenTimeWidgetReceiver
 import com.frerox.toolz.widget.glance.SearchBarWidgetReceiver
+import com.frerox.toolz.widget.glance.TimerWidgetReceiver
 
 // ---------------------------------------------------------------------------
 //  Generated previews publisher (API 35+). Rate-limited ~2/hr by the system.
-//  Call once from MainActivity onCreate (IO dispatcher). Safe no-op below 35
-//  and on any failure — previewLayout covers API 31-34.
+//  Each widget overrides previewSizeMode=Responsive so the picker renders
+//  every tier without clipping. Safe no-op below 35 and on any failure —
+//  previewLayout covers API 31-34.
 // ---------------------------------------------------------------------------
 
 object WidgetPreviewsPublisher {
     private const val TAG = "WidgetPreviews"
     private const val PREFS = "widget_previews"
     private const val KEY_LAST_PUBLISH_MS = "last_publish_ms"
-    // setWidgetPreviews is rate-limited (~2/hr) and each publish re-renders
-    // all four widgets. MainActivity calls this on every cold start, so
-    // throttle to once per day — previews don't change faster than that.
     private const val MIN_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
     suspend fun publishAll(context: Context, force: Boolean = false) {
@@ -52,8 +50,6 @@ object WidgetPreviewsPublisher {
         }
         try {
             val manager = GlanceAppWidgetManager(context)
-            // Publish in priority order; each is independently guarded.
-            // Receivers (not widgets): SearchBar receiver now serves Quick Actions.
             try {
                 manager.setWidgetPreviews(MusicWidgetReceiver::class)
             } catch (e: Exception) {
@@ -70,9 +66,9 @@ object WidgetPreviewsPublisher {
                 Log.w(TAG, "toolbar preview failed", e)
             }
             try {
-                manager.setWidgetPreviews(ScreenTimeWidgetReceiver::class)
+                manager.setWidgetPreviews(TimerWidgetReceiver::class)
             } catch (e: Exception) {
-                Log.w(TAG, "screentime preview failed", e)
+                Log.w(TAG, "timer preview failed", e)
             }
             try {
                 context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

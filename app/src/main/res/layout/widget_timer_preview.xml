@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static picker preview for Pomodoro widget (API 31-34). Mirrors square tier. -->
+<!-- Static picker preview for Timer widget (API 31-34). Mirrors square tier. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -11,7 +11,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="FOCUS • READY"
+        android:text="TIMER • READY"
         android:textSize="10sp"
         android:textStyle="bold"
         android:textColor="?attr/colorOnPrimaryContainer"
@@ -24,19 +24,11 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="24:59"
+        android:text="04:59"
         android:textSize="32sp"
         android:textStyle="bold"
         android:textColor="?attr/colorOnSurface"
         android:layout_marginTop="8dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="3 of 8 sessions"
-        android:textSize="11sp"
-        android:textColor="?attr/colorOnSurfaceVariant"
-        android:layout_marginTop="2dp" />
 
     <FrameLayout
         android:layout_width="52dp"

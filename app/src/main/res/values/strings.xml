@@ -749,6 +749,8 @@
     <string name="widget_toolbar_desc">Search bar with customizable shortcuts to flashlight, QR and timer</string>
     <string name="widget_screentime_label">Toolz Screen Time</string>
     <string name="widget_screentime_desc">Daily usage ring with top apps and goal progress</string>
+    <string name="widget_timer_label">Toolz Timer</string>
+    <string name="widget_timer_desc">Countdown timer with live ring and quick controls</string>
 
     <!-- About Section -->
     <string name="st_About_Toolz">TOOLZ</string>

@@ -603,15 +603,17 @@
                 android:resource="@xml/search_bar_widget_info" />
         </receiver>
 
-        <!-- Screen Time (Glance) -->
-        <receiver android:name=".widget.glance.ScreenTimeWidgetReceiver"
+        <!-- Timer (Glance) -->
+        <receiver android:name=".widget.glance.TimerWidgetReceiver"
             android:exported="true"
-            android:label="@string/widget_screentime_label">
+            android:label="@string/widget_timer_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.frerox.toolz.WIDGET_TIMER_TOGGLE" />
+                <action android:name="com.frerox.toolz.WIDGET_TIMER_RESET" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/screen_time_widget_info" />
+                android:resource="@xml/timer_widget_info" />
         </receiver>
 
         <provider

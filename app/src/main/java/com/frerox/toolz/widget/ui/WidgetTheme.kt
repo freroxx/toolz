@@ -55,8 +55,106 @@ import kotlinx.coroutines.flow.firstOrNull
 // ---------------------------------------------------------------------------
 
 val WidgetOuterCorner: Dp = 28.dp
+val WidgetOuterCornerSmall: Dp = 20.dp
 val WidgetPlaySquircleFraction: Float = 0.35f
 const val WIDGET_MIN_TOUCH_DP: Int = 48
+
+/** Adaptive outer radius — small widgets use 20dp so content never looks inset. */
+fun widgetOuterCornerFor(width: Dp, height: Dp): Dp =
+    if (width < 220.dp || height < 120.dp) WidgetOuterCornerSmall else WidgetOuterCorner
+
+// ---------------------------------------------------------------------------
+//  Canonical Responsive sizes — single source of truth for picker + layout.
+//  Every widget uses SizeMode.Responsive with these (never Exact):
+//  launcher picks the best fit, no stretch/clip on Samsung/Pixel.
+//  minResize in XML must equal the smallest tier here.
+// ---------------------------------------------------------------------------
+
+object WidgetSizes {
+    // Music: S 3x2 bar, M 4x2 transport, L 4x3 queue
+    val MusicSmall = androidx.compose.ui.unit.DpSize(180.dp, 110.dp)
+    val MusicMedium = androidx.compose.ui.unit.DpSize(270.dp, 150.dp)
+    val MusicLarge = androidx.compose.ui.unit.DpSize(320.dp, 220.dp)
+    // Pomodoro: square 2x2, wide 4x2, tall 2x3
+    val PomoSquare = androidx.compose.ui.unit.DpSize(150.dp, 150.dp)
+    val PomoWide = androidx.compose.ui.unit.DpSize(300.dp, 160.dp)
+    val PomoTall = androidx.compose.ui.unit.DpSize(180.dp, 220.dp)
+    // Toolbar: single-row pill, narrow 2 slots / wide 3 slots
+    val ToolbarCompact = androidx.compose.ui.unit.DpSize(200.dp, 72.dp)
+    val ToolbarExpanded = androidx.compose.ui.unit.DpSize(320.dp, 72.dp)
+    // Timer: square 2x2, wide 4x2
+    val TimerSquare = androidx.compose.ui.unit.DpSize(150.dp, 150.dp)
+    val TimerWide = androidx.compose.ui.unit.DpSize(300.dp, 160.dp)
+}
+
+// ---------------------------------------------------------------------------
+//  Breakpoint helpers — NEVER compare LocalSize with ==.
+//  Launchers (OneUI, Nothing, third-party) hand back intermediate DpSizes
+//  during drag; equality snaps to the wrong tier and clips. Width/height
+//  thresholds degrade gracefully to the smaller tier instead.
+// ---------------------------------------------------------------------------
+
+fun musicTier(size: androidx.compose.ui.unit.DpSize): Int = when {
+    size.width >= 300.dp && size.height >= 190.dp -> 2
+    size.width >= 240.dp && size.height >= 135.dp -> 1
+    else -> 0
+}
+
+fun pomoTier(size: androidx.compose.ui.unit.DpSize): Int = when {
+    // Wide wins when clearly landscape; tall when portrait-tall.
+    size.width >= 260.dp && size.height < 200.dp -> 2 // wide
+    size.width < 220.dp && size.height >= 190.dp -> 1 // tall
+    size.width >= 260.dp && size.height >= 190.dp -> 2 // large landscape -> wide
+    else -> 0 // square fallback
+}
+
+fun timerIsWide(size: androidx.compose.ui.unit.DpSize): Boolean =
+    size.width >= 250.dp && size.width > size.height
+
+fun toolbarIsExpanded(size: androidx.compose.ui.unit.DpSize): Boolean =
+    size.width >= 280.dp
+
+/**
+ * Unified progress-ring bitmap. Transparent bg —
+ * caller draws it over GlanceTheme.surface so dark mode never double-fills.
+ * 192px is plenty (launcher downsamples); keeps per-update alloc low.
+ */
+fun drawWidgetRing(
+    progress: Float,
+    ringColor: Int,
+    trackColor: Int,
+    sizePx: Int = 192,
+    trackAlpha: Int = 72,
+): android.graphics.Bitmap {
+    val p = progress.coerceIn(0f, 1f)
+    val bitmap = android.graphics.Bitmap.createBitmap(sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val stroke = sizePx * 0.105f
+    val inset = stroke / 2f + sizePx * 0.035f
+    val bounds = android.graphics.RectF(inset, inset, sizePx - inset, sizePx - inset)
+    canvas.drawArc(
+        bounds, -90f, 360f, false,
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = trackColor
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = stroke
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            alpha = trackAlpha
+        }
+    )
+    if (p > 0.005f) {
+        canvas.drawArc(
+            bounds, -90f, p * 360f, false,
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = ringColor
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = stroke
+                strokeCap = android.graphics.Paint.Cap.ROUND
+            }
+        )
+    }
+    return bitmap
+}
 
 /**
  * Single deep-link factory for every Glance widget. Uses
@@ -199,6 +297,15 @@ fun widgetBackgroundProvider(appearance: WidgetAppearance): ColorProvider? {
         null
     }
 }
+
+/**
+ * Non-null outer background — custom when set, otherwise GlanceTheme surface.
+ * Every widget must use this (never hardcoded surface) so opacity/accent
+ * settings apply uniformly in light + dark.
+ */
+@Composable
+fun widgetOuterBackground(appearance: WidgetAppearance): ColorProvider =
+    widgetBackgroundProvider(appearance) ?: GlanceTheme.colors.surface
 
 // ---------------------------------------------------------------------------
 //  Shared buttons — 48dp min touch, disabled-safe (no clickable when off).

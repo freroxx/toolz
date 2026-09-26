@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Theme-aware art placeholder for widget picker previews. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Theme-aware: picker pill follows M3 primary-container in light/dark. -->
-    <solid android:color="?attr/colorPrimaryContainer" />
+    <solid android:color="?attr/colorSurfaceVariant" />
     <corners android:radius="16dp" />
 </shape>

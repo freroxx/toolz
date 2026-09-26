@@ -1054,41 +1054,6 @@ fun SettingsScreen(
                                     onCheckedChange = { viewModel.setWidgetShowQueue(it) }
                                 )
                             }
-                            if (matches(searchQuery, "widget", "screen", "goal", "limit", "usage")) {
-                                SettingsItem(
-                                    title = "Screen Time daily goal",
-                                    subtitle = "Target: $widgetScreenGoalMins min (${widgetScreenGoalMins / 60}h ${widgetScreenGoalMins % 60}m)",
-                                    icon = Icons.Rounded.EmojiEvents
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        listOf(120, 240, 360, 480).forEach { mins ->
-                                            val isSelected = widgetScreenGoalMins == mins
-                                            Surface(
-                                                onClick = {
-                                                    vibrationManager?.vibrateClick()
-                                                    viewModel.setWidgetScreenGoalMins(mins)
-                                                },
-                                                modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
-                                                shape = RoundedCornerShape(14.dp),
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Text(
-                                                        "${mins / 60}h",
-                                                        fontWeight = FontWeight.Black,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                             if (matches(searchQuery, "widget", "haptic", "vibration", "feedback", "touch")) {
                                 SettingsToggleItem(
                                     title = "Widget haptics",

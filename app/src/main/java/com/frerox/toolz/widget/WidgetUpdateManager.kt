@@ -29,7 +29,9 @@ import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
 import com.frerox.toolz.widget.glance.PomodoroWidgetState
 import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
 import com.frerox.toolz.widget.glance.QuickActionsGlanceWidget
-import com.frerox.toolz.widget.glance.ScreenTimeGlanceWidget
+import com.frerox.toolz.widget.glance.TimerGlanceWidget
+import com.frerox.toolz.widget.glance.TimerWidgetState
+import com.frerox.toolz.widget.glance.TimerWidgetStateDefinition
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -149,10 +151,36 @@ class WidgetUpdateManager @Inject constructor(
         } catch (_: Exception) { }
     }
 
-    suspend fun updateScreenTimeWidget() {
-        try {
-            ScreenTimeGlanceWidget().updateAll(context)
-        } catch (_: Exception) { }
+    suspend fun updateTimerWidget(
+        remainingMs: Long,
+        totalMs: Long,
+        isRunning: Boolean,
+        isRinging: Boolean = false
+    ) {
+        val glanceIds = try {
+            GlanceAppWidgetManager(context).getGlanceIds(TimerGlanceWidget::class.java)
+        } catch (e: Exception) {
+            android.util.Log.w("WidgetUpdateMgr", "getGlanceIds failed (non-fatal)", e)
+            return
+        }
+        if (glanceIds.isEmpty()) return
+        val capturedAt = android.os.SystemClock.elapsedRealtime()
+        glanceIds.forEach { glanceId ->
+            try {
+                updateAppWidgetState(context, TimerWidgetStateDefinition, glanceId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[TimerWidgetState.KEY_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
+                        this[TimerWidgetState.KEY_TOTAL_MS] = totalMs.coerceAtLeast(1L)
+                        this[TimerWidgetState.KEY_IS_RUNNING] = isRunning
+                        this[TimerWidgetState.KEY_IS_RINGING] = isRinging
+                        this[TimerWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] = capturedAt
+                    }
+                }
+                TimerGlanceWidget().update(context, glanceId)
+            } catch (e: Exception) {
+                android.util.Log.w("WidgetUpdateMgr", "updateTimerWidget failed for $glanceId", e)
+            }
+        }
     }
 
     suspend fun refreshAllWidgets() {
@@ -166,7 +194,7 @@ class WidgetUpdateManager @Inject constructor(
             MusicGlanceWidget().updateAll(context)
         } catch (_: Exception) { }
         try {
-            ScreenTimeGlanceWidget().updateAll(context)
+            TimerGlanceWidget().updateAll(context)
         } catch (_: Exception) { }
     }
 }

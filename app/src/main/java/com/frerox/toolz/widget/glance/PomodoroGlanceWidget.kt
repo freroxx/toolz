@@ -20,14 +20,9 @@ package com.frerox.toolz.widget.glance
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
@@ -41,7 +36,6 @@ import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.PreviewSizeMode
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionSendBroadcast
 import androidx.glance.appwidget.action.actionStartActivity
@@ -67,53 +61,34 @@ import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
-import com.frerox.toolz.widget.ui.WidgetOuterCorner
+import com.frerox.toolz.widget.ui.WidgetAppearance
+import com.frerox.toolz.widget.ui.WidgetSizes
+import com.frerox.toolz.widget.ui.drawWidgetRing
 import com.frerox.toolz.widget.ui.formatWidgetClock
-import java.util.Locale
+import com.frerox.toolz.widget.ui.pomoTier
+import com.frerox.toolz.widget.ui.readWidgetAppearance
+import com.frerox.toolz.widget.ui.widgetBackgroundProvider
+import com.frerox.toolz.widget.ui.widgetOuterCornerFor
+
+// ---------------------------------------------------------------------------
+//  Pomodoro — M3 Expressive, Responsive (square / wide / tall).
+//  Square 150x150: ring + time + play
+//  Wide   300x160: ring + goal + 3 controls
+//  Tall   180x220: stacked ring + controls (2x3 cells)
+//  Outer never clickable; time + ring open app as siblings.
+// ---------------------------------------------------------------------------
 
 class PomodoroGlanceWidget : GlanceAppWidget() {
 
-    companion object {
-        // Reference sizes for the widget picker + preview rendering.
-        private val COMPACT = DpSize(150.dp, 150.dp)
-        private val EXPANDED = DpSize(300.dp, 160.dp)
-    }
-
-    // Exact: the launcher stretches one layout to the real canvas; LocalSize
-    // picks square vs wide so every intermediate resize step re-lays out.
-    override val sizeMode: SizeMode = SizeMode.Exact
-    override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
+    // Responsive: launcher picks best fit. Exact stretched the single layout
+    // and snapped thresholds — the resize bug.
+    override val sizeMode: SizeMode = SizeMode.Responsive(
+        setOf(WidgetSizes.PomoSquare, WidgetSizes.PomoWide, WidgetSizes.PomoTall)
+    )
+    override val previewSizeMode: androidx.glance.appwidget.PreviewSizeMode = SizeMode.Responsive(
+        setOf(WidgetSizes.PomoSquare, WidgetSizes.PomoWide)
+    )
     override val stateDefinition = PomodoroWidgetStateDefinition
-
-    override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        provideContent {
-            GlanceTheme {
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .background(GlanceTheme.colors.surface)
-                        .cornerRadius(WidgetOuterCorner),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CompactPomodoroContent(
-                        mode = "WORK",
-                        isRunning = false,
-                        ringBitmap = buildProgressBitmap(
-                            progress = 0.35f,
-                            ringColor = 0xFF6750A4.toInt(),
-                            trackColor = 0xFFE7E0EC.toInt(),
-                            fillColor = 0x00000000,
-                            sizePx = 192
-                        ),
-                        displayMs = 24 * 60 * 1000L,
-                        openPomodoroIntent = Intent(context, MainActivity::class.java).apply {
-                            putExtra(MainActivity.EXTRA_NAVIGATE_TO, "pomodoro")
-                        }
-                    )
-                }
-            }
-        }
-    }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, PomodoroWidgetStateDefinition, id)
@@ -134,7 +109,6 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         val sessionsGoal = try { (prefs[PomodoroWidgetState.KEY_SESSIONS_GOAL] ?: 8).coerceIn(1, 12) } catch (_: Exception) { 8 }
         val capturedAt = try { prefs[PomodoroWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] ?: SystemClock.elapsedRealtime() } catch (_: Exception) { SystemClock.elapsedRealtime() }
 
-        // Live interpolation: while running, subtract wall-clock since push.
         val nowElapsed = SystemClock.elapsedRealtime()
         val liveRemaining = if (isRunning) {
             (storedRemaining - (nowElapsed - capturedAt).coerceAtLeast(0L)).coerceAtLeast(0L)
@@ -144,21 +118,22 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         val elapsedProgress = (1f - liveRemaining.toFloat() / totalMs.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
         val goalProgress = (sessionsDone.toFloat() / sessionsGoal.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
 
-        val palette = PomodoroWidgetPalette.resolve(context, mode)
-        // 192px ring / 96px goal is plenty for a widget (launcher downsamples
-        // anyway) and cuts the per-update allocation vs 256.
-        val ringBitmap = buildProgressBitmap(
+        val appearance: WidgetAppearance = try { readWidgetAppearance(context) } catch (_: Exception) {
+            WidgetAppearance()
+        }
+        val night = (context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val palette = PomodoroWidgetPalette.resolve(context, mode, night, appearance.customAccent)
+        val ringBitmap = drawWidgetRing(
             progress = elapsedProgress,
             ringColor = palette.accent,
             trackColor = palette.track,
-            fillColor = 0x00000000,
             sizePx = 192
         )
-        val goalBitmap = buildProgressBitmap(
+        val goalBitmap = drawWidgetRing(
             progress = goalProgress,
             ringColor = palette.secondary,
             trackColor = palette.track,
-            fillColor = 0x00000000,
             sizePx = 96
         )
 
@@ -170,87 +145,37 @@ class PomodoroGlanceWidget : GlanceAppWidget() {
         provideContent {
             GlanceTheme {
                 val size = LocalSize.current
-                val isExpanded = size.width >= 260.dp && size.height >= 130.dp
-
-                // Outer is NOT clickable — inner play/reset/skip buttons are
-                // clickables. Nesting them under an outer clickable breaks on
-                // many launchers. Time + ring carry the open-app action instead.
+                val tier = pomoTier(size)
+                val outerBg = widgetBackgroundProvider(appearance) ?: GlanceTheme.colors.surface
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
-                        .background(GlanceTheme.colors.surface)
-                        .cornerRadius(WidgetOuterCorner),
+                        .background(outerBg)
+                        .cornerRadius(widgetOuterCornerFor(size.width, size.height)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isExpanded) {
-                        ExpandedPomodoroContent(
-                            mode = mode,
-                            isRunning = isRunning,
-                            sessionsDone = sessionsDone,
-                            sessionsGoal = sessionsGoal,
-                            ringBitmap = ringBitmap,
-                            goalBitmap = goalBitmap,
-                            displayMs = liveRemaining,
-                            openPomodoroIntent = openPomodoroIntent
+                    when (tier) {
+                        2 -> ExpandedPomodoroContent(
+                            mode = mode, isRunning = isRunning,
+                            sessionsDone = sessionsDone, sessionsGoal = sessionsGoal,
+                            ringBitmap = ringBitmap, goalBitmap = goalBitmap,
+                            displayMs = liveRemaining, openPomodoroIntent = openPomodoroIntent
                         )
-                    } else {
-                        CompactPomodoroContent(
-                            mode = mode,
-                            isRunning = isRunning,
+                        1 -> TallPomodoroContent(
+                            mode = mode, isRunning = isRunning,
+                            sessionsDone = sessionsDone, sessionsGoal = sessionsGoal,
                             ringBitmap = ringBitmap,
-                            displayMs = liveRemaining,
-                            openPomodoroIntent = openPomodoroIntent
+                            displayMs = liveRemaining, openPomodoroIntent = openPomodoroIntent
+                        )
+                        else -> CompactPomodoroContent(
+                            mode = mode, isRunning = isRunning,
+                            ringBitmap = ringBitmap,
+                            displayMs = liveRemaining, openPomodoroIntent = openPomodoroIntent
                         )
                     }
                 }
             }
         }
-    }
-
-    private fun buildProgressBitmap(
-        progress: Float,
-        ringColor: Int,
-        trackColor: Int,
-        fillColor: Int,
-        sizePx: Int
-    ): Bitmap {
-        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val stroke = sizePx * 0.105f
-        val inset = stroke / 2f + sizePx * 0.035f
-        val bounds = RectF(inset, inset, sizePx - inset, sizePx - inset)
-
-        if (fillColor != 0) {
-            canvas.drawCircle(
-                sizePx / 2f,
-                sizePx / 2f,
-                sizePx / 2f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = fillColor
-                    style = Paint.Style.FILL
-                }
-            )
-        }
-        canvas.drawArc(
-            bounds, -90f, 360f, false,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = trackColor
-                style = Paint.Style.STROKE
-                strokeWidth = stroke
-                strokeCap = Paint.Cap.ROUND
-                alpha = 72
-            }
-        )
-        canvas.drawArc(
-            bounds, -90f, progress * 360f, false,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = ringColor
-                style = Paint.Style.STROKE
-                strokeWidth = stroke
-                strokeCap = Paint.Cap.ROUND
-            }
-        )
-        return bitmap
     }
 }
 
@@ -260,7 +185,7 @@ fun formatWidgetMillis(ms: Long): String = formatWidgetClock(ms)
 private fun CompactPomodoroContent(
     mode: String,
     isRunning: Boolean,
-    ringBitmap: Bitmap,
+    ringBitmap: android.graphics.Bitmap,
     displayMs: Long,
     openPomodoroIntent: Intent
 ) {
@@ -298,13 +223,91 @@ private fun CompactPomodoroContent(
 }
 
 @Composable
+private fun TallPomodoroContent(
+    mode: String,
+    isRunning: Boolean,
+    sessionsDone: Int,
+    sessionsGoal: Int,
+    ringBitmap: android.graphics.Bitmap,
+    displayMs: Long,
+    openPomodoroIntent: Intent
+) {
+    // 2x3 portrait: stacked ring on top, controls below. No clipping.
+    val actions = rememberPomodoroActions()
+    Column(
+        modifier = GlanceModifier.fillMaxSize().padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = GlanceModifier.size(120.dp)
+                .clickable(actionStartActivity(openPomodoroIntent)),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(provider = ImageProvider(ringBitmap), contentDescription = null, modifier = GlanceModifier.fillMaxSize())
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
+                PhasePill(mode = mode, isRunning = isRunning)
+                Spacer(GlanceModifier.height(4.dp))
+                Text(
+                    text = formatWidgetClock(displayMs),
+                    style = TextStyle(
+                        color = GlanceTheme.colors.onSurface,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1
+                )
+            }
+        }
+        Spacer(GlanceModifier.height(4.dp))
+        Text(
+            text = "$sessionsDone of $sessionsGoal sessions",
+            style = TextStyle(
+                color = GlanceTheme.colors.onSurfaceVariant,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center
+            ),
+            maxLines = 1
+        )
+        Spacer(GlanceModifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            WidgetIconButton(
+                icon = R.drawable.ic_widget_reset,
+                contentDescription = "Reset Pomodoro",
+                action = actions.reset,
+                prominent = false,
+                mode = mode
+            )
+            Spacer(GlanceModifier.width(10.dp))
+            WidgetIconButton(
+                icon = if (isRunning) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+                contentDescription = if (isRunning) "Pause Pomodoro" else "Start Pomodoro",
+                action = actions.toggle,
+                prominent = true,
+                mode = mode
+            )
+            Spacer(GlanceModifier.width(10.dp))
+            WidgetIconButton(
+                icon = R.drawable.ic_widget_next,
+                contentDescription = "Skip Pomodoro phase",
+                action = actions.skip,
+                prominent = false,
+                mode = mode
+            )
+        }
+    }
+}
+
+@Composable
 private fun ExpandedPomodoroContent(
     mode: String,
     isRunning: Boolean,
     sessionsDone: Int,
     sessionsGoal: Int,
-    ringBitmap: Bitmap,
-    goalBitmap: Bitmap,
+    ringBitmap: android.graphics.Bitmap,
+    goalBitmap: android.graphics.Bitmap,
     displayMs: Long,
     openPomodoroIntent: Intent
 ) {
@@ -438,7 +441,6 @@ private fun WidgetIconButton(
     prominent: Boolean,
     mode: String
 ) {
-    // 48dp min touch: prominent 52dp, secondary 48dp.
     val buttonSize = if (prominent) 52.dp else 48.dp
     val background = when {
         prominent && mode == "WORK" -> GlanceTheme.colors.primary
@@ -490,7 +492,12 @@ private data class PomodoroWidgetPalette(
     val track: Int
 ) {
     companion object {
-        fun resolve(context: Context, mode: String): PomodoroWidgetPalette {
+        fun resolve(context: Context, mode: String, night: Boolean, customAccent: Int?): PomodoroWidgetPalette {
+            // Custom accent wins when user disabled dynamic color — consistent with Music.
+            if (customAccent != null) {
+                val track = if (night) 0xFF49454F.toInt() else 0xFFE7E0EC.toInt()
+                return PomodoroWidgetPalette(customAccent, customAccent, track)
+            }
             val accent = if (Build.VERSION.SDK_INT >= 31) {
                 try {
                     context.resources.getColor(
@@ -514,8 +521,8 @@ private data class PomodoroWidgetPalette(
             } else {
                 0xFF625B71.toInt()
             }
-            // Track uses surfaceVariant-tinted neutral; alpha applied at draw.
-            val track = 0xFFCAC4D0.toInt()
+            // Night-aware track — fixes invisible ring in dark mode.
+            val track = if (night) 0xFF49454F.toInt() else 0xFFE7E0EC.toInt()
             return PomodoroWidgetPalette(accent, secondary, track)
         }
     }
@@ -527,7 +534,6 @@ private fun modeLabel(mode: String) = when (mode) {
     else -> "FOCUS"
 }
 
-/** Legacy Float fallback for widgets written before the P-P1-03 Long migration. */
 private fun legacyRemaining(prefs: Preferences): Long {
     return try {
         prefs[PomodoroWidgetState.KEY_REMAINING_MS_LEGACY]?.toLong() ?: 25 * 60 * 1000L

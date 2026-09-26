@@ -19,8 +19,8 @@ package com.frerox.toolz.widget.glance
 
 import android.content.Context
 import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -29,13 +29,12 @@ import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.PreviewSizeMode
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.action.actionSendBroadcast
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
@@ -45,7 +44,6 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
-import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
@@ -54,56 +52,50 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.frerox.toolz.R
-import com.frerox.toolz.widget.ui.WidgetOuterCorner
+import com.frerox.toolz.widget.ui.WidgetAppearance
+import com.frerox.toolz.widget.ui.WidgetSizes
+import com.frerox.toolz.widget.ui.readWidgetAppearance
+import com.frerox.toolz.widget.ui.toolbarIsExpanded
+import com.frerox.toolz.widget.ui.widgetBackgroundProvider
 import com.frerox.toolz.widget.ui.widgetNavIntent
+import com.frerox.toolz.widget.ui.widgetOuterCornerFor
 import kotlinx.coroutines.flow.firstOrNull
 
 // ---------------------------------------------------------------------------
-//  Quick Actions toolbar — canonical Search toolbar + standard toolbar.
-//  Single 4x1 pill: search field + up to 3 configurable slots
-//  (mic, flashlight, qr, pomodoro, timer). No nested clickable bug:
-//  search area and each slot are siblings, never parent/child.
+//  Quick Actions toolbar — M3 Expressive, Responsive (compact / expanded).
+//  Single 4x1 pill: search field + up to 3 configurable slots.
+//  Compact <280dp shows 2 slots, expanded shows 3 (threshold, never ==).
+//  Search badge + hint + slots are siblings, never nested clickables.
+//  Mic launches system voice recognition; flashlight toggles torch directly
+//  via QuickActionsCallback (no app open); QR/pomo/timer deep-link.
 // ---------------------------------------------------------------------------
 
 class QuickActionsGlanceWidget : GlanceAppWidget() {
 
-    companion object {
-        // Reference sizes for the widget picker + preview rendering.
-        // 72dp tall: 48dp touch targets + headroom for launcher system
-        // padding (Android 12+ insets clip exact-64dp toolbars).
-        private val COMPACT = DpSize(200.dp, 72.dp)
-        private val EXPANDED = DpSize(280.dp, 72.dp)
-    }
-
-    // Exact: narrow launchers drop to 2 slots via LocalSize, wide shows 3.
-    override val sizeMode: SizeMode = SizeMode.Exact
-    override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
-
-    override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        provideContent {
-            GlanceTheme {
-                ToolbarContent(
-                    slots = listOf("mic", "flashlight", "qr"),
-                    openSearchIntent = dummyIntent(context, "search"),
-                    micIntent = dummyIntent(context, "search"),
-                    flashlightIntent = dummyIntent(context, "flashlight"),
-                    qrIntent = dummyIntent(context, "qr_generator"),
-                    pomodoroIntent = dummyIntent(context, "pomodoro"),
-                    timerIntent = dummyIntent(context, "timer")
-                )
-            }
-        }
-    }
+    override val sizeMode: SizeMode = SizeMode.Responsive(
+        setOf(WidgetSizes.ToolbarCompact, WidgetSizes.ToolbarExpanded)
+    )
+    override val previewSizeMode: androidx.glance.appwidget.PreviewSizeMode = SizeMode.Responsive(
+        setOf(WidgetSizes.ToolbarExpanded)
+    )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val openSearchIntent = widgetNavIntent(context, "search").apply {
             putExtra("auto_focus_search", true)
         }
-        // Voice slot opens in-app search (same destination as the hint).
-        // The old external ACTION_WEB_SEARCH branch could resolve to another
-        // app and broke the single-tap contract on launchers without Google.
-        val voiceIntent = openSearchIntent
-        val flashlightIntent = widgetNavIntent(context, "flashlight")
+        // Real voice search — was a copy of openSearchIntent (did nothing).
+        val voiceIntent = try {
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Search with Toolz")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        } catch (_: Exception) {
+            openSearchIntent
+        }
         val qrIntent = widgetNavIntent(context, "qr_generator")
         val pomodoroIntent = widgetNavIntent(context, "pomodoro")
         val timerIntent = widgetNavIntent(context, "timer")
@@ -113,14 +105,17 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
         } catch (_: Exception) {
             listOf("mic", "flashlight", "qr")
         }
+        val appearance: WidgetAppearance = try { readWidgetAppearance(context) } catch (_: Exception) {
+            WidgetAppearance()
+        }
 
         provideContent {
             GlanceTheme {
                 ToolbarContent(
                     slots = slots,
+                    appearance = appearance,
                     openSearchIntent = openSearchIntent,
                     micIntent = voiceIntent,
-                    flashlightIntent = flashlightIntent,
                     qrIntent = qrIntent,
                     pomodoroIntent = pomodoroIntent,
                     timerIntent = timerIntent
@@ -128,9 +123,6 @@ class QuickActionsGlanceWidget : GlanceAppWidget() {
             }
         }
     }
-
-    private fun dummyIntent(context: Context, route: String): Intent =
-        widgetNavIntent(context, route)
 }
 
 private suspend fun readToolbarSlots(context: Context): List<String> {
@@ -140,7 +132,6 @@ private suspend fun readToolbarSlots(context: Context): List<String> {
             com.frerox.toolz.widget.ui.WidgetAppearanceEntryPoint::class.java
         ).settingsRepository()
         val slots = repo.widgetToolbarSlots.firstOrNull() ?: setOf("mic", "flashlight", "qr")
-        // Stable order: mic, flashlight, qr, pomodoro, timer. Max 3 shown.
         val order = listOf("mic", "flashlight", "qr", "pomodoro", "timer")
         order.filter { slots.contains(it) }.take(3).ifEmpty { listOf("mic", "flashlight", "qr") }
     } catch (_: Exception) {
@@ -151,23 +142,23 @@ private suspend fun readToolbarSlots(context: Context): List<String> {
 @Composable
 private fun ToolbarContent(
     slots: List<String>,
+    appearance: WidgetAppearance,
     openSearchIntent: Intent,
     micIntent: Intent,
-    flashlightIntent: Intent,
     qrIntent: Intent,
     pomodoroIntent: Intent,
     timerIntent: Intent
 ) {
-    // Narrow launchers show 2 slots, wide shows 3 — keeps Row under the
-    // 10-child hard limit at every size (outer Row always has 4 children).
-    val widgetWidth = LocalSize.current.width
-    val maxSlots = if (widgetWidth < 240.dp) 2 else 3
-    val visibleSlots = slots.take(maxSlots)
+    // Threshold tier — OneUI hands intermediates during drag; == would clip.
+    val isExpanded = toolbarIsExpanded(LocalSize.current)
+    val visibleSlots = slots.take(if (isExpanded) 3 else 2)
+    val size = LocalSize.current
+    val outerBg = widgetBackgroundProvider(appearance) ?: GlanceTheme.colors.surface
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(GlanceTheme.colors.surface)
-            .cornerRadius(WidgetOuterCorner),
+            .background(outerBg)
+            .cornerRadius(widgetOuterCornerFor(size.width, size.height)),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -177,7 +168,6 @@ private fun ToolbarContent(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Search badge — 48dp touch, opens search.
             Box(
                 modifier = GlanceModifier.size(48.dp).cornerRadius(24.dp)
                     .background(GlanceTheme.colors.primary)
@@ -194,7 +184,6 @@ private fun ToolbarContent(
 
             Spacer(GlanceModifier.width(12.dp))
 
-            // Hint — opens search (sibling, not parent, of slots).
             Text(
                 text = "Search with Toolz…",
                 modifier = GlanceModifier.defaultWeight()
@@ -209,60 +198,56 @@ private fun ToolbarContent(
 
             Spacer(GlanceModifier.width(8.dp))
 
-            // Slots in ONE nested Row: outer stays at 4 children, inner max 5
-            // (3 buttons + 2 spacers). Never exceeds Glance's 10-child limit.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 visibleSlots.forEachIndexed { index, slot ->
                     if (index > 0) Spacer(GlanceModifier.width(8.dp))
                     when (slot) {
-                    "mic" -> SlotButton(
-                        icon = R.drawable.ic_widget_mic,
-                        desc = "Voice Search",
-                        container = GlanceTheme.colors.secondaryContainer,
-                        onContainer = GlanceTheme.colors.onSecondaryContainer,
-                        intent = micIntent,
-                        isActivity = true
-                    )
-                    "flashlight" -> SlotButton(
-                        icon = R.drawable.ic_flashlight,
-                        desc = "Flashlight",
-                        container = GlanceTheme.colors.tertiaryContainer,
-                        onContainer = GlanceTheme.colors.onTertiaryContainer,
-                        intent = flashlightIntent,
-                        isActivity = true
-                    )
-                    "qr" -> SlotButton(
-                        icon = R.drawable.ic_shortcut_qr_generator,
-                        desc = "QR scanner",
-                        container = GlanceTheme.colors.surfaceVariant,
-                        onContainer = GlanceTheme.colors.onSurfaceVariant,
-                        intent = qrIntent,
-                        isActivity = true
-                    )
-                    "pomodoro" -> SlotButton(
-                        icon = R.drawable.ic_shortcut_pomodoro,
-                        desc = "Focus timer",
-                        container = GlanceTheme.colors.surfaceVariant,
-                        onContainer = GlanceTheme.colors.onSurfaceVariant,
-                        intent = pomodoroIntent,
-                        isActivity = true
-                    )
-                    "timer" -> SlotButton(
-                        icon = R.drawable.ic_shortcut_timer,
-                        desc = "Timer",
-                        container = GlanceTheme.colors.surfaceVariant,
-                        onContainer = GlanceTheme.colors.onSurfaceVariant,
-                        intent = timerIntent,
-                        isActivity = true
-                    )
-                    else -> SlotButton(
-                        icon = R.drawable.ic_widget_mic,
-                        desc = "Voice Search",
-                        container = GlanceTheme.colors.secondaryContainer,
-                        onContainer = GlanceTheme.colors.onSecondaryContainer,
-                        intent = micIntent,
-                        isActivity = true
-                    )
+                        "mic" -> SlotButtonIntent(
+                            icon = R.drawable.ic_widget_mic,
+                            desc = "Voice search",
+                            container = GlanceTheme.colors.secondaryContainer,
+                            onContainer = GlanceTheme.colors.onSecondaryContainer,
+                            intent = micIntent
+                        )
+                        "flashlight" -> SlotButtonAction(
+                            icon = R.drawable.ic_flashlight,
+                            desc = "Toggle flashlight",
+                            container = GlanceTheme.colors.tertiaryContainer,
+                            onContainer = GlanceTheme.colors.onTertiaryContainer,
+                            action = actionRunCallback<QuickActionsCallback>(
+                                androidx.glance.action.actionParametersOf(
+                                    QuickActionsCallback.PARAM_ACTION to QuickActionsCallback.ACTION_FLASHLIGHT
+                                )
+                            )
+                        )
+                        "qr" -> SlotButtonIntent(
+                            icon = R.drawable.ic_shortcut_qr_generator,
+                            desc = "QR scanner",
+                            container = GlanceTheme.colors.surfaceVariant,
+                            onContainer = GlanceTheme.colors.onSurfaceVariant,
+                            intent = qrIntent
+                        )
+                        "pomodoro" -> SlotButtonIntent(
+                            icon = R.drawable.ic_shortcut_pomodoro,
+                            desc = "Focus timer",
+                            container = GlanceTheme.colors.surfaceVariant,
+                            onContainer = GlanceTheme.colors.onSurfaceVariant,
+                            intent = pomodoroIntent
+                        )
+                        "timer" -> SlotButtonIntent(
+                            icon = R.drawable.ic_shortcut_timer,
+                            desc = "Timer",
+                            container = GlanceTheme.colors.surfaceVariant,
+                            onContainer = GlanceTheme.colors.onSurfaceVariant,
+                            intent = timerIntent
+                        )
+                        else -> SlotButtonIntent(
+                            icon = R.drawable.ic_widget_mic,
+                            desc = "Voice search",
+                            container = GlanceTheme.colors.secondaryContainer,
+                            onContainer = GlanceTheme.colors.onSecondaryContainer,
+                            intent = micIntent
+                        )
                     }
                 }
             }
@@ -271,24 +256,19 @@ private fun ToolbarContent(
 }
 
 @Composable
-private fun SlotButton(
+private fun SlotButtonIntent(
     icon: Int,
     desc: String,
     container: androidx.glance.unit.ColorProvider,
     onContainer: androidx.glance.unit.ColorProvider,
-    intent: Intent,
-    isActivity: Boolean
+    intent: Intent
 ) {
-    val mod = if (isActivity) {
-        GlanceModifier.size(48.dp).cornerRadius(24.dp)
+    Box(
+        modifier = GlanceModifier.size(48.dp).cornerRadius(24.dp)
             .background(container)
-            .clickable(actionStartActivity(intent))
-    } else {
-        GlanceModifier.size(48.dp).cornerRadius(24.dp)
-            .background(container)
-            .clickable(actionSendBroadcast(intent))
-    }
-    Box(modifier = mod, contentAlignment = Alignment.Center) {
+            .clickable(actionStartActivity(intent)),
+        contentAlignment = Alignment.Center
+    ) {
         Image(
             provider = ImageProvider(icon),
             contentDescription = desc,
@@ -298,6 +278,25 @@ private fun SlotButton(
     }
 }
 
-// NOTE: QuickActionsWidgetReceiver is dead — the live toolbar receiver is
-// SearchBarWidgetReceiver (same component name as the old search bar, so pinned
-// widgets auto-migrate). Kept out to avoid a duplicate, undeclared widget.
+@Composable
+private fun SlotButtonAction(
+    icon: Int,
+    desc: String,
+    container: androidx.glance.unit.ColorProvider,
+    onContainer: androidx.glance.unit.ColorProvider,
+    action: Action
+) {
+    Box(
+        modifier = GlanceModifier.size(48.dp).cornerRadius(24.dp)
+            .background(container)
+            .clickable(action),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            provider = ImageProvider(icon),
+            contentDescription = desc,
+            modifier = GlanceModifier.size(22.dp),
+            colorFilter = androidx.glance.ColorFilter.tint(onContainer)
+        )
+    }
+}
