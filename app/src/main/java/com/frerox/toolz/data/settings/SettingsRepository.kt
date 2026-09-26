@@ -340,6 +340,14 @@ class SettingsRepository @Inject constructor(
     private val WIDGET_BACKGROUND_COLOR = intPreferencesKey("widget_background_color")
     private val WIDGET_ACCENT_COLOR = intPreferencesKey("widget_accent_color")
     private val WIDGET_OPACITY = floatPreferencesKey("widget_opacity")
+    // Widget revolution — additive keys, never rename existing.
+    private val WIDGET_FOLLOW_DYNAMIC = booleanPreferencesKey("widget_follow_dynamic")
+    private val WIDGET_SHOW_ART = booleanPreferencesKey("widget_show_art")
+    private val WIDGET_SHOW_QUEUE = booleanPreferencesKey("widget_show_queue")
+    private val WIDGET_SCREEN_GOAL_MINS = intPreferencesKey("widget_screen_goal_mins")
+    private val WIDGET_TOOLBAR_SLOTS = stringSetPreferencesKey("widget_toolbar_slots")
+    private val WIDGET_TAP_ACTION = stringPreferencesKey("widget_tap_action") // "OPEN_APP" | "CURRENT_TOOL"
+    private val WIDGET_HAPTICS = booleanPreferencesKey("widget_haptics")
 
     // New Settings
     private val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
@@ -823,6 +831,18 @@ class SettingsRepository @Inject constructor(
         }
     }
     val widgetOpacity: Flow<Float> = dataStore.data.map { it[WIDGET_OPACITY] ?: 0.9f }
+    // Widget revolution flows — additive, safe defaults.
+    val widgetFollowDynamic: Flow<Boolean> = dataStore.data.map { it[WIDGET_FOLLOW_DYNAMIC] ?: true }
+    val widgetShowArt: Flow<Boolean> = dataStore.data.map { it[WIDGET_SHOW_ART] ?: true }
+    val widgetShowQueue: Flow<Boolean> = dataStore.data.map { it[WIDGET_SHOW_QUEUE] ?: true }
+    val widgetScreenGoalMins: Flow<Int> = dataStore.data.map {
+        (it[WIDGET_SCREEN_GOAL_MINS] ?: 240).coerceIn(60, 720)
+    }
+    val widgetToolbarSlots: Flow<Set<String>> = dataStore.data.map {
+        it[WIDGET_TOOLBAR_SLOTS] ?: setOf("mic", "flashlight", "qr")
+    }
+    val widgetTapAction: Flow<String> = dataStore.data.map { it[WIDGET_TAP_ACTION] ?: "OPEN_APP" }
+    val widgetHaptics: Flow<Boolean> = dataStore.data.map { it[WIDGET_HAPTICS] ?: true }
 
     // New Flows
     val hapticFeedback: Flow<Boolean> = dataStore.data.map { it[HAPTIC_FEEDBACK] ?: true }
@@ -1350,7 +1370,14 @@ class SettingsRepository @Inject constructor(
     // Widget setters
     suspend fun setWidgetBackgroundColor(color: Int) { dataStore.edit { it[WIDGET_BACKGROUND_COLOR] = color } }
     suspend fun setWidgetAccentColor(color: Int) { dataStore.edit { it[WIDGET_ACCENT_COLOR] = color } }
-    suspend fun setWidgetOpacity(opacity: Float) { dataStore.edit { it[WIDGET_OPACITY] = opacity } }
+    suspend fun setWidgetOpacity(opacity: Float) { dataStore.edit { it[WIDGET_OPACITY] = opacity.coerceIn(0f, 1f) } }
+    suspend fun setWidgetFollowDynamic(enabled: Boolean) { dataStore.edit { it[WIDGET_FOLLOW_DYNAMIC] = enabled } }
+    suspend fun setWidgetShowArt(enabled: Boolean) { dataStore.edit { it[WIDGET_SHOW_ART] = enabled } }
+    suspend fun setWidgetShowQueue(enabled: Boolean) { dataStore.edit { it[WIDGET_SHOW_QUEUE] = enabled } }
+    suspend fun setWidgetScreenGoalMins(mins: Int) { dataStore.edit { it[WIDGET_SCREEN_GOAL_MINS] = mins.coerceIn(60, 720) } }
+    suspend fun setWidgetToolbarSlots(slots: Set<String>) { dataStore.edit { it[WIDGET_TOOLBAR_SLOTS] = slots.take(4).toSet() } }
+    suspend fun setWidgetTapAction(action: String) { dataStore.edit { it[WIDGET_TAP_ACTION] = action } }
+    suspend fun setWidgetHaptics(enabled: Boolean) { dataStore.edit { it[WIDGET_HAPTICS] = enabled } }
 
     // New Setters
     suspend fun setHapticFeedback(enabled: Boolean) { dataStore.edit { it[HAPTIC_FEEDBACK] = enabled } }

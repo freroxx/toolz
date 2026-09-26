@@ -115,7 +115,14 @@ fun SettingsScreen(
     val purgeShotNotifications by viewModel.purgeShotNotifications.collectAsState(initial = true)
 
     val widgetBgColor by viewModel.widgetBackgroundColor.collectAsState(initial = 0xFFFFFFFF.toInt())
+    val widgetAccentColor by viewModel.widgetAccentColor.collectAsState(initial = 0xFF4CAF50.toInt())
     val widgetOpacity by viewModel.widgetOpacity.collectAsState(initial = 0.9f)
+    val widgetFollowDynamic by viewModel.widgetFollowDynamic.collectAsState(initial = true)
+    val widgetShowArt by viewModel.widgetShowArt.collectAsState(initial = true)
+    val widgetShowQueue by viewModel.widgetShowQueue.collectAsState(initial = true)
+    val widgetScreenGoalMins by viewModel.widgetScreenGoalMins.collectAsState(initial = 240)
+    val widgetHaptics by viewModel.widgetHaptics.collectAsState(initial = true)
+    val widgetToolbarSlots by viewModel.widgetToolbarSlots.collectAsState(initial = setOf("mic", "flashlight", "qr"))
 
     val hapticFeedback by viewModel.hapticFeedback.collectAsState(initial = true)
     val hapticIntensity by viewModel.hapticIntensity.collectAsState(initial = 0.5f)
@@ -982,8 +989,178 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 7. Section: NOTIFICATIONS — Master, background & per-tool alerts
+                    // 7. Section: WIDGETS SETTINGS
                     StaggeredEntrance(index = 6) {
+                        SettingsExpandableSection(
+                            title = stringResource(R.string.st_Settings_Section_Widgets),
+                            icon = Icons.Rounded.Widgets,
+                            isExpanded = expandedSection == "WIDGETS" || searchQuery.isNotEmpty(),
+                            onExpandToggle = { expandedSection = if (expandedSection == "WIDGETS") null else "WIDGETS" }
+                        ) {
+                            if (matches(searchQuery, "widget", "home screen", "music", "pomodoro", "screen time", "toolbar", "appearance", "transparency", "accent")) {
+                                SettingsToggleItem(
+                                    title = "Follow dynamic color",
+                                    subtitle = "Use wallpaper colors, fallback to custom accent",
+                                    icon = Icons.Rounded.ColorLens,
+                                    checked = widgetFollowDynamic,
+                                    onCheckedChange = { viewModel.setWidgetFollowDynamic(it) }
+                                )
+                            }
+                            if (!widgetFollowDynamic && matches(searchQuery, "widget", "accent", "color", "custom")) {
+                                SettingsItem(
+                                    title = "Widget accent",
+                                    subtitle = "Used when dynamic color is off",
+                                    icon = Icons.Rounded.FormatColorFill
+                                ) {
+                                    ColorPickerRow(
+                                        selectedColor = widgetAccentColor,
+                                        onColorSelected = {
+                                            vibrationManager?.vibrateClick()
+                                            viewModel.setWidgetAccentColor(it)
+                                        }
+                                    )
+                                }
+                            }
+                            if (matches(searchQuery, "widget", "opacity", "transparency", "background")) {
+                                SettingsItem(
+                                    title = "Widget opacity",
+                                    subtitle = "Background transparency: ${(widgetOpacity * 100).toInt()}%",
+                                    icon = Icons.Rounded.Opacity
+                                ) {
+                                    Slider(
+                                        value = widgetOpacity,
+                                        onValueChange = { viewModel.setWidgetOpacity(it) },
+                                        valueRange = 0.4f..1f,
+                                        modifier = Modifier.padding(top = 8.dp),
+                                        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
+                                    )
+                                }
+                            }
+                            if (matches(searchQuery, "widget", "music", "art", "cover", "album")) {
+                                SettingsToggleItem(
+                                    title = "Show album art",
+                                    subtitle = "Display covers in the Music widget",
+                                    icon = Icons.Rounded.Album,
+                                    checked = widgetShowArt,
+                                    onCheckedChange = { viewModel.setWidgetShowArt(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "widget", "music", "queue", "up next", "list")) {
+                                SettingsToggleItem(
+                                    title = "Show Up Next queue",
+                                    subtitle = "Queue preview in expanded Music widget",
+                                    icon = Icons.Rounded.QueueMusic,
+                                    checked = widgetShowQueue,
+                                    onCheckedChange = { viewModel.setWidgetShowQueue(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "widget", "screen", "goal", "limit", "usage")) {
+                                SettingsItem(
+                                    title = "Screen Time daily goal",
+                                    subtitle = "Target: $widgetScreenGoalMins min (${widgetScreenGoalMins / 60}h ${widgetScreenGoalMins % 60}m)",
+                                    icon = Icons.Rounded.EmojiEvents
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf(120, 240, 360, 480).forEach { mins ->
+                                            val isSelected = widgetScreenGoalMins == mins
+                                            Surface(
+                                                onClick = {
+                                                    vibrationManager?.vibrateClick()
+                                                    viewModel.setWidgetScreenGoalMins(mins)
+                                                },
+                                                modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        "${mins / 60}h",
+                                                        fontWeight = FontWeight.Black,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (matches(searchQuery, "widget", "haptic", "vibration", "feedback", "touch")) {
+                                SettingsToggleItem(
+                                    title = "Widget haptics",
+                                    subtitle = "Vibrate on widget button taps",
+                                    icon = Icons.Rounded.Vibration,
+                                    checked = widgetHaptics,
+                                    onCheckedChange = { viewModel.setWidgetHaptics(it) }
+                                )
+                            }
+                            if (matches(searchQuery, "widget", "toolbar", "shortcut", "slot", "quick action", "search bar")) {
+                                SettingsItem(
+                                    title = "Toolbar shortcuts",
+                                    subtitle = "Pick up to 3 slots for the Quick Actions bar",
+                                    icon = Icons.Rounded.DashboardCustomize
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        val allSlots = listOf(
+                                            "mic" to "Mic",
+                                            "flashlight" to "Flashlight",
+                                            "qr" to "QR",
+                                            "pomodoro" to "Pomodoro",
+                                            "timer" to "Timer"
+                                        )
+                                        allSlots.chunked(3).forEach { row ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                row.forEach { (id, label) ->
+                                                    val isSelected = widgetToolbarSlots.contains(id)
+                                                    Surface(
+                                                        onClick = {
+                                                            vibrationManager?.vibrateClick()
+                                                            val next = widgetToolbarSlots.toMutableSet()
+                                                            if (isSelected) {
+                                                                if (next.size > 1) next.remove(id)
+                                                            } else {
+                                                                next.add(id)
+                                                            }
+                                                            viewModel.setWidgetToolbarSlots(next)
+                                                        },
+                                                        modifier = Modifier.weight(1f).height(44.dp).bouncyClick {},
+                                                        shape = RoundedCornerShape(14.dp),
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                        border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Text(
+                                                                label,
+                                                                fontWeight = FontWeight.Black,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                repeat(3 - row.size) {
+                                                    Spacer(Modifier.weight(1f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 8. Section: NOTIFICATIONS — Master, background & per-tool alerts
+                    StaggeredEntrance(index = 7) {
                         SettingsExpandableSection(
                             title = stringResource(R.string.st_SettingsScreen_e1f3),
                             icon = Icons.Rounded.Notifications,

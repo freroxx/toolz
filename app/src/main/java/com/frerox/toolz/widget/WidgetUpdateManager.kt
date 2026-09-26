@@ -28,6 +28,8 @@ import com.frerox.toolz.widget.glance.encodeQueueJson
 import com.frerox.toolz.widget.glance.PomodoroGlanceWidget
 import com.frerox.toolz.widget.glance.PomodoroWidgetState
 import com.frerox.toolz.widget.glance.PomodoroWidgetStateDefinition
+import com.frerox.toolz.widget.glance.QuickActionsGlanceWidget
+import com.frerox.toolz.widget.glance.ScreenTimeGlanceWidget
 import com.frerox.toolz.widget.glance.SearchBarGlanceWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -115,6 +117,7 @@ class WidgetUpdateManager @Inject constructor(
             return
         }
         if (glanceIds.isEmpty()) return
+        val capturedAt = android.os.SystemClock.elapsedRealtime()
         glanceIds.forEach { glanceId ->
             try {
                 // NOTE: with a custom StateDefinition the lambda receives immutable
@@ -127,6 +130,7 @@ class WidgetUpdateManager @Inject constructor(
                         this[PomodoroWidgetState.KEY_REMAINING_MS] = remainingMs.coerceAtLeast(0L)
                         this[PomodoroWidgetState.KEY_TOTAL_MS] = totalMs.coerceAtLeast(1L)
                         this[PomodoroWidgetState.KEY_IS_RUNNING] = isRunning
+                        this[PomodoroWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] = capturedAt
                         sessionsDone?.let { this[PomodoroWidgetState.KEY_SESSIONS_DONE] = it.coerceAtLeast(0) }
                         sessionsGoal?.let { this[PomodoroWidgetState.KEY_SESSIONS_GOAL] = it.coerceIn(1, 12) }
                     }
@@ -140,6 +144,29 @@ class WidgetUpdateManager @Inject constructor(
 
     suspend fun updateSearchBarWidget() {
         // SearchBar doesn't have dynamic state yet, but we provide this for consistency
-        SearchBarGlanceWidget().updateAll(context)
+        try {
+            SearchBarGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+        try {
+            QuickActionsGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+    }
+
+    suspend fun refreshAllWidgets() {
+        try {
+            SearchBarGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+        try {
+            QuickActionsGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+        try {
+            PomodoroGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+        try {
+            MusicGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
+        try {
+            ScreenTimeGlanceWidget().updateAll(context)
+        } catch (_: Exception) { }
     }
 }

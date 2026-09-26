@@ -29,6 +29,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.flow.firstOrNull
 
 /**
  * High-performance callback for music widget controls.
@@ -63,6 +64,7 @@ class MusicActionCallback : ActionCallback {
     @InstallIn(SingletonComponent::class)
     interface MusicWidgetEntryPoint {
         fun vibrationManager(): VibrationManager
+        fun settingsRepository(): com.frerox.toolz.data.settings.SettingsRepository
     }
 
     override suspend fun onAction(
@@ -71,13 +73,19 @@ class MusicActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val action = parameters[PARAM_ACTION] ?: return
-        val haptics = EntryPointAccessors.fromApplication(
+        val entry = EntryPointAccessors.fromApplication(
             context.applicationContext,
             MusicWidgetEntryPoint::class.java
-        ).vibrationManager()
+        )
+        val haptics = entry.vibrationManager()
 
-        // 1. Immediate Haptic Feedback
-        haptics.vibrateClick()
+        // 1. Immediate Haptic Feedback (respects WIDGETS settings toggle).
+        try {
+            val enabled = entry.settingsRepository().widgetHaptics.firstOrNull() ?: true
+            if (enabled) haptics.vibrateClick()
+        } catch (_: Exception) {
+            haptics.vibrateClick()
+        }
 
         // 2. Optimistic UI Updates
         // Toggling these keys locally in Preferences makes Glance re-render

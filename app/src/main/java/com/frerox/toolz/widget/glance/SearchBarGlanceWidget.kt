@@ -153,9 +153,10 @@ private fun SearchBarContent(openSearchIntent: Intent, voiceIntent: Intent) {
 }
 
 // ---------------------------------------------------------------------------
-//  Receiver
+//  Receiver — upgraded in place to Quick Actions toolbar. Existing pinned
+//  search bars auto-migrate on update (same component name, no orphan).
 // ---------------------------------------------------------------------------
 
 class SearchBarWidgetReceiver : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = SearchBarGlanceWidget()
+    override val glanceAppWidget: GlanceAppWidget = QuickActionsGlanceWidget()
 }

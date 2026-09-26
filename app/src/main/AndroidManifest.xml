@@ -564,12 +564,13 @@
         </receiver>
 
         <!-- ══════════════════════════════════════════════════════ -->
-        <!--  WIDGETS (new suite — Glance + RemoteViews)            -->
+        <!--  WIDGETS (Glance suite — M3 Expressive)                -->
         <!-- ══════════════════════════════════════════════════════ -->
 
-        <!-- Music Pill (Glance) -->
+        <!-- Music (Glance) -->
         <receiver android:name=".widget.glance.MusicWidgetReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_music_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -579,7 +580,8 @@
 
         <!-- Pomodoro Timer (Glance) -->
         <receiver android:name=".widget.glance.PomodoroWidgetReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_pomodoro_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="com.frerox.toolz.WIDGET_POMO_TOGGLE" />
@@ -590,9 +592,10 @@
                 android:resource="@xml/pomodoro_widget_info" />
         </receiver>
 
-        <!-- Quick Search Bar (Glance) -->
+        <!-- Quick Actions toolbar (Glance, upgrades old search bar in place) -->
         <receiver android:name=".widget.glance.SearchBarWidgetReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_toolbar_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -600,9 +603,10 @@
                 android:resource="@xml/search_bar_widget_info" />
         </receiver>
 
-        <!-- Screen Time (RemoteViews) -->
-        <receiver android:name=".widget.ScreenTimeWidgetProvider"
-            android:exported="true">
+        <!-- Screen Time (Glance) -->
+        <receiver android:name=".widget.glance.ScreenTimeWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_screentime_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

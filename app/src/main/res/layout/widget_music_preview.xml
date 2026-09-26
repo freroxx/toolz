@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview for Music widget (API 31-34). Mirrors Compact tier with test data. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_background">
+
+    <ImageView
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:src="@drawable/ic_music_note"
+        android:scaleType="centerCrop"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingStart="10dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Midnight Drive"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#1D1B20"
+            android:maxLines="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Neon Coast"
+            android:textSize="11sp"
+            android:textColor="#49454F"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <ImageView
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:src="@drawable/ic_widget_pause"
+        android:contentDescription="@null" />
+</LinearLayout>

@@ -43,8 +43,17 @@ class SettingsViewModel @Inject constructor(
     private val database: com.frerox.toolz.data.AppDatabase,
     private val deviceSpecsRepository: DeviceSpecsRepository,
     val vibrationManager: VibrationManager,
+    private val widgetUpdateManager: com.frerox.toolz.widget.WidgetUpdateManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private fun refreshWidgets() {
+        viewModelScope.launch {
+            try {
+                widgetUpdateManager.refreshAllWidgets()
+            } catch (_: Exception) { }
+        }
+    }
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
@@ -89,6 +98,13 @@ class SettingsViewModel @Inject constructor(
     val widgetBackgroundColor = repository.widgetBackgroundColor
     val widgetAccentColor = repository.widgetAccentColor
     val widgetOpacity = repository.widgetOpacity
+    val widgetFollowDynamic = repository.widgetFollowDynamic
+    val widgetShowArt = repository.widgetShowArt
+    val widgetShowQueue = repository.widgetShowQueue
+    val widgetScreenGoalMins = repository.widgetScreenGoalMins
+    val widgetToolbarSlots = repository.widgetToolbarSlots
+    val widgetTapAction = repository.widgetTapAction
+    val widgetHaptics = repository.widgetHaptics
 
     val hapticFeedback = repository.hapticFeedback
     val hapticIntensity = repository.hapticIntensity
@@ -183,9 +199,16 @@ class SettingsViewModel @Inject constructor(
     fun setPurgeShotNotifications(enabled: Boolean) = viewModelScope.launch { repository.setPurgeShotNotificationsEnabled(enabled) }
     fun setNotificationRetentionDays(days: Int) = viewModelScope.launch { repository.setNotificationRetentionDays(days) }
 
-    fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color) }
-    fun setWidgetAccentColor(color: Int) = viewModelScope.launch { repository.setWidgetAccentColor(color) }
-    fun setWidgetOpacity(opacity: Float) = viewModelScope.launch { repository.setWidgetOpacity(opacity) }
+    fun setWidgetBackgroundColor(color: Int) = viewModelScope.launch { repository.setWidgetBackgroundColor(color); refreshWidgets() }
+    fun setWidgetAccentColor(color: Int) = viewModelScope.launch { repository.setWidgetAccentColor(color); refreshWidgets() }
+    fun setWidgetOpacity(opacity: Float) = viewModelScope.launch { repository.setWidgetOpacity(opacity); refreshWidgets() }
+    fun setWidgetFollowDynamic(enabled: Boolean) = viewModelScope.launch { repository.setWidgetFollowDynamic(enabled); refreshWidgets() }
+    fun setWidgetShowArt(enabled: Boolean) = viewModelScope.launch { repository.setWidgetShowArt(enabled); refreshWidgets() }
+    fun setWidgetShowQueue(enabled: Boolean) = viewModelScope.launch { repository.setWidgetShowQueue(enabled); refreshWidgets() }
+    fun setWidgetScreenGoalMins(mins: Int) = viewModelScope.launch { repository.setWidgetScreenGoalMins(mins); refreshWidgets() }
+    fun setWidgetToolbarSlots(slots: Set<String>) = viewModelScope.launch { repository.setWidgetToolbarSlots(slots); refreshWidgets() }
+    fun setWidgetTapAction(action: String) = viewModelScope.launch { repository.setWidgetTapAction(action); refreshWidgets() }
+    fun setWidgetHaptics(enabled: Boolean) = viewModelScope.launch { repository.setWidgetHaptics(enabled); refreshWidgets() }
 
     fun setHapticFeedback(enabled: Boolean) = viewModelScope.launch { repository.setHapticFeedback(enabled) }
     fun setHapticIntensity(intensity: Float) = viewModelScope.launch { repository.setHapticIntensity(intensity) }

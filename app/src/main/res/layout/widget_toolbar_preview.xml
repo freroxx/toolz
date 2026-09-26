@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview for Quick Actions toolbar (API 31-34). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:background="@drawable/widget_background">
+
+    <ImageView
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:src="@drawable/ic_search"
+        android:contentDescription="@null" />
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Search with Toolz…"
+        android:textSize="16sp"
+        android:textColor="#49454F"
+        android:paddingStart="16dp"
+        android:maxLines="1" />
+
+    <ImageView
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_widget_mic"
+        android:contentDescription="@null" />
+</LinearLayout>

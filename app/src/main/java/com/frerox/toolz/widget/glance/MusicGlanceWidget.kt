@@ -64,9 +64,15 @@ import androidx.glance.text.TextAlign
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import androidx.glance.action.actionParametersOf
+import androidx.glance.appwidget.PreviewSizeMode
 import androidx.glance.appwidget.action.actionRunCallback
 import com.frerox.toolz.MainActivity
 import com.frerox.toolz.R
+import com.frerox.toolz.widget.ui.decodeWidgetArt
+import com.frerox.toolz.widget.ui.isColorDark
+import com.frerox.toolz.widget.ui.readWidgetAppearance
+import com.frerox.toolz.widget.ui.resolveWidgetAccent
+import com.frerox.toolz.widget.ui.toWidgetColorProvider
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_FAVORITE
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_NEXT
 import com.frerox.toolz.widget.glance.MusicActionCallback.Companion.ACTION_PREV
@@ -109,7 +115,36 @@ class MusicGlanceWidget : GlanceAppWidget() {
     }
 
     override val sizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED, HERO))
+    override val previewSizeMode: PreviewSizeMode = SizeMode.Responsive(setOf(COMPACT, EXPANDED))
     override val stateDefinition = MusicWidgetStateDefinition
+
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent {
+            GlanceTheme {
+                // Static preview with realistic sample data — no DataStore, no effects.
+                Box(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .background(GlanceTheme.colors.surface)
+                        .cornerRadius(OUTER_CORNER_RADIUS),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    CompactMusicContent(
+                        title = "Midnight Drive",
+                        artist = "Neon Coast",
+                        isPlaying = true,
+                        artBitmap = null,
+                        artShape = "SQUIRCLE",
+                        accentColor = null,
+                        progress = 0.42f,
+                        isFavorite = true,
+                        hasNext = true,
+                        hasPrev = true
+                    )
+                }
+            }
+        }
+    }
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val prefs = getAppWidgetState<Preferences>(context, MusicWidgetStateDefinition, id)
@@ -130,19 +165,14 @@ class MusicGlanceWidget : GlanceAppWidget() {
         val capturedAtElapsedMs = prefs[MusicWidgetState.KEY_CAPTURED_AT_ELAPSED_MS] ?: 0L
         val queue = decodeQueueJson(prefs[MusicWidgetState.KEY_QUEUE_JSON])
 
-        // Production: bitmap decode with fallback, never crash on corrupt file
-        val artBitmap = artPath?.let {
-            try {
-                // Decode with bounds check to avoid OOM on large files
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 1 }
-                BitmapFactory.decodeFile(it, opts)?.takeIf { bmp -> bmp.width > 0 && bmp.height > 0 }
-            } catch (_: Exception) { null }
+        // Downsampled decode — never OOM, never crash on corrupt file.
+        val appearance = try { readWidgetAppearance(context) } catch (_: Exception) {
+            com.frerox.toolz.widget.ui.WidgetAppearance()
         }
+        val artBitmap = if (appearance.showArt) decodeWidgetArt(artPath) else null
 
-        // Expressive palette: vibrant → muted → primary fallback, contrast-aware
-        val accentColor = accentHex?.let { hex ->
-            try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { null }
-        }
+        // Accent: dynamic track color wins when followDynamic, else settings custom.
+        val accentColor = resolveWidgetAccent(accentHex, appearance)
 
         val openMusicIntent = Intent(context, MainActivity::class.java).apply {
             putExtra("navigate_to", "music_player")
@@ -165,17 +195,21 @@ class MusicGlanceWidget : GlanceAppWidget() {
         provideContent {
             GlanceTheme {
                 val size = LocalSize.current
+                // Height-aware tiers: wide-but-short launchers stay Compact, no overflow.
                 val tier = when {
-                    size.height >= HERO.height - 20.dp -> WidgetTier.Hero
-                    size.width >= EXPANDED.width -> WidgetTier.Expanded
+                    size.height >= 320.dp && size.width >= 250.dp -> WidgetTier.Hero
+                    size.width >= EXPANDED.width && size.height >= 180.dp -> WidgetTier.Expanded
                     else -> WidgetTier.Compact
                 }
 
-                // Outer expressive container: surface + 28dp + accent tint overlay (6%)
+                // Outer expressive container: surface (or custom bg) + 28dp.
+                // Custom bg from WIDGETS settings when followDynamic is off.
+                val outerBg = com.frerox.toolz.widget.ui.widgetBackgroundProvider(appearance)
+                    ?: GlanceTheme.colors.surface
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
-                        .background(GlanceTheme.colors.surface)
+                        .background(outerBg)
                         .cornerRadius(OUTER_CORNER_RADIUS)
                         .clickable(actionStartActivity(openMusicIntent)),
                     contentAlignment = Alignment.TopStart,
@@ -183,13 +217,13 @@ class MusicGlanceWidget : GlanceAppWidget() {
                     // Subtle tonal accent wash behind content (expressive)
                     Box(
                         modifier = GlanceModifier.fillMaxSize()
-                            .background(accentColor?.copy(alpha = 0.06f)?.toColorProvider() ?: GlanceTheme.colors.surfaceVariant)
+                            .background(accentColor?.copy(alpha = 0.06f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant)
                             .cornerRadius(OUTER_CORNER_RADIUS)
                     ) {}
                     // Top accent strip — 4dp expressive header rule
                     Box(
                         modifier = GlanceModifier.fillMaxWidth().height(4.dp)
-                            .background(accentColor?.toColorProvider() ?: GlanceTheme.colors.primary)
+                            .background(accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary)
                     ) {}
                     // Content with top inset for accent strip
                     Box(
@@ -224,7 +258,7 @@ class MusicGlanceWidget : GlanceAppWidget() {
                                 hasPrev = hasPrev,
                                 isShuffle = isShuffle,
                                 repeatMode = repeatMode,
-                                queue = queue
+                                queue = if (appearance.showQueue) queue else emptyList()
                             )
                             WidgetTier.Hero -> HeroMusicContent(
                                 title = title,
@@ -241,7 +275,7 @@ class MusicGlanceWidget : GlanceAppWidget() {
                                 hasPrev = hasPrev,
                                 isShuffle = isShuffle,
                                 repeatMode = repeatMode,
-                                queue = queue
+                                queue = if (appearance.showQueue) queue else emptyList()
                             )
                         }
                     }
@@ -281,16 +315,20 @@ private fun TransportButton(
     iconTint: ColorProvider,
     action: String
 ) {
+    // Disabled-safe: no clickable when disabled — prevents dead taps.
+    var mod = GlanceModifier
+        .size(size)
+        .cornerRadius(size / 2)
+        .background(backgroundColor)
+    if (enabled) {
+        mod = mod.clickable(
+            actionRunCallback<MusicActionCallback>(
+                actionParametersOf(PARAM_ACTION to action)
+            )
+        )
+    }
     Box(
-        modifier = GlanceModifier
-            .size(size)
-            .cornerRadius(size / 2)
-            .background(backgroundColor)
-            .clickable(
-                actionRunCallback<MusicActionCallback>(
-                    actionParametersOf(PARAM_ACTION to action)
-                )
-            ),
+        modifier = mod,
         contentAlignment = Alignment.Center
     ) {
         Image(
@@ -308,7 +346,7 @@ private fun TransportButton(
 private fun FavoriteButton(isFavorite: Boolean, size: Dp, accentColor: Color?) {
     val iconRes = if (isFavorite) R.drawable.ic_widget_favorite_filled else R.drawable.ic_widget_favorite_outline
     // Expressive: tonal container when favorited, surfaceVariant otherwise
-    val bg = if (isFavorite) (accentColor?.copy(alpha = 0.12f)?.toColorProvider() ?: GlanceTheme.colors.primaryContainer)
+    val bg = if (isFavorite) (accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.primaryContainer)
              else GlanceTheme.colors.surfaceVariant
     Box(
         modifier = GlanceModifier
@@ -327,7 +365,7 @@ private fun FavoriteButton(isFavorite: Boolean, size: Dp, accentColor: Color?) {
             contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
             modifier = GlanceModifier.size(size * 0.52f),
             colorFilter = androidx.glance.ColorFilter.tint(
-                if (isFavorite) Color(0xFFE0555C).toColorProvider() else GlanceTheme.colors.onSurfaceVariant
+                if (isFavorite) Color(0xFFE0555C).toWidgetColorProvider() else GlanceTheme.colors.onSurfaceVariant
             )
         )
     }
@@ -345,7 +383,7 @@ private fun PlayPauseButton(
         modifier = GlanceModifier
             .size(size)
             .cornerRadius(size * 0.35f)
-            .background(accentColor?.toColorProvider() ?: GlanceTheme.colors.primary)
+            .background(accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary)
             .clickable(
                 actionRunCallback<MusicActionCallback>(
                     actionParametersOf(PARAM_ACTION to ACTION_TOGGLE)
@@ -358,7 +396,7 @@ private fun PlayPauseButton(
             contentDescription = if (isPlaying) "Pause" else "Play",
             modifier = GlanceModifier.size(iconSize),
             colorFilter = androidx.glance.ColorFilter.tint(
-                if (accentColor != null && isColorDark(accentColor)) Color.White.toColorProvider() else GlanceTheme.colors.onPrimary
+                if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary
             )
         )
     }
@@ -404,7 +442,7 @@ private fun CompactMusicContent(
             // Art with tonal wash behind
             Box(
                 modifier = GlanceModifier.size(52.dp).cornerRadius(cornerDp)
-                    .background(accentColor?.copy(alpha = 0.12f)?.toColorProvider() ?: GlanceTheme.colors.surfaceVariant),
+                    .background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -415,7 +453,7 @@ private fun CompactMusicContent(
                 if (isPlaying) {
                     Box(
                         modifier = GlanceModifier.size(10.dp).cornerRadius(5.dp)
-                            .background(Color(0xFF4CAF50).toColorProvider()),
+                            .background(Color(0xFF4CAF50).toWidgetColorProvider()),
                         contentAlignment = Alignment.Center
                     ) {}
                 }
@@ -437,13 +475,13 @@ private fun CompactMusicContent(
                             provider = ImageProvider(R.drawable.ic_widget_favorite_filled),
                             contentDescription = null,
                             modifier = GlanceModifier.size(10.dp),
-                            colorFilter = androidx.glance.ColorFilter.tint(Color(0xFFE0555C).toColorProvider())
+                            colorFilter = androidx.glance.ColorFilter.tint(Color(0xFFE0555C).toWidgetColorProvider())
                         )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (isPlaying) {
-                        Box(modifier = GlanceModifier.size(6.dp).cornerRadius(3.dp).background(Color(0xFF4CAF50).toColorProvider())) {}
+                        Box(modifier = GlanceModifier.size(6.dp).cornerRadius(3.dp).background(Color(0xFF4CAF50).toWidgetColorProvider())) {}
                         Spacer(GlanceModifier.width(4.dp))
                     }
                     Text(
@@ -464,12 +502,11 @@ private fun CompactMusicContent(
                 iconSize = 20.dp
             )
         }
-        // Expressive progress — 3dp, full width, tappable to seek (50%)
+        // Progress — display only (no fake seek; tap targets must be honest).
         LinearProgressIndicator(
             progress = progress,
-            modifier = GlanceModifier.fillMaxWidth().height(3.dp)
-                .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SEEK_POSITION, PARAM_INDEX to (progress * 100).toInt()))),
-            color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+            modifier = GlanceModifier.fillMaxWidth().height(3.dp),
+            color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
             backgroundColor = GlanceTheme.colors.surfaceVariant
         )
     }
@@ -534,9 +571,8 @@ private fun ExpandedMusicContent(
             Box(modifier = GlanceModifier.defaultWeight()) {
                 LinearProgressIndicator(
                     progress = progress,
-                    modifier = GlanceModifier.fillMaxWidth().height(6.dp).cornerRadius(3.dp)
-                        .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SEEK_POSITION, PARAM_INDEX to (progress * 100).toInt()))),
-                    color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+                    modifier = GlanceModifier.fillMaxWidth().height(6.dp).cornerRadius(3.dp),
+                    color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
                     backgroundColor = GlanceTheme.colors.surfaceVariant
                 )
             }
@@ -554,7 +590,7 @@ private fun ExpandedMusicContent(
                 Text(
                     "UP NEXT",
                     style = TextStyle(
-                        color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+                        color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
                         fontSize = 10.sp, fontWeight = FontWeight.Bold
                     )
                 )
@@ -580,7 +616,7 @@ private fun ExpandedMusicContent(
                             .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SEEK, PARAM_INDEX to track.queueIndex))),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = GlanceModifier.size(5.dp).cornerRadius(2.dp).background(accentColor?.copy(alpha = 0.5f)?.toColorProvider() ?: GlanceTheme.colors.onSurfaceVariant)) {}
+                        Box(modifier = GlanceModifier.size(5.dp).cornerRadius(2.dp).background(accentColor?.copy(alpha = 0.5f)?.toWidgetColorProvider() ?: GlanceTheme.colors.onSurfaceVariant)) {}
                         Spacer(GlanceModifier.width(8.dp))
                         Column(modifier = GlanceModifier.defaultWeight()) {
                             Text(
@@ -672,9 +708,8 @@ private fun HeroMusicContent(
             Box(modifier = GlanceModifier.defaultWeight()) {
                 LinearProgressIndicator(
                     progress = progress,
-                    modifier = GlanceModifier.fillMaxWidth().height(7.dp).cornerRadius(4.dp)
-                        .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SEEK_POSITION, PARAM_INDEX to (progress * 100).toInt()))),
-                    color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+                    modifier = GlanceModifier.fillMaxWidth().height(7.dp).cornerRadius(4.dp),
+                    color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
                     backgroundColor = GlanceTheme.colors.surfaceVariant
                 )
             }
@@ -722,18 +757,18 @@ private fun HeroMusicContent(
                 Text(
                     "UP NEXT",
                     style = TextStyle(
-                        color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+                        color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
                         fontSize = 11.sp, fontWeight = FontWeight.Bold
                     )
                 )
                 Spacer(GlanceModifier.width(6.dp))
                 Box(
-                    modifier = GlanceModifier.background(accentColor?.copy(alpha = 0.12f)?.toColorProvider() ?: GlanceTheme.colors.primaryContainer)
+                    modifier = GlanceModifier.background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.primaryContainer)
                         .cornerRadius(8.dp).padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         "${queue.size}",
-                        style = TextStyle(color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        style = TextStyle(color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     )
                 }
                 Spacer(GlanceModifier.defaultWeight())
@@ -789,18 +824,18 @@ private fun QueueRow(track: QueueTrackInfo, accentColor: Color?, index: Int = -1
         if (index > 0) {
             Box(
                 modifier = GlanceModifier.size(20.dp).cornerRadius(10.dp)
-                    .background(accentColor?.copy(alpha = 0.12f)?.toColorProvider() ?: GlanceTheme.colors.surfaceVariant),
+                    .background(accentColor?.copy(alpha = 0.12f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     "$index",
-                    style = TextStyle(color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    style = TextStyle(color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary, fontSize = 9.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 )
             }
         } else {
             Box(
                 modifier = GlanceModifier.size(6.dp).cornerRadius(3.dp)
-                    .background(accentColor?.copy(alpha = 0.5f)?.toColorProvider() ?: GlanceTheme.colors.onSurfaceVariant)
+                    .background(accentColor?.copy(alpha = 0.5f)?.toWidgetColorProvider() ?: GlanceTheme.colors.onSurfaceVariant)
             ) {}
         }
         Spacer(GlanceModifier.width(10.dp))
@@ -864,7 +899,7 @@ private fun NowPlayingHeader(
 
         Box(
             modifier = GlanceModifier.size(artSize).cornerRadius(cornerDp)
-                .background(accentColor?.copy(alpha = 0.10f)?.toColorProvider() ?: GlanceTheme.colors.surfaceVariant),
+                .background(accentColor?.copy(alpha = 0.10f)?.toWidgetColorProvider() ?: GlanceTheme.colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Image(
@@ -875,7 +910,7 @@ private fun NowPlayingHeader(
             if (isPlaying) {
                 Box(
                     modifier = GlanceModifier.fillMaxSize().cornerRadius(cornerDp)
-                        .background(Color.Transparent.toColorProvider())
+                        .background(Color.Transparent.toWidgetColorProvider())
                 ) {}
             }
         }
@@ -892,7 +927,7 @@ private fun NowPlayingHeader(
                 )
                 if (isPlaying) {
                     Spacer(GlanceModifier.width(6.dp))
-                    Box(modifier = GlanceModifier.size(7.dp).cornerRadius(3.dp).background(Color(0xFF4CAF50).toColorProvider())) {}
+                    Box(modifier = GlanceModifier.size(7.dp).cornerRadius(3.dp).background(Color(0xFF4CAF50).toWidgetColorProvider())) {}
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -907,7 +942,7 @@ private fun NowPlayingHeader(
                         provider = ImageProvider(R.drawable.ic_widget_favorite_filled),
                         contentDescription = null,
                         modifier = GlanceModifier.size(12.dp),
-                        colorFilter = androidx.glance.ColorFilter.tint(Color(0xFFE0555C).toColorProvider())
+                        colorFilter = androidx.glance.ColorFilter.tint(Color(0xFFE0555C).toWidgetColorProvider())
                     )
                 }
             }
@@ -916,7 +951,7 @@ private fun NowPlayingHeader(
                 Spacer(GlanceModifier.height(3.dp))
                 Text(
                     "Up next: $nextTitle", maxLines = 1, style = TextStyle(
-                        color = accentColor?.toColorProvider() ?: GlanceTheme.colors.primary,
+                        color = accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -951,7 +986,7 @@ private fun TransportRow(
         Box(
             modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
                 .background(
-                    if (isShuffle) accentColor?.toColorProvider() ?: GlanceTheme.colors.primary
+                    if (isShuffle) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
                     else GlanceTheme.colors.surfaceVariant
                 )
                 .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_SHUFFLE))),
@@ -962,7 +997,7 @@ private fun TransportRow(
                 contentDescription = if (isShuffle) "Shuffle on" else "Shuffle off",
                 modifier = GlanceModifier.size(16.dp),
                 colorFilter = androidx.glance.ColorFilter.tint(
-                    if (isShuffle) (if (accentColor != null && isColorDark(accentColor)) Color.White.toColorProvider() else GlanceTheme.colors.onPrimary)
+                    if (isShuffle) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
                     else GlanceTheme.colors.onSurfaceVariant
                 )
             )
@@ -1006,7 +1041,7 @@ private fun TransportRow(
         Box(
             modifier = GlanceModifier.size(36.dp).cornerRadius(18.dp)
                 .background(
-                    if (repeatMode != 0) accentColor?.toColorProvider() ?: GlanceTheme.colors.primary
+                    if (repeatMode != 0) accentColor?.toWidgetColorProvider() ?: GlanceTheme.colors.primary
                     else GlanceTheme.colors.surfaceVariant
                 )
                 .clickable(actionRunCallback<MusicActionCallback>(actionParametersOf(PARAM_ACTION to ACTION_REPEAT))),
@@ -1017,7 +1052,7 @@ private fun TransportRow(
                 contentDescription = when (repeatMode) { 1 -> "Repeat one" ; 2 -> "Repeat all" ; else -> "Repeat off" },
                 modifier = GlanceModifier.size(16.dp),
                 colorFilter = androidx.glance.ColorFilter.tint(
-                    if (repeatMode != 0) (if (accentColor != null && isColorDark(accentColor)) Color.White.toColorProvider() else GlanceTheme.colors.onPrimary)
+                    if (repeatMode != 0) (if (accentColor != null && isColorDark(accentColor)) Color.White.toWidgetColorProvider() else GlanceTheme.colors.onPrimary)
                     else GlanceTheme.colors.onSurfaceVariant
                 )
             )
@@ -1027,11 +1062,4 @@ private fun TransportRow(
     }
 }
 
-private fun isColorDark(color: Color): Boolean {
-    val darkness = 1 - (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue)
-    return darkness >= 0.5
-}
-
-private fun Color.toColorProvider(): ColorProvider = object : ColorProvider {
-    override fun getColor(context: Context): Color = this@toColorProvider
-}
+// Shared helpers live in widget.ui.WidgetTheme (isColorDark, toWidgetColorProvider).

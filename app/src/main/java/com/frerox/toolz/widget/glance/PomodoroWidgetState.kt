@@ -37,6 +37,9 @@ object PomodoroWidgetState {
     val KEY_MODE          = stringPreferencesKey("pw_mode")
     val KEY_REMAINING_MS  = longPreferencesKey("pw_remaining_ms")
     val KEY_TOTAL_MS      = longPreferencesKey("pw_total_ms")
+    // Live interpolation anchor: elapsedRealtime at push time. Widget derives
+    // now = remaining - (nowElapsed - capturedAt) while running.
+    val KEY_CAPTURED_AT_ELAPSED_MS = longPreferencesKey("pw_captured_at_elapsed_ms")
     // Legacy Float keys (pre-P1-03) — read as fallback for widgets written
     // before the Long migration, then overwritten with Long on next push.
     val KEY_REMAINING_MS_LEGACY  = androidx.datastore.preferences.core.floatPreferencesKey("pw_remaining_ms")

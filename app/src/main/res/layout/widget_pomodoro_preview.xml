@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview for Pomodoro widget (API 31-34). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="12dp"
+    android:background="@drawable/widget_background">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="FOCUS • READY"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:textColor="#6750A4" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="24:59"
+        android:textSize="31sp"
+        android:textStyle="bold"
+        android:textColor="#1D1B20"
+        android:layout_marginTop="4dp" />
+
+    <ImageView
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_marginTop="8dp"
+        android:src="@drawable/ic_widget_play"
+        android:contentDescription="@null" />
+</LinearLayout>
