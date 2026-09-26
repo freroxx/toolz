@@ -43,7 +43,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
  * ViewModel for the unified Media Downloader tool (YouTube / TikTok / Instagram Reels).
  *
  * Routing:
- * - Remote (API) results → [SocialDownloadWorker] (same-instance /api/download streaming).
+ * - Remote v1 assets → [SocialDownloadWorker] (opaque extraction/asset handles).
  * - Local YouTube fallback → [VideoDownloadWorker] / [YouTubeMp3DownloadWorker] (shared HD engine).
  */
 @HiltViewModel
@@ -90,6 +90,8 @@ class MediaDownloaderViewModel @Inject constructor(
         val detail: String,
         val isAudio: Boolean = false,
         val isHd: Boolean = false,
+        /** v1 asset kind: video, audio, or image. */
+        val kind: String = "video",
         /** Lowercase container (mp4, mp3, …) used for favorites/hide/auto-select. */
         val ext: String = "",
         /** Target container for converter-backed options (null = direct download). */
@@ -716,43 +718,31 @@ class MediaDownloaderViewModel @Inject constructor(
         mode: DownloadMode,
         platform: MediaDownloaderRepository.Platform?,
     ): List<QualityOption> {
-        val directAudio = res.formats.audio
-            .filter { !it.url.isNullOrBlank() && it.format_id != null }
+        val directAudio = res.assets.filter { it.kind == "audio" && it.id.isNotBlank() }
             .take(3)
             .map { f ->
                 QualityOption(
-                    id = f.format_id!!,
-                    label = f.abr?.let { "${it.toInt()}k audio" } ?: f.resolution?.takeIf { it != "unknown" } ?: "Audio",
+                    id = f.id,
+                    label = f.acodec?.takeIf { it != "none" } ?: f.resolution?.takeIf { it != "unknown" } ?: "Audio",
                     detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "mp3"),
                     isAudio = true,
                     ext = (f.ext ?: "mp3").lowercase(),
+                    kind = "audio",
                 )
             }
         if (mode == DownloadMode.AUDIO) {
-            val list = (directAudio + converterAudioLadder(includeDirectMp3 = false)).distinctBy { it.id }
+            val list = directAudio.distinctBy { it.id }
             val withPrefs = platform?.let { applyFormatPrefs(it, list) } ?: list
             return withPrefs.take(10)
         }
         val out = mutableListOf<QualityOption>()
-        if (!res.download_url.isNullOrBlank()) {
-            out += QualityOption("best", "Best quality", "recommended", ext = res.ext?.lowercase() ?: "mp4")
-        }
-        // Server-side cobalt ladder first (converted on demand), then direct formats.
-        res.quality_options.forEach { q ->
-            if (q.f.isNotBlank()) {
-                val isAudio = q.f.endsWith("mp3")
-                if (mode == DownloadMode.VIDEO && isAudio) return@forEach
-                out += QualityOption(q.f, q.label, "server", isAudio = isAudio, isHd = false, ext = if (isAudio) "mp3" else "mp4")
-            }
-        }
-        res.formats.video
-            .filter { !it.url.isNullOrBlank() && it.format_id != null }
+        res.assets.filter { it.kind == "video" && it.id.isNotBlank() }
             .take(8)
             .forEach { f ->
-                val hasAudio = f.acodec != null && f.acodec != "none"
+                val hasAudio = f.has_audio == true || (f.has_audio == null && f.acodec != null && f.acodec != "none")
                 val h = f.height
                 out += QualityOption(
-                    id = f.format_id!!,
+                    id = f.id,
                     label = f.resolution?.takeIf { it != "unknown" } ?: "${h?.let { "${it}p" } ?: (f.ext?.uppercase() ?: "Video")}",
                     detail = listOfNotNull(
                         if (!hasAudio) "no audio" else null,
@@ -761,15 +751,18 @@ class MediaDownloaderViewModel @Inject constructor(
                     ).joinToString(" · ").ifBlank { f.ext ?: "mp4" },
                     isHd = (h ?: 0) >= 1080,
                     ext = (f.ext ?: "mp4").lowercase(),
+                    kind = "video",
+                )
+            }
+        res.assets.filter { it.kind == "image" && it.id.isNotBlank() }
+            .forEachIndexed { index, f ->
+                out += QualityOption(
+                    id = f.id, label = "Photo ${index + 1}",
+                    detail = f.filesize?.let { formatBytes(it) } ?: (f.ext ?: "image").uppercase(),
+                    ext = (f.ext ?: "jpg").lowercase(), kind = "image",
                 )
             }
         out += directAudio
-        if (mode != DownloadMode.VIDEO) {
-            // MP3 is always offered too (converter-backed so it works on every
-            // platform, even when the server exposes no direct MP3 stream).
-            val convertedMp3 = converterAudioLadder(includeDirectMp3 = false).first()
-            if (out.none { it.id == convertedMp3.id }) out += convertedMp3
-        }
         val withPrefs = platform?.let { applyFormatPrefs(it, out) } ?: out
         val filtered = if (mode == DownloadMode.VIDEO) withPrefs.filter { !it.isAudio } else withPrefs
         return filtered.distinctBy { it.id }.take(14)
@@ -891,19 +884,30 @@ class MediaDownloaderViewModel @Inject constructor(
         // Remote path (TikTok / IG / remote YouTube)
         val remote = s.remote
         if (remote != null && !remote.blocked) {
-            val pageUrl = remote.original_url?.ifBlank { s.url.trim() } ?: s.url.trim()
-            val isAudio = opt.isAudio || opt.id.equals("MP3", ignoreCase = true)
-            val ext = if (isAudio) "mp3" else "mp4"
-            val fileName = repository.downloadFileName(remote.title, ext)
+            val extractionId = remote.id
+            if (extractionId.isNullOrBlank()) {
+                _ui.value = s.copy(error = "This result expired. Extract the link again.")
+                return
+            }
+            val asset = remote.assets.firstOrNull { it.id == opt.id }
+            if (asset == null) {
+                _ui.value = s.copy(error = "That format is no longer available. Extract the link again.")
+                return
+            }
+            val isAudio = asset.kind == "audio"
+            val ext = asset.ext ?: if (isAudio) "mp3" else "mp4"
+            val baseName = if (asset.kind == "image") "${remote.title ?: "photo"}-${asset.id}" else remote.title
+            val fileName = repository.downloadFileName(baseName, ext)
             val req = OneTimeWorkRequestBuilder<SocialDownloadWorker>()
                 .setInputData(
                     workDataOf(
-                        SocialDownloadWorker.KEY_PAGE_URL to pageUrl,
-                        SocialDownloadWorker.KEY_FORMAT_ID to opt.id,
+                        SocialDownloadWorker.KEY_EXTRACTION_ID to extractionId,
+                        SocialDownloadWorker.KEY_ASSET_ID to asset.id,
                         SocialDownloadWorker.KEY_FILE_NAME to fileName,
                         SocialDownloadWorker.KEY_TITLE to (remote.title ?: "media"),
                         SocialDownloadWorker.KEY_THUMBNAIL_URL to remote.thumbnail,
                         SocialDownloadWorker.KEY_IS_AUDIO to isAudio,
+                        SocialDownloadWorker.KEY_MIME_TYPE_INPUT to asset.mime_type,
                     )
                 )
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -911,7 +915,7 @@ class MediaDownloaderViewModel @Inject constructor(
                 .addTag(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD)
                 .build()
             WorkManager.getInstance(appContext).enqueueUniqueWork(
-                "social_download_${pageUrl.hashCode()}_${System.currentTimeMillis()}",
+                "social_download_${extractionId}_${asset.id}_${System.currentTimeMillis()}",
                 ExistingWorkPolicy.REPLACE,
                 req,
             )
@@ -941,19 +945,26 @@ class MediaDownloaderViewModel @Inject constructor(
         val ext = opt.targetExt ?: "m4a"
         val remote = s.remote
         if (remote != null && !remote.blocked) {
-            val pageUrl = remote.original_url?.ifBlank { s.url.trim() } ?: s.url.trim()
-            val baseFormatId = remote.formats.audio.firstOrNull { !it.url.isNullOrBlank() && it.format_id != null }?.format_id ?: "best"
+            val extractionId = remote.id ?: run {
+                _ui.value = s.copy(error = "This result expired. Extract the link again.")
+                return
+            }
+            val baseAsset = remote.assets.firstOrNull { it.kind == "audio" } ?: run {
+                _ui.value = s.copy(error = "No downloadable audio format is available.")
+                return
+            }
             val title = remote.title ?: "media"
             val fileName = repository.downloadFileName(title, "mp3")
             val req = OneTimeWorkRequestBuilder<SocialDownloadWorker>()
                 .setInputData(
                     workDataOf(
-                        SocialDownloadWorker.KEY_PAGE_URL to pageUrl,
-                        SocialDownloadWorker.KEY_FORMAT_ID to baseFormatId,
+                        SocialDownloadWorker.KEY_EXTRACTION_ID to extractionId,
+                        SocialDownloadWorker.KEY_ASSET_ID to baseAsset.id,
                         SocialDownloadWorker.KEY_FILE_NAME to fileName,
                         SocialDownloadWorker.KEY_TITLE to title,
                         SocialDownloadWorker.KEY_THUMBNAIL_URL to remote.thumbnail,
                         SocialDownloadWorker.KEY_IS_AUDIO to true,
+                        SocialDownloadWorker.KEY_MIME_TYPE_INPUT to baseAsset.mime_type,
                     )
                 )
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -961,7 +972,7 @@ class MediaDownloaderViewModel @Inject constructor(
                 .addTag(SocialDownloadWorker.TAG_SOCIAL_DOWNLOAD)
                 .build()
             WorkManager.getInstance(appContext).enqueueUniqueWork(
-                "social_download_${pageUrl.hashCode()}_${System.currentTimeMillis()}",
+                "social_download_${extractionId}_${baseAsset.id}_${System.currentTimeMillis()}",
                 ExistingWorkPolicy.REPLACE,
                 req,
             )

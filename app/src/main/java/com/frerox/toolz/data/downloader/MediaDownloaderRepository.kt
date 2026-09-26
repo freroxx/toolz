@@ -6,19 +6,21 @@ package com.frerox.toolz.data.downloader
 
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.catalog.CatalogRepository
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Unified extraction repository for the Media Downloader tool.
  *
- * Strategy (per platform, mirroring toolz-downloadz-api/api/index.py detect_platform):
- * - TikTok / Instagram / YouTube-remote → toolz-downloadz-api /api/extract (requires API key).
- * - YouTube on-device fallback → CatalogRepository (InnerTube + NewPipe) when the API
- *   is unconfigured, unreachable, or returns blocked:true.
+ * Strategy: all supported platforms use the v1 API first. It returns opaque,
+ * short-lived asset IDs instead of upstream URLs. YouTube can fall back to the
+ * device engine when the service is unavailable.
  *
  * The repository never throws raw Retrofit errors; it maps them to [ExtractResult].
  */
@@ -27,6 +29,7 @@ class MediaDownloaderRepository @Inject constructor(
     private val service: DownloadzService,
     @DownloadzClient private val okHttpClient: OkHttpClient,
     private val catalogRepository: CatalogRepository,
+    @ApplicationContext private val context: Context,
 ) {
 
     sealed interface ExtractResult {
@@ -38,24 +41,26 @@ class MediaDownloaderRepository @Inject constructor(
 
     enum class Platform { YOUTUBE, TIKTOK, INSTAGRAM }
 
-    fun isApiConfigured(): Boolean =
-        BuildConfig.DOWNLOADZ_API_URL.isNotBlank() && BuildConfig.DOWNLOADZ_API_KEY.isNotBlank()
+    fun isApiConfigured(): Boolean = BuildConfig.DOWNLOADZ_API_URL.isNotBlank()
 
     fun detectPlatform(rawUrl: String): Platform? {
-        val u = rawUrl.trim().lowercase()
-        if ("youtube.com" in u || "youtu.be" in u) return Platform.YOUTUBE
-        if ("tiktok.com" in u) return Platform.TIKTOK
-        if ("instagram.com" in u && ("/reel" in u || "/reels" in u || "/p/" in u)) return Platform.INSTAGRAM
+        val parsed = runCatching { java.net.URI(rawUrl.trim()) }.getOrNull() ?: return null
+        val host = parsed.host?.lowercase()?.removeSuffix(".") ?: return null
+        val path = parsed.path?.lowercase().orEmpty()
+        fun isHost(domain: String) = host == domain || host.endsWith(".$domain")
+        if (isHost("youtube.com") || host == "youtu.be") return Platform.YOUTUBE
+        if (isHost("tiktok.com")) return Platform.TIKTOK
+        if (isHost("instagram.com") && (path.startsWith("/reel") || path.startsWith("/reels") || path.startsWith("/p/"))) return Platform.INSTAGRAM
         return null
     }
 
     /** Rejects non-http(s) and private/internal hosts, mirroring api clean_url(). */
     fun sanitizeUrl(raw: String): String? {
         val url = raw.trim()
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+        if (!url.startsWith("https://")) return null
         if (url.length > 2048) return null
         return try {
-            val host = java.net.URI(url).host?.lowercase() ?: return null
+            val host = java.net.URI(url).host?.lowercase()?.removeSuffix(".") ?: return null
             if (host in setOf("localhost", "127.0.0.1", "0.0.0.0", "::1")) return null
             if (host.endsWith(".local") || host.endsWith(".internal")) return null
             if (host.startsWith("10.") || host.startsWith("192.168.") || host.startsWith("169.254.")) return null
@@ -63,6 +68,7 @@ class MediaDownloaderRepository @Inject constructor(
                 host.startsWith("172.19.") || host.startsWith("172.2") || host.startsWith("172.30.") ||
                 host.startsWith("172.31.")
             ) return null
+            if (runCatching { java.net.InetAddress.getByName(host) }.getOrNull()?.isSiteLocalAddress == true) return null
             url
         } catch (_: Exception) {
             null
@@ -76,29 +82,24 @@ class MediaDownloaderRepository @Inject constructor(
             val platform = detectPlatform(url)
                 ?: return@withContext ExtractResult.Error("Unsupported link. Only YouTube, TikTok and Instagram Reels are supported.")
 
-            // Remote first when configured (TikTok/IG have no on-device engine).
+            // Every platform is server-first. The v1 API returns opaque asset IDs,
+            // never raw media URLs or a project-wide embedded secret.
             if (isApiConfigured()) {
                 try {
-                    val res = service.extract(url, audioOnly)
-                    if (res.blocked) {
-                        // YouTube blocked → fall through to on-device engine below.
-                        if (platform != Platform.YOUTUBE) {
-                            return@withContext ExtractResult.Blocked(
-                                platform = res.platform,
-                                message = res.blocked_message ?: "Extraction blocked on the server. Try again later.",
-                                response = res,
-                            )
-                        }
-                    } else {
-                        return@withContext ExtractResult.Remote(res)
-                    }
+                    val session = service.createGuestSession(DownloadzGuestSessionRequest(installationId()))
+                    if (session.access_token.isBlank()) throw IllegalStateException("Empty guest session")
+                    val res = service.extractV1(
+                        authorization = "Bearer ${session.access_token}",
+                        request = DownloadzV1ExtractRequest(url, audioOnly),
+                    )
+                    return@withContext ExtractResult.Remote(res)
                 } catch (e: retrofit2.HttpException) {
                     val code = e.code()
                     // YouTube → on-device fallback on any HTTP error; TikTok/IG surface the error.
                     if (platform != Platform.YOUTUBE) {
                         return@withContext ExtractResult.Error(
                             message = when (code) {
-                                401 -> "Invalid API key. Check DOWNLOADZ_API_KEY in local.properties."
+                                401 -> "Your download session expired. Please retry."
                                 429 -> "Too many requests. Wait a minute and retry."
                                 else -> "Server error ($code). Try again."
                             },
@@ -114,7 +115,7 @@ class MediaDownloaderRepository @Inject constructor(
                 }
             } else if (platform != Platform.YOUTUBE) {
                 return@withContext ExtractResult.Error(
-                    "TikTok / Instagram need the download server. Set DOWNLOADZ_API_KEY in local.properties and rebuild."
+                    "TikTok / Instagram need a configured download server."
                 )
             }
 
@@ -134,6 +135,14 @@ class MediaDownloaderRepository @Inject constructor(
             }
         }
 
+    /** A stable, non-secret app installation identifier for anonymous API sessions. */
+    fun installationId(): String {
+        val prefs = context.getSharedPreferences("downloadz_guest", Context.MODE_PRIVATE)
+        return prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString("installation_id", it).apply()
+        }
+    }
+
     fun extractYouTubeId(url: String): String? {
         val idRegex = Regex("(?:v=|youtu\\.be/|shorts/|embed/|live/)([a-zA-Z0-9_-]{11})")
         idRegex.find(url)?.let { return it.groupValues[1] }
@@ -142,18 +151,8 @@ class MediaDownloaderRepository @Inject constructor(
 
     /** Best single-tap download candidate from a remote response. */
     fun bestCandidates(res: DownloadzExtractResponse): Triple<String?, String, String> {
-        // Triple(downloadUrlOrFormatId, ext, label)
-        val fmt = res.formats.video.firstOrNull { !it.url.isNullOrBlank() }
-        if (!res.download_url.isNullOrBlank()) {
-            return Triple("best", res.ext ?: "mp4", "Best quality")
-        }
-        if (fmt != null) {
-            return Triple(fmt.format_id ?: "best", fmt.ext ?: "mp4", fmt.resolution ?: "Video")
-        }
-        val audio = res.formats.audio.firstOrNull { !it.url.isNullOrBlank() }
-        if (audio != null) {
-            return Triple(audio.format_id ?: "best", audio.ext ?: "mp3", "Audio")
-        }
+        val asset = res.assets.firstOrNull { it.kind == "video" } ?: res.assets.firstOrNull()
+        if (asset != null) return Triple(asset.id, asset.ext ?: "mp4", asset.resolution ?: asset.kind)
         return Triple(null, "mp4", "No stream")
     }
 

@@ -6,6 +6,8 @@ package com.frerox.toolz.data.downloader
 
 import com.frerox.toolz.BuildConfig
 import com.frerox.toolz.data.catalog.CatalogRepository
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,10 +25,6 @@ import java.util.concurrent.TimeUnit
 @Retention(AnnotationRetention.BINARY)
 annotation class DownloadzClient
 
-@Qualifier
-@Retention(AnnotationRetention.BINARY)
-annotation class DownloadzApiKey
-
 @Module
 @InstallIn(SingletonComponent::class)
 object DownloaderModule {
@@ -34,9 +32,7 @@ object DownloaderModule {
     @Provides
     @Singleton
     @DownloadzClient
-    fun provideDownloadzOkHttpClient(
-        @DownloadzApiKey apiKey: String,
-    ): OkHttpClient = OkHttpClient.Builder()
+    fun provideDownloadzOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -46,17 +42,9 @@ object DownloaderModule {
             val req = chain.request().newBuilder()
                 .header("User-Agent", "Toolz/1.0 (Android; Media Downloader)")
                 .header("Accept", "application/json")
-            if (apiKey.isNotBlank()) {
-                req.header("X-API-KEY", apiKey)
-            }
             chain.proceed(req.build())
         }
         .build()
-
-    @Provides
-    @Singleton
-    @DownloadzApiKey
-    fun provideDownloadzApiKey(): String = BuildConfig.DOWNLOADZ_API_KEY
 
     @Provides
     @Singleton
@@ -79,6 +67,7 @@ object DownloaderModule {
         service: DownloadzService,
         @DownloadzClient okHttpClient: OkHttpClient,
         catalogRepository: CatalogRepository,
+        @ApplicationContext context: Context,
     ): MediaDownloaderRepository =
-        MediaDownloaderRepository(service, okHttpClient, catalogRepository)
+        MediaDownloaderRepository(service, okHttpClient, catalogRepository, context)
 }

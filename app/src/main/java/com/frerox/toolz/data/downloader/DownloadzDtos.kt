@@ -47,6 +47,8 @@ data class DownloadzQualityOption(
 
 @Serializable
 data class DownloadzExtractResponse(
+    /** Opaque v1 extraction handle. It never contains an upstream media URL. */
+    val id: String? = null,
     val platform: String? = null,
     val title: String? = null,
     val thumbnail: String? = null,
@@ -66,6 +68,43 @@ data class DownloadzExtractResponse(
     val formats: DownloadzFormatsDto = DownloadzFormatsDto(),
     val quality_options: List<DownloadzQualityOption> = emptyList(),
     val original_url: String? = null,
+    val media_kind: String? = null,
+    val assets: List<DownloadzAssetDto> = emptyList(),
+)
+
+/** Safe asset metadata returned by /api/v1/extractions. */
+@Serializable
+data class DownloadzAssetDto(
+    val id: String = "",
+    val kind: String = "video",
+    val ext: String? = null,
+    val mime_type: String? = null,
+    val filesize: Long? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val duration: Long? = null,
+    val resolution: String? = null,
+    val vcodec: String? = null,
+    val acodec: String? = null,
+    val has_audio: Boolean? = null,
+    val thumbnail: String? = null,
+    val download_path: String? = null,
+)
+
+@Serializable
+data class DownloadzGuestSessionRequest(val installation_id: String)
+
+@Serializable
+data class DownloadzGuestSessionResponse(
+    val access_token: String = "",
+    val token_type: String = "Bearer",
+    val expires_in: Long = 0,
+)
+
+@Serializable
+data class DownloadzV1ExtractRequest(
+    val url: String,
+    val audio_only: Boolean = false,
 )
 
 @Serializable

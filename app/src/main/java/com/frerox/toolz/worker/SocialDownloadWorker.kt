@@ -30,15 +30,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.util.UUID
 
 /**
- * Downloads TikTok / Instagram / remote-YouTube media via toolz-downloadz-api.
- *
- * Critical: media CDN URLs are IP-signed to the extractor, so Android must NOT fetch
- * `format.url` directly (would 403). Instead it streams the api's same-instance
- * downloader: GET {base}/api/download?u={pageUrl}&f={formatId}&n={fileName}&key={apiKey}
- * which resolves + streams server-side (see api/index.py download()).
+ * Downloads opaque v1 assets. A short-lived guest session is created inside the
+ * worker from the stable installation ID, so no API secret or bearer token is
+ * compiled into the APK or persisted in WorkManager input data.
  */
 @HiltWorker
 class SocialDownloadWorker @AssistedInject constructor(
@@ -49,12 +49,13 @@ class SocialDownloadWorker @AssistedInject constructor(
 
     companion object {
         const val TAG_SOCIAL_DOWNLOAD = "toolz_social_download"
-        const val KEY_PAGE_URL = "page_url"
-        const val KEY_FORMAT_ID = "format_id"
+        const val KEY_EXTRACTION_ID = "extraction_id"
+        const val KEY_ASSET_ID = "asset_id"
         const val KEY_FILE_NAME = "file_name"
         const val KEY_TITLE = "title"
         const val KEY_THUMBNAIL_URL = "thumbnail_url"
         const val KEY_IS_AUDIO = "is_audio"
+        const val KEY_MIME_TYPE_INPUT = "mime_type_input"
         const val KEY_PROGRESS = "progress"
         /** Output Data keys on success — shared values across all download workers. */
         const val KEY_FILE_URI = "file_uri"
@@ -68,13 +69,14 @@ class SocialDownloadWorker @AssistedInject constructor(
         applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val pageUrl = inputData.getString(KEY_PAGE_URL) ?: return@withContext Result.failure()
-        val formatId = inputData.getString(KEY_FORMAT_ID)?.ifBlank { "best" } ?: "best"
+        val extractionId = inputData.getString(KEY_EXTRACTION_ID) ?: return@withContext Result.failure()
+        val assetId = inputData.getString(KEY_ASSET_ID) ?: return@withContext Result.failure()
         val title = inputData.getString(KEY_TITLE) ?: "media"
         val fileName = inputData.getString(KEY_FILE_NAME)?.ifBlank { "$title.mp4" } ?: "$title.mp4"
         val isAudio = inputData.getBoolean(KEY_IS_AUDIO, false)
+        val inputMime = inputData.getString(KEY_MIME_TYPE_INPUT)
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9 \\-.]"), "_").take(80)
-        val notificationId = NOTIFICATION_ID_BASE + (pageUrl.hashCode() and 0x7fffffff) % 10000
+        val notificationId = NOTIFICATION_ID_BASE + ((extractionId + assetId).hashCode() and 0x7fffffff) % 10000
 
         try {
             createNotificationChannel()
@@ -88,23 +90,23 @@ class SocialDownloadWorker @AssistedInject constructor(
             }
 
             val base = BuildConfig.DOWNLOADZ_API_URL.trim().trimEnd('/')
-            val apiKey = BuildConfig.DOWNLOADZ_API_KEY
-            if (base.isBlank() || apiKey.isBlank()) {
+            if (base.isBlank()) {
                 progressChannel.close(); progressJob.cancel()
                 showErrorNotification(notificationId, safeTitle, "Download server not configured")
                 return@withContext Result.failure()
             }
-            val downloadUrl = "$base/api/download?" +
-                "u=${java.net.URLEncoder.encode(pageUrl, "UTF-8")}" +
-                "&f=${java.net.URLEncoder.encode(formatId, "UTF-8")}" +
-                "&n=${java.net.URLEncoder.encode(fileName, "UTF-8")}" +
-                "&key=${java.net.URLEncoder.encode(apiKey, "UTF-8")}"
+            val sessionToken = createGuestSession(base) ?: run {
+                showErrorNotification(notificationId, safeTitle, "Could not create a download session")
+                return@withContext Result.retry()
+            }
+            val downloadUrl = "$base/api/v1/extractions/${java.net.URLEncoder.encode(extractionId, "UTF-8")}" +
+                "/assets/${java.net.URLEncoder.encode(assetId, "UTF-8")}/download"
 
             publishProgress(notificationId, "Downloading $safeTitle...", 0.08f)
-            val ext = if (isAudio) fileName.substringAfterLast('.', "mp3") else fileName.substringAfterLast('.', "mp4")
+            val ext = fileName.substringAfterLast('.', if (isAudio) "mp3" else "mp4")
             val tmp = File(applicationContext.cacheDir, "social_${System.currentTimeMillis()}.$ext")
 
-            val ok = downloadUrlToFile(downloadUrl, tmp) { progress ->
+            val ok = downloadUrlToFile(downloadUrl, sessionToken, tmp) { progress ->
                 val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.80f)
                 val progressInt = (normalized * 100).toInt()
                 notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
@@ -114,19 +116,21 @@ class SocialDownloadWorker @AssistedInject constructor(
             progressChannel.close()
             progressJob.cancel()
 
-            if (!ok || !tmp.exists() || tmp.length() < 1024) {
+            if (!ok || !tmp.exists() || tmp.length() <= 0) {
                 try { tmp.delete() } catch (_: Exception) {}
                 showErrorNotification(notificationId, safeTitle, "Server refused the download")
                 return@withContext Result.failure()
             }
 
             publishProgress(notificationId, "Saving file...", 0.92f)
-            val mime = if (isAudio) "audio/mpeg" else "video/mp4"
-            val savedUri = if (isAudio) {
-                saveToMusic(tmp, fileName)
-            } else {
-                saveToMovies(tmp, fileName)
+            val mime = inputMime ?: when {
+                isAudio -> "audio/mpeg"
+                ext in setOf("jpg", "jpeg") -> "image/jpeg"
+                ext == "png" -> "image/png"
+                ext == "webp" -> "image/webp"
+                else -> "video/mp4"
             }
+            val savedUri = saveToMediaStore(tmp, fileName, mime, isAudio)
             try { tmp.delete() } catch (_: Exception) {}
 
             if (savedUri != null) {
@@ -144,7 +148,7 @@ class SocialDownloadWorker @AssistedInject constructor(
                 Result.failure()
             }
         } catch (e: Exception) {
-            android.util.Log.e("SocialDownloadWorker", "Failure downloading $pageUrl", e)
+            android.util.Log.e("SocialDownloadWorker", "Failure downloading $extractionId/$assetId", e)
             showErrorNotification(notificationId, safeTitle, e.message ?: "Download failed")
             Result.failure()
         }
@@ -152,6 +156,7 @@ class SocialDownloadWorker @AssistedInject constructor(
 
     private suspend fun downloadUrlToFile(
         url: String,
+        sessionToken: String,
         out: File,
         onProgress: suspend (Float) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
@@ -159,6 +164,7 @@ class SocialDownloadWorker @AssistedInject constructor(
             val req = Request.Builder().url(url)
                 .header("User-Agent", "Toolz/1.0 (Android; Media Downloader)")
                 .header("Accept", "*/*")
+                .header("Authorization", "Bearer $sessionToken")
                 .build()
             val resp = okHttpClient.newCall(req).execute()
             if (!resp.isSuccessful) {
@@ -195,7 +201,7 @@ class SocialDownloadWorker @AssistedInject constructor(
             }
             resp.close()
             withContext(Dispatchers.Main) { onProgress(1f) }
-            out.exists() && out.length() > 1024
+            out.exists() && out.length() > 0
         } catch (e: Exception) {
             android.util.Log.w("SocialDownloadWorker", "download failed: ${e.message}")
             try { out.delete() } catch (_: Exception) {}
@@ -203,10 +209,34 @@ class SocialDownloadWorker @AssistedInject constructor(
         }
     }
 
-    private fun saveToMovies(source: File, displayName: String): String? = try {
+    private fun createGuestSession(base: String): String? = try {
+        val prefs = applicationContext.getSharedPreferences("downloadz_guest", Context.MODE_PRIVATE)
+        val installationId = prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString("installation_id", it).apply()
+        }
+        val body = "{\"installation_id\":\"$installationId\"}"
+            .toRequestBody("application/json".toMediaType())
+        okHttpClient.newCall(
+            Request.Builder().url("$base/api/v1/client-sessions").post(body).build(),
+        ).execute().use { response ->
+            if (!response.isSuccessful) return null
+            org.json.JSONObject(response.body?.string().orEmpty()).optString("access_token").ifBlank { null }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("SocialDownloadWorker", "guest session failed", e)
+        null
+    }
+
+    private fun saveToMediaStore(source: File, displayName: String, mime: String, isAudio: Boolean): String? = when {
+        isAudio -> saveToMusic(source, displayName, mime)
+        mime.startsWith("image/") -> saveToImages(source, displayName, mime)
+        else -> saveToMovies(source, displayName, mime)
+    }
+
+    private fun saveToMovies(source: File, displayName: String, mime: String): String? = try {
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, mime)
             put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Toolz")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -227,12 +257,35 @@ class SocialDownloadWorker @AssistedInject constructor(
         null
     }
 
-    private fun saveToMusic(source: File, displayName: String): String? = try {
+    private fun saveToImages(source: File, displayName: String, mime: String): String? = try {
+        val resolver = applicationContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Toolz")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        try {
+            resolver.openOutputStream(uri)?.use { out -> source.inputStream().use { it.copyTo(out) } } ?: return null
+            values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            uri.toString()
+        } catch (e: Exception) {
+            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            throw e
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("SocialDownloadWorker", "MediaStore image save failed", e)
+        null
+    }
+
+    private fun saveToMusic(source: File, displayName: String, mime: String): String? = try {
         val resolver = applicationContext.contentResolver
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
-                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+                put(MediaStore.Audio.Media.MIME_TYPE, mime)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/Toolz Downloads")
                 put(MediaStore.Audio.Media.IS_MUSIC, 1)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
@@ -252,7 +305,7 @@ class SocialDownloadWorker @AssistedInject constructor(
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Toolz Downloads").apply { mkdirs() }
             val finalFile = File(musicDir, displayName)
             source.copyTo(finalFile, overwrite = true)
-            android.media.MediaScannerConnection.scanFile(applicationContext, arrayOf(finalFile.absolutePath), arrayOf("audio/mpeg"), null)
+            android.media.MediaScannerConnection.scanFile(applicationContext, arrayOf(finalFile.absolutePath), arrayOf(mime), null)
             android.net.Uri.fromFile(finalFile).toString()
         }
     } catch (e: Exception) {

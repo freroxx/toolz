@@ -5,6 +5,9 @@
 package com.frerox.toolz.data.downloader
 
 import retrofit2.http.GET
+import retrofit2.http.Body
+import retrofit2.http.Header
+import retrofit2.http.POST
 import retrofit2.http.Query
 
 /**
@@ -14,6 +17,17 @@ import retrofit2.http.Query
  * Auth via X-API-KEY header (see check_auth in api/index.py:804).
  */
 interface DownloadzService {
+
+    @POST("api/v1/client-sessions")
+    suspend fun createGuestSession(
+        @Body request: DownloadzGuestSessionRequest,
+    ): DownloadzGuestSessionResponse
+
+    @POST("api/v1/extractions")
+    suspend fun extractV1(
+        @Header("Authorization") authorization: String,
+        @Body request: DownloadzV1ExtractRequest,
+    ): DownloadzExtractResponse
 
     @GET("api/extract")
     suspend fun extract(
