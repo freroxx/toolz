@@ -61,22 +61,49 @@ class SocialDownloadWorker @AssistedInject constructor(
         const val KEY_FILE_URI = "file_uri"
         const val KEY_DISPLAY_NAME = "display_name"
         const val KEY_MIME_TYPE = "mime_type"
+        /** Human-readable, non-sensitive failure reason for the in-app download card. */
+        const val KEY_ERROR = "error"
         const val CHANNEL_ID = NotificationHelper.CHANNEL_VIDEO_DOWNLOADS
-        const val NOTIFICATION_ID_BASE = 3000
+        const val NOTIFICATION_ID_BASE = NotificationHelper.ID_SOCIAL_BASE
     }
 
     private val notificationManager =
         applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+    @Volatile private var lastFgAt = 0L
+    @Volatile private var lastFgPct = -1
+
+    /**
+     * Retain only opaque asset identifiers and harmless display metadata in the
+     * failed work output. WorkManager does not surface a completed request's
+     * input, so this allows a retry after process recreation without saving a
+     * bearer token, source URL, or upstream cookie.
+     */
+    private fun failure(reason: String): Result {
+        val output = androidx.work.Data.Builder().putString(KEY_ERROR, reason.take(160))
+        listOf(
+            KEY_EXTRACTION_ID,
+            KEY_ASSET_ID,
+            KEY_FILE_NAME,
+            KEY_TITLE,
+            KEY_MIME_TYPE_INPUT,
+        ).forEach { key -> inputData.getString(key)?.let { output.putString(key, it) } }
+        output.putBoolean(KEY_IS_AUDIO, inputData.getBoolean(KEY_IS_AUDIO, false))
+        return Result.failure(output.build())
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val extractionId = inputData.getString(KEY_EXTRACTION_ID) ?: return@withContext Result.failure()
-        val assetId = inputData.getString(KEY_ASSET_ID) ?: return@withContext Result.failure()
+        val extractionId = inputData.getString(KEY_EXTRACTION_ID)
+            ?: return@withContext failure("This download is missing its media reference.")
+        val assetId = inputData.getString(KEY_ASSET_ID)
+            ?: return@withContext failure("This download is missing its file reference.")
         val title = inputData.getString(KEY_TITLE) ?: "media"
         val fileName = inputData.getString(KEY_FILE_NAME)?.ifBlank { "$title.mp4" } ?: "$title.mp4"
         val isAudio = inputData.getBoolean(KEY_IS_AUDIO, false)
         val inputMime = inputData.getString(KEY_MIME_TYPE_INPUT)
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9 \\-.]"), "_").take(80)
-        val notificationId = NOTIFICATION_ID_BASE + ((extractionId + assetId).hashCode() and 0x7fffffff) % 10000
+        val notificationId = NotificationHelper.downloadId(NOTIFICATION_ID_BASE, "$extractionId|$assetId")
+        var tmp: File? = null
 
         try {
             createNotificationChannel()
@@ -86,6 +113,19 @@ class SocialDownloadWorker @AssistedInject constructor(
             val progressJob = launch {
                 for (norm in progressChannel) {
                     try { setProgress(workDataOf(KEY_PROGRESS to norm)) } catch (_: Exception) {}
+                    val pct = (norm.coerceIn(0f, 1f) * 100).toInt()
+                    val now = System.currentTimeMillis()
+                    if (!NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) continue
+                    lastFgAt = now
+                    lastFgPct = pct
+                    try {
+                        val n = createNotification(notificationId, "Downloading $safeTitle", pct)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            setForeground(ForegroundInfo(notificationId, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC))
+                        } else {
+                            setForeground(ForegroundInfo(notificationId, n))
+                        }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -93,9 +133,10 @@ class SocialDownloadWorker @AssistedInject constructor(
             if (base.isBlank()) {
                 progressChannel.close(); progressJob.cancel()
                 showErrorNotification(notificationId, safeTitle, "Download server not configured")
-                return@withContext Result.failure()
+                return@withContext failure("The download server is not configured.")
             }
             val sessionToken = createGuestSession(base) ?: run {
+                progressChannel.close(); progressJob.cancel()
                 showErrorNotification(notificationId, safeTitle, "Could not create a download session")
                 return@withContext Result.retry()
             }
@@ -104,22 +145,22 @@ class SocialDownloadWorker @AssistedInject constructor(
 
             publishProgress(notificationId, "Downloading $safeTitle...", 0.08f)
             val ext = fileName.substringAfterLast('.', if (isAudio) "mp3" else "mp4")
-            val tmp = File(applicationContext.cacheDir, "social_${System.currentTimeMillis()}.$ext")
+            val tmpFile = File(applicationContext.cacheDir, "social_${System.currentTimeMillis()}.$ext")
+            tmp = tmpFile
 
-            val ok = downloadUrlToFile(downloadUrl, sessionToken, tmp) { progress ->
+            val ok = downloadUrlToFile(downloadUrl, sessionToken, tmpFile) { progress ->
                 val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.80f)
-                val progressInt = (normalized * 100).toInt()
-                notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
                 progressChannel.trySend(normalized)
             }
 
             progressChannel.close()
             progressJob.cancel()
 
-            if (!ok || !tmp.exists() || tmp.length() <= 0) {
-                try { tmp.delete() } catch (_: Exception) {}
+            if (!ok || !tmpFile.exists() || tmpFile.length() <= 0) {
+                try { tmpFile.delete() } catch (_: Exception) {}
+                tmp = null
                 showErrorNotification(notificationId, safeTitle, "Server refused the download")
-                return@withContext Result.failure()
+                return@withContext failure("The link expired or the server could not provide this file. Extract it again and retry.")
             }
 
             publishProgress(notificationId, "Saving file...", 0.92f)
@@ -130,12 +171,13 @@ class SocialDownloadWorker @AssistedInject constructor(
                 ext == "webp" -> "image/webp"
                 else -> "video/mp4"
             }
-            val savedUri = saveToMediaStore(tmp, fileName, mime, isAudio)
-            try { tmp.delete() } catch (_: Exception) {}
+            val savedUri = saveToMediaStore(tmpFile, fileName, mime, isAudio)
+            try { tmpFile.delete() } catch (_: Exception) {}
+            tmp = null
 
             if (savedUri != null) {
                 publishProgress(notificationId, "Download complete", 1.0f)
-                showCompletedNotification(notificationId, safeTitle, isAudio)
+                showCompletedNotification(notificationId, safeTitle, savedUri, mime, isAudio)
                 Result.success(
                     workDataOf(
                         KEY_FILE_URI to savedUri,
@@ -145,12 +187,14 @@ class SocialDownloadWorker @AssistedInject constructor(
                 )
             } else {
                 showErrorNotification(notificationId, safeTitle, "Could not save file to gallery")
-                Result.failure()
+                failure("Toolz could not save this file to your device.")
             }
         } catch (e: Exception) {
             android.util.Log.e("SocialDownloadWorker", "Failure downloading $extractionId/$assetId", e)
+            try { tmp?.delete() } catch (_: Exception) {}
+            if (e is kotlinx.coroutines.CancellationException) throw e
             showErrorNotification(notificationId, safeTitle, e.message ?: "Download failed")
-            Result.failure()
+            failure("The download could not be completed. Check your connection and retry.")
         }
     }
 
@@ -314,17 +358,17 @@ class SocialDownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Video Downloads", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Social media downloads"
-                setShowBadge(false)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+        NotificationHelper.createAllChannels(applicationContext)
     }
 
     private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
-        val progressInt = (progress.coerceIn(0f, 1f) * 100).toInt()
+        val clamped = progress.coerceIn(0f, 1f)
+        try { setProgress(workDataOf(KEY_PROGRESS to clamped)) } catch (_: Exception) {}
+        val progressInt = (clamped * 100).toInt()
+        val now = System.currentTimeMillis()
+        if (!NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, progressInt)) return
+        lastFgAt = now
+        lastFgPct = progressInt
         try {
             val notification = createNotification(notificationId, contentTitle, progressInt)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -332,11 +376,7 @@ class SocialDownloadWorker @AssistedInject constructor(
             } else {
                 setForeground(ForegroundInfo(notificationId, notification))
             }
-        } catch (_: Exception) {
-            try {
-                notificationManager.notify(notificationId, createNotification(notificationId, contentTitle, progressInt))
-            } catch (_: Exception) {}
-        }
+        } catch (_: Exception) {}
     }
 
     private fun createNotification(id: Int, contentTitle: String, progress: Int): android.app.Notification {
@@ -347,44 +387,52 @@ class SocialDownloadWorker @AssistedInject constructor(
         val cancelPendingIntent = PendingIntent.getBroadcast(
             applicationContext, id.hashCode(), cancelIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(contentTitle)
-            .setContentText(if (progress in 1..99) "$progress% • Toolz" else "")
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setOngoing(progress in 1..99)
-            .setOnlyAlertOnce(true)
-            .setProgress(100, progress.coerceIn(0, 100), progress == 0)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setSilent(true)
+        return NotificationHelper.progressBuilder(
+            applicationContext, CHANNEL_ID, contentTitle,
+            if (progress in 1..99) "$progress%" else null, progress
+        )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
     }
 
-    private fun showCompletedNotification(id: Int, title: String, isAudio: Boolean = false) {
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("✓ Download complete")
-            .setContentText("$title • Toolz")
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setAutoCancel(true)
-            .setOngoing(false)
-            .setProgress(0, 0, false)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+    private fun showCompletedNotification(id: Int, title: String, fileUri: String, mime: String, isAudio: Boolean = false) {
+        // Tap opens the saved file; fallback opens the downloader on failure.
+        val openIntent = try {
+            val uri = android.net.Uri.parse(fileUri)
+            android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        } catch (_: Exception) { null }
+        val contentIntent = try {
+            if (openIntent != null) {
+                PendingIntent.getActivity(
+                    applicationContext, id.hashCode(), openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            } else null
+        } catch (_: Exception) { null }
+        val notification = NotificationHelper.terminalBuilder(applicationContext, CHANNEL_ID, "Download complete", title)
+            .setContentIntent(contentIntent)
             .build()
         try { notificationManager.notify(id, notification) } catch (_: Exception) {}
     }
 
     private fun showErrorNotification(id: Int, title: String, error: String) {
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Download failed: $title")
-            .setContentText(error.take(80))
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setAutoCancel(true)
-            .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+        // Tap returns to the downloader so the user can retry with one tap.
+        val appIntent = try {
+            val launch = applicationContext.packageManager.getLaunchIntentForPackage(applicationContext.packageName)?.apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            if (launch != null) PendingIntent.getActivity(
+                applicationContext, id.hashCode(), launch,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ) else null
+        } catch (_: Exception) { null }
+        val notification = NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "Download failed", "$title: ${error.take(80)}", highPriority = true
+        )
+            .setContentIntent(appIntent)
             .build()
         try { notificationManager.notify(id, notification) } catch (_: Exception) {}
     }

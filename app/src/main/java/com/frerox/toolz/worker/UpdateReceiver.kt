@@ -55,11 +55,24 @@ class UpdateReceiver : BroadcastReceiver() {
             if (cursor.moveToFirst()) {
                 val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
                 if (cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL) {
+                    // Ownership check: only Toolz update APKs trigger the ready
+                    // notification. Without this any successful system download
+                    // with an existing file would post a phantom update row.
+                    val tracked = context.getSharedPreferences("toolz_update_dl", Context.MODE_PRIVATE)
+                        .getLong("update_download_id", -1L)
+                    val uriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_URI)
+                    val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                    val src = runCatching { cursor.getString(uriIdx) }.getOrNull().orEmpty()
+                    val title = runCatching { cursor.getString(titleIdx) }.getOrNull().orEmpty()
                     val localUriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
                     val localUri = cursor.getString(localUriIndex)
                     val apkFile = File(android.net.Uri.parse(localUri).path ?: "")
 
-                    if (apkFile.exists()) {
+                    val looksLikeToolzUpdate = downloadId == tracked ||
+                        src.contains("toolz", ignoreCase = true) ||
+                        title.contains("Toolz", ignoreCase = true) ||
+                        apkFile.name.startsWith("toolz_update_")
+                    if (apkFile.exists() && looksLikeToolzUpdate) {
                         showReadyToInstallNotification(context, apkFile)
                     }
                 }
@@ -88,7 +101,9 @@ class UpdateReceiver : BroadcastReceiver() {
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
 
-        downloadManager.enqueue(request)
+        val id = downloadManager.enqueue(request)
+        context.getSharedPreferences("toolz_update_dl", Context.MODE_PRIVATE)
+            .edit().putLong("update_download_id", id).apply()
     }
 
     private fun showReadyToInstallNotification(context: Context, apkFile: File) {
@@ -102,7 +117,7 @@ class UpdateReceiver : BroadcastReceiver() {
         val installPendingIntent = PendingIntent.getBroadcast(context, 0, installIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentTitle("Update Ready to Install")
             .setContentText("Tap to complete the update process.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

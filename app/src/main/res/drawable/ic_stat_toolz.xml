@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Monochrome status-bar silhouette for ALL Toolz notifications.
+         White-on-transparent only: system tints this mask, so no colors,
+         no backgrounds, no opaque bitmaps. Full-color launcher art must
+         never be used as setSmallIcon (it renders as a white square). -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6,4h12v3h-4.5v11h-3V7H6zM5,20h14v1.5H5z" />
+</vector>

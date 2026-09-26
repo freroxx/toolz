@@ -247,14 +247,14 @@ class VoiceRecorderService : Service() {
 
         val toggleAction = if (_isPaused.value) ACTION_RESUME else ACTION_PAUSE
         val toggleIntent = Intent(this, VoiceRecorderService::class.java).apply { action = toggleAction }
-        val togglePI = PendingIntent.getService(this, 2, toggleIntent, PendingIntent.FLAG_IMMUTABLE)
+        val togglePI = PendingIntent.getService(this, 2, toggleIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val stopIntent = Intent(this, VoiceRecorderService::class.java).apply { action = ACTION_STOP }
-        val stopPI = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE)
+        val stopPI = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
         val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_VOICE_RECORDER)
             .setContentTitle(if (_isPaused.value) "Recording Paused" else "Recording Audio...")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)

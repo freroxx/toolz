@@ -133,6 +133,11 @@ class UpdateRepository @Inject constructor(
     }
 
     private fun showUpdateNotification(version: String) {
+        // Periodic UpdateCheckWorker runs with showNotification=true every time:
+        // collapse re-notifies for the same version so the shade holds one row.
+        val prefs = context.getSharedPreferences("toolz_update_notifs", Context.MODE_PRIVATE)
+        if (prefs.getString("notified_version", null) == version) return
+        prefs.edit().putString("notified_version", version).apply()
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         NotificationHelper.createAllChannels(context)
 
@@ -161,7 +166,7 @@ class UpdateRepository @Inject constructor(
         val changelogPendingIntent = PendingIntent.getActivity(context, 8003, changelogIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
         val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_APP_UPDATES)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentTitle("New Version Available: $version")
             .setContentText("A new version of Toolz is ready for deployment. Tap to see what's new.")
             .setStyle(NotificationCompat.BigTextStyle().bigText("Toolz $version is available with bug fixes and new features. Download now to stay up to date."))
@@ -169,8 +174,8 @@ class UpdateRepository @Inject constructor(
             .setContentIntent(contentPendingIntent)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_SYSTEM)
-            .addAction(R.drawable.ic_launcher_foreground, "Download", downloadPendingIntent)
-            .addAction(R.drawable.ic_launcher_foreground, "Details", changelogPendingIntent)
+            .addAction(R.drawable.ic_stat_toolz, "Download", downloadPendingIntent)
+            .addAction(R.drawable.ic_stat_toolz, "Details", changelogPendingIntent)
             .build()
 
         notificationManager.notify(NotificationHelper.ID_APP_UPDATE, notification)

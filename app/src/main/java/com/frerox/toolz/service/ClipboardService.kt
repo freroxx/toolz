@@ -361,7 +361,7 @@ class ClipboardService : Service() {
         return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_CLIPBOARD)
             .setContentTitle(title)
             .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentIntent(openPi)
             .addAction(R.drawable.ic_clipboard, "Open", openPi)
             .addAction(R.drawable.ic_clipboard, "Pause", pausePi)

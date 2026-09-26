@@ -63,8 +63,8 @@ class MusicDownloadWorker @AssistedInject constructor(
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     companion object {
-        const val CHANNEL_ID = "music_downloads"
-        const val NOTIFICATION_ID_BASE = 1000
+        const val CHANNEL_ID = com.frerox.toolz.util.NotificationHelper.CHANNEL_MUSIC_DOWNLOADS
+        const val NOTIFICATION_ID_BASE = com.frerox.toolz.util.NotificationHelper.ID_MUSIC_BASE
         
         const val KEY_TRACK_ID = "track_id"
         const val KEY_TRACK_TITLE = "track_title"
@@ -90,7 +90,7 @@ class MusicDownloadWorker @AssistedInject constructor(
         val format = inputData.getString(KEY_FORMAT) ?: "M4A"
         val quality = inputData.getString(KEY_QUALITY) ?: "HIGH"
 
-        val notificationId = NOTIFICATION_ID_BASE + trackId.hashCode()
+        val notificationId = com.frerox.toolz.util.NotificationHelper.downloadId(NOTIFICATION_ID_BASE, trackId)
         createNotificationChannel()
 
         publishProgress(notificationId, "Preparing $title...", 0.02f)
@@ -121,7 +121,7 @@ class MusicDownloadWorker @AssistedInject constructor(
             val downloadSuccess = if (ytdlpFile != null) {
                 ytdlpFile.copyTo(tempFile, overwrite = true)
                 ytdlpFile.delete()
-                publishProgress(notificationId, "Download complete", 0.80f)
+                publishProgress(notificationId, "Finalizing download", 0.80f)
                 true
             } else catalogRepository.downloadAudioStream(streamUrl, tempFile) { progress ->
                 publishProgressBlocking(
@@ -229,34 +229,30 @@ class MusicDownloadWorker @AssistedInject constructor(
         }
     }
 
+    @Volatile private var lastFgAt = 0L
+    @Volatile private var lastFgPct = -1
+
     private suspend fun publishProgress(notificationId: Int, contentTitle: String, progress: Float) {
         val clamped = progress.coerceIn(0f, 1f)
         // Always emit WorkData progress so the WorkInfo observer can read it
-        setProgress(workDataOf(KEY_PROGRESS to clamped))
-        // Foreground info updates the notification; wrap so a transient failure doesn't
-        // prevent future setProgress calls from reaching observers.
+        try { setProgress(workDataOf(KEY_PROGRESS to clamped)) } catch (_: Exception) {}
+        // Single owner: progress goes ONLY through setForeground, never notify().
+        // Throttled so chunk callbacks and yt-dlp storms collapse into one row.
+        val progressInt = (clamped * 100).toInt()
+        val now = System.currentTimeMillis()
+        if (!com.frerox.toolz.util.NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, progressInt)) return
+        lastFgAt = now
+        lastFgPct = progressInt
         try {
-            val progressInt = (clamped * 100).toInt()
             setForeground(createForegroundInfo(notificationId, contentTitle, progressInt))
         } catch (e: Exception) {
             android.util.Log.w("MusicDownloadWorker", "setForeground failed (non-fatal): ${e.message}")
         }
     }
 
-    // P2-13 fix: suspend & Main-safe — no fire-and-forget CoroutineScope leak
+    // Chunk callback path: same single-owner throttled foreground update.
     private suspend fun publishProgressBlocking(notificationId: Int, contentTitle: String, progress: Float) {
-        val clamped = progress.coerceIn(0f, 1f)
-        val progressInt = (clamped * 100).toInt()
-        try {
-            notificationManager.notify(notificationId, createNotification(notificationId, contentTitle, progressInt))
-        } catch (e: Exception) {
-            android.util.Log.w("MusicDownloadWorker", "notification update failed (non-fatal): ${e.message}")
-        }
-        try {
-            setProgress(workDataOf(KEY_PROGRESS to clamped))
-        } catch (e: Exception) {
-            android.util.Log.w("MusicDownloadWorker", "setProgress failed (non-fatal): ${e.message}")
-        }
+        publishProgress(notificationId, contentTitle, progress)
     }
 
     private fun downloadThumbnail(url: String, file: File) {
@@ -448,8 +444,17 @@ class MusicDownloadWorker @AssistedInject constructor(
                     val progressVal = (args[0] as? Float) ?: 0f
                     // Progress is 0.0 to 100.0. Scale it within our 0.08 to 0.80 window.
                     val normalized = 0.08f + ((progressVal / 100f) * 0.72f)
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        publishProgress(notificationId, "Downloading...", normalized)
+                    val pct = (normalized * 100).toInt()
+                    val now = System.currentTimeMillis()
+                    // Throttle at the callback: claim the slot synchronously so
+                    // concurrent callbacks collapse instead of storming setForeground.
+                    if (com.frerox.toolz.util.NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) {
+                        lastFgAt = now
+                        lastFgPct = pct
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try { setProgress(workDataOf(KEY_PROGRESS to normalized)) } catch (_: Exception) {}
+                            try { setForeground(createForegroundInfo(notificationId, "Downloading $title", pct)) } catch (_: Exception) {}
+                        }
                     }
                 }
                 null
@@ -508,16 +513,7 @@ class MusicDownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Music Downloads",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows progress for music downloads"
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+        com.frerox.toolz.util.NotificationHelper.createAllChannels(applicationContext)
     }
 
     private fun createForegroundInfo(id: Int, title: String, progress: Int): ForegroundInfo {
@@ -540,23 +536,17 @@ class MusicDownloadWorker @AssistedInject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(contentTitle)
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setOngoing(true)
-            .setProgress(100, progress, progress == 0)
-            .setSilent(true)
+        return com.frerox.toolz.util.NotificationHelper.progressBuilder(
+            applicationContext, CHANNEL_ID, contentTitle, "$progress%", progress
+        )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
     }
 
     private fun showCompletedNotification(id: Int, title: String) {
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Download Complete")
-            .setContentText(title)
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setAutoCancel(true)
-            .build()
+        val notification = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "Download complete", title
+        ).build()
         notificationManager.notify(id, notification)
     }
 
@@ -578,12 +568,10 @@ class MusicDownloadWorker @AssistedInject constructor(
             applicationContext, ("retry_$trackId").hashCode(), retryIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Download Failed")
-            .setContentText("$title: $error")
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setAutoCancel(true)
-            .addAction(com.frerox.toolz.R.drawable.ic_launcher_foreground, "Retry", retryPending)
+        val notification = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "Download failed", "$title: $error", highPriority = true
+        )
+            .addAction(com.frerox.toolz.R.drawable.ic_stat_toolz, "Retry", retryPending)
             .build()
         notificationManager.notify(id, notification)
     }

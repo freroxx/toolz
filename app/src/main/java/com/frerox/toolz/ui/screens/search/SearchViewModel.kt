@@ -835,11 +835,19 @@ class SearchViewModel @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.e("SearchViewModel", "Video download enqueue failed", e)
                 try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_queue_failed, e.message ?: ""), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
-                // Fallback notification if enqueue fails
+                // Fallback notification if enqueue fails (fixed ID so retries collapse)
                 try {
                     val nm = appContext.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-                    nm?.notify((System.currentTimeMillis()%Int.MAX_VALUE).toInt(), androidx.core.app.NotificationCompat.Builder(appContext, com.frerox.toolz.util.NotificationHelper.CHANNEL_VIDEO_DOWNLOADS)
-                        .setContentTitle(appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_queue_failed_title)).setContentText(e.message?.take(60) ?: appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown)).setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground).setAutoCancel(true).build())
+                    val nid = com.frerox.toolz.util.NotificationHelper.downloadId(
+                        com.frerox.toolz.util.NotificationHelper.ID_IMAGE_BASE, "queue_failed"
+                    )
+                    nm?.notify(nid, com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+                        appContext,
+                        com.frerox.toolz.util.NotificationHelper.CHANNEL_VIDEO_DOWNLOADS,
+                        appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_queue_failed_title),
+                        e.message?.take(60) ?: appContext.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown),
+                        highPriority = true
+                    ).build())
                 } catch (_: Exception) {}
             }
         }
@@ -939,36 +947,27 @@ class SearchViewModel @Inject constructor(
      */
     fun downloadImage(imageUrl: String, context: android.content.Context) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            // Polished image download with Toolz branding and correct progress
+            // Single-slot image download: stable ID per URL so progress morphs
+            // into the terminal notification instead of stacking.
             val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-            val channelId = "toolz_image_downloads"
-            val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+            val channelId = com.frerox.toolz.util.NotificationHelper.CHANNEL_IMAGE_DOWNLOADS
+            val notificationId = com.frerox.toolz.util.NotificationHelper.downloadId(
+                com.frerox.toolz.util.NotificationHelper.ID_IMAGE_BASE, imageUrl
+            )
             fun createImageChannel() {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    val channel = android.app.NotificationChannel(channelId, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_img_channel), android.app.NotificationManager.IMPORTANCE_LOW).apply {
-                        description = context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_img_channel_desc)
-                        setShowBadge(false)
-                        enableVibration(false)
-                    }
-                    try { notificationManager?.createNotificationChannel(channel) } catch (_: Exception) {}
-                }
+                try { com.frerox.toolz.util.NotificationHelper.createAllChannels(context) } catch (_: Exception) {}
             }
             fun showImageNotification(title: String, progress: Int, ongoing: Boolean) {
                 try {
-                    val large = com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context)
-                    val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
-                        .setContentTitle(title)
-                        .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-                        .setLargeIcon(large)
+                    val builder = com.frerox.toolz.util.NotificationHelper.progressBuilder(
+                        context, channelId, title,
+                        if (progress in 1..99) context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_progress, progress)
+                        else if (!ongoing) context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_tap_gallery)
+                        else null,
+                        progress
+                    )
                         .setOngoing(ongoing)
-                        .setOnlyAlertOnce(true)
                         .setAutoCancel(!ongoing)
-                        .setProgress(100, progress.coerceIn(0,100), progress==0 && ongoing)
-                        .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                        .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
-                    if (progress in 1..99) builder.setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_progress, progress))
-                    else if (!ongoing) builder.setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_tap_gallery))
-                    // Rounded corners via largeIcon is already circular foreground
                     notificationManager?.notify(notificationId, builder.build())
                 } catch (_: Exception) {}
             }
@@ -1036,18 +1035,11 @@ class SearchViewModel @Inject constructor(
                 result.onSuccess {
                     try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_image_saved), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
                     try {
-                        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, com.frerox.toolz.R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
-                        val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
-                            .setContentTitle(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_saved_title))
-                            .setContentText(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_saved_gallery))
-                            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-                            .setLargeIcon(large)
-                            .setAutoCancel(true)
-                            .setOnlyAlertOnce(false)
-                            .setOngoing(false)
-                            .setProgress(0,0,false)
-                            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
-                            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
+                        val builder = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+                            context, channelId,
+                            context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_saved_title),
+                            context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_saved_gallery)
+                        )
                         notificationManager?.notify(notificationId, builder.build())
                         // Auto-dismiss after 3s to polished UX — cancel progress notification
                         kotlinx.coroutines.delay(3000)
@@ -1057,14 +1049,12 @@ class SearchViewModel @Inject constructor(
                 }.onFailure {
                     try { android.widget.Toast.makeText(context, context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_toast_download_failed, it.message ?: ""), android.widget.Toast.LENGTH_LONG).show() } catch (_: Exception) {}
                     try {
-                        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, com.frerox.toolz.R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
-                        val builder = androidx.core.app.NotificationCompat.Builder(context, channelId)
-                            .setContentTitle(context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_failed_title))
-                            .setContentText(it.message?.take(80) ?: context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown))
-                            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-                            .setLargeIcon(large)
-                            .setAutoCancel(true)
-                            .setOnlyAlertOnce(false)
+                        val builder = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+                            context, channelId,
+                            context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_notif_image_failed_title),
+                            it.message?.take(80) ?: context.getString(com.frerox.toolz.R.string.st_SearchScreen_ws_error_unknown),
+                            highPriority = true
+                        )
                         notificationManager?.notify(notificationId, builder.build())
                     } catch (_: Exception) {}
                     android.util.Log.w("SearchViewModel", "Image download failed for $imageUrl: ${it.message}", it)

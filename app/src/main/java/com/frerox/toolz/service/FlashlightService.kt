@@ -458,7 +458,7 @@ class FlashlightService : Service() {
         FlashlightMode.DISCO  -> "Disco Mode"
     }
     private fun modeIconRes() = when (_mode.value) {
-        FlashlightMode.STEADY -> R.drawable.ic_launcher_foreground
+        FlashlightMode.STEADY -> R.drawable.ic_flashlight
         FlashlightMode.STROBE -> R.drawable.ic_notif_strobe
         FlashlightMode.SOS    -> R.drawable.ic_notif_sos
         FlashlightMode.DISCO  -> R.drawable.ic_notif_disco
@@ -480,7 +480,7 @@ class FlashlightService : Service() {
         val compact = RemoteViews(packageName, R.layout.notification_flashlight)
         compact.setInt(R.id.notif_mode_strip, "setBackgroundColor", modeColor())
         compact.setImageViewResource(R.id.notif_icon,
-            if (on) modeIconRes() else R.drawable.ic_launcher_foreground)
+            if (on) modeIconRes() else R.drawable.ic_flashlight)
         // Use the proper RemoteViews method for color filter
         compact.setInt(R.id.notif_icon, "setColorFilter", modeColor())
         compact.setTextViewText(R.id.notif_mode_label, modeLabel())
@@ -524,7 +524,7 @@ class FlashlightService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(if (on) R.drawable.ic_launcher_foreground else R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_flashlight)
             .setContentTitle(modeLabel())
             .setContentText("$brightPct% intensity \u00B7 tap to open")
             .setCustomContentView(compact)

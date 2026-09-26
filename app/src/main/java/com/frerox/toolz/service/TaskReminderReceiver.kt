@@ -185,7 +185,7 @@ class TaskReminderReceiver : BroadcastReceiver() {
 
         val atDue = task.dueDate?.let { it <= System.currentTimeMillis() + 60_000L } == true
         val notification = NotificationHelper.baseBuilder(context, NotificationHelper.CHANNEL_TASK_REMINDERS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentTitle(if (atDue) "Task due now" else "Task due soon")
             .setContentText(task.title)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

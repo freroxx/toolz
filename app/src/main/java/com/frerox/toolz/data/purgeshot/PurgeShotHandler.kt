@@ -289,7 +289,7 @@ object PurgeShotHandler {
             val notif = NotificationCompat.Builder(context, PurgeShotService.ALERTS_CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(text)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_toolz)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(pi)

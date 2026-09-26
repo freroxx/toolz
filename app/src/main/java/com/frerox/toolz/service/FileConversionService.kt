@@ -184,17 +184,21 @@ class FileConversionService : Service() {
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             },
-            PendingIntent.FLAG_IMMUTABLE,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(if (queueTotal > 1) "Toolz · $queuePos of $queueTotal files" else "Toolz File Converter")
+            .setContentTitle(if (queueTotal > 1) "Converting $queuePos of $queueTotal files" else "Converting file")
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
+            .setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(this))
+            .setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(!finished)
             .setContentIntent(pending)
             .setAutoCancel(finished)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
 
         when {
             !finished && progress > 0 -> builder.setProgress(100, progress, false)

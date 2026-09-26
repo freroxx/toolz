@@ -263,7 +263,7 @@ class PurgeShotService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("PurgeShot active")
             .setContentText("Watching for screenshots")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setOngoing(true)
             .setSilent(true)
             .setContentIntent(pi)

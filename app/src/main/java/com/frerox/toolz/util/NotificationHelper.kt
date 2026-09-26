@@ -17,7 +17,6 @@
 
 package com.frerox.toolz.util
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -26,6 +25,13 @@ import androidx.core.app.NotificationCompat
 import com.frerox.toolz.R
 
 object NotificationHelper {
+
+    // Small icon: monochrome silhouette only. Never use ic_launcher_foreground
+    // (opaque adaptive foreground renders as a white square on API 26+).
+    const val SMALL_ICON = R.drawable.ic_stat_toolz
+
+    // Accent applied to all Toolz notifications for a consistent brand tint.
+    const val ACCENT_COLOR = 0xFFFF6D00.toInt()
 
     // Channel IDs
     const val CHANNEL_TOOL_ACTIVE = "tool_service_channel"
@@ -59,6 +65,19 @@ object NotificationHelper {
     const val ID_UPDATE_READY = 8002
     const val ID_MUSIC_DOWNLOAD_BASE = 9000
     const val ID_BACKUP_OPERATION = 10001
+
+    // Non-overlapping download ID namespaces. Each band is 1000 wide so
+    // concurrent downloads never collide across tools.
+    const val ID_VIDEO_BASE = 20000
+    const val ID_SOCIAL_BASE = 21000
+    const val ID_MUSIC_BASE = 22000
+    const val ID_YTMP3_BASE = 23000
+    const val ID_IMAGE_BASE = 24000
+    private const val ID_BAND_SIZE = 1000
+
+    /** Stable per-download ID inside a tool namespace. Same key re-downloads collapse. */
+    fun downloadId(base: Int, key: String): Int =
+        base + ((key.hashCode() and 0x7fffffff) % ID_BAND_SIZE)
 
     fun createAllChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -156,7 +175,7 @@ object NotificationHelper {
                 "Image Downloads",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Image downloads from search — polished Toolz notifications"
+                description = "Image downloads from search"
                 setShowBadge(false)
                 enableVibration(false)
             },
@@ -165,7 +184,7 @@ object NotificationHelper {
                 "Video Downloads",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "YouTube video downloads"
+                description = "Video and social media downloads"
                 setShowBadge(false)
                 enableVibration(false)
             },
@@ -182,12 +201,60 @@ object NotificationHelper {
     }
 
     fun baseBuilder(context: Context, channelId: String): NotificationCompat.Builder {
-        val large = try { android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground) } catch (_: Exception) { null }
         return NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setLargeIcon(large)
+            .setSmallIcon(SMALL_ICON)
+            .setLargeIcon(toolzLargeIcon(context))
+            .setColor(ACCENT_COLOR)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
+    }
+
+    /**
+     * Progress builder: silent, single-slot, collapses into the terminal
+     * notification that reuses the same ID.
+     */
+    fun progressBuilder(
+        context: Context,
+        channelId: String,
+        title: String,
+        text: String?,
+        progress: Int
+    ): NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(SMALL_ICON)
+            .setLargeIcon(toolzLargeIcon(context))
+            .setColor(ACCENT_COLOR)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOngoing(progress in 1..99)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setAutoCancel(false)
+            .setProgress(100, progress.coerceIn(0, 100), progress == 0)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+    }
+
+    /** Terminal builder: clears the progress bar, alerts once, swipe-dismissable. */
+    fun terminalBuilder(
+        context: Context,
+        channelId: String,
+        title: String,
+        text: String?,
+        highPriority: Boolean = false
+    ): NotificationCompat.Builder {
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(SMALL_ICON)
+            .setLargeIcon(toolzLargeIcon(context))
+            .setColor(ACCENT_COLOR)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setOngoing(false)
+            .setOnlyAlertOnce(false)
+            .setAutoCancel(true)
+            .setProgress(0, 0, false)
+            .setPriority(if (highPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
     }
 
     /**
@@ -197,13 +264,28 @@ object NotificationHelper {
     fun alarmBuilder(context: Context, channelId: String): NotificationCompat.Builder {
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_stat_event)
+            .setColor(ACCENT_COLOR)
             .setOnlyAlertOnce(false)
             .setAutoCancel(true)
     }
 
+    /** Throttle gate for foreground progress: at most one post per interval or 5% delta. */
+    fun shouldPublishProgress(
+        lastAt: Long,
+        lastPct: Int,
+        now: Long,
+        pct: Int,
+        minIntervalMs: Long = 800L,
+        minDeltaPct: Int = 2
+    ): Boolean {
+        if (pct >= 100 || pct <= 0) return true
+        if (pct - lastPct >= minDeltaPct) return true
+        return now - lastAt >= minIntervalMs
+    }
+
     fun showBackupSuccess(context: Context, fileName: String, isScheduled: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Success_Scheduled) 
+        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Success_Scheduled)
                     else context.getString(R.string.st_Notification_Backup_Success_Manual)
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
             .setContentTitle(title)
@@ -215,7 +297,7 @@ object NotificationHelper {
 
     fun showBackupFailure(context: Context, error: String?, isScheduled: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Failure_Scheduled) 
+        val title = if (isScheduled) context.getString(R.string.st_Notification_Backup_Failure_Scheduled)
                     else context.getString(R.string.st_Notification_Backup_Failure_Manual)
         val notification = baseBuilder(context, CHANNEL_BACKUPS)
             .setContentTitle(title)
@@ -245,36 +327,47 @@ object NotificationHelper {
         manager.notify(ID_BACKUP_OPERATION, notification)
     }
 
+    @Volatile private var largeIconCache: android.graphics.Bitmap? = null
+    @Volatile private var largeIconKey: String? = null
+
     fun toolzLargeIcon(context: Context): android.graphics.Bitmap? = try {
         val raw = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_logo)
             ?: android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground)
-        if (raw == null) null
-        else {
-            val size = minOf(raw.width, raw.height)
-            val output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(output)
-            val paint = android.graphics.Paint().apply {
-                isAntiAlias = true
-                shader = android.graphics.BitmapShader(raw, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
-                val scale = size.toFloat() / minOf(raw.width, raw.height).toFloat()
-                val dx = (size - raw.width * scale) / 2f
-                val dy = (size - raw.height * scale) / 2f
-                shader?.let {
-                    val m = android.graphics.Matrix()
-                    m.setScale(scale, scale)
-                    m.postTranslate(dx, dy)
-                    it.setLocalMatrix(m)
-                }
-            }
-            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-            val borderPaint = android.graphics.Paint().apply {
-                isAntiAlias = true
-                style = android.graphics.Paint.Style.STROKE
-                color = android.graphics.Color.WHITE
-                strokeWidth = size * 0.03f
-            }
-            canvas.drawCircle(size / 2f, size / 2f, size / 2f - borderPaint.strokeWidth / 2, borderPaint)
-            output
+            ?: return null
+        val cacheKey = "${raw.width}x${raw.height}"
+        if (cacheKey == largeIconKey && largeIconCache != null) return largeIconCache
+        val size = minOf(raw.width, raw.height).coerceAtLeast(1)
+        // Rounded-rectangle app mark (~28% radius) so the tray/shade shows
+        // rounded corners everywhere instead of a circle or raw square.
+        val radius = size * 0.28f
+        val output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(output)
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            shader = android.graphics.BitmapShader(raw, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+            val scale = size.toFloat() / minOf(raw.width, raw.height).toFloat()
+            val dx = (size - raw.width * scale) / 2f
+            val dy = (size - raw.height * scale) / 2f
+            val m = android.graphics.Matrix()
+            m.setScale(scale, scale)
+            m.postTranslate(dx, dy)
+            shader.setLocalMatrix(m)
         }
+        val rect = android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat())
+        canvas.drawRoundRect(rect, radius, radius, paint)
+        val borderPaint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            style = android.graphics.Paint.Style.STROKE
+            color = android.graphics.Color.WHITE
+            strokeWidth = (size * 0.02f).coerceAtLeast(1f)
+        }
+        val inset = borderPaint.strokeWidth / 2f
+        canvas.drawRoundRect(
+            android.graphics.RectF(inset, inset, size - inset, size - inset),
+            radius, radius, borderPaint
+        )
+        largeIconCache = output
+        largeIconKey = cacheKey
+        output
     } catch (_: Exception) { null }
 }

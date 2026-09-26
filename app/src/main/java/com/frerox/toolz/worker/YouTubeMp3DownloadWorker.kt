@@ -50,8 +50,8 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         const val KEY_MIME_TYPE = "mime_type"
         /** Failure reason for UI banners. */
         const val KEY_ERROR = "error"
-        const val CHANNEL_ID = "music_downloads"
-        const val NOTIFICATION_ID_BASE = 3000
+        const val CHANNEL_ID = com.frerox.toolz.util.NotificationHelper.CHANNEL_MUSIC_DOWNLOADS
+        const val NOTIFICATION_ID_BASE = com.frerox.toolz.util.NotificationHelper.ID_YTMP3_BASE
     }
 
     private val notificationManager =
@@ -61,7 +61,7 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: return@withContext Result.failure()
         val title = inputData.getString(KEY_TITLE) ?: "audio"
         val thumbnailUrl = inputData.getString(KEY_THUMBNAIL_URL)
-        val notificationId = NOTIFICATION_ID_BASE + (title.hashCode() and 0x7fffffff) % 10000
+        val notificationId = com.frerox.toolz.util.NotificationHelper.downloadId(NOTIFICATION_ID_BASE, sourceUrl)
 
         try {
             createNotificationChannel()
@@ -78,7 +78,7 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
             val success = if (ytdlpFile != null) {
                 ytdlpFile.copyTo(tempFile, overwrite = true)
                 ytdlpFile.delete()
-                publishProgress(notificationId, "Download complete", 0.80f)
+                publishProgress(notificationId, "Finalizing download", 0.80f)
                 true
             } else {
                 // Fallback via CatalogRepository (same as Music Catalog — InnerTube/NewPipe)
@@ -86,11 +86,19 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
                 publishProgress(notificationId, "Downloading MP3...", 0.05f)
                 catalogRepository.downloadAudioStream(streamUrl, tempFile) { progress ->
                     val normalized = 0.05f + (progress.coerceIn(0f, 1f) * 0.75f)
-                    try {
-                        CoroutineScope(Dispatchers.IO).launch {
-                            publishProgress(notificationId, "Downloading MP3...", normalized)
-                        }
-                    } catch (_: Exception) {}
+                    // Chunk callbacks arrive on the downloader thread: throttle
+                    // synchronously, then post a single throttled foreground update.
+                    val pct = (normalized * 100).toInt()
+                    val now = System.currentTimeMillis()
+                    if (com.frerox.toolz.util.NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) {
+                        lastFgAt = now
+                        lastFgPct = pct
+                        try {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                publishProgress(notificationId, "Downloading MP3...", normalized)
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
             }
 
@@ -232,9 +240,15 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
                 if (m.name == "onProgressUpdate" && args.isNotEmpty()) {
                     val p = (args[0] as? Float) ?: 0f
                     val norm = 0.08f + (p / 100f * 0.72f)
-                    try {
-                        CoroutineScope(Dispatchers.IO).launch { publishProgress(notificationId, "Downloading...", norm) }
-                    } catch (_: Exception) {}
+                    val pct = (norm * 100).toInt()
+                    val now = System.currentTimeMillis()
+                    if (com.frerox.toolz.util.NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) {
+                        lastFgAt = now
+                        lastFgPct = pct
+                        try {
+                            CoroutineScope(Dispatchers.IO).launch { publishProgress(notificationId, "Downloading MP3...", norm) }
+                        } catch (_: Exception) {}
+                    }
                 }; null
             }
             val exec3 = ytdl.javaClass.methods.firstOrNull { it.name == "execute" && it.parameterTypes.size == 3 && it.parameterTypes[0].isAssignableFrom(reqClass) }
@@ -244,20 +258,25 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
         }.onFailure { android.util.Log.w("YouTubeMp3DownloadWorker", "ytdlp failed", it) }.getOrNull()
     }
 
+    @Volatile private var lastFgAt = 0L
+    @Volatile private var lastFgPct = -1
+
     private suspend fun publishProgress(id: Int, title: String, progress: Float) {
         val clamped = progress.coerceIn(0f, 1f)
         try { setProgress(workDataOf(KEY_PROGRESS to clamped)) } catch (_: Exception) {}
-        try { setForeground(createForegroundInfo(id, title, (clamped * 100).toInt())) } catch (e: Exception) {
+        // Single owner: progress ONLY via setForeground, never notify(). Throttled.
+        val pct = (clamped * 100).toInt()
+        val now = System.currentTimeMillis()
+        if (!com.frerox.toolz.util.NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) return
+        lastFgAt = now
+        lastFgPct = pct
+        try { setForeground(createForegroundInfo(id, title, pct)) } catch (e: Exception) {
             android.util.Log.w("YouTubeMp3DownloadWorker", "foreground failed ${e.message}")
-            try { notificationManager.notify(id, createNotification(id, title, (clamped * 100).toInt())) } catch (_: Exception) {}
         }
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "MP3 Downloads", NotificationManager.IMPORTANCE_LOW).apply { description = "YouTube MP3 downloads" }
-            notificationManager.createNotificationChannel(ch)
-        }
+        com.frerox.toolz.util.NotificationHelper.createAllChannels(applicationContext)
     }
 
     private fun createForegroundInfo(id: Int, title: String, progress: Int): ForegroundInfo {
@@ -266,18 +285,22 @@ class YouTubeMp3DownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotification(id: Int, title: String, progress: Int): android.app.Notification {
-        return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(title).setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setOngoing(progress in 1..99).setProgress(100, progress.coerceIn(0, 100), progress == 0).setSilent(true).build()
+        return com.frerox.toolz.util.NotificationHelper.progressBuilder(
+            applicationContext, CHANNEL_ID, title, "$progress%", progress
+        ).build()
     }
 
     private fun showCompletedNotification(id: Int, title: String) {
-        val n = NotificationCompat.Builder(applicationContext, CHANNEL_ID).setContentTitle("✓ MP3 Download complete").setContentText(title).setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground).setAutoCancel(true).build()
+        val n = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "MP3 download complete", title
+        ).build()
         try { notificationManager.notify(id, n) } catch (_: Exception) {}
     }
 
     private fun showErrorNotification(id: Int, title: String, err: String) {
-        val n = NotificationCompat.Builder(applicationContext, CHANNEL_ID).setContentTitle("MP3 Download failed: $title").setContentText(err.take(80)).setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground).setAutoCancel(true).build()
+        val n = com.frerox.toolz.util.NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "MP3 download failed", "$title: ${err.take(80)}", highPriority = true
+        ).build()
         try { notificationManager.notify(id, n) } catch (_: Exception) {}
     }
 }

@@ -92,6 +92,7 @@ class WhisperNotificationManager @Inject constructor(
     @Volatile var isViewingFriendRequests: Boolean = false
     // Dedupe: same messageId from FCM + realtime must not double-notify within TTL.
     private val recentlyNotifiedMessageIds = ConcurrentHashMap<String, Long>()
+    private val lastBlankNotifyAt = ConcurrentHashMap<String, Long>()
     private val NOTIF_DEDUPE_TTL_MS = 30_000L
     private val MAX_RECENT_NOTIF_IDS = 1_024
 
@@ -181,6 +182,14 @@ class WhisperNotificationManager @Inject constructor(
         if (isRead) return
         // Dedupe same messageId from FCM + realtime within TTL.
         if (!messageId.isNullOrBlank() && !shouldNotifyForMessage(messageId)) return
+        // Blank messageId bypassed dedup and double-posted via FCM + realtime.
+        // Coalesce per-sender within a short window instead.
+        if (messageId.isNullOrBlank()) {
+            val now = System.currentTimeMillis()
+            val last = lastBlankNotifyAt[senderId] ?: 0L
+            if (now - last < 3000L) return
+            lastBlankNotifyAt[senderId] = now
+        }
         // Skip if muted or hidden (hidden chats should not ping).
         if (mutePrefs.isMuted(senderId)) {
             // V2-FIX M-M?: sender names/ids never appear in release logs (privacy).
@@ -219,7 +228,7 @@ class WhisperNotificationManager @Inject constructor(
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
             .setContentTitle(context.getString(R.string.st_Whisper_Notif_NewMessage))
             // Never copy decrypted content to the lock screen or notification history.
             .setContentText(context.getString(R.string.st_Whisper_Notif_OpenToRead))
@@ -233,7 +242,7 @@ class WhisperNotificationManager @Inject constructor(
         // V2-FIX M-M?: the group summary posts on its own low-importance channel so it can
         // be silenced independently of the per-message notifications.
         val summaryNotification = NotificationCompat.Builder(context, SUMMARY_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
             .setContentTitle("Whisper")
             .setContentText(context.getString(R.string.st_Whisper_Notif_SummaryText))
             .setGroup(GROUP_KEY)
@@ -274,7 +283,7 @@ class WhisperNotificationManager @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_whisper_notif).setColor(com.frerox.toolz.util.NotificationHelper.ACCENT_COLOR).setLargeIcon(com.frerox.toolz.util.NotificationHelper.toolzLargeIcon(context))
             .setContentTitle(context.getString(R.string.st_Whisper_Notif_FriendRequest))
             .setContentText(fromName)
             // Sender names and requests stay off the lock screen like message notifications.

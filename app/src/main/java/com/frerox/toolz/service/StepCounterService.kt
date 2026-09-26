@@ -515,7 +515,7 @@ class StepCounterService : Service(), SensorEventListener {
         )
 
         val builder = NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_STEP_COUNTER)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
@@ -550,7 +550,7 @@ class StepCounterService : Service(), SensorEventListener {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationHelper.baseBuilder(this, NotificationHelper.CHANNEL_STEP_COUNTER)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_toolz)
             .setContentTitle("Step Tracker — Permission Required")
             .setContentText("Tap to grant Activity Recognition for accurate step counting.")
             .setContentIntent(pendingIntent)

@@ -63,11 +63,14 @@ class VideoDownloadWorker @AssistedInject constructor(
         /** Failure reason for UI banners (Result.failure carries no message otherwise). */
         const val KEY_ERROR = "error"
         const val CHANNEL_ID = NotificationHelper.CHANNEL_VIDEO_DOWNLOADS
-        const val NOTIFICATION_ID_BASE = 2000
+        const val NOTIFICATION_ID_BASE = NotificationHelper.ID_VIDEO_BASE
     }
 
     private val notificationManager =
         applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    @Volatile private var lastFgAt = 0L
+    @Volatile private var lastFgPct = -1
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: return@withContext Result.failure()
@@ -75,7 +78,7 @@ class VideoDownloadWorker @AssistedInject constructor(
         val quality = inputData.getString(KEY_QUALITY) ?: "720p"
         val isMp3 = quality.equals("MP3", ignoreCase = true) || quality.equals("AUDIO", ignoreCase = true)
         val maxHeight = quality.replace("p", "", ignoreCase = true).toIntOrNull() ?: 720
-        val notificationId = NOTIFICATION_ID_BASE + (title.hashCode() and 0x7fffffff) % 10000
+        val notificationId = NotificationHelper.downloadId(NOTIFICATION_ID_BASE, "$sourceUrl|$quality")
         val safeTitle = title.replace(Regex("[^a-zA-Z0-9 \\-\\.]"), "_").take(80)
 
         try {
@@ -86,6 +89,20 @@ class VideoDownloadWorker @AssistedInject constructor(
             val progressJob = launch {
                 for (norm in progressChannel) {
                     try { setProgress(workDataOf(KEY_PROGRESS to norm)) } catch (_: Exception) {}
+                    // Single throttled foreground owner for chunk/yt-dlp callbacks.
+                    val pct = (norm.coerceIn(0f, 1f) * 100).toInt()
+                    val now = System.currentTimeMillis()
+                    if (!NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, pct)) continue
+                    lastFgAt = now
+                    lastFgPct = pct
+                    try {
+                        val n = createNotification(notificationId, "Downloading $safeTitle ($quality)", pct)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            setForeground(ForegroundInfo(notificationId, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC))
+                        } else {
+                            setForeground(ForegroundInfo(notificationId, n))
+                        }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -120,8 +137,6 @@ class VideoDownloadWorker @AssistedInject constructor(
                         File(applicationContext.cacheDir, "hd_merge"), hdOut,
                     ) { progress ->
                         val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
-                        val progressInt = (normalized * 100).toInt()
-                        notificationManager.notify(notificationId, createNotification(notificationId, "Downloading HD $safeTitle (${pair.height}p)...", progressInt))
                         progressChannel.trySend(normalized)
                     }
                     if (muxed && hdOut.exists() && hdOut.length() > 1024) {
@@ -175,8 +190,6 @@ class VideoDownloadWorker @AssistedInject constructor(
                     publishProgress(notificationId, "Downloading $safeTitle ($quality)...", 0.08f)
                     val ok = catalogRepository.downloadAudioStream(directStream.url, tempFile) { progress ->
                         val normalized = 0.08f + (progress.coerceIn(0f, 1f) * 0.77f)
-                        val progressInt = (normalized * 100).toInt()
-                        notificationManager.notify(notificationId, createNotification(notificationId, "Downloading $safeTitle...", progressInt))
                         progressChannel.trySend(normalized)
                     }
                     if (ok && tempFile.exists() && tempFile.length() > 1024) {
@@ -295,11 +308,9 @@ class VideoDownloadWorker @AssistedInject constructor(
                                 if (m.name == "onProgressUpdate" && !args.isNullOrEmpty()) {
                                     val p = (args[0] as? Float) ?: (args[0] as? Number)?.toFloat() ?: 0f
                                     // yt-dlp reports 0..100; map into the 8%..85% band.
+                                    // Single owner: feed the conflated channel only.
+                                    // The progressJob below owns setForeground.
                                     val norm = 0.08f + (p.coerceIn(0f, 100f) / 100f * 0.77f)
-                                    notificationManager.notify(
-                                        notificationId,
-                                        createNotification(notificationId, "Downloading $safeTitle ($quality)...", (norm * 100).toInt()),
-                                    )
                                     progressChannel.trySend(norm)
                                 }
                                 null
@@ -381,7 +392,8 @@ class VideoDownloadWorker @AssistedInject constructor(
             try { finalFile.delete() } catch (_: Exception) {}
 
             if (savedUri != null) {
-                publishProgress(notificationId, "Download complete", 1.0f)
+                try { setProgress(workDataOf(KEY_PROGRESS to 1f)) } catch (_: Exception) {}
+                lastFgPct = 100
                 showCompletedNotification(notificationId, safeTitle, isMp3, requestedQuality = if (isMp3) null else quality, actualHeight = actualHeight)
                 Result.success(
                     workDataOf(
@@ -521,13 +533,7 @@ class VideoDownloadWorker @AssistedInject constructor(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Video Downloads", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "YouTube video downloads"
-                setShowBadge(false)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+        NotificationHelper.createAllChannels(applicationContext)
     }
 
     /**
@@ -540,6 +546,10 @@ class VideoDownloadWorker @AssistedInject constructor(
         val clamped = progress.coerceIn(0f, 1f)
         try { setProgress(workDataOf(KEY_PROGRESS to clamped)) } catch (_: Exception) {}
         val progressInt = (clamped * 100).toInt()
+        val now = System.currentTimeMillis()
+        if (!NotificationHelper.shouldPublishProgress(lastFgAt, lastFgPct, now, progressInt)) return
+        lastFgAt = now
+        lastFgPct = progressInt
         try {
             val notification = createNotification(notificationId, contentTitle, progressInt)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -547,11 +557,7 @@ class VideoDownloadWorker @AssistedInject constructor(
             } else {
                 setForeground(ForegroundInfo(notificationId, notification))
             }
-        } catch (_: Exception) {
-            try {
-                notificationManager.notify(notificationId, createNotification(notificationId, contentTitle, progressInt))
-            } catch (_: Exception) {}
-        }
+        } catch (_: Exception) {}
     }
 
     private fun createNotification(id: Int, contentTitle: String, progress: Int): android.app.Notification {
@@ -564,56 +570,36 @@ class VideoDownloadWorker @AssistedInject constructor(
         val cancelPendingIntent = PendingIntent.getBroadcast(
             applicationContext, id.hashCode(), cancelIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(contentTitle)
-            .setContentText(if (progress in 1..99) "$progress% • Toolz" else "")
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setOngoing(progress in 1..99)
-            .setOnlyAlertOnce(true)
-            .setProgress(100, progress.coerceIn(0, 100), progress == 0)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setSilent(true)
+        return NotificationHelper.progressBuilder(
+            applicationContext, CHANNEL_ID, contentTitle,
+            if (progress in 1..99) "$progress%" else null, progress
+        )
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
-        return builder.build()
+            .build()
     }
 
     private fun showCompletedNotification(id: Int, title: String, isMp3: Boolean = false, requestedQuality: String? = null, actualHeight: Int? = null) {
         val qualitySuffix = when {
-            isMp3 -> " • MP3 • Toolz"
+            isMp3 -> " (MP3)"
             actualHeight != null && requestedQuality != null -> {
                 val reqH = requestedQuality.replace("p", "", ignoreCase = true).toIntOrNull()
-                if (reqH != null && actualHeight < reqH - 60) " • ${actualHeight}p (asked $requestedQuality) • Toolz"
-                else " • ${actualHeight}p • Toolz"
+                if (reqH != null && actualHeight < reqH - 60) " (${actualHeight}p, requested $requestedQuality)"
+                else " (${actualHeight}p)"
             }
-            requestedQuality != null -> " • $requestedQuality • Toolz"
-            else -> " • Toolz"
+            requestedQuality != null -> " ($requestedQuality)"
+            else -> ""
         }
         val text = "$title$qualitySuffix"
-        val titleText = if (isMp3) "✓ MP3 Download complete" else "✓ Download complete"
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle(titleText)
-            .setContentText(text)
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setAutoCancel(true)
-            .setOngoing(false)
-            .setProgress(0, 0, false)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        val titleText = if (isMp3) "MP3 download complete" else "Download complete"
+        val notification = NotificationHelper.terminalBuilder(applicationContext, CHANNEL_ID, titleText, text)
             .build()
         try { notificationManager.notify(id, notification) } catch (_: Exception) {}
     }
 
     private fun showErrorNotification(id: Int, title: String, error: String) {
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("Download failed: $title")
-            .setContentText(error.take(80))
-            .setSmallIcon(com.frerox.toolz.R.drawable.ic_launcher_foreground)
-            .setLargeIcon(NotificationHelper.toolzLargeIcon(applicationContext))
-            .setAutoCancel(true)
-            .setOngoing(false)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+        val notification = NotificationHelper.terminalBuilder(
+            applicationContext, CHANNEL_ID, "Download failed", "$title: ${error.take(80)}", highPriority = true
+        )
             .build()
         try { notificationManager.notify(id, notification) } catch (_: Exception) {}
     }

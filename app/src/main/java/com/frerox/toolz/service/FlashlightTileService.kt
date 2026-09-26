@@ -82,8 +82,8 @@ class FlashlightTileService : TileService() {
 
         // Icon — four distinct states
         val iconRes = when {
-            !on                        -> R.drawable.ic_launcher_foreground
-            mode == FlashlightMode.STEADY -> R.drawable.ic_launcher_foreground
+            !on -> R.drawable.ic_flashlight
+            mode == FlashlightMode.STEADY -> R.drawable.ic_flashlight
             mode == FlashlightMode.STROBE -> R.drawable.ic_notif_strobe
             mode == FlashlightMode.SOS    -> R.drawable.ic_notif_sos
             else                          -> R.drawable.ic_notif_disco
