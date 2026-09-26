@@ -203,6 +203,12 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         // lifecycleScope's Main.immediate dispatcher would otherwise execute this
         // coroutine body inline before whisperPushTokenStore is assigned (crash).
         lifecycleScope.launch { whisperPushTokenStore.retryPendingIfAny() }
+        // Widget generated previews (API 35+, rate-limited, non-fatal).
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                com.frerox.toolz.widget.ui.WidgetPreviewsPublisher.publishAll(this@MainActivity)
+            } catch (_: Exception) { }
+        }
         enableEdgeToEdge()
         window.setBackgroundDrawableResource(android.R.color.background_dark)
         Shizuku.addRequestPermissionResultListener(this)
@@ -1569,11 +1575,18 @@ private fun resolveExternalNavigationRoute(intent: Intent): String? {
 
     if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
-        val sharedUrl = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(sharedText)?.value
-        if (sharedUrl != null) {
+        val rawShared = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(sharedText)?.value
+        val sharedUrl = rawShared?.trim()?.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"')
+        if (!sharedUrl.isNullOrBlank()) {
             val lower = sharedUrl.lowercase()
             // Shared social-media links open directly in the Media Downloader tool.
-            if ("youtube.com" in lower || "youtu.be" in lower || "tiktok.com" in lower || "instagram.com" in lower) {
+            // Instagram only when it's an actual reel/post/tv link — profiles go to Browser.
+            val isYouTube = "youtube.com" in lower || "youtu.be" in lower
+            val isTikTok = "tiktok.com" in lower
+            val isInstagramMedia = "instagram.com" in lower && (
+                "/reel" in lower || "/reels" in lower || "/p/" in lower || "/tv/" in lower || "/share/" in lower
+                )
+            if (isYouTube || isTikTok || isInstagramMedia) {
                 return Screen.MediaDownloader.createRoute(sharedUrl)
             }
             return Screen.Browser.createRoute(sharedUrl)

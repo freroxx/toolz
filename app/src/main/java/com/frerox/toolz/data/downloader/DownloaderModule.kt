@@ -52,7 +52,11 @@ object DownloaderModule {
         @DownloadzClient okHttpClient: OkHttpClient,
         json: Json,
     ): DownloadzService {
-        val base = BuildConfig.DOWNLOADZ_API_URL.trim().trimEnd('/') + "/"
+        // Never crash when the server URL is blank (e.g. local/dev builds).
+        // Repository.isApiConfigured() gates remote calls; workers re-check BuildConfig.
+        // Retrofit requires a valid http(s) base URL, so fall back to a placeholder.
+        val rawBase = BuildConfig.DOWNLOADZ_API_URL.trim().trimEnd('/')
+        val base = if (rawBase.startsWith("http://") || rawBase.startsWith("https://")) "$rawBase/" else "https://localhost/"
         return Retrofit.Builder()
             .baseUrl(base)
             .client(okHttpClient)

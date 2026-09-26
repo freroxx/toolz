@@ -2401,7 +2401,7 @@
     <string name="st_MediaDownloader_Download">Download</string>
     <string name="st_MediaDownloader_Active">Downloads</string>
     <string name="st_MediaDownloader_Empty">Paste a link above to preview title, thumbnail and quality options.</string>
-    <string name="st_MediaDownloader_ServerNeeded">TikTok / Instagram need the download server (DOWNLOADZ_API_KEY).</string>
+    <string name="st_MediaDownloader_ServerNeeded">TikTok and Instagram use Toolz’s secure download service.</string>
     <string name="st_MediaDownloader_Paste">Paste</string>
     <string name="st_MediaDownloader_Fetching">Fetching…</string>
     <string name="st_MediaDownloader_Retry">Retry</string>
@@ -2434,6 +2434,12 @@
     <string name="st_MediaDownloader_Clear">Clear</string>
     <string name="st_MediaDownloader_ResultLabel">Preview</string>
     <string name="st_MediaDownloader_ChooseQuality">Choose quality</string>
+    <string name="st_MediaDownloader_Photos">Photos</string>
+    <string name="st_MediaDownloader_PhotosHint">Select a photo to save it. Each photo downloads separately.</string>
+    <string name="st_MediaDownloader_Save">Save</string>
+    <string name="st_MediaDownloader_RetryDownload">Retry download</string>
+    <string name="st_MediaDownloader_CancelledHint">Download cancelled. You can retry when you’re ready.</string>
+    <string name="st_MediaDownloader_DownloadFailedHint">Couldn’t finish this download. Retry or extract the link again.</string>
     <string name="st_MediaDownloader_History">History</string>
     <string name="st_MediaDownloader_ClearAll">Clear all</string>
     <string name="st_MediaDownloader_Links">Links</string>
@@ -2448,7 +2454,7 @@
     <string name="st_MediaDownloader_Auto">Auto</string>
     <string name="st_MediaDownloader_DefaultMode">Default mode</string>
     <string name="st_MediaDownloader_AudioFormats">Audio formats</string>
-    <string name="st_MediaDownloader_AudioFormatsHint">Converted on-device after download</string>
+    <string name="st_MediaDownloader_AudioFormatsHint">Used when Toolz falls back to on-device audio conversion</string>
     <string name="st_MediaDownloader_ResetDefaults">Reset to defaults</string>
     <string name="st_SearchScreen_ws_q_quadhd">Quad HD • merged</string>
     <string name="st_SearchScreen_ws_q_ultrahd">Ultra HD • merged</string>

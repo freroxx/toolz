@@ -56,8 +56,8 @@ import com.frerox.toolz.ui.theme.toolzBackground
 
 /** Editable containers per platform shown in the customization screen. */
 fun downloaderPlatformExts(platform: MediaDownloaderRepository.Platform): List<String> =
-    // Same universe everywhere: the converter backend transcodes any of these
-    // from an audio base on every platform, so all stay manageable.
+    // Native format availability varies by provider. These are the format
+    // preferences Toolz can remember whenever a matching option is available.
     listOf("mp4", "mp3", "m4a", "wav", "ogg", "flac")
 
 private fun platformDisplayName(platform: MediaDownloaderRepository.Platform): String =
@@ -76,7 +76,7 @@ private fun platformDot(platform: MediaDownloaderRepository.Platform): Color =
 
 /**
  * Advanced customization: per-platform format memory (favorites, hidden,
- * auto-select, default mode) plus global converted-audio formats. Everything
+ * auto-select, default mode) plus on-device fallback audio formats. Everything
  * is stored in the shared settings DataStore, so backup & restore picks it up.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
