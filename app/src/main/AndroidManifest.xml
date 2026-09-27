@@ -141,7 +141,7 @@
 
         <service
             android:name=".service.FlashlightTileService"
-            android:label="Toolz: Flashlight"
+            android:label="@string/st_Manifest_FlashlightTile"
             android:icon="@drawable/ic_flashlight"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -179,7 +179,7 @@
             android:name=".service.AutofillActivity"
             android:exported="false"
             android:theme="@style/Theme.Toolz.Autofill"
-            android:label="Vault Autofill" />
+            android:label="@string/st_Manifest_VaultAutofill" />
 
         <service
             android:name=".service.StepCounterService"
@@ -220,7 +220,7 @@
 
         <service
             android:name=".service.NotificationVaultService"
-            android:label="Toolz Notification Vault"
+            android:label="@string/st_Manifest_NotificationVault"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -230,7 +230,7 @@
 
         <service
             android:name=".service.FocusFlowAccessibilityService"
-            android:label="Toolz Focus Flow"
+            android:label="@string/st_Manifest_FocusFlow"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -243,7 +243,7 @@
 
         <service
             android:name=".service.PurgeShotAccessibilityService"
-            android:label="Toolz PurgeShot"
+            android:label="@string/st_Manifest_PurgeShot"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -256,7 +256,7 @@
 
         <service
             android:name=".service.CleanerAccessibilityService"
-            android:label="Toolz Cleaner Auto-clear"
+            android:label="@string/st_Manifest_CleanerAutoClear"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -278,7 +278,7 @@
 
         <service
             android:name=".service.ClipboardTileService"
-            android:label="Toolz: Clipboard"
+            android:label="@string/st_Manifest_ClipboardTile"
             android:icon="@drawable/ic_clipboard"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -321,7 +321,7 @@
 
         <service
             android:name=".service.CaffeinateTileService"
-            android:label="Toolz: Caffeinate"
+            android:label="@string/st_Manifest_CaffeinateTile"
             android:icon="@drawable/ic_tile_caffeinate"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -334,7 +334,7 @@
 
         <service
             android:name=".service.QuickToolzTileService"
-            android:label="Toolz: Quick Access"
+            android:label="@string/st_Manifest_QuickAccessTile"
             android:icon="@drawable/ic_quick_access"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
             android:exported="true">
@@ -438,7 +438,7 @@
 
         <service
             android:name=".service.ToolzAutofillService"
-            android:label="Toolz Autofill"
+            android:label="@string/st_Manifest_AutofillService"
             android:permission="android.permission.BIND_AUTOFILL_SERVICE"
             android:exported="true">
             <intent-filter>

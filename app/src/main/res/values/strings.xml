@@ -3674,4 +3674,16 @@
     <string name="st_PurgeShot_Notif_Scheduled_Single">Screenshot scheduled</string>
     <string name="st_PurgeShot_Notif_Scheduled_Multiple">%1$d screenshots scheduled</string>
     <string name="st_PurgeShot_Notif_Scheduled_Desc">Will be deleted in %1$s</string>
+
+    <!-- Manifest labels (tiles, services) -->
+    <string name="st_Manifest_FlashlightTile">Toolz: Flashlight</string>
+    <string name="st_Manifest_VaultAutofill">Vault Autofill</string>
+    <string name="st_Manifest_NotificationVault">Toolz Notification Vault</string>
+    <string name="st_Manifest_FocusFlow">Toolz Focus Flow</string>
+    <string name="st_Manifest_PurgeShot">Toolz PurgeShot</string>
+    <string name="st_Manifest_CleanerAutoClear">Toolz Cleaner Auto-clear</string>
+    <string name="st_Manifest_ClipboardTile">Toolz: Clipboard</string>
+    <string name="st_Manifest_CaffeinateTile">Toolz: Caffeinate</string>
+    <string name="st_Manifest_QuickAccessTile">Toolz: Quick Access</string>
+    <string name="st_Manifest_AutofillService">Toolz Autofill</string>
 </resources>
