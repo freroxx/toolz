@@ -1,14 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- ic_notif_brightness_dn.xml — brightness decrease -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="
-            M20,8.69 V4 h-4.69 L12,0.69 8.69,4 H4 v4.69 L0.69,12 4,15.31 V20 h4.69 L12,23.31 15.31,20 H20 v-4.69 L23.31,12 20,8.69z
-            M12,18 c-3.31,0 -6,-2.69 -6,-6 s2.69,-6 6,-6 6,2.69 6,6 -2.69,6 -6,6z
-            M7,11 h10 v2 H7 z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M346-160H240q-33 0-56.5-23.5T160-240v-106l-77-78q-11-12-17-26.5T60-480q0-15 6-29.5T83-536l77-78v-106q0-33 23.5-56.5T240-800h106l78-77q12-11 26.5-17t29.5-6q15 0 29.5 6t26.5 17l78 77h106q33 0 56.5 23.5T800-720v106l77 78q11 12 17 26.5t6 29.5q0 15-6 29.5T877-424l-77 78v106q0 33-23.5 56.5T720-160H614l-78 77q-12 11-26.5 17T480-60q-15 0-29.5-6T424-83l-78-77Zm134-120q83 0 141.5-58.5T680-480q0-83-58.5-141.5T480-680q-83 0-141.5 58.5T280-480q0 83 58.5 141.5T480-280Zm0-80q-50 0-85-35t-35-85q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35ZM380-240l100 100 100-100h140v-140l100-100-100-100v-140H580L480-820 380-720H240v140L140-480l100 100v140h140Zm100-240Z" />
+    </group>
 </vector>

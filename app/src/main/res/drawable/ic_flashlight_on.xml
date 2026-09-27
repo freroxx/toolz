@@ -1,73 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  ic_flashlight_on.xml
-  Filled flashlight with radiating beam rays — used for ON state.
-  Designed at 24x24dp viewport, M3 Expressive filled style.
-  Colour applied at runtime via ImageView tint / setColorFilter.
--->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-
-    <!-- Flashlight body (filled, rounded) -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="
-            M17,4
-            C17,3.45 16.55,3 16,3
-            L8,3
-            C7.45,3 7,3.45 7,4
-            L7,7
-            C7,7.55 7.45,8 8,8
-            L16,8
-            C16.55,8 17,7.55 17,7
-            Z" />
-
-    <!-- Lens / head cone -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="
-            M6,8
-            L6,20
-            C6,20.55 6.45,21 7,21
-            L17,21
-            C17.55,21 18,20.55 18,20
-            L18,8
-            Z" />
-
-    <!-- Beam ray — centre -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M12,21 L12,24"
-        android:strokeWidth="2"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
-
-    <!-- Beam ray — left -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M7.5,22 L6,24.5"
-        android:strokeWidth="1.8"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
-
-    <!-- Beam ray — right -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M16.5,22 L18,24.5"
-        android:strokeWidth="1.8"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
-
-    <!-- Lens highlight dot -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="
-            M12,15
-            m-2,0
-            a2,2 0 1,0 4,0
-            a2,2 0 1,0 -4,0" />
-
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M320-160v-360l-67-100q-7-10-10-21t-3-23v-136q0-33 23.5-56.5T320-880h320q33 0 56.5 23.5T720-800v136q0 12-3 23t-10 21l-67 100v360q0 33-23.5 56.5T560-80H400q-33 0-56.5-23.5T320-160Zm160-180q-25 0-42.5-17.5T420-400q0-25 17.5-42.5T480-460q25 0 42.5 17.5T540-400q0 25-17.5 42.5T480-340ZM320-760h320v-40H320v40Zm320 80H320v16l80 120v384h160v-384l80-120v-16ZM480-480Z" />
+    </group>
 </vector>
